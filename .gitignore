@@ -1,0 +1,34 @@
+﻿# OS / Office
+desktop.ini
+Thumbs.db
+~$*
+*.xlsx
+*.xls
+
+# Ignore products for now
+2_products/
+
+# Ignore external sources
+4_external/sources/
+
+# Ignore generated/data/model/artifact folders
+7_datasets/
+8_models/
+9_artifacts/
+
+# Runtime/generated
+logs/
+runs/
+outputs/
+tmp/
+temp/
+cache/
+
+# Python / Node
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+node_modules/
+dist/
+build/
