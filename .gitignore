@@ -11,6 +11,9 @@ Thumbs.db
 # Ignore external sources
 4_external/sources/
 
+# Previous knowledge / migration corpus
+previusknowledge/
+
 # Ignore generated/data/model/artifact folders
 7_datasets/
 8_models/
@@ -32,3 +35,53 @@ venv/
 node_modules/
 dist/
 build/
+
+# Secrets / credentials
+.env
+.env.*
+!.env.example
+!.env.template
+*.pem
+*.key
+*.p12
+*.pfx
+*.cer
+*.crt
+*.csr
+*.jks
+*.keystore
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+*_rsa
+*_rsa.*
+*_ed25519
+*_ed25519.*
+secrets/
+credentials/
+.credential/
+.credentials/
+*.secret
+*.secrets
+*.token
+*.tokens
+*.auth
+*.oauth
+*.apikey
+*.api_key
+
+# Cloud / provider / local auth
+.aws/
+.azure/
+.gcloud/
+.config/gcloud/
+.netrc
+.npmrc
+.pypirc
+docker-compose.override.yml
+
+# Local environment / IDE caches
+.local/
+.cache/
+.ipynb_checkpoints/
