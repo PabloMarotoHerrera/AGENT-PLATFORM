@@ -1,0 +1,70 @@
+# G-15 controlled root Graphify run.
+# Default-deny profile: ignore everything unless explicitly re-included.
+
+*
+
+# Allow traversal to the approved governed skeleton only.
+!3_platform/
+!3_platform/_governed_skeleton/
+!3_platform/_governed_skeleton/**/
+
+# Allow Python source only.
+!3_platform/_governed_skeleton/**/*.py
+
+# Explicit hard exclusions.
+0_architecture/
+2_products/
+4_external/
+previusknowledge/
+7_datasets/
+8_models/
+9_artifacts/
+graphify-out/
+.git/
+
+# Secrets / credentials / provider material.
+.env*
+secrets/
+credentials/
+tokens/
+provider*
+*credential*
+*secret*
+*token*
+
+# Generated / cache / dependency material.
+__pycache__/
+*.pyc
+cache/
+.cache/
+tmp/
+temp/
+node_modules/
+.venv/
+venv/
+
+# Assistant / integration files.
+AGENTS.md
+.agents/
+.claude/
+.codex/
+
+# Documentation and non-code inputs.
+*.md
+*.rst
+*.txt
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.mp4
+*.mov
+*.json
+*.yaml
+*.yml
+*.toml
+*.csv
+*.xlsx
+*.parquet
