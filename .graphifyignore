@@ -1,4 +1,4 @@
-# G-15 controlled root Graphify run.
+# G-17 controlled root Graphify run.
 # Default-deny profile: ignore everything unless explicitly re-included.
 
 *
@@ -27,10 +27,14 @@ graphify-out/
 secrets/
 credentials/
 tokens/
-provider*
-*credential*
-*secret*
-*token*
+provider_config/
+provider_configs/
+provider_credentials/
+provider_credentials.*
+provider_config.*
+*provider*credential*
+*provider*secret*
+*provider*token*
 
 # Generated / cache / dependency material.
 __pycache__/
