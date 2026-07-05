@@ -31,6 +31,7 @@ It does not select, install, configure, import, execute, validate, benchmark, pu
 - P6.3 shared context evidence bus operational contract.
 - P6.4 human approval and review loop operational contract.
 - P6.5 runtime monitoring and incident handling operational contract.
+- EXT.GB-01 GBrain external source intake / read-only capability review.
 - P5.R minimal active agent platform audit.
 - P2.KR knowledge retrieval architecture reconciliation closure.
 - P1.5 Cognitive Semantic System prototype hardening record.
@@ -42,20 +43,28 @@ It does not select, install, configure, import, execute, validate, benchmark, pu
 
 ## 6. Inputs Not Available
 
-The exact EXT.GB-01 input record is absent, so the blocker is `pending_EXT.GB_01_gbrain_external_source_review`.
-
 No GBrain source contents, implementation files, dependency manifests, provider/auth configuration, MCP configuration, Cadence configuration, token stores, credentials, or external source contents were inspected for this decision.
+
+EXT.GB-01 is present and reviewed as a read-only external source intake / capability review.
+
+EXT.GB-01 confirms GBrain as a strong external architecture candidate for future Cognitive Semantic System memory/substrate review, while keeping GBrain not adopted, not executed, not imported, not configured, not dependency-approved, not provider/auth-approved, not MCP-active, not Cadence-active, and not substrate.
+
+EXT.GB-01 also records an accepted limitation: `external/sources/gbrain-master` was absent during review, so no local GBrain documentation, source, dependency, persistence, MCP, Cadence, eval, or license claims were validated.
+
+Therefore `pending_EXT.GB_01_gbrain_external_source_review` is closed. The replacement review posture is `EXT.GB_01_present_limited_review`, and `future_EXT.GB_HARD_reviews_required_before_selection` remains required before any GBrain selection, adoption, dependency approval, provider/auth approval, MCP activation, Cadence activation, persistence, or substrate decision.
 
 ## 7. Current P6 Contract Posture
 
 The P6.1 through P6.5 contracts are metadata-only governance records. They define registries, message envelopes, evidence/context references, approval references, monitoring references, incident references, and Cadence boundary language without enabling runtime behavior.
+
+P6.5 is present and reviewed as the metadata-only Runtime Monitoring / Incident Handling operational contract. P6.5 confirms that monitoring model is not monitoring runtime, incident route is not incident automation, and Cadence / always-on behavior remains blocked.
 
 Those contracts do not require a semantic substrate to be selected in P6.6.
 
 ## 8. Candidate Set
 
 - `markdown_canonical_docs_plus_metadata_refs`: current baseline candidate.
-- `gbrain_style_markdown_first_self_wiring_graph_memory`: strongest current external candidate class by posture, pending formal review.
+- `gbrain_style_markdown_first_self_wiring_graph_memory`: strongest current external candidate class by posture, reviewed through `EXT.GB_01_present_limited_review` and still requiring future EXT.GB-HARD reviews before selection.
 - `graphify_generated_evidence_only`: generated repository-map evidence, not a substrate candidate for adoption.
 - `graph_db_runtime_substrate`: deferred and blocked.
 - `vector_db_runtime_substrate`: deferred and blocked.
@@ -66,7 +75,7 @@ Those contracts do not require a semantic substrate to be selected in P6.6.
 
 The current baseline is sufficient for P6 governance because the active platform state is still an AL-1 metadata skeleton.
 
-The GBrain-style candidate is directionally aligned with markdown-first, self-wiring graph memory ideas, but it is not approved because EXT.GB-01 is missing and no external-source review has occurred.
+The GBrain-style candidate is directionally aligned with markdown-first, self-wiring graph memory ideas and is reviewed through EXT.GB-01 as present but limited. It is not approved because EXT.GB-01 did not validate local GBrain documentation, source, dependency, persistence, MCP, Cadence, eval, or license claims, and future EXT.GB-HARD reviews remain required before any selection or adoption.
 
 Runtime graph, vector, hybrid, ontology, database, ingestion, and indexing substrates are premature because the platform has not crossed the documented activation gates.
 
@@ -74,7 +83,9 @@ Runtime graph, vector, hybrid, ontology, database, ingestion, and indexing subst
 
 `gbrain_style_markdown_first_self_wiring_graph_memory` is recorded only as the strongest current external candidate class.
 
-It is not reviewed, adopted, imported, executed, configured, dependency-approved, provider/auth-approved, MCP-active, Cadence-active, or selected as the Cognitive Semantic System substrate.
+It is reviewed through EXT.GB-01 as a read-only external source intake with limitations.
+
+It is not adopted, imported, executed, configured, dependency-approved, provider/auth-approved, MCP-active, Cadence-active, or selected as the Cognitive Semantic System substrate.
 
 ## 11. Graphify Boundary
 
@@ -134,6 +145,8 @@ Cadence and always-on behavior remain blocked.
 
 This decision does not start workers, schedules, workflows, autonomous loops, monitoring daemons, incident automation, wake-up paths, or long-running semantic maintenance processes.
 
+EXT.GB-01 records GBrain as a cadence_reference_candidate only. Because local GBrain docs/source were unavailable, any future dream-cycle, always-on, background refresh, memory consolidation, or Cadence claim requires `gbrain_cadence_dream_cycle_review_required`, human approval, and a future exact gate before use.
+
 ## 21. MCP Provider And Auth Boundary
 
 This decision authorizes no MCP activation, provider authorization, API call, external connector, credential lookup, browser-auth usage, token-store access, or local credential-store access.
@@ -156,18 +169,20 @@ This decision does not create product-bound features, product-bound memory, prod
 
 This decision approves no dependency, package, import, plugin, framework, runtime service, repository import, submodule, external source checkout, or local source loading.
 
-The absence of EXT.GB-01 means GBrain-style work cannot proceed beyond candidate-class notation.
+EXT.GB-01 is present but limited. GBrain-style work cannot proceed beyond candidate-class notation until future EXT.GB-HARD documentation/source/dependency/storage/MCP/Cadence/eval/license reviews are complete and an exact future gate approves a narrower scope.
 
 ## 25. Risks Accepted
 
 - Deferring the substrate may slow future semantic-memory implementation.
 - Keeping markdown plus metadata references may require manual governance discipline.
-- Not reviewing GBrain yet leaves the strongest external candidate unqualified.
+- EXT.GB-01 reviewed GBrain as a strong candidate only with accepted limitations because local GBrain documentation/source was unavailable.
 - Not selecting graph or vector infrastructure preserves reversibility but postpones performance and retrieval tradeoff analysis.
 
 ## 26. Deferred Work And Blockers
 
-- Resolve `pending_EXT.GB_01_gbrain_external_source_review` before any GBrain adoption, dependency approval, provider/auth approval, MCP review, Cadence review, or implementation planning.
+- `EXT.GB_01_present_limited_review` closes the prior EXT.GB-01 absence blocker for P6.6 alignment.
+- `future_EXT.GB_HARD_reviews_required_before_selection` remains required before any GBrain adoption, dependency approval, provider/auth approval, MCP activation, Cadence activation, persistence, substrate selection, or implementation planning.
+- Required future blockers: `gbrain_documentation_capability_map_required`, `gbrain_source_dependency_boundary_review_required`, `gbrain_persistence_storage_review_required`, `gbrain_mcp_provider_auth_review_required`, `gbrain_cadence_dream_cycle_review_required`, `gbrain_brainbench_eval_review_required`, `gbrain_license_provenance_supply_chain_review_required`, `human_approval_required`, and `future_exact_substrate_gate_required`.
 - Keep graph DB, vector DB, hybrid graph/vector storage, ontology runtime, persistence, ingestion, indexing, embeddings, and product-bound semantic storage blocked until a later explicit decision.
 - Keep AGENT PLATFORM at AL-1 metadata skeleton until activation gates are explicitly satisfied.
 
@@ -176,11 +191,16 @@ The absence of EXT.GB-01 means GBrain-style work cannot proceed beyond candidate
 - Primary output: `cognitive_semantic_system_substrate_deferred`.
 - Current baseline: `markdown_canonical_docs_plus_metadata_refs`.
 - Strongest current external candidate class: `gbrain_style_markdown_first_self_wiring_graph_memory`.
+- GBrain external review posture: `EXT.GB_01_present_limited_review`.
 - Generated evidence posture: `graphify_generated_evidence_only`.
-- Required blocker: `pending_EXT.GB_01_gbrain_external_source_review`.
+- Required future blocker: `future_EXT.GB_HARD_reviews_required_before_selection`.
 
 ## 28. Closure
 
 P6.6 closes with no substrate selected and no runtime authorized.
+
+P6.6-ALIGN-01 corrected P6.6 so EXT.GB-01 is consumed as present but limited. `pending_EXT.GB_01_gbrain_external_source_review` is no longer an active blocker.
+
+GBrain remains the strongest current external candidate class, but is not adopted, not executed, not dependency-approved, not provider/auth-approved, not MCP-active, not Cadence-active, and not substrate.
 
 The Cognitive Semantic System remains documentation-led, metadata-only, and substrate-neutral until a future governance record explicitly changes that posture.
