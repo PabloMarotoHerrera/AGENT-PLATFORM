@@ -119,6 +119,34 @@ P7.0.B defines a planning posture named `AL-1.5_manual_controlled_agentic_workfl
 
 Any future activation-level transition requires a separate exact ticket, human approval, validation targets, security review, rollback/incident posture, source classification, and applicable gates.
 
+## Agent-Native Planning Projection
+
+This document belongs to the `manual_bridge_layer` and adds conceptual references to the `agent_native_internal_organization_layer`.
+
+Roadmap generation should consider agent-native topology before manual work packet projection.
+
+The decomposition path is objective → topology selection → task graph / blackboard model → capability cell / reviewer mesh mapping → work packet projection → manual execution projection.
+
+Roadmap is not merely a list of phases. Roadmap decomposition should consider agent-native topology before projecting work into manual tickets.
+
+WorkPacket is a manual execution projection, not necessarily the internal unit of future agentic cognition.
+
+ParallelizationGroup is a manual governance projection, not runtime scheduling.
+
+ParallelizationGroup is a manual execution grouping, not necessarily a runtime scheduling primitive.
+
+SequencingRule is a manual governance rule, not autonomous orchestration.
+
+| Agent-native planning object | P7.0.B definition | Blocked interpretation |
+| --- | --- | --- |
+| `AgentNativeTopologySelection` | Manual metadata describing the conceptual topology considered for an objective before work packet projection. | Runtime topology activation or autonomous router. |
+| `TaskGraphProjection` | Manual projection of objective work into task nodes, dependency edges, blocker edges, review edges, and integration edges. | Scheduler graph or runnable task queue. |
+| `BlackboardPlanningRef` | Metadata reference to shared claims, evidence, blockers, contradictions, and unresolved questions used during planning. | Persistence runtime, graph DB, vector DB, or live shared state. |
+| `CapabilityCellProjection` | Mapping from task needs to conceptual capability cells before selecting manual lanes or harnesses. | Active capability cell runtime. |
+| `ReviewerMeshProjection` | Mapping from task risk, contradiction, and boundary needs to manual reviewer mesh metadata. | Automatic reviewer assignment or auto-review. |
+| `ManualWorkPacketProjection` | Projection from task graph/cell/reviewer metadata into human-readable WorkPacket records. | Runnable task object. |
+| `ManualExecutionProjection` | Projection from internal conceptual organization into manual tickets, manual lanes, manual harnesses, manual review, manual integration, and commit advice. | Autonomous dispatch, handoff, or runtime execution. |
+
 ## 8. Roadmap Generation Contract
 
 Roadmap generation converts a user objective into a structured planning artifact.
@@ -416,14 +444,17 @@ The lead planning agent may use this deterministic manual procedure when asked t
 | 2 | Identify in-scope and out-of-scope surfaces before reading or editing anything. |
 | 3 | Map the objective to G-01 gate types and P0/P1/P2/P3/P5/P6/P7 boundaries. |
 | 4 | Identify whether P4, EXT.*, GT-10, GT-12, GT-07, GT-08, or GT-15 is required before any part may proceed. |
-| 5 | Split the objective into RoadmapPhases with manual entry and exit criteria. |
-| 6 | Split phases into Workstreams by domain or lane. |
-| 7 | Split workstreams into WorkPackets with exact allowed and blocked scope. |
-| 8 | Create Dependencies and SequencingRules for every hard order constraint. |
-| 9 | Create ParallelizationGroups only for metadata/design/review work that has no hard dependency conflict. |
-| 10 | Attach Blockers and CompletionCriteria to each packet. |
-| 11 | Create ReviewRequest metadata for packets that need human, validation, security, governance, product, or release review. |
-| 12 | Create IntegrationSummary and CommitAdvice metadata only after separate authorized changes exist. |
+| 5 | Record `AgentNativeTopologySelection` metadata before manual ticket projection. |
+| 6 | Create `TaskGraphProjection` and `BlackboardPlanningRef` metadata for nodes, edges, blockers, evidence, review, and integration posture. |
+| 7 | Map `CapabilityCellProjection` and `ReviewerMeshProjection` metadata before selecting manual lanes or reviewers. |
+| 8 | Project the selected graph/cell/reviewer posture into `ManualWorkPacketProjection` records with exact allowed and blocked scope. |
+| 9 | Split projected work into RoadmapPhases and Workstreams as human-facing manual planning views. |
+| 10 | Create Dependencies and SequencingRules for every hard order constraint. |
+| 11 | Create ParallelizationGroups only for metadata/design/review work that has no hard dependency conflict. |
+| 12 | Attach Blockers and CompletionCriteria to each packet. |
+| 13 | Create ReviewRequest metadata for packets that need human, validation, security, governance, product, or release review. |
+| 14 | Create IntegrationSummary and CommitAdvice metadata only after separate authorized changes exist. |
+| 15 | Preserve `ManualExecutionProjection` posture: no step authorizes runtime dispatch, autonomous handoff, automatic review, automatic integration, or Git mutation. |
 
 No step authorizes execution, source loading, product work, external adoption, substrate selection, generated output tracking, source tracking expansion, publication, or Git mutation.
 
@@ -489,13 +520,13 @@ All roadmap outputs must retain limitations, blockers, source posture, sensitivi
 
 ## 28. P7 Peer Alignment Register
 
-P7.0.B is created before the optional P7 peer documents. Their absence is recorded as pending alignment, not as permission to invent their contracts.
+Some optional P7 peer documents are present in the worktree as unreviewed, unconsumed files outside the P7.0.B authorized scope. Their presence is not treated as alignment, authority, or permission. P7.0.B preserves pending alignment markers until a future exact review consumes accepted peer records.
 
 | Peer | Current status | Required marker | P7.0.B handling |
 | --- | --- | --- | --- |
-| P7.0.A Lead Gateway Alignment | Absent | `pending_P7.0.A_lead_gateway_alignment` | Use conservative manual lead-planning semantics only. |
-| P7.0.C Lane Taxonomy Alignment | Absent | `pending_P7.0.C_lane_taxonomy_alignment` | Use G-19/P0/P6 lane vocabulary and mark taxonomy provisional. |
-| P7.0.D Memory Manifest Alignment | Absent | `pending_P7.0.D_memory_manifest_alignment` | Use canonical markdown docs plus metadata refs only; no runtime memory. |
+| P7.0.A Lead Gateway Alignment | Present and aligned by P7.0-NATIVE-ALIGN-01 | `resolved_by_alignment` | Consume Lead Agent as `user_gateway` / `manual_control_plane` in the `manual_bridge_layer`. |
+| P7.0.C Lane Taxonomy Alignment | Present and aligned by P7.0-NATIVE-ALIGN-01 | `resolved_by_alignment` | Consume lane taxonomy as `manual_lane_projection` and `manual_execution_projection`, not final internal runtime taxonomy. |
+| P7.0.D Memory Manifest Alignment | Present and aligned by P7.0-NATIVE-ALIGN-01 | `resolved_by_alignment` | Consume MemoryManifest as manual context metadata extended toward Context & Memory Fabric, not runtime memory. |
 | P7.0.E Harness Boundary Alignment | Absent | `pending_P7.0.E_harness_boundary_alignment` | No harness runtime, OpenCode/MCP integration, hooks, or watch mode. |
 | P7.0.F Reviewer Pipeline Alignment | Absent | `pending_P7.0.F_reviewer_pipeline_alignment` | Review objects are metadata only; no automated pipeline. |
 | P7.0.G Integrator Commit Protocol Alignment | Absent | `pending_P7.0.G_integrator_commit_protocol_alignment` | Commit advice is exact-path only and never executed by this contract. |
@@ -521,9 +552,9 @@ If a future P7 peer contradicts this contract, create an explicit reconciliation
 | `cognitive_semantic_system_substrate_deferred` | Active | Graph/vector/database/ontology/runtime substrate selection. |
 | `generated_output_tracking_blocked` | Active | Generated/local-only output tracking and publication. |
 | `source_tracking_git_publication_blocked` | Active | Staging, commit, push, force-add, publication without human gate. |
-| `pending_P7.0.A_lead_gateway_alignment` | Pending peer alignment | Lead gateway final semantics. |
-| `pending_P7.0.C_lane_taxonomy_alignment` | Pending peer alignment | Final lane taxonomy. |
-| `pending_P7.0.D_memory_manifest_alignment` | Pending peer alignment | Future memory manifest. |
+| `pending_P7.0.A_lead_gateway_alignment` | resolved_by_alignment | Lead gateway classified as `user_gateway` / `manual_control_plane` in the `manual_bridge_layer`. |
+| `pending_P7.0.C_lane_taxonomy_alignment` | resolved_by_alignment | Lane taxonomy classified as manual execution projection, not final internal agent taxonomy. |
+| `pending_P7.0.D_memory_manifest_alignment` | resolved_by_alignment | MemoryManifest extended toward Context & Memory Fabric metadata. |
 | `pending_P7.0.E_harness_boundary_alignment` | Pending peer alignment | Harness and integration boundaries. |
 | `pending_P7.0.F_reviewer_pipeline_alignment` | Pending peer alignment | Reviewer pipeline details. |
 | `pending_P7.0.G_integrator_commit_protocol_alignment` | Pending peer alignment | Integrator and commit protocol details. |

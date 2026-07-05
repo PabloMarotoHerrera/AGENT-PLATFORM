@@ -83,9 +83,9 @@ Manual operating model preserved by P7.0.D:
 ## Inputs Reviewed
 | Input | Expected role | Present / missing | Memory-manifest use | Blocking consequence if missing |
 |---|---|---|---|---|
-| P7.0.A Manual Lead Agent / User Gateway Contract | Lead/user gateway alignment. | Missing. | Would define lead chat context intake and user authority. | pending_P7.0.A_lead_gateway_alignment. |
-| P7.0.B Roadmap Generation / Work Breakdown Contract | Roadmap/work packet alignment. | Missing. | Would define context by roadmap phase and work packet. | pending_P7.0.B_roadmap_breakdown_alignment. |
-| P7.0.C Parallel Agent Lane / Work Packet Taxonomy | Lane taxonomy alignment. | Missing. | Would define lane-specific context requirements. | pending_P7.0.C_agent_lane_taxonomy_alignment. |
+| P7.0.A Manual Lead Agent / User Gateway Contract | Lead/user gateway alignment. | Present / aligned by P7.0-NATIVE-ALIGN-01. | Defines lead chat context intake and user authority as `manual_bridge_layer`. | resolved_by_alignment. |
+| P7.0.B Roadmap Generation / Work Breakdown Contract | Roadmap/work packet alignment. | Present / aligned by P7.0-NATIVE-ALIGN-01. | Defines context by topology projection, roadmap phase, and work packet. | resolved_by_alignment. |
+| P7.0.C Parallel Agent Lane / Work Packet Taxonomy | Lane taxonomy alignment. | Present / aligned by P7.0-NATIVE-ALIGN-01. | Defines lane-specific context requirements and native reference objects. | resolved_by_alignment. |
 | P7.0.E Manual Harness Strategy / OpenCode-Hermes Boundary | Harness boundary alignment. | Missing. | Would define harness-specific context consumption. | pending_P7.0.E_harness_boundary_alignment. |
 | P7.0.F Reviewer Agent / Approval Pipeline Contract | Reviewer pipeline alignment. | Missing. | Would define review context and approval refs. | pending_P7.0.F_reviewer_pipeline_alignment. |
 | P7.0.G Integrator / Reconciliation / Commit Advisory Protocol | Integrator and commit advisory alignment. | Missing. | Would define final integration context and exact Git command advice. | pending_P7.0.G_integrator_commit_advisory_alignment. |
@@ -127,11 +127,11 @@ Manual operating model preserved by P7.0.D:
 | `external/sources/gbrain-master` | Optional external path metadata only. | Missing. | GBrainCandidateRef remains path/class metadata only. | No content inspection; candidate path remains absent. |
 
 ## Dependency Posture
-P7.0.A is missing, so P7.0.D records `pending_P7.0.A_lead_gateway_alignment`.
+P7.0.A is present and aligned by P7.0-NATIVE-ALIGN-01, so P7.0.D records `resolved_by_alignment` for lead gateway alignment.
 
-P7.0.B is missing, so P7.0.D records `pending_P7.0.B_roadmap_breakdown_alignment`.
+P7.0.B is present and aligned by P7.0-NATIVE-ALIGN-01, so P7.0.D records `resolved_by_alignment` for roadmap/work breakdown alignment.
 
-P7.0.C is missing, so P7.0.D records `pending_P7.0.C_agent_lane_taxonomy_alignment`.
+P7.0.C is present and aligned by P7.0-NATIVE-ALIGN-01, so P7.0.D records `resolved_by_alignment` for lane taxonomy alignment.
 
 P7.0.E is missing, so P7.0.D records `pending_P7.0.E_harness_boundary_alignment`.
 
@@ -194,6 +194,148 @@ MemoryManifest is not automatic retrieval.
 
 MemoryManifest is not approval.
 
+## Context & Memory Fabric Extension
+
+MemoryManifest is extended toward Context & Memory Fabric.
+
+Context & Memory Fabric supports task memory, cell memory, blackboard memory, topology context packs, contradiction markers, and evidence conflict markers as metadata.
+
+Context & Memory Fabric is design metadata only.
+
+Context & Memory Fabric does not activate GBrain runtime.
+
+Context & Memory Fabric does not activate retrieval.
+
+Context & Memory Fabric does not create persistent memory.
+
+Context & Memory Fabric does not create vector DB.
+
+Context & Memory Fabric does not create graph DB.
+
+Context & Memory Fabric does not generate embeddings.
+
+Context & Memory Fabric does not activate Cadence.
+
+Memory fabric does not activate GBrain runtime.
+
+Memory fabric does not activate retrieval.
+
+Memory fabric does not create persistent memory.
+
+Memory fabric does not create vector DB.
+
+Memory fabric does not create graph DB.
+
+Memory fabric does not generate embeddings.
+
+Memory fabric does not activate Cadence.
+
+Existing modes remain preserved: M0 — canonical markdown + metadata refs; M1 — curated Graphify evidence references; M2 — GBrain-style candidate references; M3 — active GBrain runtime / substrate remains blocked.
+
+### TaskMemorySlice
+
+Required fields:
+
+```text
+task_memory_slice_id
+task_graph_ref
+task_node_ref
+context_pack_refs
+evidence_refs
+validation_refs
+security_refs
+blockers
+limitations
+```
+
+`TaskMemorySlice` is markdown/context metadata only. It is not persistent memory.
+
+### CellMemorySlice
+
+Required fields:
+
+```text
+cell_memory_slice_id
+capability_cell_ref
+cell_scope
+input_context_refs
+output_evidence_refs
+retained_limitations
+blockers
+review_requirements
+```
+
+`CellMemorySlice` is capability-cell context metadata only. It is not vector DB, embeddings, or active cell memory.
+
+### BlackboardMemoryRef
+
+Required fields:
+
+```text
+blackboard_memory_ref_id
+blackboard_ref
+shared_state_refs
+claim_refs
+evidence_refs
+contradiction_markers
+evidence_conflict_markers
+retention_posture
+limitations
+```
+
+`BlackboardMemoryRef` is manual blackboard context metadata only. It is not graph DB, persistence, or live shared state.
+
+### TopologyContextPack
+
+Required fields:
+
+```text
+topology_context_pack_id
+topology_ref
+task_graph_refs
+blackboard_refs
+capability_cell_refs
+reviewer_mesh_refs
+routing_decision_refs
+manual_projection_refs
+limitations
+```
+
+`TopologyContextPack` is manual context packaging for topology metadata. It is not source loading or topology activation.
+
+### ContradictionMarker
+
+Required fields:
+
+```text
+contradiction_marker_id
+conflicting_claim_refs
+source_refs
+evidence_refs
+severity
+review_required
+resolution_route
+limitations
+```
+
+`ContradictionMarker` is a manual review cue. It is not automatic rejection or automatic quarantine.
+
+### EvidenceConflictMarker
+
+Required fields:
+
+```text
+evidence_conflict_marker_id
+conflicting_evidence_refs
+affected_claim_refs
+affected_task_refs
+review_required
+escalation_route
+limitations
+```
+
+`EvidenceConflictMarker` is a manual escalation cue. It is not evidence-as-authority or automatic conflict resolution.
+
 ## MemoryManifest Object Model
 | Object | Meaning | Required fields | Forbidden fields | Security posture | Validation posture | Activation posture |
 |---|---|---|---|---|---|---|
@@ -231,6 +373,12 @@ MemoryManifest fields:
 | manifest_producer_ref | Manual producer. |
 | work_packet_refs | Work packet refs. |
 | agent_lane_refs | Agent lane refs. |
+| task_memory_slice_refs | TaskMemorySlice refs. |
+| cell_memory_slice_refs | CellMemorySlice refs. |
+| blackboard_memory_refs | BlackboardMemoryRef refs. |
+| topology_context_pack_refs | TopologyContextPack refs. |
+| contradiction_marker_refs | ContradictionMarker refs. |
+| evidence_conflict_marker_refs | EvidenceConflictMarker refs. |
 | reviewer_refs | Reviewer refs. |
 | integrator_refs | Integrator refs. |
 | context_packs | ContextPack refs. |
@@ -792,6 +940,9 @@ STOP if P7.0.D attempts to start P7.0.H, P7.0.R, P7.1, P8, P4, or implementation
 | MEM-031 | The user remains final commit authority. |
 | MEM-032 | The agent never mutates Git. |
 | MEM-033 | Never recommend git add .. |
+| MEM-034 | Context & Memory Fabric is metadata design only. |
+| MEM-035 | Context & Memory Fabric does not activate GBrain runtime. |
+| MEM-036 | Context & Memory Fabric does not activate vector DB, graph DB, embeddings, persistent memory, live retrieval, or Cadence. |
 
 ## Future Validation Targets
 Future validation targets are proposed only and were not executed:
@@ -913,9 +1064,9 @@ Round 1 parallel tickets:
 
 | Ticket | Name | Current P7.0.D posture |
 |---|---|---|
-| P7.0.A | Manual Lead Agent / User Gateway Contract | Missing; continue remaining Round 1 parallel planning tickets. |
-| P7.0.B | Roadmap Generation / Work Breakdown Contract | Missing; continue remaining Round 1 parallel planning tickets. |
-| P7.0.C | Parallel Agent Lane / Work Packet Taxonomy | Missing; continue remaining Round 1 parallel planning tickets. |
+| P7.0.A | Manual Lead Agent / User Gateway Contract | Present and aligned by P7.0-NATIVE-ALIGN-01. |
+| P7.0.B | Roadmap Generation / Work Breakdown Contract | Present and aligned by P7.0-NATIVE-ALIGN-01. |
+| P7.0.C | Parallel Agent Lane / Work Packet Taxonomy | Present and aligned by P7.0-NATIVE-ALIGN-01. |
 | P7.0.D | Manual Context / Memory Manifest Strategy | Complete by this document. |
 | P7.0.E | Manual Harness Strategy / OpenCode-Hermes Boundary | Missing; continue remaining Round 1 parallel planning tickets. |
 | P7.0.F | Reviewer Agent / Approval Pipeline Contract | Missing; continue remaining Round 1 parallel planning tickets. |
@@ -933,7 +1084,7 @@ After P7.0.H:
 |---|---|---|
 | P7.0.R | Manual Agentic Workflow Planning Closure | Do not start P7.0.R inside P7.0.D. |
 
-Recommended actual: Continue remaining P7.0.A-P7.0.G parallel planning tickets until Round 1 is complete.
+Recommended actual after P7.0-NATIVE-ALIGN-01: P7.0.E or P7.0.F. Do not start P7.0.H until P7.0.E/F/G are complete.
 
 Do not start P7.0.H inside P7.0.D.
 
@@ -973,6 +1124,6 @@ Do not start P7.0.R inside P7.0.D.
 | Did P7.0.D mutate Git? | No. |
 | Can the agent recommend git add .? | No. Never recommend git add .. |
 | Who remains final commit authority? | The user remains final commit authority. |
-| What is the next ticket? | Continue remaining P7.0.A-P7.0.G parallel planning tickets; do not start P7.0.H or P7.0.R inside P7.0.D. |
+| What is the next ticket? | After P7.0-NATIVE-ALIGN-01, P7.0.E or P7.0.F; do not start P7.0.H or P7.0.R inside P7.0.D. |
 
 Final verdict: P7.0.D is accepted as manual context / memory manifest strategy for AL-1.5 manual controlled agentic workflow planning. It creates no runtime behavior, no persistent memory, no live retrieval, no GBrain/Hermes/Cadence activation, no Graphify adoption, and no Git mutation.

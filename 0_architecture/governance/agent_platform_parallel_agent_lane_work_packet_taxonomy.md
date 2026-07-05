@@ -93,9 +93,9 @@ Manual roles can coordinate work only through human-mediated prompts, explicit w
 | `README.md` | Present / reviewed | Root workspace orientation. | No runtime effect. |
 | `.gitignore` | Present / reviewed | Local-only/generated/secrets/provider-auth hygiene posture. | Ignore rules are not enforcement; not modified. |
 | `.graphifyignore` | Present / reviewed | Graphify default-deny boundary and hard exclusions. | Not permission to run or adopt Graphify; not modified. |
-| `0_architecture/governance/agent_platform_manual_lead_agent_user_gateway_contract.md` | Absent by path-only check | Optional P7.0.A sibling. | `pending_P7.0.A_lead_gateway_alignment`. |
-| `0_architecture/governance/agent_platform_roadmap_generation_work_breakdown_contract.md` | Absent by path-only check | Optional P7.0.B sibling. | `pending_P7.0.B_roadmap_work_breakdown_alignment`. |
-| `0_architecture/governance/agent_platform_manual_context_memory_manifest_strategy.md` | Absent by path-only check | Optional P7.0.D sibling. | `pending_P7.0.D_context_memory_manifest_alignment`. |
+| `0_architecture/governance/agent_platform_manual_lead_agent_user_gateway_contract.md` | Present / aligned by P7.0-NATIVE-ALIGN-01 | P7.0.A manual bridge peer. | `resolved_by_alignment`. |
+| `0_architecture/governance/agent_platform_roadmap_generation_work_breakdown_contract.md` | Present / aligned by P7.0-NATIVE-ALIGN-01 | P7.0.B manual bridge peer and topology projection source. | `resolved_by_alignment`. |
+| `0_architecture/governance/agent_platform_manual_context_memory_manifest_strategy.md` | Present / aligned by P7.0-NATIVE-ALIGN-01 | P7.0.D manual bridge peer and Context & Memory Fabric source. | `resolved_by_alignment`. |
 | `0_architecture/governance/agent_platform_manual_harness_opencode_hermes_boundary_strategy.md` | Absent by path-only check | Optional P7.0.E sibling. | `pending_P7.0.E_harness_boundary_alignment`. |
 | `0_architecture/governance/agent_platform_manual_reviewer_approval_pipeline_contract.md` | Absent by path-only check | Optional P7.0.F sibling. | `pending_P7.0.F_reviewer_approval_alignment`. |
 | `0_architecture/governance/agent_platform_manual_integrator_commit_advisory_protocol.md` | Absent by path-only check | Optional P7.0.G sibling. | `pending_P7.0.G_integrator_commit_protocol_alignment`. |
@@ -111,7 +111,7 @@ Manual roles can coordinate work only through human-mediated prompts, explicit w
 
 P7.0.C consumes P6.7 operational readiness posture. P7.0.C consumes P6 operational contract boundaries. P7.0.C consumes P5 skeleton limitations. P7.0.C consumes P3-B activation decision boundaries. P7.0.C consumes P2.K knowledge/retrieval architecture boundaries. P7.0.C consumes P2 evidence, retention, rollback, and vocabulary contracts. P7.0.C consumes P1 metadata-only contracts.
 
-P7.0.C may consume P7.0.A, P7.0.B, P7.0.D, P7.0.E, P7.0.F, P7.0.G, and P7.0.H if present. None are present in the current path checks, so all P7 sibling alignments remain pending.
+P7.0.C may consume P7.0.A, P7.0.B, P7.0.D, P7.0.E, P7.0.F, P7.0.G, and P7.0.H if present. P7.0.A, P7.0.B, and P7.0.D are present and aligned by P7.0-NATIVE-ALIGN-01. P7.0.E, P7.0.F, P7.0.G, and P7.0.H remain pending future alignment.
 
 P7.0.C must not create, modify, or supersede any sibling P7 document. P7.0.C may record drift candidates for P7.0.R reconciliation.
 
@@ -135,6 +135,30 @@ Initial manual lane taxonomy:
 
 These are manual roles. They are not runtime agents. They are not registered live agents. They are not autonomous workers. They are not scheduled. They are not dispatched automatically. They may correspond to separate manual chats, external harness sessions, review passes, or user-mediated workstreams.
 
+## Manual Lane Projection Versus Agent-Native Internal Organization
+
+Current lane taxonomy = manual execution projection.
+
+Current lane taxonomy is not the final internal agent taxonomy.
+
+Agent lanes are human-operable manual roles for chats/harnesses.
+
+Agent lanes do not define optimal internal agent-native organization.
+
+Manual lanes are useful for chats and external harnesses.
+
+Parallel manual agents are a projection of work for human-operated harnesses.
+
+Future internal organization may use task graphs, blackboards, capability cells, reviewer meshes, routing models, routing decisions, or other agent-native topologies.
+
+Parallel manual lanes do not define runtime agents.
+
+Manual lane labels such as Architecture Agent, Security Agent, Validation Agent, Reviewer Agent, and Integrator Agent are useful operating projections but must not be treated as the final internal runtime design.
+
+This taxonomy is reclassified as `manual_lane_projection`, `manual_execution_projection`, and `manual_bridge_layer taxonomy`.
+
+`LANE-NATIVE-001` Manual lane taxonomy is a manual execution projection, not the final internal agent taxonomy.
+
 ## Object Model
 
 | object | meaning | required fields | forbidden fields | governance posture | review posture |
@@ -147,6 +171,138 @@ These are manual roles. They are not runtime agents. They are not registered liv
 | LaneBoundary | Manual lane boundary contract. | allowed scope, blocked scope, source/tool/provider/product/external/memory/harness/Git/publication/security/validation boundaries, stop rules. | Hidden exceptions, permission escalation, runtime policy engine. | Boundary breach requires stop and review. | Reviewer verifies boundary preservation. |
 | LaneStopRule | Stop condition for lane work. | trigger, reason, required action, review route, escalation route, blocked follow-up, safe reporting format, limitations. | Auto-remediation, secret output, execution workaround. | Stop means stop. | Reviewer/integrator decides next safe route. |
 | LaneReviewRequirement | Review metadata for a lane/work-packet type. | reviewer role, review scope, checklist ref, allowed verdicts, blocking verdicts, integrator/human decision requirement. | Approval-as-Git, approval-as-runtime, auto-accept. | Review metadata only. | Reviewer approval is not Git approval. |
+
+## Agent-Native Reference Object Contracts
+
+The following reference objects describe the `agent_native_internal_organization_layer` as metadata only. They do not activate runtime topology, scheduling, persistence, reviewer automation, routing automation, or dispatch.
+
+### AgentNativeTopologyRef
+
+Required fields:
+
+```text
+topology_ref_id
+topology_pattern
+topology_reason
+applicable_objective_class
+task_graph_ref
+blackboard_ref
+capability_cell_refs
+reviewer_mesh_ref
+routing_decision_refs
+manual_projection_refs
+limitations
+```
+
+`AgentNativeTopologyRef` is a conceptual topology reference. It is not topology activation.
+
+### TaskGraphRef
+
+Required fields:
+
+```text
+task_graph_ref_id
+objective_ref
+node_classes
+dependency_edges
+parallelism_posture
+blocker_edges
+review_edges
+integration_edges
+manual_projection_refs
+limitations
+```
+
+`TaskGraphRef` is task graph metadata. It is not a scheduler graph, queue, runnable task set, or graph DB.
+
+### BlackboardRef
+
+Required fields:
+
+```text
+blackboard_ref_id
+shared_state_scope
+claim_refs
+evidence_refs
+contradiction_markers
+conflict_markers
+retention_posture
+manual_projection_refs
+limitations
+```
+
+`BlackboardRef` is shared planning metadata. It is not persistence, live shared state, vector DB, graph DB, or live retrieval.
+
+### CapabilityCellRef
+
+Required fields:
+
+```text
+capability_cell_ref_id
+capability_class
+input_contract
+output_contract
+blocked_capabilities
+review_requirements
+routing_posture
+manual_lane_projection
+limitations
+```
+
+`CapabilityCellRef` is a conceptual capability cell reference. It is not an active agent, worker, or runtime capability grant.
+
+### ReviewerMeshRef
+
+Required fields:
+
+```text
+reviewer_mesh_ref_id
+review_pattern
+reviewer_cell_refs
+immune_safeguard_refs
+contradiction_detection_refs
+escalation_routes
+manual_reviewer_projection
+limitations
+```
+
+`ReviewerMeshRef` is manual reviewer mesh metadata. It is not automatic reviewer assignment, auto-review, automatic quarantine, or automatic rejection.
+
+### RoutingDecisionRef
+
+Required fields:
+
+```text
+routing_decision_ref_id
+routing_basis
+selected_topology_ref
+selected_lane_projection
+blocked_routes
+review_routes
+integration_routes
+limitations
+```
+
+`RoutingDecisionRef` records manual routing rationale. It is not automated routing, dispatch, provider selection, or model routing runtime.
+
+### ManualLaneProjectionRef
+
+Required fields:
+
+```text
+manual_lane_projection_ref_id
+source_topology_ref
+source_task_graph_ref
+source_capability_cell_refs
+selected_manual_lane
+selected_manual_role
+selected_harness_posture
+work_packet_refs
+review_requirement_refs
+limitations
+```
+
+`ManualLaneProjectionRef` maps conceptual organization into manual lanes. It is not final internal runtime taxonomy.
 
 ## AgentLane Contract
 
@@ -624,9 +780,9 @@ Reviewer approval is not Git approval. Integrator acceptance is not Git approval
 
 | drift_id | source_area | observed_issue | expected_canonical_posture | status | impact | resolution_route |
 | --- | --- | --- | --- | --- | --- | --- |
-| P7C-DRIFT-001 | P7.0.A | P7.0.A missing lead gateway alignment. | Manual lead gateway defines work packet routing. | pending_P7.0_R_reconciliation | Pilot sequencing incomplete. | Complete P7.0.A or carry blocker to P7.0.R. |
-| P7C-DRIFT-002 | P7.0.B | P7.0.B missing roadmap/work breakdown alignment. | Roadmap decomposition defines packet dependencies and parallel groups. | pending_P7.0_R_reconciliation | Pilot sequencing incomplete. | Complete P7.0.B or carry blocker to P7.0.R. |
-| P7C-DRIFT-003 | P7.0.D | P7.0.D missing context/memory manifest alignment. | LaneInputPackage carries manifest/context refs. | pending_P7.0_R_reconciliation | Context packaging incomplete. | Complete P7.0.D or carry blocker to P7.0.R. |
+| P7C-DRIFT-001 | P7.0.A | P7.0.A missing lead gateway alignment. | Manual lead gateway defines work packet routing. | resolved_by_alignment | Pilot sequencing improved. | Resolved by P7.0-NATIVE-ALIGN-01. |
+| P7C-DRIFT-002 | P7.0.B | P7.0.B missing roadmap/work breakdown alignment. | Roadmap decomposition defines packet dependencies and parallel groups. | resolved_by_alignment | Pilot sequencing improved. | Resolved by P7.0-NATIVE-ALIGN-01. |
+| P7C-DRIFT-003 | P7.0.D | P7.0.D missing context/memory manifest alignment. | LaneInputPackage carries manifest/context refs. | resolved_by_alignment | Context packaging improved. | Resolved by P7.0-NATIVE-ALIGN-01. |
 | P7C-DRIFT-004 | P7.0.E | P7.0.E missing harness boundary alignment. | Harness modes remain manual H0/design-only H1. | pending_P7.0_R_reconciliation | Harness boundary incomplete. | Complete P7.0.E or carry blocker to P7.0.R. |
 | P7C-DRIFT-005 | P7.0.F | P7.0.F missing reviewer approval alignment. | Reviewer verdicts governed by manual approval pipeline. | pending_P7.0_R_reconciliation | Review pipeline incomplete. | Complete P7.0.F or carry blocker to P7.0.R. |
 | P7C-DRIFT-006 | P7.0.G | P7.0.G missing integrator commit protocol alignment. | Integrator acceptance and commit advice governed by protocol. | pending_P7.0_R_reconciliation | Integration/commit advisory incomplete. | Complete P7.0.G or carry blocker to P7.0.R. |
@@ -674,6 +830,22 @@ Reviewer approval is not Git approval. Integrator acceptance is not Git approval
 | LANE-028 | Cognitive Semantic System substrate remains deferred. |
 | LANE-029 | Siamese is product vision, not product activation. |
 | LANE-030 | AGENT PLATFORM remains AL-1 metadata skeleton unless future gate changes it. |
+| LANE-NATIVE-001 | Manual lane taxonomy is a manual execution projection, not the final internal agent taxonomy. |
+| NATIVE-ALIGN-001 | P7.0.A/B/C/D are preserved, not restarted. |
+| NATIVE-ALIGN-002 | P7.0.A/B/C/D form the `manual_bridge_layer`. |
+| NATIVE-ALIGN-003 | The `agent_native_internal_organization_layer` is added conceptually. |
+| NATIVE-ALIGN-004 | Lead Agent is `user_gateway` / `manual_control_plane`, not internal runtime orchestrator. |
+| NATIVE-ALIGN-005 | Roadmap generation must consider topology selection before manual work packet projection. |
+| NATIVE-ALIGN-006 | WorkPacket is a manual execution projection. |
+| NATIVE-ALIGN-007 | Manual lane taxonomy is not the final internal agent taxonomy. |
+| NATIVE-ALIGN-008 | Manual lanes are projections for human-operated chats/harnesses. |
+| NATIVE-ALIGN-009 | Agent-native internal organization may use task graph, blackboard, capability cells, reviewer mesh, routing model, and memory fabric. |
+| NATIVE-ALIGN-010 | Context & Memory Fabric is metadata design only. |
+| NATIVE-ALIGN-011 | Context & Memory Fabric does not activate GBrain runtime. |
+| NATIVE-ALIGN-012 | Context & Memory Fabric does not activate vector DB, graph DB, embeddings, persistent memory, live retrieval, or Cadence. |
+| NATIVE-ALIGN-013 | Manual execution projection does not bypass governance. |
+| NATIVE-ALIGN-014 | Manual bridge layer does not activate runtime behavior. |
+| NATIVE-ALIGN-015 | P7 remains manual workflow design only. |
 
 ## Future Validation Targets
 
@@ -850,9 +1022,9 @@ Do not recommend P7.1 until P7.0.R closes. Do not recommend P8 until P7.1 and pi
 | What review requirement matrix was defined? | A packet-to-reviewer/integrator/human decision matrix for all packet types. |
 | How does P7.0.C ensure parallel execution does not bypass governance? | It requires explicit inputs, exact scope, non-overlapping targets, stop rules, reviewer routing, and integrator closure; outputs remain proposed until reviewed. |
 | How does P7.0.C preserve human Git authority? | Commit commands are advisory only; Reviewer approval is not Git approval; Integrator acceptance is not Git approval; The user commits and pushes manually. |
-| How does P7.0.C interface with P7.0.A? | Expects manual lead gateway routing; records `pending_P7.0.A_lead_gateway_alignment`. |
-| How does P7.0.C interface with P7.0.B? | Expects roadmap/work breakdown to identify packet types, dependencies, parallel groups, sequencing; records `pending_P7.0.B_roadmap_work_breakdown_alignment`. |
-| How does P7.0.C interface with P7.0.D? | Expects context pack refs, memory manifest refs, evidence refs, source refs, freshness and missing-context markers; records `pending_P7.0.D_context_memory_manifest_alignment`. |
+| How does P7.0.C interface with P7.0.A? | Expects manual lead gateway routing; P7.0.A is aligned by P7.0-NATIVE-ALIGN-01 as `user_gateway` / `manual_control_plane`. |
+| How does P7.0.C interface with P7.0.B? | Expects roadmap/work breakdown to identify packet types, dependencies, parallel groups, sequencing, and topology projection metadata; P7.0.B is aligned by P7.0-NATIVE-ALIGN-01. |
+| How does P7.0.C interface with P7.0.D? | Expects context pack refs, memory manifest refs, evidence refs, source refs, freshness and missing-context markers, and Context & Memory Fabric refs; P7.0.D is aligned by P7.0-NATIVE-ALIGN-01. |
 | How does P7.0.C interface with P7.0.E? | Expects manual H0 or design-only H1 harness modes; records `pending_P7.0.E_harness_boundary_alignment`. |
 | How does P7.0.C interface with P7.0.F? | Expects reviewer requirements/verdicts to be governed by review pipeline; records `pending_P7.0.F_reviewer_approval_alignment`. |
 | How does P7.0.C interface with P7.0.G? | Expects integrator acceptance, drift closure, and commit advice to be governed by integrator protocol; records `pending_P7.0.G_integrator_commit_protocol_alignment`. |
@@ -874,5 +1046,5 @@ Do not recommend P7.1 until P7.0.R closes. Do not recommend P8 until P7.1 and pi
 | Was generated output tracking approved? | No. |
 | Was source tracking expansion approved? | No. |
 | Was Cognitive Semantic System substrate selected? | No. |
-| What pending P7 alignments remain? | `pending_P7.0.A_lead_gateway_alignment`, `pending_P7.0.B_roadmap_work_breakdown_alignment`, `pending_P7.0.D_context_memory_manifest_alignment`, `pending_P7.0.E_harness_boundary_alignment`, `pending_P7.0.F_reviewer_approval_alignment`, `pending_P7.0.G_integrator_commit_protocol_alignment`, `pending_P7.0.H_first_manual_pilot_alignment`. |
+| What pending P7 alignments remain? | `pending_P7.0.E_harness_boundary_alignment`, `pending_P7.0.F_reviewer_mesh_alignment`, `pending_P7.0.G_integrator_commit_protocol_alignment`, `pending_P7.0.H_manual_agent_native_pilot_alignment`, `pending_P7.0.R_manual_agent_native_closure_alignment`. |
 | What is the next ticket? | Complete remaining Round 1 P7.0 tickets before P7.0.H; if choosing one next, P7.0.A - Manual Lead Agent / User Gateway Contract. |

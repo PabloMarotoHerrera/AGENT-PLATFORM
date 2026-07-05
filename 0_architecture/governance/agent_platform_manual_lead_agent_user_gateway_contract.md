@@ -11,7 +11,7 @@
 | Scope | Manual workflow contract for AGENT PLATFORM / Siamese, moving toward AL-1.5 manual controlled agentic workflow. |
 | Authority | Manual workflow design only, not agent runtime activation, autonomous orchestration, automatic dispatch, automatic handoff, automatic reviewer assignment, automatic Git mutation, provider/auth/API/MCP activation, Hermes runtime, GBrain runtime, Cadence, live connector activation, product/Siamese source inspection, persistence, vector DB, graph DB, Graphify adoption, Codegraph adoption, Cognitive Semantic System substrate selection, or publication. |
 | Related documents | P6.7, P6.1, P6.2, P6.3, P6.4, P6.5, P6.6 if present, P5.R, P5.1-P5.7, P3.BR, P3.3, P3.4, P3.5, P2.1, P2.2, P2.3, P2.KR, P1.1-P1.5, P0.1-P0.3, S-03, S-04, CSS ADR/audit. |
-| Optional sibling inputs | P7.0.B-P7.0.R are absent by path-only check and are downstream future consumers only. |
+| Optional sibling inputs | P7.0.B, P7.0.C, and P7.0.D are present and aligned by P7.0-NATIVE-ALIGN-01 as `manual_bridge_layer` peers; P7.0.E-P7.0.R remain downstream future consumers only. |
 | Output | Manual Lead Agent / User Gateway Contract |
 
 P7 designs the manual operating model. P7.0.A does not activate agent runtime. P7.0.A does not automate orchestration. Manual workflow design is not runtime activation.
@@ -79,6 +79,36 @@ P7.0.A is manual workflow design only. Manual lead agent is a role, not a runtim
 | Human Decision Point | Explicit user decision moment. | Require user choice before expansion/approval/Git. | Inferred approval from silence. | All P7 contracts. |
 
 Lead Agent is the role of the main planning chat. User Gateway is the governed boundary between user intent and manual agentic workflow. This is not a runtime orchestrator. This is not an autonomous agent.
+
+## Manual Bridge Layer Classification
+
+This document belongs to the `manual_bridge_layer`.
+
+Lead Agent = user gateway / manual control plane.
+
+The Lead Agent is the `user_gateway` and `manual_control_plane`.
+
+The Lead Agent is part of the `manual_bridge_layer` and is the manual bridge layer entry point for user-facing planning.
+
+The Lead Agent is not the `agent_native_internal_organization_layer`.
+
+Lead Agent is not the agent-native internal organization layer.
+
+The Lead Agent translates user objectives into manual planning artifacts. It projects user-facing intent into roadmap, work packet, review, integration, and commit-advice structures.
+
+The Lead Agent is not the final internal agent architecture, a human-style boss agent, an autonomous orchestrator, a runtime scheduler, an execution engine, a provider/tool activator, or a Git actor.
+
+The Lead Agent does not command runtime agents.
+
+The Lead Agent does not define the optimal internal topology.
+
+The Lead Agent may request topology selection metadata but does not activate topology.
+
+The Lead Agent may prepare manual tickets but does not dispatch agents.
+
+The Lead Agent does not activate orchestration.
+
+The Lead Agent may advise Git commands but never mutates Git.
 
 ## 6. Manual Workflow Lifecycle
 
