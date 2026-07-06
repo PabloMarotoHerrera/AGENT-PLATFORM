@@ -9,7 +9,7 @@
 | Status | Accepted agent-native organization research carry-forward |
 | Date | 2026-07-05 |
 | Scope | Research carry-forward and conceptual pattern set for AGENT PLATFORM / Siamese P7 alignment. |
-| Authority | Research carry-forward and conceptual alignment input only, not modification of P7.0.A/B/C/D, not runtime activation, not autonomous orchestration, not automatic dispatch, not automatic handoff, not automatic reviewer assignment, not automatic Git mutation, not provider/auth/API/MCP activation, not Hermes runtime, not GBrain runtime, not Cadence, not live connector activation, not product/Siamese source inspection, not persistence, not vector DB, not graph DB, not Graphify adoption, not Codegraph adoption, not Cognitive Semantic System substrate selection, and not publication. |
+| Authority | Research carry-forward and agent-native organization pattern normalization only, not runtime activation, autonomous orchestration, automatic dispatch, automatic handoff, automatic reviewer assignment, automatic context retrieval, persistent memory, live retrieval, GBrain runtime, Hermes runtime, Cadence, provider/auth/API/MCP activation, tool execution, agent execution, reviewer execution, integrator execution, source loading, source inspection, product source inspection, external source inspection, Graphify adoption/rerun, Codegraph execution, vector DB, embeddings, graph DB, ontology runtime, generated output tracking, source tracking expansion, publication, Git mutation, modification of P7.0.A/B/C/D, or Cognitive Semantic System substrate selection. |
 | Related documents | P7.0.A, P7.0.B, P7.0.C, P7.0.D, P6.7, P6.1-P6.6, P5.R, P5.1-P5.7, P3.BR, P3.3, P3.4, P3.5, P2.1, P2.2, P2.3, P2.KR, P1.1-P1.5, P0.1-P0.3, S-03, S-04, CSS ADR/audit. |
 | Optional research inputs | Listed approved markdown research notes were absent by path-only check. This carry-forward uses the P7 correction brief and path-verified governance baseline. |
 | Output | agent-native organization pattern set ready for P7 |
@@ -514,3 +514,652 @@ Do not start P7.0-NATIVE-ALIGN-01 in this ticket. Do not start P7.0.E. Do not st
 | What is the next recommended ticket? | P7.0-NATIVE-ALIGN-01 - Align Existing P7.0.A/B/C/D With Agent-Native Organization. |
 
 Stop after P7.0.0. Do not start P7.0-NATIVE-ALIGN-01, P7.0.E, P7.0.F, P7.0.G, P7.0.H, or P7.0.R.
+
+## 33. Canonical Normalization Addendum
+
+This addendum normalizes the existing P7.0.0 record against the full required P7.0.0 ticket contract. It does not modify P7.0.A/B/C/D. It does not create P7.0-NATIVE-ALIGN-01.
+
+P7.0.A/B/C/D already define a useful manual bridge layer.
+
+The manual bridge layer must not be deleted or restarted.
+
+The manual bridge layer is necessary for user-facing execution through manual chats and external harnesses.
+
+The manual bridge layer is not the final internal agent architecture.
+
+P7 needs an agent-native internal organization layer before continuing with P7.0.E/F/G/H/R.
+
+P7.0.0 carries forward research and architectural notes about non-human / agent-native organization patterns.
+
+P7.0.0 creates a pattern set for P7.
+
+P7.0.0 does not modify P7.0.A/B/C/D.
+
+P7.0.0 does not start P7.0-NATIVE-ALIGN-01.
+
+P7.0.0 does not activate runtime.
+
+P7.0.0 does not execute future platform behavior.
+
+Approved optional research markdowns about agent taxonomies, non-human organization patterns, multi-agent coordination, second-brain / AIOS organization, graph / blackboard / cell / swarm / market / reviewer patterns were not identified without broad source inspection. This record therefore proceeds using only approved governance / architecture markdowns, the P7 correction brief, and path-verified baseline posture. This limitation is accepted.
+
+## 34. Canonical Layer Model
+
+| Layer | Purpose | Primary consumers | Allowed P7 status | Blocked interpretation | Future alignment consequence |
+| --- | --- | --- | --- | --- | --- |
+| manual_bridge_layer | User-facing manual execution projection: user objective, gateway / lead chat, tickets, outputs, reviews, commit advice, and user-performed Git. | User, lead chat, manual agents, reviewer agents, integrator agents, external harnesses. | Useful and preserved. | Final internal runtime architecture. | P7.0-NATIVE-ALIGN-01 must mark P7.0.A/B/C/D as manual_bridge_layer without deleting them. |
+| agent_native_internal_organization_layer | Internal topology candidates: task graph, blackboard, capability cells, reviewer mesh, routing model, memory fabric, contradiction handling, evidence conflict handling, manual execution projection. | P7.0-NATIVE-ALIGN-01, P7.0.E/F/G/H/R, future implementation planning. | Conceptual only. | Runtime activation, autonomous orchestration, dispatch, persistence, graph/vector runtime. | P7.0-NATIVE-ALIGN-01 must align A/B/C/D to this conceptual layer. |
+
+manual_bridge_layer maps user-facing manual execution.
+
+agent_native_internal_organization_layer defines internal topology candidates.
+
+Manual bridge roles are not final runtime agents.
+
+Agent-native patterns are not runtime activation.
+
+## 35. Agent-Native Pattern Object Model
+
+| Object | Meaning | Required fields | Forbidden fields | Security posture | Validation posture | Activation posture |
+| --- | --- | --- | --- | --- | --- | --- |
+| AgentNativePattern | Research carry-forward unit for one agent-native organization pattern. | pattern_id, pattern_name, family, source/evidence refs, uses, boundaries, limitations. | Runtime code, executable configuration, automatic dispatch rules. | Must preserve P0-P6 blockers. | Pattern is not validation. | Not implementation. |
+| AgentNativeTopologyRef | Metadata ref to a candidate topology. | topology_id, topology_name, problem fit, projection rule, blockers. | Runtime topology activation. | Must preserve source/security boundaries. | Not orchestration validation. | Not orchestration. |
+| TaskGraphPattern | Dependency-aware work topology. | nodes, edges, dependency types, stop rules, projection rule. | Runnable tasks, scheduler bindings. | Sensitive nodes require blockers. | Task graph is not validation execution. | Task graph is not task execution. |
+| RecursiveTaskGraphPattern | Nested task graph with bounded decomposition. | recursion boundary, stop rule, integrator boundary, work packet projection. | Infinite planner, autonomous recursion. | Must stop on blocked source/security context. | Not recursive validation. | Not automatic planner. |
+| BlackboardPattern | Shared claim/evidence/finding surface. | findings, claims, evidence refs, contradiction markers, freshness markers. | Database, event stream, live shared store. | Must exclude secrets, credentials, product source, raw external source. | Blackboard is not validation execution. | Blackboard is not persistence. |
+| CapabilityCellPattern | Bounded specialist capability unit. | cell_id, capability scope, inputs, outputs, boundaries, review obligations. | Runtime agent identity, autonomous execution permission. | Cell boundary must include security blockers. | Cell output still requires review. | Capability cell is not runtime agent. |
+| FederatedCellPattern | Semi-independent bounded cells with shared contract boundaries. | federation scope, cell boundaries, integration rules, review routes. | Distributed runtime, autonomous federation. | Must preserve isolation and blockers. | Not distributed validation. | Federated cell model is not distributed runtime. |
+| ReviewerMeshPattern | Mesh of review capabilities across outputs and routes. | reviewer scopes, review surfaces, conflict routes, limitations. | Auto-review, automatic approval, automatic rejection. | Must preserve human approval and security blockers. | Review mesh is not validation execution. | Reviewer mesh is not auto-review. |
+| ImmuneReviewPattern | Anomaly, contradiction, drift, and boundary safeguard pattern. | immune markers, anomaly classes, quarantine recommendation, human route. | Automatic quarantine, automatic rejection. | Stops on security blockers. | Contradiction marker is not validation execution. | Immune system review is not runtime enforcement. |
+| RoutingDecisionPattern | Explicit selection of cells, reviewers, lanes, or harnesses. | route reason, source classification, risk, capability fit, blockers. | Automatic dispatch, provider routing. | Must honor provider/auth/source blockers. | Routing does not validate. | Routing model is not dispatch. |
+| RouterExpertPattern | Router-expert decision pattern. | route criteria, expert/cell candidates, decision rationale. | Learned router runtime, provider/model activation. | Must not expose credentials/providers. | Not model evaluation. | router-expert is conceptual only. |
+| MixtureOfExpertsPattern | Multiple experts/cells selected or combined by routing logic. | expert set, route rule, aggregation limits, reviewer route. | Provider/model activation, uncontrolled ensemble. | Must preserve boundaries by expert. | Not automatic evaluation. | mixture-of-experts is conceptual only. |
+| ContractNetPattern | contract-net allocation by task advertisement and capability fit. | task offer, capability claim, selection rationale, acceptance boundary. | Automatic bidding, autonomous market. | Must preserve authority and blockers. | Not validation. | Market allocation is not automatic bidding. |
+| MarketAllocationPattern | Market-like task-to-capability matching. | allocation criteria, fit score/ref, owner, limitations. | Autonomous auction, budget/runtime bidding. | Must preserve manual approval. | Not validation. | market allocation is conceptual only. |
+| SwarmStigmergyPattern | Indirect coordination through markers/traces. | marker type, affected object, intended human action, limitation. | Autonomous swarm, polling, background loops. | Markers cannot bypass blockers. | Marker is not validation. | Swarm/stigmergy is not autonomous loop. |
+| SocietyOfMindPattern | Specialized cognitive/capability modules. | module/cell role, boundary, input/output contract. | Uncontrolled agent proliferation. | Each module inherits blockers. | Not validation. | society-of-mind is conceptual only. |
+| MemoryFabricPattern | Context/memory association fabric across task/cell/blackboard slices. | memory slices, refs, freshness, staleness, missing context, blockers. | Persistent memory, live retrieval. | Must exclude secrets and blocked source. | Context freshness is not validation. | Memory fabric is not persistent memory. |
+| MycelialMemoryNetworkPattern | mycelial memory network of distributed contextual associations. | contextual paths, relationship refs, evidence refs, freshness markers. | GBrain runtime, graph/vector DB. | Must preserve source/security blockers. | Not validation. | Not persistent memory. |
+| ContradictionHandlingPattern | Pattern for marking conflicts between claims, refs, or outputs. | contradiction marker, affected refs, severity, review route. | Automatic rejection or truth decision. | Sensitive conflicts trigger stop rules. | Contradiction marker is not validation execution. | Not runtime. |
+| EvidenceConflictPattern | Pattern for marking evidence conflict. | conflict marker, evidence refs, decision refs, review route. | Evidence deciding by itself. | Evidence conflict cannot bypass security. | Evidence conflict marker is not governance decision. | Not runtime. |
+| HumanOperationalAnalogyRef | Reference-only human analogy such as incident command, SWAT, Toyota / lean production, or mission command. | analogy_name, useful lesson, prohibited interpretation. | Command hierarchy adoption, broad approval. | Cannot override governance/security. | Not validation. | human operational analogies are reference only. |
+| ManualProjectionRule | Rule mapping internal topology concept to manual tickets/chats/reviews/integration. | source concept, manual artifact, limitation, stop rule. | Automatic dispatch. | Must preserve manual blockers. | Not validation. | Projection is not runtime. |
+| FutureAlignmentRequirement | Requirement for later P7.0-NATIVE-ALIGN-01 or future tickets. | target document, required change, blocked interpretation. | Current-file modification of A/B/C/D. | Must preserve boundaries. | Not validation. | Future requirement only. |
+
+## 36. AgentNativePattern Contract
+
+| Field | Requirement |
+| --- | --- |
+| pattern_id | Stable identifier for the pattern card. |
+| pattern_name | Human-readable pattern name. |
+| pattern_family | Family classification. |
+| pattern_summary | Concise conceptual summary. |
+| source_refs | Governance/architecture source refs or limitation if research notes unavailable. |
+| evidence_refs | Evidence refs, if present. |
+| related_decision_refs | Decision refs relevant to the pattern boundary. |
+| applicable_problem_types | Problems where the pattern may help. |
+| internal_design_use | Conceptual internal layer use. |
+| manual_projection_use | Manual bridge projection use. |
+| required_inputs | Inputs needed to use the pattern conceptually. |
+| expected_outputs | Expected metadata outputs. |
+| coordination_model | How the pattern coordinates. |
+| memory_model | How the pattern treats memory/context. |
+| review_model | How review is represented. |
+| routing_model | How routing or allocation is represented. |
+| conflict_model | How contradictions or evidence conflicts are represented. |
+| failure_modes | Known risks. |
+| security_boundaries | Security constraints. |
+| validation_boundaries | Validation constraints. |
+| retention_posture | Retention requirements. |
+| rollback_posture | Rollback requirements. |
+| incident_posture | Incident requirements. |
+| activation_boundary | Explicit non-activation posture. |
+| blocked_behaviors | Runtime/automation behaviors blocked by the pattern. |
+| future_gate_requirements | Future gates required before implementation or activation. |
+| limitations | Accepted limitations. |
+
+AgentNativePattern is not implementation.
+
+AgentNativePattern is not runtime activation.
+
+AgentNativePattern is not final architecture unless later reconciled.
+
+AgentNativePattern is a research carry-forward unit for P7.
+
+## 37. Pattern Families
+
+| pattern_family | Included patterns | Primary value | Risk if misunderstood | P7 use | Blocked use |
+| --- | --- | --- | --- | --- | --- |
+| task_topology_patterns | task graph, recursive task graph | Dependency-aware decomposition. | Treating graph as scheduler. | Topology before work packets. | Task execution. |
+| coordination_surface_patterns | blackboard, shared claim/evidence surface | Shared visibility for claims, blockers, findings. | Treating blackboard as persistence. | Manual blackboard sections. | Database/event stream. |
+| allocation_patterns | contract-net, market allocation | Capability matching. | Automatic bidding. | Manual allocation rationale. | Autonomous market. |
+| review_safeguard_patterns | reviewer mesh, immune system review | Anomaly and contradiction review. | Auto-review or auto-rejection. | Manual reviewer mesh. | Runtime enforcement. |
+| routing_patterns | routing model, router-expert, mixture-of-experts | Specialist routing. | Provider/model activation. | Manual routing decision refs. | Dispatch/model calls. |
+| memory_fabric_patterns | memory fabric, mycelial memory network | Context continuity. | Persistent memory or GBrain activation. | Manual memory slices. | Vector DB, graph DB, live retrieval. |
+| cellular_federation_patterns | capability cell, federated cells | Modular responsibility. | Distributed runtime. | Cell-to-lane projection. | Active cells. |
+| recursive_decomposition_patterns | recursive task graph | Nested decomposition with stop rules. | Infinite autonomous planning. | Ticket-level decomposition. | Recursive planner. |
+| conflict_detection_patterns | contradiction handling, evidence conflict handling | Explicit conflict markers. | Treating marker as decision. | Reviewer/integrator prompts. | Validation execution. |
+| human_reference_analogies | incident command, SWAT, Toyota / lean production, mission command | Decision rights and escalation lessons. | Human hierarchy overfit. | Reference-only vocabulary. | Command hierarchy adoption. |
+
+## 38. Agent-Native Organization Pattern Matrix
+
+| Pattern | Meaning | Best fit | P7 internal design value | Manual bridge projection | Risk | Blocked activation behavior | Future alignment use |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| task graph | Dependency-aware topology of work nodes and edges. | Complex objectives with dependencies. | Supports dependency-aware decomposition and execution topology. | Work packets from graph nodes. | Treating as scheduler. | Task graph is not task execution. | Add before work packet projection. |
+| recursive task graph | Nested graph decomposition with explicit stop rules. | Multi-level roadmap/ticket decomposition. | Supports nested decomposition and integrator boundaries. | Recursion stops at manual ticket. | Infinite decomposition. | No recursive planner. | Add recursion boundaries. |
+| blackboard architecture | Shared claim/evidence/finding surface. | Cross-lane evidence and conflict visibility. | Shared state / claim / evidence surface conceptually, not persistence. | Manual blackboard section in packets/reviews. | Stale/noisy state. | Blackboard is not persistence. | Add blackboard refs and findings. |
+| contract-net / market allocation | Capability matching by task offer and fit. | Assigning tasks to cells/harnesses. | Task-to-capability matching conceptually, not automatic bidding. | Lead manually assigns based on fit. | Allocation overhead. | Market allocation is not automatic bidding. | Add allocation/routing rationale. |
+| swarm / stigmergy | Indirect coordination through markers/traces. | Parallel exploration. | Indirect coordination conceptually, not autonomous swarm execution. | Standardized markers in outputs. | Marker noise. | Swarm/stigmergy is not autonomous loop. | Add marker taxonomy. |
+| immune system review | Anomaly/contradiction/boundary review. | Security, validation, drift, product/external boundary checks. | Anomaly detection, contradiction detection, adversarial review conceptually. | Reviewer prompts and quarantine recommendations. | False positives. | No auto-rejection runtime. | P7.0.F reviewer mesh. |
+| society-of-mind | Multiple specialized cognitive modules. | Micro-specialization. | Specialized cognitive modules conceptually. | Specialized manual prompts/cells. | Fragmentation. | No uncontrolled agent proliferation. | Cell model refinement. |
+| router-expert / mixture-of-experts | Routing to expert capabilities. | Specialist routing. | Routing to specialist capabilities conceptually, not provider/model activation. | Lead records routing decision. | Router bias. | No provider/model activation. | Add RoutingDecisionRef. |
+| mycelial memory network | Distributed contextual associations. | Context continuity and memory fabric. | Distributed contextual associations conceptually. | MemoryManifest slices and blackboard refs. | Retrieval drift. | No persistent memory runtime. | Extend P7.0.D later. |
+| federated cells | Bounded semi-autonomous modules. | Capability cell modularity. | Bounded semi-autonomous modules conceptually. | Manual lanes/harnesses as projections. | Boundary mismatch. | Federated cell model is not distributed runtime. | Add CapabilityCellRef. |
+| reviewer mesh | Review surface around outputs/routes. | Multi-angle review. | Safeguard mesh conceptually. | Reviewer agents as manual projection. | Auto-approval confusion. | Reviewer mesh is not auto-review. | P7.0.F. |
+| routing model | Decision model for selecting cells/reviewers/harnesses. | Work assignment and review route. | Auditable internal routing. | Manual lead route rationale. | Dispatch confusion. | Routing model is not dispatch. | P7.0.B/C. |
+| memory fabric | Context/evidence/decision relationship fabric. | Carrying context across tasks/cells. | Internal memory model conceptually. | MemoryManifest / ContextPack / EvidencePack. | Persistent memory pressure. | Memory fabric is not persistent memory. | P7.0.D alignment. |
+| contradiction handling | Marking inconsistent claims. | Review and integration. | Conflict visibility. | ContradictionMarker. | Treating marker as truth. | Contradiction marker is not validation execution. | P7.0.D/F/G. |
+| evidence conflict handling | Marking evidence disagreement. | Evidence governance. | Evidence conflict visibility. | EvidenceConflictMarker. | Evidence deciding. | Evidence conflict marker is not governance decision. | P7.0.D/F/G. |
+| incident command reference | Human operational analogy. | Escalation/incident route vocabulary. | Reference-only decision/right clarity. | HumanDecisionPoint and incident refs. | Command hierarchy overfit. | Human operational analogies are reference only. | Vocabulary only. |
+| SWAT reference | Human operational analogy. | Focused response team analogy. | Reference-only specialization lesson. | Specialist manual packet examples. | Militarized hierarchy. | Human operational analogies are reference only. | Vocabulary only. |
+| Toyota / lean production reference | Human operational analogy. | Flow, pull, quality, and stop-the-line discipline. | Reference-only process lesson. | Stop rules and quality gates. | Human process overfit. | Human operational analogies are reference only. | Vocabulary only. |
+| mission command reference | Human operational analogy. | Intent and bounded autonomy vocabulary. | Reference-only intent/delegation lesson. | Explicit objective and boundaries. | Broad autonomous authority. | Human operational analogies are reference only. | Vocabulary only. |
+
+## 39. Recommended Internal Design Layer
+
+| Step | Conceptual layer function | Boundary |
+| --- | --- | --- |
+| objective intake | Capture user objective and constraints. | User gateway only. |
+| topology selection | Select conceptual topology candidate. | Planning operation, not orchestration. |
+| task graph construction | Build task graph / recursive task graph metadata. | Task graph is not task execution. |
+| blackboard / shared claim surface | Capture shared findings, claims, evidence conflicts. | Blackboard is not persistence. |
+| capability cell matching | Match task nodes to capability cells. | Capability cell is not runtime agent. |
+| manual work packet projection | Project nodes/cells into manual tickets/chats/harnesses. | Projection is not dispatch. |
+| reviewer mesh assignment | Plan manual review surfaces. | Reviewer mesh is not auto-review. |
+| memory fabric slicing | Slice context/evidence/decision refs for tasks/cells. | Memory fabric is not persistent memory. |
+| contradiction / conflict marking | Mark contradictions and evidence conflicts. | Marker is not decision. |
+| integrator reconciliation | Manual reconciliation of outputs/reviews/conflicts. | Integrator is not automatic merger. |
+| commit advisory projection | Produce exact commit advice after approval. | Commit advisory is not Git mutation. |
+| human final authority | User performs final Git decisions manually. | The user remains final commit authority. |
+
+This layer is conceptual only.
+
+This layer does not execute.
+
+This layer does not dispatch.
+
+This layer does not persist.
+
+This layer does not mutate Git.
+
+## 40. Topology Selection Model
+
+| Topology | When to use | Manual projection | Blocked runtime interpretation | Required future alignment |
+| --- | --- | --- | --- | --- |
+| linear_sequence | Simple serial work. | Ordered manual checklist. | Scheduler. | P7.0.B topology step. |
+| parallel_fanout | Independent lanes. | Parallel manual work packets. | Auto-dispatch. | P7.0.B/C projection. |
+| task_graph | Dependency-aware work. | Nodes become tickets. | Task execution. | TaskGraphRef in P7.0.B/C. |
+| recursive_task_graph | Nested decomposition. | Subgraph stops at manual ticket. | Recursive planner. | Recursion stop rules. |
+| blackboard_centered | Shared evidence/conflict work. | Manual blackboard section. | Persistence store. | BlackboardRef in P7.0.B/D. |
+| cell_federation | Specialized bounded capabilities. | Cells map to manual lanes/harnesses. | Distributed runtime. | CapabilityCellRef in P7.0.C. |
+| reviewer_mesh | Multi-surface safeguards. | Reviewer prompts and review routes. | Auto-review. | P7.0.F. |
+| router_expert | Specialist routing. | Manual routing rationale. | Provider/model router. | RoutingDecisionRef. |
+| market_allocation_candidate | Capability-fit allocation. | Manual allocation rubric. | Automatic bidding. | Allocation constraints. |
+| swarm_stigmergy_candidate | Parallel marker-based coordination. | Output markers and blackboard cues. | Autonomous swarm. | Marker taxonomy. |
+| hybrid_topology | Combined task graph, blackboard, cells, reviewer mesh, routing, memory fabric. | P7 manual agent-native workflow. | Autonomous orchestration. | P7.0-NATIVE-ALIGN-01. |
+
+Topology selection is a planning operation, not orchestration.
+
+Topology selection must happen before manual work packet projection.
+
+Topology selection must not imply runtime activation.
+
+## 41. Manual Projection Model
+
+Agent-native topology may be projected manually into chats, tickets, harnesses, reviewers, and integrator passes.
+
+Projection is not authority.
+
+Projection is not runtime.
+
+Projection is not final architecture.
+
+Projection must preserve governance, security, validation, retention, rollback, incident, and Git boundaries.
+
+| Agent-native concept | Manual projection | Example P7 artifact | Blocked interpretation |
+| --- | --- | --- | --- |
+| TaskGraphRef | Work packet dependency map. | P7.0.B roadmap / work breakdown. | Scheduler or task executor. |
+| BlackboardRef | Shared findings/evidence/conflict section. | P7.0.D context pack / integrator brief. | Persistence or event stream. |
+| CapabilityCellRef | Manual specialist lane or harness assignment. | P7.0.C lane projection. | Runtime agent. |
+| ReviewerMeshRef | Manual reviewer pass matrix. | P7.0.F reviewer mesh. | Auto-review. |
+| RoutingDecisionRef | Lead route rationale. | P7.0.B/P7.0.C route table. | Dispatch. |
+| MemoryFabricRef | Context/evidence/decision relationship map. | P7.0.D memory manifest extension. | Persistent memory. |
+| ContradictionMarker | Manual conflict marker. | Reviewer/integrator prompt. | Validation execution. |
+| EvidenceConflictMarker | Manual evidence conflict marker. | EvidencePack limitation. | Governance decision. |
+| IntegrationBoundaryRef | Manual integrator scope. | P7.0.G reconciliation brief. | Automatic merge. |
+
+## 42. Alignment Requirements For P7.0.A/B/C/D
+
+Future alignment requirements only:
+
+| Document | Required future alignment |
+| --- | --- |
+| P7.0.A | Must clarify Lead Agent as user_gateway / manual_control_plane. |
+| P7.0.A | Must clarify Lead Agent is not the internal agent architecture. |
+| P7.0.A | Must clarify Lead Agent translates user objectives toward the manual system. |
+| P7.0.B | Must add topology selection before work packet projection. |
+| P7.0.B | Must express objective -> topology selection -> task graph / blackboard model -> work packet projection -> manual execution projection. |
+| P7.0.C | Must clarify current lane taxonomy equals manual execution projection. |
+| P7.0.C | Must clarify current lane taxonomy is not final internal agent taxonomy. |
+| P7.0.C | Must add AgentNativeTopologyRef, TaskGraphRef, BlackboardRef, CapabilityCellRef, ReviewerMeshRef, RoutingDecisionRef. |
+| P7.0.D | Must extend MemoryManifest toward Context & Memory Fabric. |
+| P7.0.D | Must add TaskMemorySlice, CellMemorySlice, BlackboardMemoryRef, TopologyContextPack, ContradictionMarker, EvidenceConflictMarker. |
+| P7.0.D | Must keep GBrain runtime, embeddings, persistent memory, live retrieval, graph DB, vector DB, and Cadence blocked. |
+
+These are future alignment requirements only.
+
+P7.0.0 must not modify A/B/C/D.
+
+## 43. Agent-Native / Manual Bridge Boundary
+
+Manual bridge layer remains the user-facing execution method.
+
+Agent-native internal organization layer informs future decomposition and alignment.
+
+Manual lanes are useful projections for external harnesses.
+
+Manual lanes are not final runtime agents.
+
+Lead agent is a gateway and planning interface, not a runtime chief.
+
+Reviewer agents are manual review projections, not autonomous reviewers.
+
+Integrator is reconciliation / advisory projection, not automatic merger.
+
+Commit advisory is not Git mutation.
+
+## 44. Research Pattern Adoption Boundary
+
+Pattern inclusion is not adoption.
+
+Pattern adoption would require later reconciliation.
+
+Pattern adoption would require future exact implementation gate if runtime behavior is implicated.
+
+No pattern may override P0-P6 constraints.
+
+No pattern may approve provider/auth/API/MCP.
+
+No pattern may approve tool execution.
+
+No pattern may approve agent execution.
+
+No pattern may approve source loading.
+
+No pattern may approve product source inspection.
+
+No pattern may approve persistent memory.
+
+No pattern may approve graph/vector DB.
+
+No pattern may approve GBrain/Hermes/Cadence activation.
+
+## 45. Evidence / Validation / Security Interfaces
+
+Evidence supports; it does not decide.
+
+Validation evaluates; governance decides.
+
+Security constrains; it does not activate.
+
+Pattern extraction must preserve EvidenceRef semantics.
+
+Pattern extraction must preserve security blockers.
+
+Pattern extraction must preserve validation limitations.
+
+Pattern extraction must preserve retention / rollback / incident posture.
+
+Pattern extraction must mark uncertain research carry-forward as limitation.
+
+## 46. Cognitive Semantic System Boundary
+
+Cognitive Semantic System substrate remains deferred unless a governed future decision changes it.
+
+Agent-native topology refs are not substrate selection.
+
+BlackboardPattern is not a blackboard database.
+
+MemoryFabricPattern is not persistent memory.
+
+MycelialMemoryNetworkPattern is not GBrain runtime.
+
+Graph-like relationship patterns are not graph DB.
+
+Router-expert patterns are not provider/model activation.
+
+## 47. Graphify Boundary
+
+Graphify evidence is supporting generated evidence only, not authority.
+
+GraphifyRef is not Graphify authority.
+
+Raw Graphify outputs remain blocked.
+
+Graphify rerun is not approved.
+
+Graphify adoption as substrate is not approved.
+
+Graphify-derived evidence may support pattern extraction only if curated and already approved as evidence.
+
+Rejected/prohibited phrases remain rejected: Platform Graphify, Graphify Authority, Graphify owns truth.
+
+## 48. GBrain / Hermes / Cadence Boundary
+
+GBrain remains external memory architecture candidate only.
+
+`external/sources/gbrain-master` remains path/class metadata only: external_source_candidate, memory_architecture_candidate, cadence_reference_candidate, not adopted, not executed, not imported, not configured, not dependency-approved, not provider/auth-approved, not Cadence-active, not substrate.
+
+Hermes remains external runtime/orchestration/Cadence candidate only.
+
+Cadence remains future and inactive.
+
+GBrainCandidateRef is not adoption.
+
+Hermes boundary design is not Hermes activation.
+
+Cadence reference is not always-on behavior.
+
+## 49. Product / Siamese Boundary
+
+Siamese is product vision, not product activation.
+
+P7.0.0 must not inspect product source.
+
+P7.0.0 must not load product source into context.
+
+P7.0.0 must not create product-bound architecture from product source.
+
+Product-bound agent-native topology remains future readiness only.
+
+## 50. Retention / Rollback / Incident Posture
+
+| Pattern artifact | Required posture |
+| --- | --- |
+| pattern extraction notes | Metadata-only retention, source/evidence posture, limitations. |
+| pattern cards | Limitations, blocked runtime interpretation, future gate requirements. |
+| source refs | Source classification and no-content-loading posture. |
+| evidence refs | EvidenceRef semantics and evidence-is-not-decision posture. |
+| manual projection rules | Git/runtime/security blockers and future alignment requirements. |
+| future alignment requirements | Target doc, required future change, blocked interpretation. |
+| contradiction markers | Review route, limitation, not validation execution. |
+| evidence conflict markers | Review route, limitation, not governance decision. |
+| human analogy references | Reference-only posture and prohibited hierarchy adoption. |
+
+Every extracted pattern must include limitations.
+
+Every extracted pattern must include source/evidence posture when known.
+
+Every extracted pattern must include blocked runtime interpretation.
+
+Every extracted pattern must include future gate requirements if it implies runtime behavior.
+
+## 51. Human Operational Analogies Boundary
+
+Human operational analogies include incident command, SWAT, Toyota / lean production, mission command, and other human operational systems.
+
+Human operational analogies are reference only.
+
+They may inspire coordination vocabulary.
+
+They must not become command hierarchy.
+
+They must not turn Lead Agent into human-style manager.
+
+They must not override agent-native topology.
+
+They must not justify autonomous execution.
+
+They must not justify broad approval.
+
+## 52. Expanded Stop Rules
+
+STOP if P7.0.0 attempts to modify P7.0.A/B/C/D.
+
+STOP if P7.0.0 attempts to create P7.0-NATIVE-ALIGN-01.
+
+STOP if pattern extraction requires product source inspection.
+
+STOP if pattern extraction requires external source inspection beyond approved governance / architecture markdowns.
+
+STOP if GBrain source inspection is required.
+
+STOP if Hermes source inspection is required.
+
+STOP if Graphify implementation inspection is required.
+
+STOP if source classification is unknown and cannot be safely treated as governance/architecture metadata.
+
+STOP if pattern is treated as runtime adoption.
+
+STOP if topology is treated as orchestration.
+
+STOP if task graph is treated as task execution.
+
+STOP if blackboard is treated as persistence.
+
+STOP if capability cell is treated as runtime agent.
+
+STOP if reviewer mesh is treated as auto-review.
+
+STOP if routing model is treated as dispatch.
+
+STOP if memory fabric is treated as persistent memory.
+
+STOP if GBrain/Hermes/Cadence activation is implied.
+
+STOP if vector DB, graph DB, embeddings, ontology runtime, provider/auth/API/MCP, tools, agents, source loading, product source, generated output tracking, source tracking expansion, publication, or Git mutation is implied.
+
+STOP if git add . is recommended.
+
+## 53. Required P7.0.0 Invariants
+
+| Invariant | Statement |
+| --- | --- |
+| NATIVE-001 | P7.0.0 is research carry-forward only. |
+| NATIVE-002 | P7.0.0 does not modify P7.0.A/B/C/D. |
+| NATIVE-003 | P7.0.0 does not start P7.0-NATIVE-ALIGN-01. |
+| NATIVE-004 | P7 designs the manual operating model for a future agentic platform. |
+| NATIVE-005 | P7 does not execute the future platform. |
+| NATIVE-006 | Existing P7.0.A/B/C/D are manual_bridge_layer. |
+| NATIVE-007 | Agent-native internal organization layer is required before P7.0.E/F/G/H/R. |
+| NATIVE-008 | Pattern inclusion is not runtime adoption. |
+| NATIVE-009 | Topology selection is not orchestration. |
+| NATIVE-010 | Task graph is not task execution. |
+| NATIVE-011 | Blackboard is not persistence. |
+| NATIVE-012 | Capability cell is not runtime agent. |
+| NATIVE-013 | Reviewer mesh is not auto-review. |
+| NATIVE-014 | Routing model is not dispatch. |
+| NATIVE-015 | Memory fabric is not persistent memory. |
+| NATIVE-016 | Contradiction marker is not validation execution. |
+| NATIVE-017 | Evidence conflict marker is not governance decision. |
+| NATIVE-018 | Human operational analogies are reference only. |
+| NATIVE-019 | GBrainCandidateRef is not GBrain adoption. |
+| NATIVE-020 | Hermes boundary is not Hermes activation. |
+| NATIVE-021 | Cadence reference is not Cadence activation. |
+| NATIVE-022 | Graphify evidence is supporting generated evidence only, not authority. |
+| NATIVE-023 | Cognitive Semantic System substrate remains deferred. |
+| NATIVE-024 | Siamese is product vision, not product activation. |
+| NATIVE-025 | No product/Siamese source inspection. |
+| NATIVE-026 | No external source content inspection. |
+| NATIVE-027 | No persistent memory, vector DB, embeddings, graph DB, or ontology runtime. |
+| NATIVE-028 | No provider/auth/API/MCP, tool execution, agent execution, or live connectors. |
+| NATIVE-029 | No generated output tracking or source tracking expansion. |
+| NATIVE-030 | The user remains final commit authority. |
+| NATIVE-031 | The agent never mutates Git. |
+| NATIVE-032 | Never recommend git add .. |
+
+## 54. Expanded Future Validation Targets
+
+Future validation targets, not executed:
+
+| Target | Status |
+| --- | --- |
+| agent-native pattern required fields completeness | Future only. |
+| pattern-family coverage completeness | Future only. |
+| manual_bridge_layer classification check | Future only. |
+| agent_native_internal_organization_layer presence check | Future only. |
+| task graph pattern boundary check | Future only. |
+| blackboard non-persistence invariant | Future only. |
+| capability cell non-runtime-agent invariant | Future only. |
+| reviewer mesh non-auto-review invariant | Future only. |
+| routing model non-dispatch invariant | Future only. |
+| memory fabric non-persistent-memory invariant | Future only. |
+| GBrain candidate-only invariant | Future only. |
+| Hermes inactive invariant | Future only. |
+| Cadence inactive invariant | Future only. |
+| Graphify evidence-only invariant | Future only. |
+| human operational analogies reference-only invariant | Future only. |
+| P7.0.A future alignment requirement check | Future only. |
+| P7.0.B future alignment requirement check | Future only. |
+| P7.0.C future alignment requirement check | Future only. |
+| P7.0.D future alignment requirement check | Future only. |
+| P7.0-NATIVE-ALIGN-01 readiness check | Future only. |
+| no-runtime-activation invariant | Future only. |
+| no-source-loading invariant | Future only. |
+| no-product-source-inspection invariant | Future only. |
+| no-Git-mutation invariant | Future only. |
+| never-recommend-git-add-dot invariant | Future only. |
+
+## 55. Required Future Hardening Candidates
+
+Future tickets, not started:
+
+| Candidate | Purpose |
+| --- | --- |
+| NATIVE-HARD-01 - Agent-Native Topology Selection Contract | Harden topology selection semantics. |
+| NATIVE-HARD-02 - TaskGraph / Blackboard / WorkPacket Projection Contract | Harden task graph, blackboard, and projection boundaries. |
+| NATIVE-HARD-03 - Capability Cell / Reviewer Mesh Boundary Contract | Harden capability cell and reviewer mesh semantics. |
+| NATIVE-HARD-04 - Memory Fabric / Context Slice Contract | Harden memory fabric and context slice semantics. |
+| NATIVE-HARD-05 - Contradiction / Evidence Conflict Marker Contract | Harden marker semantics. |
+| NATIVE-HARD-06 - Manual Bridge Projection From Agent-Native Topology | Harden projection from internal topology to manual bridge layer. |
+| NATIVE-HARD-07 - Human Analogy Reference Safety Contract | Harden reference-only analogy boundary. |
+| NATIVE-HARD-08 - Agent-Native Pattern Validation Checklist | Define future validation checklist without execution. |
+
+## 56. Expanded Created / Modified / Not Created Register
+
+| Item | Status |
+| --- | --- |
+| agent-native organization research carry-forward document | Created / normalized in target document. |
+| agent-native organization pattern set | Created. |
+| manual_bridge_layer classification | Recorded. |
+| agent_native_internal_organization_layer | Introduced. |
+| task graph pattern | Recorded. |
+| recursive task graph pattern | Recorded. |
+| blackboard architecture pattern | Recorded. |
+| contract-net / market allocation pattern | Recorded. |
+| swarm / stigmergy pattern | Recorded. |
+| immune system review pattern | Recorded. |
+| society-of-mind pattern | Recorded. |
+| router-expert / mixture-of-experts pattern | Recorded. |
+| mycelial memory network pattern | Recorded. |
+| federated cells pattern | Recorded. |
+| reviewer mesh pattern | Recorded. |
+| routing model pattern | Recorded. |
+| memory fabric pattern | Recorded. |
+| contradiction handling pattern | Recorded. |
+| evidence conflict handling pattern | Recorded. |
+| human operational analogies | Recorded as reference only. |
+| future alignment requirements for P7.0.A/B/C/D | Recorded. |
+| P7.0.A modified | No P7.0.A modified. |
+| P7.0.B modified | No P7.0.B modified. |
+| P7.0.C modified | No P7.0.C modified. |
+| P7.0.D modified | No P7.0.D modified. |
+| P7.0-NATIVE-ALIGN-01 created | No P7.0-NATIVE-ALIGN-01 created. |
+| P7.0.E started | No P7.0.E started. |
+| P7.0.F started | No P7.0.F started. |
+| P7.0.G started | No P7.0.G started. |
+| P7.0.H started | No P7.0.H started. |
+| P7.0.R started | No P7.0.R started. |
+| P7.1 started | No P7.1 started. |
+| P8 started | No P8 started. |
+| P4/product-bound files started | No P4/product-bound files started. |
+| runtime activation | No runtime activation. |
+| autonomous orchestration | No autonomous orchestration. |
+| automatic dispatch | No automatic dispatch. |
+| automatic handoff | No automatic handoff. |
+| automatic reviewer assignment | No automatic reviewer assignment. |
+| automatic context retrieval | No automatic context retrieval. |
+| live retrieval | No live retrieval. |
+| persistent memory | No persistent memory. |
+| GBrain runtime | No GBrain runtime. |
+| Hermes runtime | No Hermes runtime. |
+| Cadence | No Cadence. |
+| agent execution | No agent execution. |
+| reviewer execution | No reviewer execution. |
+| integrator execution | No integrator execution. |
+| tool execution | No tool execution. |
+| provider/auth/API/MCP activation | No provider/auth/API/MCP activation. |
+| credential use | No credential use. |
+| API calls | No API calls. |
+| MCP activation | No MCP activation. |
+| live connector activation | No live connector activation. |
+| source loading | No source loading. |
+| source inspection | No source inspection. |
+| product source inspection | No product source inspection. |
+| external source inspection | No external source inspection. |
+| external/sources/gbrain-master content inspection | No external/sources/gbrain-master content inspection. |
+| Graphify rerun/adoption | No Graphify rerun/adoption. |
+| Codegraph execution/adoption | No Codegraph execution/adoption. |
+| validation execution | No validation execution. |
+| tests / CI / scripts / builds | No tests / CI / scripts / builds. |
+| security enforcement activation | No security enforcement activation. |
+| persistence/database/event stream | No persistence/database/event stream. |
+| telemetry | No telemetry. |
+| vector DB / embeddings | No vector DB / embeddings. |
+| graph DB / substrate implementation | No graph DB / substrate implementation. |
+| generated output tracking | No generated output tracking. |
+| source tracking expansion | No source tracking expansion. |
+| publication | No publication. |
+| Git mutation | No Git mutation. |
+| auto-commit | No auto-commit. |
+| auto-push | No auto-push. |
+| .gitignore modified | No .gitignore modified. |
+| .graphifyignore modified | No .graphifyignore modified. |
+| generated outputs modified/tracked | No generated outputs modified/tracked. |
+| Cognitive Semantic System substrate selected | No Cognitive Semantic System substrate selected. |
+
+## 57. Expanded Final Verdict
+
+| Question | Answer |
+| --- | --- |
+| What did P7.0.0 create? | The Agent-Native Organization Research Carry-Forward record and normalized agent-native organization pattern set. |
+| What problem did P7.0.0 solve? | It filled the missing agent_native_internal_organization_layer so P7 can continue beyond a manual human-role projection. |
+| Did P7.0.0 restart P7? | No. |
+| Did P7.0.0 delete or replace P7.0.A/B/C/D? | No. |
+| How are P7.0.A/B/C/D classified now? | Existing P7.0.A/B/C/D are manual_bridge_layer. |
+| What new layer was introduced? | agent_native_internal_organization_layer. |
+| What is the difference between manual_bridge_layer and agent_native_internal_organization_layer? | manual_bridge_layer is the user-facing manual execution projection; agent_native_internal_organization_layer is the conceptual internal topology layer. |
+| What agent-native organization patterns were carried forward? | task graph, recursive task graph, blackboard, contract-net / market allocation, swarm / stigmergy, immune system review, society-of-mind, router-expert / mixture-of-experts, mycelial memory network, federated cells, reviewer mesh, routing model, memory fabric, contradiction handling, evidence conflict handling, and human operational analogies as reference only. |
+| What pattern set is ready for P7? | agent_native_organization_pattern_set_ready_for_P7. |
+| What is a task graph? | A dependency-aware topology of work nodes and edges; task graph is not task execution. |
+| What is a blackboard pattern? | A shared claim/evidence/finding surface; blackboard is not persistence. |
+| What is a capability cell? | A bounded specialist capability unit; capability cell is not runtime agent. |
+| What is a reviewer mesh? | A safeguard review mesh; reviewer mesh is not auto-review. |
+| What is memory fabric? | A conceptual context/evidence/decision association layer; memory fabric is not persistent memory. |
+| What is a routing model? | An auditable route decision model; routing model is not dispatch. |
+| What are contradiction and evidence conflict markers? | Manual markers for conflicts requiring review; they are not validation execution or governance decisions. |
+| Are human operational analogies adopted as command hierarchy? | No. Human operational analogies are reference only. |
+| Did P7.0.0 modify P7.0.A/B/C/D? | No. |
+| Did P7.0.0 create P7.0-NATIVE-ALIGN-01? | No. |
+| Did P7.0.0 activate runtime? | No. |
+| Did P7.0.0 activate agents, reviewers, integrators, tools, providers, MCP, GBrain, Hermes, Cadence, Graphify, Codegraph, or product behavior? | No. |
+| Did P7.0.0 inspect product/Siamese source? | No. |
+| Did P7.0.0 inspect external/sources/gbrain-master contents? | No. |
+| Did P7.0.0 implement persistent memory, vector DB, embeddings, graph DB, or ontology runtime? | No. |
+| Did P7.0.0 mutate Git? | No. |
+| Can the agent recommend git add .? | No. Never recommend git add .. |
+| Who remains final commit authority? | The user remains final commit authority. |
+| What is the next ticket? | P7.0-NATIVE-ALIGN-01 - Align Existing P7.0.A/B/C/D With Agent-Native Organization. Do not start it inside P7.0.0. |
+
+Final declaration: agent_native_organization_pattern_set_ready_for_P7.
