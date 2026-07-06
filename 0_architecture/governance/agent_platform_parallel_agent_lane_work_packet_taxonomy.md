@@ -159,6 +159,18 @@ This taxonomy is reclassified as `manual_lane_projection`, `manual_execution_pro
 
 `LANE-NATIVE-001` Manual lane taxonomy is a manual execution projection, not the final internal agent taxonomy.
 
+## P7.0-NATIVE-ALIGN-01 Canonical Marker Evidence
+
+This document intentionally carries the exact P7.0-NATIVE-ALIGN-01 marker `ManualExecutionProjection`.
+
+The current manual lane taxonomy is a `ManualExecutionProjection`.
+
+`ManualExecutionProjection` maps agent-native topology concepts into human-operated chats, external harnesses, work packets, reviewer passes, integrator passes, and exact Git advice.
+
+`ManualExecutionProjection` is not the final internal agent taxonomy.
+
+`ManualExecutionProjection` is not automatic dispatch, runtime scheduling, autonomous orchestration, automatic handoff, automatic reviewer assignment, live agent execution, or Git mutation.
+
 ## Object Model
 
 | object | meaning | required fields | forbidden fields | governance posture | review posture |

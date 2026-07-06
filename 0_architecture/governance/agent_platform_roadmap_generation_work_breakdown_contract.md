@@ -147,6 +147,26 @@ SequencingRule is a manual governance rule, not autonomous orchestration.
 | `ManualWorkPacketProjection` | Projection from task graph/cell/reviewer metadata into human-readable WorkPacket records. | Runnable task object. |
 | `ManualExecutionProjection` | Projection from internal conceptual organization into manual tickets, manual lanes, manual harnesses, manual review, manual integration, and commit advice. | Autonomous dispatch, handoff, or runtime execution. |
 
+## P7.0-NATIVE-ALIGN-01 Canonical Marker Evidence
+
+This document intentionally carries the exact P7.0-NATIVE-ALIGN-01 marker `TaskGraphRef`.
+
+`TaskGraphRef` is the canonical alias for the task graph metadata represented in this document through `TaskGraphProjection`.
+
+`TaskGraphRef` is metadata only. It is not a scheduler graph, runnable task set, queue, graph DB, or task execution permission.
+
+This document intentionally carries the exact P7.0-NATIVE-ALIGN-01 marker `BlackboardRef`.
+
+`BlackboardRef` is the canonical alias for the shared claim/evidence/finding metadata represented in this document through `BlackboardPlanningRef`.
+
+`BlackboardRef` is metadata only. It is not persistence, live shared state, vector DB, graph DB, event stream, or live retrieval.
+
+This document intentionally carries the exact P7.0-NATIVE-ALIGN-01 marker `ManualExecutionProjection`.
+
+`ManualExecutionProjection` is the projection from agent-native conceptual organization into manual tickets, manual lanes, manual harnesses, manual review, manual integration, and user-owned Git advice.
+
+`ManualExecutionProjection` is not autonomous dispatch, runtime orchestration, task execution, handoff execution, automatic reviewer assignment, or Git mutation.
+
 ## 8. Roadmap Generation Contract
 
 Roadmap generation converts a user objective into a structured planning artifact.
