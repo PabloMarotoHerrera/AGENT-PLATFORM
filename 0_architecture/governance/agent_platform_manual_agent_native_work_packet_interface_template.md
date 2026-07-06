@@ -54,6 +54,494 @@ Lead Chat / User Gateway
 
 Every stage is manual only, metadata only unless the user manually operates an H0 harness outside AGENT PLATFORM, not runtime, not automatic dispatch, not automatic review, not automatic integration, and not Git mutation.
 
+## P7.2 Simplified Usage Modes
+
+This P7.2 addendum keeps the full canonical interface as reference and adds compact usage modes for repeated manual documentation/governance work.
+
+The full schema remains canonical.
+
+Compact mode is allowed for small documentation-only governance tasks.
+
+Compact mode does not weaken boundaries.
+
+Exact target files remain mandatory.
+
+Blocked actions remain mandatory.
+
+Stop rules remain mandatory.
+
+Review requirement remains mandatory.
+
+Integrator requirement remains mandatory when Git advice is expected.
+
+Exact-path Git advice remains mandatory.
+
+`git add .` remains forbidden.
+
+### Usage Mode Matrix
+
+| Usage mode | When to use | Required posture | Stop condition |
+| --- | --- | --- | --- |
+| `full_canonical_mode` | Use for complex governance, cross-document, high-risk, external-boundary, product-boundary, or architecture-sensitive work. | Use the full template family and all relevant agent-native refs. | Stop if the task implies blocked runtime/source/provider/tool/Git behavior. |
+| `compact_documentation_mode` | Use for small documentation-only governance tickets with exact target files and no product/external/runtime/tool/provider scope. | Use compact WorkPacket, compact HarnessInputPackage, compact HarnessOutputPackage, compact reviewer checklist, and compact integrator checklist. | Stop if exact target files, blocked actions, stop rules, review, integration, or Git boundaries are unclear. |
+| `review_only_mode` | Use when only reviewing a returned HarnessOutputPackage. | Use ReviewInputPackage, ReviewVerdictPackage, and compact reviewer boundary drift checklist. | Stop if review requires source loading, automatic assignment, or blocked scope. |
+| `integrator_only_mode` | Use when review is complete and only accepted/rejected output plus exact-path Git advice must be reconciled. | Use IntegrationSummary, DriftRegister, AcceptedOutputRegister, RejectedOutputRegister, CommitCandidate, and compact integrator checklist. | Stop if rejected files may be staged or exact Git paths are unclear. |
+| `blocked_high_risk_mode` | Use when the task requires product/Siamese source, external source, runtime, provider/auth/API/MCP, tools, GBrain/Hermes/Cadence, Graphify/Codegraph, persistence, generated tracking, publication, or Git mutation by agent. | Stop instead of proceeding. | The task must be routed to a future explicit governance gate. |
+
+### Field Classification Model
+
+Field classifications:
+
+```text
+mandatory
+conditional
+optional
+not_applicable_with_reason
+blocked
+```
+
+A field may be marked `not_applicable_with_reason` only if the reason is explicit and the omission does not hide scope, target files, blocked actions, review requirements, integration requirements, or Git boundaries.
+
+Mandatory fields that must never be optional:
+
+```text
+work_packet_id
+ticket_title
+objective
+scope
+non_goals
+target_files
+blocked_files
+allowed_actions
+blocked_actions
+expected_output
+review_required
+integrator_required
+stop_rules
+success_criteria
+failure_criteria
+```
+
+Mandatory Git-related fields when commit advice is expected:
+
+```text
+included_file_paths
+excluded_file_paths
+commit_message_candidate
+git_add_paths
+git_commit_command
+git_push_command
+human_approval_required
+```
+
+| Template family | Mandatory fields | Conditional fields | Optional fields | `not_applicable_with_reason` allowed for | Blocked fields/content |
+| --- | --- | --- | --- | --- | --- |
+| WorkPacket | `work_packet_id`, `ticket_title`, `objective`, `scope`, `non_goals`, `target_files`, `blocked_files`, `allowed_actions`, `blocked_actions`, `expected_output`, `review_required`, `integrator_required`, `stop_rules`, `success_criteria`, `failure_criteria` | `memory_manifest_refs`, `agent_native_refs`, `task_graph_refs`, `blackboard_refs`, `capability_cell_refs`, `routing_decision_refs`, `reviewer_mesh_refs` | `ticket_kind`, `context_refs` when already embedded in supplied ticket text | Agent-native refs that do not apply to a small documentation task, with reason. | Secrets, credentials, product/Siamese source, external source, runtime permissions, Git approval. |
+| HarnessInputPackage | `target_harness`, `harness_level`, `manual_operator`, `ticket_text`, `allowed_context`, `blocked_context`, `allowed_files`, `expected_response_format`, `stop_rules` | `work_packet_ref`, `forbidden_commands`, `safe_reporting_requirements` | `required_file_register`, `required_decision_register`, `required_not_created_register`, `required_blocker_register` in compact mode if expected response covers them | Commands when no commands are allowed, with reason. | Automatic dispatch, OpenCode integration, H2/H3 adapter behavior, credentials, provider/API/MCP. |
+| HarnessOutputPackage | `summary`, `files_created`, `files_modified`, `files_not_created`, `commands_run`, `decisions_made`, `assumptions`, `blockers`, `limitations`, `scope_deviations`, `boundary_deviations` | `evidence_refs`, `validation_refs`, `security_refs`, `recommended_next_ticket`, `commit_advice_candidate` | `source_harness`, `source_work_packet_ref` when obvious from surrounding packet | Empty registers, if explicitly stated as none. | Accepted-by-default status, Git approval, runtime approval. |
+| ReviewInputPackage | `target_output_package_ref`, `review_scope`, `excluded_scope`, `reviewer_mesh_ref`, `required_verdict_format`, `human_decision_points`, `stop_rules` | `reviewer_cell_refs`, `immune_safeguard_refs`, `review_checklist_refs`, `context_refs`, `evidence_refs`, marker refs | Extra blackboard refs when not needed | Specific marker groups when no marker exists, with reason. | Source loading permission, automatic reviewer assignment. |
+| ReviewVerdictPackage | `review_input_package_ref`, `reviewer_cell_ref`, `verdict_status`, `findings`, `human_final_decision_required`, `limitations` | `accepted_items`, `accepted_with_limitations_items`, `needs_rework_items`, `blocked_items`, `out_of_scope_items`, `markers_emitted`, `containment_recommendations`, `rework_requests` | Empty item categories if explicitly none | Item categories that do not apply, with reason or empty register. | Git approval, runtime approval, final human decision. |
+| IntegrationSummary | `integrated_output_package_refs`, `review_verdict_package_refs`, `accepted_output_register_ref`, `rejected_output_register_ref`, `drift_register_ref`, `summary`, `decisions`, `human_decision_required` | `agent_native_refs`, `limitations`, `blockers`, `unresolved_drift`, `recommended_next_ticket` | Extra refs for simple tasks | Agent-native refs not relevant to compact docs, with reason. | Automatic merge, Git approval. |
+| DriftRegister | `drift_register_id`, `drift_items`, `drift_type`, `severity`, `resolution_status`, `resolution_summary`, `review_required`, `human_decision_required` | `affected_files`, `affected_contracts`, `affected_agent_native_refs`, `owner_or_route`, `limitations` | Empty drift categories if explicitly none | Affected refs when no drift touches them, with reason. | Hidden scope expansion, auto-remediation. |
+| AcceptedOutputRegister | `accepted_output_register_id`, `accepted_output_package_refs`, `accepted_file_paths`, `accepted_decisions`, `accepted_reviewer_verdict_refs`, `accepted_integrator_rationale`, `human_decision_required` | `accepted_limitations`, `required_follow_up`, `commit_candidate_ref` | Follow-up when none | Commit candidate ref when no Git advice is expected, with reason. | Git approval. |
+| RejectedOutputRegister | `rejected_output_register_id`, `rejected_output_package_refs`, `rejected_file_paths`, `rejection_reasons`, `human_decision_required` | `blocking_verdict_refs`, `out_of_scope_items`, `rework_required`, `future_ticket_refs`, `limitations` | Empty rejected path list only if no rejected files exist. | Future tickets when not needed, with reason. | Staging permission for rejected paths. |
+| CommitCandidate | `commit_candidate_id`, `commit_scope`, `included_file_paths`, `excluded_file_paths`, `accepted_output_register_ref`, `rejected_output_register_ref`, `drift_register_ref`, `reviewer_verdict_refs`, `integration_summary_ref`, `commit_message_candidate`, `git_add_paths`, `git_commit_command`, `git_push_command`, `human_approval_required` | `rollback_note`, `limitations` | None for Git command fields. | Commit candidate may be not applicable only when no Git advice is expected. | `git add .`, staging flags, auto-commit, auto-push. |
+
+## Compact WorkPacket View For Documentation-Only Tasks
+
+Required compact fields:
+
+```text
+work_packet_id
+ticket_title
+objective
+target_files
+blocked_files
+allowed_actions
+blocked_actions
+required_context
+expected_output
+review_required
+integrator_required
+stop_rules
+success_criteria
+failure_criteria
+```
+
+Compact template:
+
+```text
+work_packet_id: <id>
+ticket_title: <title>
+objective: <single bounded objective>
+target_files:
+- <exact path>
+blocked_files:
+- product/Siamese source
+- external source
+- generated artifacts
+- secrets/credentials
+allowed_actions:
+- create or modify documentation-only markdown in exact target files
+blocked_actions:
+- runtime activation
+- source loading
+- product/Siamese source inspection
+- external source inspection
+- provider/auth/API/MCP
+- tool execution
+- Graphify/Codegraph execution
+- GBrain/Hermes/Cadence runtime
+- validation/tests/scripts/builds unless explicitly scoped
+- security enforcement
+- Git mutation by agent
+required_context:
+- <governance docs or refs supplied by user>
+expected_output:
+- HarnessOutputPackage compact summary
+review_required: true
+integrator_required: true
+stop_rules:
+- stop if blocked action is required
+- stop if target file scope is unclear
+- stop if secret/credential appears
+success_criteria:
+- exact target file created/modified
+- no blocked behavior introduced
+failure_criteria:
+- blocked scope required
+- `git add .` recommended
+```
+
+## Compact HarnessInputPackage View For OpenCode H0
+
+Required compact fields:
+
+```text
+target_harness
+harness_level
+manual_operator
+ticket_text
+allowed_context
+blocked_context
+allowed_files
+expected_response_format
+stop_rules
+```
+
+Required statements:
+
+```text
+OpenCode remains H0 user-operated only.
+The user manually copies this package into OpenCode.
+This package is not automatic dispatch.
+This package is not OpenCode integration.
+```
+
+Compact template:
+
+```text
+target_harness: OpenCode
+harness_level: H0
+manual_operator: user
+allowed_context: <provided governance docs or refs only>
+blocked_context: product/Siamese source, external source, generated artifacts, secrets, credentials, raw Graphify output, GBrain source
+allowed_files: <exact target paths only>
+expected_response_format: Compact HarnessOutputPackage summary
+stop_rules: stop on blocked context, blocked action, unclear target files, credential exposure, or `git add .`
+```
+
+## Compact HarnessOutputPackage View For OpenCode Summaries
+
+Required compact output checklist:
+
+```text
+Summary
+Files created
+Files modified
+Files not created
+Commands run
+Decisions made
+Assumptions
+Blockers
+Limitations
+Scope deviations
+Boundary deviations
+Recommended next ticket
+Commit advice candidate
+```
+
+Required statements:
+
+```text
+HarnessOutputPackage is proposed output only.
+HarnessOutputPackage is not accepted by default.
+HarnessOutputPackage must be reviewed before integration.
+HarnessOutputPackage does not approve Git.
+```
+
+## Compact Reviewer Boundary Drift Checklist
+
+Required checks:
+
+```text
+scope_boundary_check
+target_file_check
+blocked_file_check
+runtime_activation_check
+tool_execution_check
+provider_auth_api_mcp_check
+product_source_check
+external_source_check
+gbrain_hermes_cadence_check
+graphify_codegraph_check
+persistence_vector_graph_db_check
+validation_execution_check
+security_enforcement_check
+git_mutation_check
+git_add_dot_check
+review_verdict_not_git_approval_check
+```
+
+Allowed compact verdicts:
+
+```text
+accepted_for_integrator_review
+accepted_with_limitations_for_integrator_review
+needs_rework
+blocked
+out_of_scope
+```
+
+Compact reviewer result:
+
+```text
+reviewer_checklist_id: <id>
+target_output_package_ref: <HarnessOutputPackage ref>
+checks_passed: <list>
+checks_failed: <list>
+markers_emitted: <markers or none>
+verdict: <allowed compact verdict>
+limitations: <limitations>
+human_final_decision_required: true | false
+```
+
+## Compact Integrator Exact-Path Checklist
+
+Required checks:
+
+```text
+accepted_files_exact_paths_present
+rejected_files_excluded
+drift_register_present
+review_verdict_present
+commit_scope_matches_accepted_files
+commit_message_matches_ticket_scope
+git_add_paths_exact
+no_git_add_dot
+user_final_git_authority_preserved
+```
+
+Required compact commit advice pattern:
+
+```powershell
+git status --short
+
+git add <exact_path_1>
+git add <exact_path_2>
+
+git commit -m "<exact commit message>"
+
+git push origin main
+```
+
+Forbidden:
+
+```powershell
+git add .
+```
+
+Compact integrator result:
+
+```text
+integrator_checklist_id: <id>
+accepted_files: <exact paths>
+rejected_files: <exact paths or none>
+drift_register_ref: <ref>
+review_verdict_ref: <ref>
+commit_candidate: advisory only, exact paths only
+human_approval_required: true
+```
+
+## P7.2 Examples
+
+### Example 1 - Safe Documentation-Only Governance Task
+
+Compact WorkPacket:
+
+```text
+work_packet_id: WP-P72-EXAMPLE-001
+ticket_title: Example Governance Note
+objective: Create a small AGENT PLATFORM governance documentation note.
+target_files:
+- 0_architecture/governance/example_safe_doc.md
+blocked_files:
+- product/Siamese source
+- external source
+- generated artifacts
+- secrets/credentials
+allowed_actions:
+- create documentation-only markdown in exact target files
+blocked_actions:
+- runtime activation
+- source loading
+- product/Siamese source inspection
+- external source inspection
+- provider/auth/API/MCP
+- tool execution
+- Graphify/Codegraph execution
+- GBrain/Hermes/Cadence runtime
+- validation/tests/scripts/builds unless explicitly scoped
+- security enforcement
+- Git mutation by agent
+required_context:
+- user-supplied governance docs or refs
+expected_output:
+- HarnessOutputPackage compact summary
+review_required: true
+integrator_required: true
+stop_rules:
+- stop if blocked action is required
+- stop if target file scope is unclear
+- stop if secret/credential appears
+success_criteria:
+- 0_architecture/governance/example_safe_doc.md created
+- no blocked behavior introduced
+failure_criteria:
+- blocked scope required
+- `git add .` recommended
+```
+
+Compact HarnessInputPackage:
+
+```text
+target_harness: OpenCode
+harness_level: H0
+manual_operator: user
+allowed_context: user-supplied governance docs only
+blocked_context: product/Siamese source, external source, generated artifacts, secrets, credentials
+allowed_files: 0_architecture/governance/example_safe_doc.md
+expected_response_format: Compact HarnessOutputPackage summary
+stop_rules: stop on blocked context, unclear target file, credential exposure, or `git add .`
+```
+
+Compact HarnessOutputPackage:
+
+```text
+Summary: Created a small governance note.
+Files created: 0_architecture/governance/example_safe_doc.md
+Files modified: none
+Files not created: runtime files, product files, source files, generated artifacts
+Commands run: none
+Decisions made: kept scope documentation-only
+Assumptions: governance refs supplied by user were sufficient
+Blockers: none
+Limitations: documentation-only output
+Scope deviations: none
+Boundary deviations: none
+Recommended next ticket: none
+Commit advice candidate: exact-path only
+```
+
+Compact reviewer verdict:
+
+```text
+ReviewVerdictPackage: accepted_for_integrator_review
+checks_passed: scope_boundary_check, target_file_check, runtime_activation_check, provider_auth_api_mcp_check, product_source_check, external_source_check, git_add_dot_check
+checks_failed: none
+limitations: documentation-only review
+human_final_decision_required: true for Git
+```
+
+Compact integrator checklist:
+
+```text
+accepted_files_exact_paths_present: pass
+rejected_files_excluded: pass
+drift_register_present: pass
+review_verdict_present: pass
+commit_scope_matches_accepted_files: pass
+commit_message_matches_ticket_scope: pass
+git_add_paths_exact: pass
+no_git_add_dot: pass
+user_final_git_authority_preserved: pass
+```
+
+Exact-path CommitCandidate:
+
+```powershell
+git status --short
+
+git add 0_architecture/governance/example_safe_doc.md
+
+git commit -m "Add example governance note"
+
+git push origin main
+```
+
+### Example 2 - Rejected Unsafe Output
+
+Unsafe harness output:
+
+```text
+Summary: Created a governance note and recommended `git add .`, product/Siamese source inspection, provider/API/MCP activation, runtime activation, Graphify rerun/adoption, and GBrain/Hermes/Cadence runtime exploration.
+Files created: 0_architecture/governance/example_safe_doc.md
+Boundary deviations: recommended blocked actions
+Commit advice candidate: git add .
+```
+
+ReviewVerdictPackage:
+
+```text
+ReviewVerdictPackage: blocked
+blocked_items:
+- `git add .`
+- product/Siamese source inspection
+- provider/API/MCP activation
+- runtime activation
+- Graphify rerun/adoption
+- GBrain/Hermes/Cadence runtime
+containment_recommendations:
+- reject unsafe output
+- request rework with blocked actions removed
+human_final_decision_required: true
+```
+
+RejectedOutputRegister:
+
+```text
+rejected_output_register_id: ROR-P72-EXAMPLE-002
+rejected_output_package_refs: unsafe output example
+rejected_file_paths: none accepted from unsafe output until rework
+rejection_reasons: blocked actions recommended
+out_of_scope_items: product/Siamese source, provider/API/MCP, runtime, Graphify, GBrain/Hermes/Cadence, `git add .`
+rework_required: true
+future_ticket_refs: governance escalation if unsafe scope is intentional
+human_decision_required: true
+```
+
+CommitCandidate:
+
+```text
+not produced
+```
+
+Required route:
+
+```text
+rework or governance escalation
+```
+
 ## 6. WorkPacket Template
 
 Required fields:
