@@ -2,9 +2,25 @@
 
 ## Summary
 
-P12.BUN-INSTALL-EXEC performed the allowed preflight checks for one controlled user-level Bun installation attempt, but did not run the Bun installer because the required explicit human approval statement was not present.
+P12.BUN-INSTALL-EXEC performed one controlled user-level Bun installation attempt after explicit human approval was provided. The approved installer command ran exactly once:
 
-No Bun installation was attempted. No Bun verification command was run. No PATH repair was performed. No GBrain dependency installation, GBrain runtime command, `node_modules` creation, package lifecycle script, Ollama command, Graphify command, provider call, sandbox output, credential inspection, or Git mutation occurred.
+```powershell
+powershell -c "irm bun.sh/install.ps1|iex"
+```
+
+Installer output reported:
+
+```text
+Bun 1.3.14 was installed successfully.
+The binary is located at C:\Users\pablo\.bun\bin\bun.exe
+To get started, restart your terminal/editor, then type "bun"
+```
+
+Post-install checks confirmed `C:\Users\pablo\.bun\bin\bun.exe` and `C:\Users\pablo\.bun\uninstall.ps1` exist. `Get-Command bun -ErrorAction SilentlyContinue` still returned no output in the current agent shell. Because explicit User PATH repair approval was present, the User PATH repair command was run once. A terminal/editor restart or refreshed process environment is likely required before `bun` is discoverable in this agent shell.
+
+`bun --version` and `bun --revision` were not run because `bun` was not discoverable through `Get-Command` after installation and PATH repair in the current agent shell.
+
+P12.INSTALL remains blocked until Bun availability is verified in a refreshed shell or an approved absolute Bun path boundary is accepted. P12.0D remains blocked.
 
 Result marker:
 
@@ -15,7 +31,8 @@ gbrain_bun_controlled_user_level_installation_execution_record_ready
 Result markers:
 
 ```text
-bun_user_level_install_blocked_before_execution
+bun_user_level_install_success
+bun_user_level_install_path_repair_completed
 p12_install_still_blocked_after_bun_install_attempt
 ```
 
@@ -23,14 +40,24 @@ p12_install_still_blocked_after_bun_install_attempt
 P12_BUN_INSTALL_EXEC_Result:
   ticket: P12.BUN-INSTALL-EXEC
   date: "2026-07-09"
-  execution_status: "blocked_before_installation"
-  human_approval_present: false
-  install_command_attempted: false
-  install_command_allowed_candidate: 'powershell -c "irm bun.sh/install.ps1|iex"'
+  execution_status: "installed_path_repaired_current_shell_not_discoverable"
+  human_install_approval_present: true
+  human_path_repair_approval_present: true
+  install_command_attempted: true
+  install_command_execution_count: 1
+  install_command_completed_successfully: true
+  installed_version_reported_by_installer: "1.3.14"
   bun_available_before_install: false
   bun_user_binary_present_before_install: false
   bun_uninstall_script_present_before_install: false
-  path_repair_attempted: false
+  bun_user_binary_present_after_install: true
+  bun_uninstall_script_present_after_install: true
+  get_command_bun_after_install_before_path_repair: "no output"
+  path_repair_attempted: true
+  path_repair_scope: "User PATH only"
+  get_command_bun_after_path_repair: "no output in current agent shell"
+  bun_version_checked: false
+  bun_revision_checked: false
   p12_install_ready_now: false
   p12_0d_execution_authorized_now: false
   final_marker: "gbrain_bun_controlled_user_level_installation_execution_record_ready"
@@ -52,7 +79,7 @@ GBrain source metadata inspected read-only:
 4_external/sources/gbrain-master/package.json
 ```
 
-Presence-only checks were also performed for:
+Presence-only checks were performed for:
 
 ```text
 4_external/sources/gbrain-master
@@ -64,13 +91,41 @@ No credentials, `.env`, provider configs, token stores, browser auth, local cred
 
 ## Files Created
 
+Repo output file:
+
 ```text
 0_architecture/governance/agent_platform_gbrain_bun_controlled_user_level_installation_execution_record.md
 ```
 
+Outside-repo files confirmed created by the Bun installer:
+
+```text
+C:\Users\pablo\.bun\bin\bun.exe
+C:\Users\pablo\.bun\uninstall.ps1
+```
+
+The parent Bun user installation directory also exists by implication:
+
+```text
+C:\Users\pablo\.bun\
+C:\Users\pablo\.bun\bin\
+```
+
 ## Files Modified
 
-No existing file was modified. The only repo file change is this new P12.BUN-INSTALL-EXEC execution record.
+Repo file modified:
+
+```text
+0_architecture/governance/agent_platform_gbrain_bun_controlled_user_level_installation_execution_record.md
+```
+
+Outside-repo user environment modified:
+
+```text
+User PATH was updated with C:\Users\pablo\.bun\bin by the approved User PATH repair command.
+```
+
+System PATH was not modified by the agent. Shell profiles were not modified by the agent.
 
 ## Commands Run
 
@@ -88,57 +143,58 @@ Test-Path "$env:USERPROFILE\.bun\bin\bun.exe"
 Test-Path "$env:USERPROFILE\.bun\uninstall.ps1"
 ```
 
-Additional allowed presence-only checks run during preflight context:
+Approved install command run exactly once:
 
 ```powershell
-Get-Command node -ErrorAction SilentlyContinue
-Get-Command npm -ErrorAction SilentlyContinue
+powershell -c "irm bun.sh/install.ps1|iex"
 ```
 
-Observed command results:
+Allowed post-install checks run:
 
-| Check | Result |
-| --- | --- |
-| Initial `git status --short` | `?? 0_architecture/implementation/graphify_command_candidate_confirmation.md` |
-| P12.BUN-INSTALL plan file | `True` |
-| GBrain source root | `True` |
-| `package.json` | `True` |
-| `bun.lock` | `True` |
-| `Get-Command bun` | No output |
-| `Get-Command gbrain` | No output |
-| `Get-Command node` | `C:\Program Files\nodejs\node.exe` |
-| `Get-Command npm` | `C:\Program Files\nodejs\npm.ps1` |
-| `$env:USERPROFILE\.bun\bin\bun.exe` | `False` |
-| `$env:USERPROFILE\.bun\uninstall.ps1` | `False` |
+```powershell
+Test-Path "$env:USERPROFILE\.bun\bin\bun.exe"
+Test-Path "$env:USERPROFILE\.bun\uninstall.ps1"
+Get-Command bun -ErrorAction SilentlyContinue
+```
 
-Allowed read-only searches were used to confirm P12.BUN-INSTALL, P12.BUN, P12.SETUP, and root GBrain package metadata markers.
+Approved User PATH repair command run once:
+
+```powershell
+[System.Environment]::SetEnvironmentVariable(
+  "Path",
+  [System.Environment]::GetEnvironmentVariable("Path", "User") + ";$env:USERPROFILE\.bun\bin",
+  [System.EnvironmentVariableTarget]::User
+)
+```
+
+Allowed post-repair checks run:
+
+```powershell
+Get-Command bun -ErrorAction SilentlyContinue
+Test-Path "$env:USERPROFILE\.bun\bin\bun.exe"
+Test-Path "$env:USERPROFILE\.bun\uninstall.ps1"
+```
 
 Commands not run:
 
 ```text
-powershell -c "irm bun.sh/install.ps1|iex"
 bun --version
 bun --revision
 bun install
-gbrain
-node --version
-npm install
-ollama
-graphify
-/graphify
+bun run
+bun build
+bun test
 ```
 
 ## Human Approval Status
 
-Required approval statement was not present.
-
-Required minimum installation approval:
+Required installation approval was present:
 
 ```text
 I approve one controlled user-level Bun installation using `powershell -c "irm bun.sh/install.ps1|iex"`. Network access is allowed only for the Bun installer endpoint. Expected created files are limited to the user Bun installation directory under `%USERPROFILE%\.bun`. Do not install GBrain dependencies, do not run GBrain, do not run `bun install` inside GBrain, do not create node_modules, do not run package lifecycle scripts, do not run providers, do not run Ollama, do not run Graphify, do not inspect credentials, do not create sandbox outputs, do not modify System PATH, and do not mutate Git.
 ```
 
-Optional PATH repair approval was also not present:
+Optional PATH repair approval was present:
 
 ```text
 I also approve adding `%USERPROFILE%\.bun\bin` to User PATH if Bun installs successfully but is not discoverable. Do not modify System PATH.
@@ -147,11 +203,10 @@ I also approve adding `%USERPROFILE%\.bun\bin` to User PATH if Bun installs succ
 Decision:
 
 ```yaml
-human_install_approval_present: false
-human_path_repair_approval_present: false
-install_execution_allowed: false
-path_repair_allowed: false
-decision_marker: "bun_user_level_install_blocked_before_execution"
+human_install_approval_present: true
+human_path_repair_approval_present: true
+install_execution_allowed: true
+path_repair_allowed: true
 ```
 
 ## Preflight Status
@@ -168,81 +223,84 @@ P12.BUN-INSTALL final marker is present:
 gbrain_bun_controlled_local_installation_plan_ready
 ```
 
-P12.BUN-INSTALL confirms:
-
-```text
-bun_install_execution_requires_human_approval
-bun_install_execution_still_blocked
-p12_install_still_blocked_until_bun_installed
-```
-
 GBrain source root exists:
 
 ```text
 4_external/sources/gbrain-master
 ```
 
-Preflight decision:
+Preflight results before install:
 
 ```yaml
-p12_bun_install_plan_confirmed: true
-p12_bun_install_marker_confirmed: true
+get_command_bun_before_install: "no output"
+get_command_gbrain_before_install: "no output"
+bun_user_binary_before_install: false
+bun_uninstall_script_before_install: false
 gbrain_source_root_present: true
-human_approval_gate_satisfied: false
-safe_to_run_install_command: false
+package_json_present: true
+bun_lock_present: true
+safe_to_run_install_command: true
 ```
 
 ## Bun Install Execution Status
 
-The official install candidate was not executed.
+The approved install command ran once and completed successfully according to installer output.
 
 ```yaml
 install_command_candidate: 'powershell -c "irm bun.sh/install.ps1|iex"'
-install_command_attempted: false
-install_command_completed_successfully: false
-install_command_failure_observed: false
-blocker: "explicit human approval missing"
-result_marker: "bun_user_level_install_blocked_before_execution"
+install_command_attempted: true
+install_command_execution_count: 1
+install_command_completed_successfully: true
+installer_reported_version: "1.3.14"
+installer_reported_binary_path: "C:\\Users\\pablo\\.bun\\bin\\bun.exe"
+installer_reported_restart_required: true
+result_marker: "bun_user_level_install_success"
 ```
 
-No network access was authorized or used for Bun installation.
+No GBrain dependency install was attempted.
 
 ## Created Path Metadata
 
-Preflight path status before any install command:
+Preflight path status before install:
 
 | Path | Status |
 | --- | --- |
-| `%USERPROFILE%\.bun\bin\bun.exe` | Not present from allowed check |
-| `%USERPROFILE%\.bun\uninstall.ps1` | Not present from allowed check |
+| `%USERPROFILE%\.bun\bin\bun.exe` | `False` |
+| `%USERPROFILE%\.bun\uninstall.ps1` | `False` |
 
-Created outside repo by this ticket:
+Post-install path status:
+
+| Path | Status |
+| --- | --- |
+| `%USERPROFILE%\.bun\bin\bun.exe` | `True` |
+| `%USERPROFILE%\.bun\uninstall.ps1` | `True` |
+
+Created outside repo by install:
 
 ```text
-None
+C:\Users\pablo\.bun\bin\bun.exe
+C:\Users\pablo\.bun\uninstall.ps1
 ```
 
-Expected Bun install paths remain future candidates only:
-
-```text
-%USERPROFILE%\.bun\
-%USERPROFILE%\.bun\bin\bun.exe
-%USERPROFILE%\.bun\uninstall.ps1
-```
+No GBrain source files, `node_modules`, sandbox directories, databases, or generated outputs were created by this ticket.
 
 ## PATH Status
 
-PATH repair was not attempted.
+`Get-Command bun -ErrorAction SilentlyContinue` returned no output after install, even though `bun.exe` existed at the expected path. Approved User PATH repair was therefore performed.
+
+PATH repair status:
 
 ```yaml
-user_path_modified_by_this_ticket: false
-system_path_modified_by_this_ticket: false
-shell_profile_modified_by_this_ticket: false
-path_repair_required_now: false
-path_repair_allowed_now: false
+user_path_repair_required_after_install: true
+user_path_repair_approved: true
+user_path_repair_performed: true
+system_path_modified_by_agent: false
+shell_profile_modified_by_agent: false
+terminal_restart_likely_required: true
+result_marker: "bun_user_level_install_path_repair_completed"
 ```
 
-Because Bun was not installed, PATH repair was not evaluated beyond noting that the optional human PATH repair approval was absent.
+Post-repair `Get-Command bun -ErrorAction SilentlyContinue` still returned no output in the current agent shell. This is consistent with the installer restart note and with User PATH registry changes not necessarily refreshing the already-running agent process environment.
 
 ## Verification Results
 
@@ -254,25 +312,31 @@ bun_user_binary_before_install: false
 bun_uninstall_script_before_install: false
 ```
 
-Post-install verification was not run because installation was blocked before execution.
+Post-install and post-repair verification:
 
 ```yaml
+bun_user_binary_after_install: true
+bun_uninstall_script_after_install: true
+get_command_bun_after_install_before_path_repair: "no output"
+get_command_bun_after_path_repair: "no output in current agent shell"
 bun_version_checked: false
 bun_revision_checked: false
-get_command_bun_after_install: "not run"
-bun_user_binary_after_install: "not checked after install because install did not run"
-bun_uninstall_script_after_install: "not checked after install because install did not run"
+verification_status: "installed_files_present_current_shell_path_refresh_pending"
 ```
+
+`bun --version` and `bun --revision` were not run because `bun` was not discoverable through `Get-Command` after installation and PATH repair in the current agent shell.
 
 ## Incident Status
 
-This is a controlled pre-execution block, not an installer failure.
+No installer failure was observed. The remaining issue is current-shell PATH refresh, not a failed Bun installation.
 
 ```yaml
-incident_status: "no_install_incident"
-safe_stop_reason: "explicit human approval missing"
+incident_status: "path_refresh_pending"
+installer_failed: false
+bun_executable_missing: false
+verification_failure: false
 secrets_exposed: false
-system_path_modified: false
+system_path_modified_by_agent: false
 git_mutated: false
 gbrain_dependency_install_attempted: false
 runtime_attempted: false
@@ -280,19 +344,22 @@ runtime_attempted: false
 
 ## P12.INSTALL Handoff Decision
 
-P12.INSTALL remains blocked.
+P12.INSTALL remains blocked for the current agent shell because `Get-Command bun` still returns no output and `bun --version` / `bun --revision` were not verified.
 
 ```yaml
 P12_INSTALL_HandoffDecision:
-  status: "blocked"
-  reason: "Bun installation did not run because explicit human approval was missing."
-  bun_installed_and_discoverable: false
-  approved_absolute_bun_path_available: false
+  status: "blocked_pending_refreshed_shell_bun_verification"
+  reason: "Bun installed and User PATH repair completed, but current agent shell does not yet discover bun."
+  bun_installed_under_expected_user_path: true
+  user_path_repair_completed: true
+  bun_discoverable_in_current_agent_shell: false
+  bun_version_verified: false
+  bun_revision_verified: false
   p12_install_may_be_generated_now: false
   decision_marker: "p12_install_still_blocked_after_bun_install_attempt"
 ```
 
-Future P12.INSTALL must still use only the approved GBrain dependency install candidate after Bun is available and after separate human approval:
+Future P12.INSTALL must still use only the approved GBrain dependency install candidate after Bun is discoverable and after separate human approval:
 
 ```powershell
 bun install --ignore-scripts --frozen-lockfile
@@ -307,7 +374,7 @@ P12.0D remains blocked.
 ```yaml
 P12_0D_HandoffDecision:
   status: "blocked"
-  reason: "Bun was not installed, P12.INSTALL was not completed, and GBrain dependency state is unavailable."
+  reason: "P12.INSTALL was not completed and GBrain dependency state is unavailable."
   p12_0d_execution_authorized: false
   decision_marker: "gbrain_runtime_still_blocked"
 ```
@@ -325,7 +392,7 @@ human runtime approval present
 
 ## Created / Not Created Register
 
-Created:
+Created in repo:
 
 ```text
 0_architecture/governance/agent_platform_gbrain_bun_controlled_user_level_installation_execution_record.md
@@ -334,19 +401,19 @@ Created:
 Created outside repo:
 
 ```text
-None
+C:\Users\pablo\.bun\bin\bun.exe
+C:\Users\pablo\.bun\uninstall.ps1
+```
+
+Modified outside repo:
+
+```text
+User PATH repaired with C:\Users\pablo\.bun\bin
 ```
 
 Not created / not approved:
 
 ```text
-No Bun installation
-No Bun version command
-No Bun revision command
-No PATH mutation
-No User PATH mutation
-No System PATH mutation
-No shell profile mutation
 No GBrain dependency install
 No node_modules
 No GBrain execution
@@ -364,34 +431,44 @@ No Ollama inference
 No Graphify execution
 No provider/API calls
 No credential inspection
+No System PATH mutation by agent
+No shell profile mutation by agent
 No Git mutation
 No git add .
 ```
 
 ## Limitations
 
-No Bun install attempt occurred, so no installer success/failure, created files, PATH behavior, Bun version, or Bun revision were verified.
+`bun --version` and `bun --revision` were not run because `bun` was not discoverable in the current agent shell after install and User PATH repair.
 
-System PATH was not inspected; it was only not modified by this ticket.
+System PATH was not inspected; it was only not modified by the agent.
 
-User PATH was not inspected; it was only not modified by this ticket.
+User PATH content was not printed. The approved User PATH repair command reads and updates User PATH without exposing environment values in output.
 
-One allowed root package metadata search returned an incidental nested GBrain package manifest line due search behavior; nested metadata was not used for this execution decision.
+A refreshed terminal/editor or new agent process may be required before `Get-Command bun` resolves through PATH.
 
 ## Recommended Next Ticket
 
-Recommended next action: rerun or continue P12.BUN-INSTALL-EXEC only after explicit human approval is provided.
-
-Minimum approval to proceed with installation:
+Recommended next ticket:
 
 ```text
-I approve one controlled user-level Bun installation using `powershell -c "irm bun.sh/install.ps1|iex"`. Network access is allowed only for the Bun installer endpoint. Expected created files are limited to the user Bun installation directory under `%USERPROFILE%\.bun`. Do not install GBrain dependencies, do not run GBrain, do not run `bun install` inside GBrain, do not create node_modules, do not run package lifecycle scripts, do not run providers, do not run Ollama, do not run Graphify, do not inspect credentials, do not create sandbox outputs, do not modify System PATH, and do not mutate Git.
+P12.BUN-PATH-VERIFY - Bun Refreshed Shell Availability Verification
 ```
 
-If PATH repair should be allowed in the same execution ticket, also provide:
+That ticket should run only:
+
+```powershell
+Get-Command bun -ErrorAction SilentlyContinue
+bun --version
+bun --revision
+Test-Path "$env:USERPROFILE\.bun\bin\bun.exe"
+Test-Path "$env:USERPROFILE\.bun\uninstall.ps1"
+```
+
+If Bun is discoverable and version/revision verification succeeds, then proceed to:
 
 ```text
-I also approve adding `%USERPROFILE%\.bun\bin` to User PATH if Bun installs successfully but is not discoverable. Do not modify System PATH.
+P12.INSTALL - GBrain Controlled Local Dependency Install
 ```
 
 ## Commit Commands
@@ -401,7 +478,7 @@ If this execution record is accepted for commit, stage only the intended file. D
 ```powershell
 git status --short
 git add 0_architecture/governance/agent_platform_gbrain_bun_controlled_user_level_installation_execution_record.md
-git commit -m "Record Bun controlled user-level installation block"
+git commit -m "Record Bun controlled user-level installation"
 ```
 
 Push only if explicitly approved:
@@ -419,19 +496,25 @@ GBrainBunControlledUserLevelInstallationExecutionRecord:
   target_file: "0_architecture/governance/agent_platform_gbrain_bun_controlled_user_level_installation_execution_record.md"
   p12_bun_install_plan_confirmed: true
   p12_bun_install_marker_confirmed: true
-  human_install_approval_present: false
-  human_path_repair_approval_present: false
-  install_blocked_before_execution: true
-  install_command_attempted: false
-  install_command_completed_successfully: false
+  human_install_approval_present: true
+  human_path_repair_approval_present: true
+  install_blocked_before_execution: false
+  install_command_attempted: true
+  install_command_execution_count: 1
+  install_command_completed_successfully: true
+  installer_reported_version: "1.3.14"
   bun_available_before_install: false
   bun_user_binary_present_before_install: false
   bun_uninstall_script_present_before_install: false
+  bun_user_binary_present_after_install: true
+  bun_uninstall_script_present_after_install: true
+  get_command_bun_after_path_repair: "no output in current agent shell"
   bun_version_checked: false
   bun_revision_checked: false
-  path_repair_attempted: false
-  user_path_modified: false
-  system_path_modified: false
+  path_repair_attempted: true
+  path_repair_completed: true
+  user_path_modified: true
+  system_path_modified_by_agent: false
   gbrain_available_on_path: false
   gbrain_dependency_install_attempted: false
   gbrain_runtime_attempted: false
