@@ -72,3 +72,46 @@ AGENTS.md
 *.csv
 *.xlsx
 *.parquet
+
+# P10 Graphify Markdown Evidence Integration — controlled scope
+# GraphifyIgnoreControlledScopeBlock
+# Graphify = evidence map; Graphify is not authority, source of truth, approval engine, runtime, or Cognitive Semantic System substrate.
+# Allowed evidence input scope:
+# - README.md
+# - 0_architecture/**/*.md
+# - 3_platform/_governed_skeleton/**/*.py
+# Scope is read-only for later gated Graphify runs and does not authorize execution, output import, generated output tracking, or source tracking expansion.
+
+# Allowed evidence input patterns.
+!README.md
+!0_architecture/
+!0_architecture/**/
+!0_architecture/**/*.md
+!3_platform/
+!3_platform/_governed_skeleton/
+!3_platform/_governed_skeleton/**/
+!3_platform/_governed_skeleton/**/*.py
+
+# P10 explicit sensitive / external / generated / product blockers.
+.env
+.env.*
+credentials/**
+**/credentials/**
+secrets/**
+**/secrets/**
+**/*credential*/**
+**/*credentials*/**
+**/*secret*/**
+**/*secrets*/**
+**/*token*/**
+**/*tokens*/**
+**/*provider*config*/**
+**/*auth*/**
+4_external/sources/**
+external/sources/**
+4_external/sources/gstack-main/**
+9_artifacts/**
+graphify-out/**
+2_products/**
+product/**
+products/**
