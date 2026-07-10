@@ -2,7 +2,9 @@
 
 ## Summary
 
-P12.9 was evaluated as an execution spike, but runtime execution was blocked before sandbox setup because the required explicit human approval was not present outside the ticket body. No sandbox directories were created and no GBrain runtime command was run.
+P12.9 executed one approved controlled GBrain Mode A runtime sequence in a fresh local sandbox. The spike created a canonical local memory sandbox candidate under the approved `9_artifacts` root, initialized local PGLite with `--no-embedding`, forced keyword-only search, imported the Git-visible governance markdown corpus with `--no-embed`, ran only the five approved keyword search smoke queries, and exported generated evidence to the approved sandbox exports path.
+
+The sandbox is not production memory. It is not authority. It is local/untracked generated evidence and derived retrieval infrastructure only.
 
 Result marker:
 
@@ -10,56 +12,66 @@ Result marker:
 canonical_local_memory_sandbox_spike_ready
 ```
 
-Outcome B markers:
+Decision markers:
 
 ```text
-p12_9_blocked_before_execution
-p12_9_missing_runtime_approval_or_preflight_failure
-```
-
-Success marker family not claimed:
-
-```text
-execution success is not claimed
-fresh sandbox creation is not claimed
-keyword-only index creation is not claimed
-governance input import is not claimed
-search smoke success is not claimed
-export generation is not claimed
-P12.11 readiness after memory spike is not claimed
+p12_9_canonical_memory_sandbox_execution_success
+p12_9_fresh_sandbox_created
+p12_9_keyword_only_gbrain_index_created
+p12_9_canonical_governance_input_imported
+p12_9_memory_search_smoke_success
+p12_9_exports_generated_local_untracked
+p12_9_no_embeddings_no_ollama_no_providers
+p12_9_no_graph_query
+p12_9_no_production_memory_authority
+p12_9_cleanup_dependency_preserved
+p12_11_retention_rollback_ready_after_memory_spike
 ```
 
 ```yaml
 P12_9_Canonical_Local_Memory_Sandbox_Spike_Record:
   ticket: P12.9
   date: "2026-07-10"
-  outcome: "Outcome B - blocked before execution"
-  required_runtime_approval_present_outside_ticket_body: false
-  blocker: "missing explicit human runtime approval outside ticket body"
-  sandbox_setup_started: false
-  sandbox_directories_created: false
-  gbrain_runtime_executed: false
-  gbrain_init_executed: false
-  keyword_only_config_executed: false
-  governance_import_executed: false
-  search_smokes_executed: false
-  export_executed: false
+  outcome: "Outcome A - success"
+  human_runtime_approval_present: true
+  execution_attempts_allowed: 1
+  gbrain_runtime_sequence_attempted_once: true
+  fresh_sandbox_created: true
+  sandbox_root: "9_artifacts/gbrain_sandbox/p12_9_canonical_memory_01"
+  gbrain_home_scoped_to_sandbox: true
+  gbrain_home_env_removed_after_runtime: true
+  local_pglite_init_success: true
+  keyword_only_config_success: true
+  governance_import_success: true
+  git_visible_governance_markdown_count: 129
+  imported_markdown_files: 129
+  imported_pages: 129
+  skipped_pages: 0
+  import_errors: 0
+  chunks_created: 1763
+  approved_search_smokes_success: true
+  export_success: true
+  exported_pages: 129
+  generated_outputs_confined_to_sandbox: true
+  generated_outputs_staged: false
   embeddings_generated: false
   ollama_attempted: false
   provider_calls_attempted: false
   graphify_attempted: false
   graph_query_attempted: false
-  gstack_attempted: false
-  skills_attempted: false
-  mcp_attempted: false
+  gstack_command_attempted: false
+  skill_execution_attempted: false
+  mcp_registration_attempted: false
   browser_daemon_attempted: false
   credential_inspection_attempted: false
   product_or_siamese_path_access_attempted: false
   normal_user_gbrain_write_attempted: false
   normal_user_gstack_write_attempted: false
+  db_internal_inspection_attempted: false
+  generated_home_internal_inspection_attempted: false
   git_mutated: false
-  sandbox_outputs_staged: false
   production_memory_created: false
+  p12_11_ready_after_spike: true
   final_marker: "canonical_local_memory_sandbox_spike_ready"
 ```
 
@@ -84,21 +96,84 @@ GBrain metadata path checks performed:
 4_external/sources/gbrain-master/src/cli.ts
 ```
 
-Path check result for GBrain metadata:
+Input scope checked:
 
-```yaml
-gbrain_root_found_by_path_check: false
-gbrain_package_json_found_by_path_check: false
-gbrain_bun_lock_found_by_path_check: false
-gbrain_node_modules_found_by_path_check: false
-gbrain_cli_found_by_path_check: false
+```text
+0_architecture/governance
 ```
 
-No `node_modules` contents, DB internals, generated home internals, sandbox internals, credentials, provider configs, product/Siamese paths, normal user memory state, browser stores, package caches, or raw generated outputs were inspected.
+Post-run top-level sandbox metadata checked only:
+
+```text
+9_artifacts/gbrain_sandbox/p12_9_canonical_memory_01/
+9_artifacts/gbrain_sandbox/p12_9_canonical_memory_01/exports/ top-level file names and lengths only
+```
+
+Not inspected:
+
+```text
+.env
+.env.*
+credentials/**
+secrets/**
+provider configs
+token stores
+browser auth
+local credential stores
+API keys
+Claude credentials
+Claude session files
+Anthropic credentials
+OpenAI credentials
+Gemini credentials
+Ollama configs
+normal user .gbrain
+normal user .gstack
+normal user .claude
+normal user .codex
+normal user .config/opencode
+browser cookie stores
+graphify-out/**
+9_artifacts/** contents outside approved P12.9 top-level metadata checks
+2_products/**
+product/**
+products/**
+raw Graphify outputs
+4_external/sources/gbrain-master/node_modules/**
+4_external/sources/gstack-main/node_modules/**
+global package caches
+Bun cache contents
+DB internals under 9_artifacts/**
+generated home internals under 9_artifacts/**
+```
 
 ## Files Created
 
-Created exactly one governance execution record:
+Created approved sandbox directories and generated manifest/export/state under:
+
+```text
+9_artifacts/gbrain_sandbox/p12_9_canonical_memory_01/
+```
+
+Created approved subdirectories:
+
+```text
+9_artifacts/gbrain_sandbox/p12_9_canonical_memory_01/gbrain_home/
+9_artifacts/gbrain_sandbox/p12_9_canonical_memory_01/db/
+9_artifacts/gbrain_sandbox/p12_9_canonical_memory_01/exports/
+9_artifacts/gbrain_sandbox/p12_9_canonical_memory_01/logs/
+9_artifacts/gbrain_sandbox/p12_9_canonical_memory_01/reports/
+9_artifacts/gbrain_sandbox/p12_9_canonical_memory_01/manifest/
+```
+
+Manifest files created under approved sandbox manifest path:
+
+```text
+9_artifacts/gbrain_sandbox/p12_9_canonical_memory_01/manifest/git_visible_governance_markdown_files.txt
+9_artifacts/gbrain_sandbox/p12_9_canonical_memory_01/manifest/canonical_memory_manifest.md
+```
+
+Created or updated the single allowed governance execution record:
 
 ```text
 0_architecture/governance/agent_platform_canonical_local_memory_sandbox_spike_record.md
@@ -106,17 +181,85 @@ Created exactly one governance execution record:
 
 ## Files Modified
 
-No existing file was modified.
+The single allowed governance execution record was updated with this successful approved-run record:
+
+```text
+0_architecture/governance/agent_platform_canonical_local_memory_sandbox_spike_record.md
+```
+
+No GBrain source, GStack source, existing governance file other than this output record, product/Siamese file, shell profile, PATH configuration, credential file, or Git metadata was modified.
 
 ## Commands Run
 
-Allowed command run:
+Allowed preflight command group was run:
 
-```text
+```powershell
 git status --short
+Test-Path dependency governance files
+Test-Path GBrain runtime metadata paths
+Get-Command bun -ErrorAction SilentlyContinue
+bun --version
+bun --revision
+git check-ignore -q 0_architecture/governance
+git ls-files --cached --others --exclude-standard -- 0_architecture/governance
+Test-Path 9_artifacts/gbrain_sandbox/p12_9_canonical_memory_01
 ```
 
-Read-only marker/path checks were performed with repository read/search tooling. No runtime command was executed.
+Observed preflight results:
+
+```yaml
+memory_store_integration_design_present: true
+memory_authority_model_present: true
+gbrain_adoption_decision_present: true
+gbrain_mode_a_rerun_record_present: true
+governance_input_present: true
+gbrain_root_present: true
+gbrain_package_json_present: true
+gbrain_bun_lock_present: true
+gbrain_node_modules_present: true
+gbrain_cli_present: true
+bun_available: true
+bun_command: "C:/Users/pablo/.bun/bin/bun.exe"
+bun_version: "1.3.14"
+bun_revision: "1.3.14+0d9b296af"
+governance_input_ignored: false
+git_visible_governance_markdown_count: 129
+sandbox_root_existed_before_setup: false
+```
+
+Allowed sandbox setup command group was run. It created only approved sandbox directories and manifest files.
+
+Approved GBrain Mode A runtime sequence was run once from:
+
+```text
+4_external/sources/gbrain-master
+```
+
+Approved runtime commands run once:
+
+```powershell
+bun run src/cli.ts init --pglite --path "$DbPath" --no-embedding
+bun run src/cli.ts config set search.mcp_keyword_only true
+bun run src/cli.ts import "$GovernanceInput" --no-embed
+bun run src/cli.ts search "memory authority model GBrain derived index canonical source"
+bun run src/cli.ts search "GBrain Graphify semantic replacement memory retrieval authority"
+bun run src/cli.ts search "memory store integration canonical source reference GBrain index"
+bun run src/cli.ts search "GStack skill memory not authority execution gate"
+bun run src/cli.ts search "CLEAN production operational memory blocked"
+bun run src/cli.ts export --dir "$ExportsPath"
+```
+
+Post-run metadata command group was run:
+
+```powershell
+git status --short
+Test-Path sandbox/input/state paths
+Test-Path Env:GBRAIN_HOME
+Get-ChildItem -LiteralPath $SandboxRoot -Force
+Get-ChildItem -LiteralPath $ExportsPath -Force | Select-Object Name,Length
+```
+
+An initial PowerShell wrapper with malformed manifest here-string syntax failed at parse time before sandbox creation or runtime execution. A sandbox path check immediately after that failure confirmed the sandbox root was still absent. The approved GBrain runtime sequence itself was then run exactly once and completed successfully.
 
 Commands explicitly not run:
 
@@ -125,7 +268,6 @@ gbrain
 gbrain --help
 gbrain --version
 bun install
-bun run
 bun build
 bun test
 bunx
@@ -154,21 +296,15 @@ git push
 
 ## Human Approval Status
 
-Required approval text was not present as an explicit approval outside the ticket body.
+Explicit runtime approval was present outside the ticket body.
 
 Classification:
 
 ```yaml
 approval_required_for_runtime: true
-approval_present_outside_ticket_body: false
-runtime_may_execute: false
-stop_before_sandbox_setup_required: true
-```
-
-Boundary decision:
-
-```text
-Because the approval was missing, P12.9 stopped before sandbox setup. No sandbox root was created and no GBrain command was run.
+approval_present_outside_ticket_body: true
+runtime_may_execute_once: true
+runtime_attempts_used: 1
 ```
 
 ## P12.3 Dependency Status
@@ -252,7 +388,7 @@ The memory store is a governed retrieval and context assembly layer that referen
 P12.7 handoff preserved:
 
 ```text
-P12.9 may proceed only with a fresh canonical local memory sandbox spike using keyword-only, no-provider, no-production-memory boundaries. Since runtime approval was missing, P12.9 did not proceed to sandbox setup.
+P12.9 used a fresh canonical local memory sandbox, keyword-only mode, no embeddings, no Ollama, no providers, no Graphify, no graph-query, and local/untracked generated outputs only.
 ```
 
 ## P12.0D-RERUN Dependency Status
@@ -281,36 +417,20 @@ P12.0D-RERUN remains historical feasibility evidence only. It was not reused as 
 
 ## Preflight Status
 
-Preflight stopped before runtime-oriented checks because explicit human runtime approval was missing.
-
-Completed read-only checks:
+Preflight succeeded.
 
 ```yaml
 p12_7_marker_confirmed: true
 p12_3_marker_confirmed: true
 p12_5_marker_confirmed: true
 p12_0d_rerun_marker_confirmed: true
-git_status_checked_before_record_creation: true
+gbrain_runtime_prerequisites_present: true
+bun_available: true
+governance_input_exists: true
+governance_input_ignored: false
+git_visible_governance_markdown_count: 129
+sandbox_root_existed_before_setup: false
 ```
-
-Not performed because approval was missing:
-
-```text
-bun availability check
-bun version check
-bun revision check
-git check-ignore for governance input
-Git-visible governance markdown count
-fresh sandbox root stop-check as runtime preflight
-```
-
-Observed GBrain metadata path status from allowed path checks:
-
-```text
-4_external/sources/gbrain-master was not found by path check.
-```
-
-This is recorded as a future preflight condition to resolve if explicit approval is later provided. It did not trigger runtime debugging because runtime was already blocked by missing approval.
 
 ## Sandbox Path Status
 
@@ -320,18 +440,30 @@ Approved sandbox root:
 9_artifacts/gbrain_sandbox/p12_9_canonical_memory_01/
 ```
 
-Status:
+Post-run top-level path status:
 
 ```yaml
-sandbox_setup_started: false
-sandbox_root_created: false
-gbrain_home_created: false
-db_created: false
-exports_created: false
-logs_created: false
-reports_created: false
-manifest_created: false
+sandbox_root_exists: true
+gbrain_home_exists: true
+db_exists: true
+exports_exists: true
+logs_exists: true
+reports_exists: true
+manifest_exists: true
 ```
+
+Observed top-level sandbox entries:
+
+```text
+db/
+exports/
+gbrain_home/
+logs/
+manifest/
+reports/
+```
+
+No recursive DB, home, export, log, or report internals were inspected.
 
 ## Input Scope Status
 
@@ -344,10 +476,10 @@ Approved primary input scope:
 Input status:
 
 ```yaml
-governance_dependency_files_present: true
-governance_import_attempted: false
-git_visible_markdown_count_performed: false
-input_classification: "canonical governance baseline import candidate"
+governance_input_exists: true
+governance_input_ignored: false
+git_visible_markdown_count: 129
+input_classification: "canonical governance baseline import"
 ```
 
 ## Runtime Execution Status
@@ -355,102 +487,178 @@ input_classification: "canonical governance baseline import candidate"
 Runtime execution status:
 
 ```yaml
-runtime_started: false
-runtime_blocker: "missing explicit human approval outside ticket body"
-gbrain_runtime_sequence_attempted: false
+runtime_started: true
+runtime_completed: true
+gbrain_runtime_sequence_attempted_once: true
 alternate_commands_attempted: false
 debug_chain_opened: false
 ```
 
+GBrain init emitted advisory text about search mode, missing GStack, and optional recommended skills. No recommended GStack, skillpack, provider, MCP, or GStack action was taken.
+
 ## Init Result
 
-Not run.
+Init command:
+
+```powershell
+bun run src/cli.ts init --pglite --path "$DbPath" --no-embedding
+```
+
+Observed result:
 
 ```yaml
-init_attempted: false
-local_pglite_init_success: false
+init_attempted: true
+local_pglite_init_success: true
+migrations_applied: 117
+schema_pack: "gbrain-base-v2"
+embedding_setup_deferred_by_no_embedding: true
+brain_ready_path: "9_artifacts/gbrain_sandbox/p12_9_canonical_memory_01/db"
+pages_after_init: 0
 ```
 
 ## Keyword-only Config Result
 
-Not run.
+Config command:
+
+```powershell
+bun run src/cli.ts config set search.mcp_keyword_only true
+```
+
+Observed result:
 
 ```yaml
-keyword_only_config_attempted: false
-keyword_only_config_success: false
+keyword_only_config_attempted: true
+keyword_only_config_success: true
+observed_output: "Set search.mcp_keyword_only = true"
 ```
 
 ## Governance Import Result
 
-Not run.
+Import command:
+
+```powershell
+bun run src/cli.ts import "$GovernanceInput" --no-embed
+```
+
+Observed result:
 
 ```yaml
-governance_import_attempted: false
-governance_import_success: false
-imported_pages_gt_zero: false
-chunks_created_gt_zero: false
+governance_import_attempted: true
+governance_import_success: true
+import_collected_markdown_files: 129
+imported_pages: 129
+skipped_pages: 0
+import_errors: 0
+chunks_created: 1763
+```
+
+Import warnings:
+
+```text
+Several governance files triggered content-sanity warnings for size or markup-heavy ratio. They stayed searchable. These warnings do not change the success classification and should inform future cleanup/retention work.
 ```
 
 ## Search Smoke Results
 
-No approved smoke query was run.
+Only approved keyword search smoke queries were run.
 
 ```yaml
-search_smoke_1_attempted: false
-search_smoke_2_attempted: false
-search_smoke_3_attempted: false
-search_smoke_4_attempted: false
-search_smoke_5_attempted: false
-approved_search_smokes_success: false
+search_smoke_1:
+  query: "memory authority model GBrain derived index canonical source"
+  success: true
+search_smoke_2:
+  query: "GBrain Graphify semantic replacement memory retrieval authority"
+  success: true
+search_smoke_3:
+  query: "memory store integration canonical source reference GBrain index"
+  success: true
+search_smoke_4:
+  query: "GStack skill memory not authority execution gate"
+  success: true
+search_smoke_5:
+  query: "CLEAN production operational memory blocked"
+  success: true
 ```
+
+Observed search behavior:
+
+```text
+Search returned ranked governance results, including P12.3 memory authority, P12.5 GBrain/Graphify decision, P12.7 memory store integration, P12.4 skill authority, P12.6 GStack adoption, and this P12.9 execution record where relevant.
+```
+
+No `query`, `graph-query`, provider expansion, embedding search, or Ollama-backed search was run.
 
 ## Export Result
 
-Not run.
+Export command:
+
+```powershell
+bun run src/cli.ts export --dir "$ExportsPath"
+```
+
+Observed result:
 
 ```yaml
-export_attempted: false
-export_success: false
+export_attempted: true
+export_success: true
+exported_pages: 129
+exports_path: "9_artifacts/gbrain_sandbox/p12_9_canonical_memory_01/exports"
+exports_top_level_files_observed: 129
 ```
+
+Only top-level export file names and lengths were listed. Export file contents were not inspected.
 
 ## Generated Output Metadata
 
-No sandbox generated output was created by P12.9.
+Generated outputs were confined to:
+
+```text
+9_artifacts/gbrain_sandbox/p12_9_canonical_memory_01/
+```
+
+Post-run metadata:
 
 ```yaml
-generated_outputs_created: false
+generated_outputs_created: true
 generated_outputs_confined_to_sandbox: true
 generated_outputs_staged: false
 generated_outputs_tracked: false
+manifest_created: true
+exports_created: true
+db_created: true
+gbrain_home_created: true
+logs_dir_created: true
+reports_dir_created: true
 ```
-
-The confinement value is `true` only in the vacuous sense that no generated outputs were created.
 
 ## GBRAIN_HOME Cleanup Status
 
-`GBRAIN_HOME` was not set by P12.9.
+`GBRAIN_HOME` was set only inside the runtime PowerShell process and removed after export.
+
+Post-run check:
 
 ```yaml
-gbrain_home_env_set_by_p12_9: false
-gbrain_home_cleanup_needed: false
-gbrain_home_cleanup_performed: false
+gbrain_home_env_set_for_runtime: true
+gbrain_home_value_was_sandbox_path: true
+gbrain_home_cleanup_performed: true
+test_path_env_gbrain_home_after_runtime: false
 ```
 
 ## Post-run Git Status
 
-Git mutation was not performed.
+Post-run `git status --short` showed no sandbox outputs staged or tracked.
 
-Expected post-record status includes this untracked governance record only from P12.9:
+Observed status after runtime before this record update:
 
 ```text
-0_architecture/governance/agent_platform_canonical_local_memory_sandbox_spike_record.md
+?? 0_architecture/implementation/graphify_command_candidate_confirmation.md
 ```
 
-Sandbox outputs were not created, staged, or tracked.
+This means the approved sandbox outputs under ignored `9_artifacts/` remained local/untracked and were not staged.
 
 ## Authority Classification
 
-If a future approved P12.9 rerun creates the sandbox, its authority classification must be:
+P12.9 authority classification:
 
 ```text
 The GBrain sandbox is Tier B derived retrieval infrastructure.
@@ -463,8 +671,6 @@ The sandbox cannot decide tickets.
 The sandbox cannot mutate Git.
 ```
 
-For this blocked record, no sandbox exists and no derived index or exports were created.
-
 ## CLEAN / Production Memory Boundary
 
 Production use remains blocked until:
@@ -475,7 +681,7 @@ P12.11 retention / rollback / incident hardening
 future exact memory reindex gate
 ```
 
-This blocked P12.9 record does not satisfy P12.11 readiness.
+P12.9 validates a fresh local retrieval sandbox candidate only. It does not create production operational memory and does not authorize production agent taxonomy use.
 
 ## Created / Not Created Register
 
@@ -483,6 +689,12 @@ Created:
 
 ```text
 0_architecture/governance/agent_platform_canonical_local_memory_sandbox_spike_record.md
+9_artifacts/gbrain_sandbox/p12_9_canonical_memory_01/gbrain_home/**
+9_artifacts/gbrain_sandbox/p12_9_canonical_memory_01/db/**
+9_artifacts/gbrain_sandbox/p12_9_canonical_memory_01/exports/**
+9_artifacts/gbrain_sandbox/p12_9_canonical_memory_01/logs/**
+9_artifacts/gbrain_sandbox/p12_9_canonical_memory_01/reports/**
+9_artifacts/gbrain_sandbox/p12_9_canonical_memory_01/manifest/**
 ```
 
 Not created / not approved:
@@ -490,7 +702,6 @@ Not created / not approved:
 ```text
 No production memory store
 No operational memory promotion
-No canonical P12.9 sandbox directories
 No graph-query
 No embeddings
 No Ollama command
@@ -520,39 +731,41 @@ No git add .
 
 ## Limitations
 
-This record does not validate:
+P12.9 does not validate:
 
 ```text
-fresh sandbox creation
-GBRAIN_HOME sandbox scoping
-local PGLite init
-keyword-only GBrain config
-governance markdown import
-search smoke queries
-export generation
-output confinement after runtime
-GBrain source runtime prerequisites
-P12.11 readiness
+production memory readiness
+semantic embeddings
+Ollama Mode B
+provider-backed search
+graph traversal usefulness
+graph-query behavior
+GStack adoption
+MCP registration
+agent taxonomy production use
+cleanup/reindex operational readiness
+rollback automation
+incident automation
 ```
+
+P12.9 observed content-sanity warnings for some large or markup-heavy governance files. These are not runtime failures, but they should be considered by P12.11 and CLEAN.
 
 ## Recommended Next Ticket
 
-Recommended next action:
+Recommended next ticket:
 
 ```text
-Provide the required explicit P12.9 runtime approval outside the ticket body, resolve any missing runtime preflight conditions such as the absent GBrain source path if still absent, then rerun P12.9 once.
+P12.11 - Retention / Rollback / Incident Hardening
 ```
-
-Do not open a runtime debug chain automatically.
 
 ## Commit Commands
 
-The following commands are not part of this execution and were not run. If this blocked-before-execution record is accepted, stage only the intended governance record:
+The following commands are not part of this execution and were not run. If this execution record is accepted, stage only the intended governance execution record:
 
 ```powershell
 git status --short
 git add 0_architecture/governance/agent_platform_canonical_local_memory_sandbox_spike_record.md
-git commit -m "Record blocked canonical local memory sandbox spike"
+git commit -m "Run canonical local memory sandbox spike"
 git push
 ```
 
@@ -560,7 +773,7 @@ Do not stage sandbox outputs. Do not stage dependency artifacts. Do not use `git
 
 ## Final Status
 
-P12.9 is blocked before execution.
+P12.9 completed successfully as a controlled local memory sandbox spike.
 
 Final marker:
 
