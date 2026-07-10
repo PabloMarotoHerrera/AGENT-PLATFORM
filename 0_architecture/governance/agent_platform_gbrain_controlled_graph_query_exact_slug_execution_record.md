@@ -2,7 +2,7 @@
 
 ## Summary
 
-P12.0E-GRAPH performed the allowed preflight checks for the controlled exact-slug graph-query execution, but stopped before running graph-query because the required explicit P12.0E-GRAPH approval statement was not present as an authorization.
+P12.0E-GRAPH executed exactly one approved GBrain graph-query command against the existing Mode A governance import sandbox. The command completed successfully and returned an empty graph result for the selected slug.
 
 Result marker:
 
@@ -13,20 +13,28 @@ gbrain_controlled_graph_query_exact_slug_execution_record_ready
 Decision markers:
 
 ```text
-gbrain_graph_query_exact_slug_blocked_before_execution
-gbrain_runtime_still_blocked
+gbrain_graph_query_exact_slug_execution_success
+gbrain_graph_query_empty_result
 gbrain_graph_query_used_existing_sandbox_home
 gbrain_graph_query_no_reimport_no_reexport
+gbrain_graph_query_output_captured_in_governance_record
 gbrain_mode_b_ollama_still_blocked
 gbrain_provider_calls_still_blocked
+p12_graph_query_review_ready_after_execution
+```
+
+Graph-query result:
+
+```text
+No edges found from agent_platform_gbrain_ollama_controlled_sandbox_plan.
 ```
 
 ```yaml
 P12_0E_GRAPH_Decision:
   ticket: P12.0E-GRAPH
   date: "2026-07-10"
-  outcome: "Outcome B - blocked before execution"
-  human_graph_query_approval_present: false
+  outcome: "Outcome D - graph-query success with empty graph result"
+  human_graph_query_approval_present: true
   preflight_completed: true
   selected_slug_confirmed: true
   selected_slug: "agent_platform_gbrain_ollama_controlled_sandbox_plan"
@@ -34,9 +42,13 @@ P12_0E_GRAPH_Decision:
   existing_sandbox_home_exists: true
   existing_sandbox_db_exists: true
   existing_sandbox_exports_exists: true
-  graph_query_attempted: false
-  graph_query_success: false
-  gbrain_home_set_by_ticket: false
+  graph_query_attempted_once: true
+  graph_query_success: true
+  graph_query_empty_result: true
+  graph_query_stdout_summary: "No edges found from agent_platform_gbrain_ollama_controlled_sandbox_plan."
+  related_nodes_edges_paths_returned: false
+  gbrain_home_set_by_ticket: true
+  gbrain_home_cleaned_up: true
   init_rerun_attempted: false
   import_rerun_attempted: false
   search_rerun_attempted: false
@@ -47,7 +59,7 @@ P12_0E_GRAPH_Decision:
   graphify_attempted: false
   sandbox_outputs_modified: false
   git_mutated: false
-  p12_graph_query_review_ready_now: false
+  p12_graph_query_review_ready_now: true
   final_marker: "gbrain_controlled_graph_query_exact_slug_execution_record_ready"
 ```
 
@@ -85,15 +97,23 @@ No DB internals, generated home internals, credentials, environment secrets, nor
 
 ## Files Created
 
-Created this execution record:
+Created or updated this execution record:
 
 ```text
 0_architecture/governance/agent_platform_gbrain_controlled_graph_query_exact_slug_execution_record.md
 ```
 
+No sandbox report file was created.
+
 ## Files Modified
 
-No existing file was modified by P12.0E-GRAPH.
+The existing blocked-before-execution graph-query record was replaced with this successful execution record:
+
+```text
+0_architecture/governance/agent_platform_gbrain_controlled_graph_query_exact_slug_execution_record.md
+```
+
+No sandbox outputs, source files, dependency files, package files, PATH configuration, shell profiles, or Git metadata were modified by P12.0E-GRAPH.
 
 ## Commands Run
 
@@ -129,44 +149,63 @@ p12_0e_graph_query_execution_gate_ready
 Exported 119 pages
 ```
 
-Commands not run:
+Approved graph-query command run exactly once:
+
+```powershell
+Push-Location "4_external/sources/gbrain-master"
+$env:GBRAIN_HOME = "C:\Users\pablo\OneDrive\Escritorio\AGENT PLATFORM\9_artifacts\gbrain_sandbox\p12_0d_governance_import_01\gbrain_home"
+bun run src/cli.ts graph-query "agent_platform_gbrain_ollama_controlled_sandbox_plan" --depth 1 --direction both
+Remove-Item Env:GBRAIN_HOME
+Pop-Location
+```
+
+Approved post-run verification commands run:
+
+```powershell
+git status --short
+Test-Path Env:GBRAIN_HOME
+Test-Path 9_artifacts/gbrain_sandbox/p12_0d_governance_import_01
+Test-Path 9_artifacts/gbrain_sandbox/p12_0d_governance_import_01/gbrain_home
+Test-Path 9_artifacts/gbrain_sandbox/p12_0d_governance_import_01/db
+Test-Path 9_artifacts/gbrain_sandbox/p12_0d_governance_import_01/exports
+```
+
+Forbidden commands not run:
 
 ```text
-No graph-query command
-No GBrain runtime command
-No gbrain command
-No bun run src/cli.ts command
-No init rerun
-No import rerun
-No search rerun
-No export rerun
-No embeddings
+No gbrain binary command
+No graph-query for any other slug
+No graph-query depth other than 1
+No graph-query direction other than both
+No init
+No config
+No import
+No search
+No export
+No sources/doctor/apply-migrations/provider command
+No bun run without explicit approved src/cli.ts graph-query command
+No bun build/test/install/x
+No npm/node/npx/pnpm/yarn command
+No Graphify command
 No Ollama command
 No provider/API command
-No Graphify command
+No credential/environment secret command
 No package install
-No build
-No test
+No build/test/CI
 No Git mutation
 No staging command
 ```
 
 ## Human Approval Status
 
-The ticket text included the required future approval wording as a quoted requirement, but the user did not provide that statement as an actual authorization for this execution turn.
-
-Required approval before graph-query:
-
-```text
-I approve P12.0E-GRAPH graph-query only. Use the existing GBrain sandbox home under `9_artifacts/gbrain_sandbox/p12_0d_governance_import_01/gbrain_home`, run exactly one graph-query for slug `agent_platform_gbrain_ollama_controlled_sandbox_plan` with `--depth 1 --direction both`, capture stdout/stderr summary only in the governance execution record, and clean up shell-scoped `GBRAIN_HOME` after execution. Do not rerun init, import, search, or export. Do not run Ollama, do not pull models, do not generate embeddings, do not call providers, do not inspect credentials, do not run Graphify, do not run any other GBrain command, do not modify sandbox outputs, do not modify PATH, do not mutate Git, and do not stage sandbox outputs.
-```
-
-Decision:
+The required P12.0E-GRAPH graph-query approval statement was present in the user request before runtime execution.
 
 ```yaml
-human_graph_query_approval_present: false
-graph_query_execution_allowed: false
-decision_marker: "gbrain_graph_query_exact_slug_blocked_before_execution"
+human_graph_query_approval_present: true
+graph_query_execution_allowed: true
+approved_slug: "agent_platform_gbrain_ollama_controlled_sandbox_plan"
+approved_depth: 1
+approved_direction: "both"
 ```
 
 ## P12.0E-GOV-REVIEW Dependency Status
@@ -224,7 +263,7 @@ existing_sandbox_exports_present: true
 selected_slug_export_present: true
 ```
 
-Initial `git status --short` observed:
+Initial `git status --short` observed before graph-query:
 
 ```text
 ?? 0_architecture/implementation/graphify_command_candidate_confirmation.md
@@ -253,42 +292,76 @@ selected_slug_export_exists: true
 
 ## Graph-Query Execution Status
 
-Graph-query was not executed.
+Graph-query was executed exactly once.
+
+Command:
+
+```powershell
+bun run src/cli.ts graph-query "agent_platform_gbrain_ollama_controlled_sandbox_plan" --depth 1 --direction both
+```
+
+Decision markers:
+
+```text
+gbrain_graph_query_exact_slug_execution_success
+```
 
 ```yaml
-graph_query_attempted: false
-graph_query_block_reason: "explicit P12.0E-GRAPH approval missing"
-decision_marker: "gbrain_runtime_still_blocked"
+graph_query_attempted_once: true
+graph_query_exit_success: true
+approved_slug_used: true
+approved_depth_used: true
+approved_direction_used: true
+existing_sandbox_home_used: true
+init_import_search_export_avoided: true
 ```
 
 ## Graph-Query Output Summary
 
-No graph-query output exists because the graph-query command was not run.
+Observed graph-query output:
+
+```text
+No edges found from agent_platform_gbrain_ollama_controlled_sandbox_plan.
+```
+
+Summary:
 
 ```yaml
-graph_query_output_captured: false
-related_nodes_edges_paths_observed: null
+graph_query_output_captured_in_governance_record: true
+graph_query_empty_result: true
+related_nodes_returned: false
+related_edges_returned: false
+related_paths_returned: false
+```
+
+Decision markers:
+
+```text
+gbrain_graph_query_empty_result
 ```
 
 ## GBRAIN_HOME Cleanup Status
 
-`GBRAIN_HOME` was not set by P12.0E-GRAPH, so cleanup was not required.
+`GBRAIN_HOME` was set only inside the runtime PowerShell process and removed after graph-query execution.
+
+Post-run check:
 
 ```yaml
-gbrain_home_set_by_ticket: false
-gbrain_home_cleanup_required: false
+Test-Path_Env_GBRAIN_HOME: false
+cleanup_required_after_postcheck: false
 ```
 
 ## Post-Run Git Status
 
-No graph-query runtime ran, so there is no post-runtime output status. After this record is created, expected worktree status includes:
+Post-query `git status --short` before this record update:
 
 ```text
-0_architecture/governance/agent_platform_gbrain_controlled_graph_query_exact_slug_execution_record.md
-0_architecture/implementation/graphify_command_candidate_confirmation.md
+?? 0_architecture/implementation/graphify_command_candidate_confirmation.md
 ```
 
-No sandbox outputs, dependency artifacts, or generated artifacts were staged.
+No sandbox outputs, dependency artifacts, or generated artifacts were staged. The approved sandbox path is under ignored `9_artifacts/` and did not appear in `git status --short`.
+
+Final worktree status after this record update is expected to include this governance record modification and the pre-existing Graphify confirmation file only.
 
 ## Mode B / Ollama Boundary Confirmation
 
@@ -314,10 +387,10 @@ Graphify with Ollama
 
 ## Incident Status
 
-This is a controlled pre-execution block, not a runtime failure.
+No boundary violation was observed.
 
 ```yaml
-incident_status: "blocked_before_execution_missing_explicit_approval"
+incident_status: "completed_with_empty_graph_result"
 runtime_safe_failure: false
 output_boundary_violation: false
 credentials_exposed: false
@@ -328,17 +401,24 @@ git_mutated: false
 
 ## P12.0E-GRAPH-REVIEW Handoff Decision
 
-P12.0E-GRAPH-REVIEW is not ready from this blocked execution because graph-query was not executed.
+P12.0E-GRAPH-REVIEW is ready as an empty graph-query output review and adoption-evidence preparation ticket.
+
+Decision marker:
+
+```text
+p12_graph_query_review_ready_after_execution
+```
 
 ```yaml
 P12_0E_GRAPH_REVIEW_HandoffDecision:
-  status: "blocked_until_explicit_graph_query_approval_and_execution"
-  p12_graph_query_review_ready_now: false
+  status: "ready_after_empty_graph_query_execution"
+  graph_query_empty_result: true
+  recommended_next_ticket: "P12.0E-GRAPH-REVIEW - GBrain Empty Graph Query Output Review"
 ```
 
 ## Created / Not Created Register
 
-Created:
+Created or updated:
 
 ```text
 0_architecture/governance/agent_platform_gbrain_controlled_graph_query_exact_slug_execution_record.md
@@ -347,7 +427,7 @@ Created:
 Not created / not approved:
 
 ```text
-No graph-query execution
+No sandbox report file
 No graph-query for any other slug
 No graph-query depth other than 1
 No graph-query direction other than both
@@ -377,20 +457,16 @@ No git add .
 
 ## Limitations
 
-P12.0E-GRAPH did not execute because explicit graph-query approval was missing.
+The selected slug produced an empty graph result. P12.0E-GRAPH did not inspect DB internals to determine whether graph links exist elsewhere or why no depth-1 bidirectional edges were returned for the selected page.
 
-No graph-query behavior, related nodes, edges, paths, or empty-result behavior was observed.
-
-The next P12.0E-GRAPH execution attempt should rerun all preflight checks because workspace state may change.
+No additional graph-query variants were run. No `--include-foreign`, `--type`, different slug, different direction, or different depth was attempted.
 
 ## Recommended Next Ticket
 
-Recommended next action: provide the explicit P12.0E-GRAPH graph-query approval statement and rerun or continue P12.0E-GRAPH.
-
-Required approval:
+Recommended next ticket:
 
 ```text
-I approve P12.0E-GRAPH graph-query only. Use the existing GBrain sandbox home under `9_artifacts/gbrain_sandbox/p12_0d_governance_import_01/gbrain_home`, run exactly one graph-query for slug `agent_platform_gbrain_ollama_controlled_sandbox_plan` with `--depth 1 --direction both`, capture stdout/stderr summary only in the governance execution record, and clean up shell-scoped `GBRAIN_HOME` after execution. Do not rerun init, import, search, or export. Do not run Ollama, do not pull models, do not generate embeddings, do not call providers, do not inspect credentials, do not run Graphify, do not run any other GBrain command, do not modify sandbox outputs, do not modify PATH, do not mutate Git, and do not stage sandbox outputs.
+P12.0E-GRAPH-REVIEW - GBrain Empty Graph Query Output Review
 ```
 
 ## Commit Commands
@@ -400,7 +476,7 @@ If this execution record is accepted for commit, stage only the intended governa
 ```powershell
 git status --short
 git add 0_architecture/governance/agent_platform_gbrain_controlled_graph_query_exact_slug_execution_record.md
-git commit -m "Record GBrain controlled graph query block"
+git commit -m "Record GBrain controlled graph query execution"
 ```
 
 Push only if explicitly approved:
@@ -418,7 +494,7 @@ GBrainControlledGraphQueryExactSlugExecutionRecord:
   target_file: "0_architecture/governance/agent_platform_gbrain_controlled_graph_query_exact_slug_execution_record.md"
   p12_0e_gov_review_confirmed: true
   p12_0d_rerun_confirmed: true
-  human_graph_query_approval_present: false
+  human_graph_query_approval_present: true
   selected_slug_confirmed: true
   selected_slug: "agent_platform_gbrain_ollama_controlled_sandbox_plan"
   selected_slug_export_exists: true
@@ -428,10 +504,14 @@ GBrainControlledGraphQueryExactSlugExecutionRecord:
   bun_available: true
   bun_version: "1.3.14"
   bun_revision: "1.3.14+0d9b296af"
-  graph_query_attempted: false
-  graph_query_success: false
-  graph_query_output_captured: false
-  gbrain_home_set_by_ticket: false
+  graph_query_attempted_once: true
+  graph_query_success: true
+  graph_query_empty_result: true
+  graph_query_stdout_summary: "No edges found from agent_platform_gbrain_ollama_controlled_sandbox_plan."
+  related_nodes_edges_paths_returned: false
+  graph_query_output_captured: true
+  gbrain_home_set_by_ticket: true
+  gbrain_home_cleaned_up: true
   init_rerun_attempted: false
   import_rerun_attempted: false
   search_rerun_attempted: false
@@ -444,7 +524,7 @@ GBrainControlledGraphQueryExactSlugExecutionRecord:
   credentials_inspected: false
   path_modified: false
   git_mutated: false
-  p12_graph_query_review_ready_now: false
+  p12_graph_query_review_ready_now: true
   final_marker: "gbrain_controlled_graph_query_exact_slug_execution_record_ready"
 ```
 
