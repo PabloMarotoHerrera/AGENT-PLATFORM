@@ -1,0 +1,94 @@
+skill_id: skill.planning.request_review
+title: Planning Request Review
+status: candidate
+lifecycle_state: blueprint_candidate
+source_refs:
+  - source_system: agent_platform
+    path: 0_architecture/governance/agent_platform_skill_stack_bootstrap_design.md
+    evidence_kind: governance
+    authority_tier: governance_authority
+  - source_system: agent_platform
+    path: 0_architecture/governance/agent_platform_skill_authority_execution_boundary.md
+    evidence_kind: governance
+    authority_tier: governance_authority
+  - source_system: agent_platform
+    path: 0_architecture/governance/agent_platform_gstack_adoption_decision.md
+    evidence_kind: governance
+    authority_tier: governance_authority
+  - source_system: agent_platform
+    path: 0_architecture/governance/agent_platform_retention_rollback_incident_hardening.md
+    evidence_kind: governance
+    authority_tier: governance_authority
+purpose: Structure a planning or ticket review before execution.
+non_goals:
+  - Execute tasks.
+  - Write files.
+  - Approve implementation.
+  - Mutate Git.
+  - Write memory.
+taxonomy:
+  family: planning_review
+  tags:
+    - planning
+    - review
+    - no_runtime
+runtime_profile: S1
+permission_classes:
+  allowed_now:
+    - SKILL_READ_DOCS
+    - SKILL_READ_SOURCE_METADATA
+  candidate_only: []
+  blocked:
+    - SKILL_WRITE_APPROVED_FILES
+    - SKILL_RUN_LOCAL_COMMANDS
+    - SKILL_RUN_TESTS
+    - SKILL_USE_BROWSER
+    - SKILL_USE_MCP
+    - SKILL_USE_PROVIDER
+    - SKILL_USE_CREDENTIALS
+    - SKILL_WRITE_MEMORY
+    - SKILL_REGISTER_HOOKS
+    - SKILL_MODIFY_SETTINGS
+    - SKILL_MUTATE_GIT
+    - SKILL_DEPLOY
+required_future_gates: []
+memory_boundary:
+  can_read_memory_refs: false
+  can_write_memory: false
+  can_sync_gbrain: false
+  memory_update_output: none
+output_boundary:
+  allowed_output_classes:
+    - review_support
+  blocked_output_classes:
+    - draft_implementation
+    - runtime_output
+    - browser_provider_mcp_output
+    - git_deploy_audit_evidence
+    - accepted_governance_source_record
+  promotion_required: true
+inputs:
+  allowed:
+    - user_request
+    - ticket_text
+    - accepted_governance_refs
+  blocked:
+    - credentials
+    - secrets
+    - provider_configs
+    - product_source
+command_candidates:
+  allowed_to_propose: false
+  exact_command_required: true
+  execution_allowed: false
+file_write_boundary:
+  allowed_to_write: false
+  allowed_paths: []
+runtime_boundary:
+  execution_allowed: false
+  browser_allowed: false
+  mcp_allowed: false
+  provider_allowed: false
+  git_allowed: false
+authority_posture: non_authoritative
+p12_10_bootstrap_action: create_blueprint

@@ -1,0 +1,219 @@
+registry_id: agent_platform_mvp0_static_skill_registry
+registry_status: inactive_static_metadata
+created_by_ticket: P12.10
+authority_posture: non_authoritative
+execution_allowed: false
+registry_invariants:
+  - The registry is static.
+  - The registry is inactive.
+  - The registry is not a dispatcher.
+  - The registry is not a command router.
+  - The registry does not activate skills.
+  - The registry does not authorize tool calls.
+  - The registry does not authorize memory writes.
+  - The registry does not authorize Git mutation.
+governance_refs:
+  - path: 0_architecture/governance/agent_platform_skill_stack_bootstrap_design.md
+    marker: skill_stack_bootstrap_design_ready
+  - path: 0_architecture/governance/agent_platform_skill_authority_execution_boundary.md
+    marker: skill_authority_execution_boundary_ready
+  - path: 0_architecture/governance/agent_platform_gstack_adoption_decision.md
+    marker: gstack_adoption_decision_ready
+  - path: 0_architecture/governance/agent_platform_memory_store_integration_design.md
+    marker: memory_store_integration_design_ready
+  - path: 0_architecture/governance/agent_platform_retention_rollback_incident_hardening.md
+    marker: retention_rollback_incident_hardening_ready
+entries:
+  - skill_id: skill.planning.request_review
+    title: Planning Request Review
+    registry_status: review_only_candidate
+    blueprint_path: 3_platform/_governed_skeleton/agent_platform_mvp0/skills/blueprints/planning-request-review/skill.blueprint.yaml
+    runtime_profile: S1
+    permission_summary:
+      allowed_now:
+        - SKILL_READ_DOCS
+        - SKILL_READ_SOURCE_METADATA
+      candidate_only: []
+      blocked:
+        - SKILL_WRITE_APPROVED_FILES
+        - SKILL_RUN_LOCAL_COMMANDS
+        - SKILL_RUN_TESTS
+        - SKILL_USE_BROWSER
+        - SKILL_USE_MCP
+        - SKILL_USE_PROVIDER
+        - SKILL_USE_CREDENTIALS
+        - SKILL_WRITE_MEMORY
+        - SKILL_REGISTER_HOOKS
+        - SKILL_MODIFY_SETTINGS
+        - SKILL_MUTATE_GIT
+        - SKILL_DEPLOY
+    required_future_gates: []
+    memory_posture: no_memory_write
+    output_posture: review_support
+    source_refs:
+      - 0_architecture/governance/agent_platform_skill_stack_bootstrap_design.md
+      - 0_architecture/governance/agent_platform_skill_authority_execution_boundary.md
+      - 0_architecture/governance/agent_platform_gstack_adoption_decision.md
+    authority_posture: non_authoritative
+    execution_allowed: false
+  - skill_id: skill.review.architecture
+    title: Architecture Review
+    registry_status: review_only_candidate
+    blueprint_path: 3_platform/_governed_skeleton/agent_platform_mvp0/skills/blueprints/architecture-review/skill.blueprint.yaml
+    runtime_profile: S1
+    permission_summary:
+      allowed_now:
+        - SKILL_READ_DOCS
+        - SKILL_READ_SOURCE_METADATA
+      candidate_only: []
+      blocked:
+        - SKILL_WRITE_APPROVED_FILES
+        - SKILL_RUN_LOCAL_COMMANDS
+        - SKILL_RUN_TESTS
+        - SKILL_USE_BROWSER
+        - SKILL_USE_MCP
+        - SKILL_USE_PROVIDER
+        - SKILL_USE_CREDENTIALS
+        - SKILL_WRITE_MEMORY
+        - SKILL_REGISTER_HOOKS
+        - SKILL_MODIFY_SETTINGS
+        - SKILL_MUTATE_GIT
+        - SKILL_DEPLOY
+    required_future_gates: []
+    memory_posture: no_memory_write
+    output_posture: review_support
+    source_refs:
+      - 0_architecture/governance/agent_platform_skill_stack_bootstrap_design.md
+      - 0_architecture/governance/agent_platform_skill_authority_execution_boundary.md
+      - 0_architecture/governance/agent_platform_gstack_adoption_decision.md
+    authority_posture: non_authoritative
+    execution_allowed: false
+  - skill_id: skill.debug.investigation
+    title: Debug Investigation
+    registry_status: command_candidate_only
+    blueprint_path: 3_platform/_governed_skeleton/agent_platform_mvp0/skills/blueprints/debug-investigation/skill.blueprint.yaml
+    runtime_profile: S2
+    permission_summary:
+      allowed_now: []
+      candidate_only:
+        - SKILL_READ_DOCS
+        - SKILL_READ_SOURCE_METADATA
+      blocked:
+        - SKILL_WRITE_APPROVED_FILES
+        - SKILL_RUN_LOCAL_COMMANDS
+        - SKILL_RUN_TESTS
+        - SKILL_USE_BROWSER
+        - SKILL_USE_MCP
+        - SKILL_USE_PROVIDER
+        - SKILL_USE_CREDENTIALS
+        - SKILL_WRITE_MEMORY
+        - SKILL_REGISTER_HOOKS
+        - SKILL_MODIFY_SETTINGS
+        - SKILL_MUTATE_GIT
+        - SKILL_DEPLOY
+    required_future_gates: []
+    memory_posture: no_memory_write
+    output_posture: command_candidate
+    source_refs:
+      - 0_architecture/governance/agent_platform_skill_stack_bootstrap_design.md
+      - 0_architecture/governance/agent_platform_skill_authority_execution_boundary.md
+      - 0_architecture/governance/agent_platform_gstack_adoption_decision.md
+    authority_posture: non_authoritative
+    execution_allowed: false
+  - skill_id: skill.safety.command_review
+    title: Safety Command Review
+    registry_status: command_candidate_only
+    blueprint_path: 3_platform/_governed_skeleton/agent_platform_mvp0/skills/blueprints/safety-command-review/skill.blueprint.yaml
+    runtime_profile: S2
+    permission_summary:
+      allowed_now: []
+      candidate_only:
+        - SKILL_READ_DOCS
+        - SKILL_READ_SOURCE_METADATA
+      blocked:
+        - SKILL_WRITE_APPROVED_FILES
+        - SKILL_RUN_LOCAL_COMMANDS
+        - SKILL_RUN_TESTS
+        - SKILL_USE_BROWSER
+        - SKILL_USE_MCP
+        - SKILL_USE_PROVIDER
+        - SKILL_USE_CREDENTIALS
+        - SKILL_WRITE_MEMORY
+        - SKILL_REGISTER_HOOKS
+        - SKILL_MODIFY_SETTINGS
+        - SKILL_MUTATE_GIT
+        - SKILL_DEPLOY
+    required_future_gates: []
+    memory_posture: no_memory_write
+    output_posture: command_candidate
+    source_refs:
+      - 0_architecture/governance/agent_platform_skill_stack_bootstrap_design.md
+      - 0_architecture/governance/agent_platform_skill_authority_execution_boundary.md
+      - 0_architecture/governance/agent_platform_gstack_adoption_decision.md
+    authority_posture: non_authoritative
+    execution_allowed: false
+  - skill_id: skill.docs.release_notes_candidate
+    title: Docs Release Notes Candidate
+    registry_status: command_candidate_only
+    blueprint_path: 3_platform/_governed_skeleton/agent_platform_mvp0/skills/blueprints/docs-release-notes-candidate/skill.blueprint.yaml
+    runtime_profile: S2
+    permission_summary:
+      allowed_now: []
+      candidate_only:
+        - SKILL_READ_DOCS
+        - SKILL_READ_SOURCE_METADATA
+      blocked:
+        - SKILL_WRITE_APPROVED_FILES
+        - SKILL_RUN_LOCAL_COMMANDS
+        - SKILL_RUN_TESTS
+        - SKILL_USE_BROWSER
+        - SKILL_USE_MCP
+        - SKILL_USE_PROVIDER
+        - SKILL_USE_CREDENTIALS
+        - SKILL_WRITE_MEMORY
+        - SKILL_REGISTER_HOOKS
+        - SKILL_MODIFY_SETTINGS
+        - SKILL_MUTATE_GIT
+        - SKILL_DEPLOY
+    required_future_gates: []
+    memory_posture: no_memory_write
+    output_posture: draft_documentation
+    source_refs:
+      - 0_architecture/governance/agent_platform_skill_stack_bootstrap_design.md
+      - 0_architecture/governance/agent_platform_skill_authority_execution_boundary.md
+      - 0_architecture/governance/agent_platform_gstack_adoption_decision.md
+    authority_posture: non_authoritative
+    execution_allowed: false
+  - skill_id: skill.memory.update_request
+    title: Memory Update Request
+    registry_status: review_only_candidate
+    blueprint_path: 3_platform/_governed_skeleton/agent_platform_mvp0/skills/blueprints/memory-update-request/skill.blueprint.yaml
+    runtime_profile: S1
+    permission_summary:
+      allowed_now:
+        - SKILL_READ_DOCS
+        - SKILL_READ_SOURCE_METADATA
+      candidate_only: []
+      blocked:
+        - SKILL_WRITE_APPROVED_FILES
+        - SKILL_RUN_LOCAL_COMMANDS
+        - SKILL_RUN_TESTS
+        - SKILL_USE_BROWSER
+        - SKILL_USE_MCP
+        - SKILL_USE_PROVIDER
+        - SKILL_USE_CREDENTIALS
+        - SKILL_WRITE_MEMORY
+        - SKILL_REGISTER_HOOKS
+        - SKILL_MODIFY_SETTINGS
+        - SKILL_MUTATE_GIT
+        - SKILL_DEPLOY
+    required_future_gates: []
+    memory_posture: memory_update_request_only
+    output_posture: memory_update_request
+    source_refs:
+      - 0_architecture/governance/agent_platform_skill_stack_bootstrap_design.md
+      - 0_architecture/governance/agent_platform_skill_authority_execution_boundary.md
+      - 0_architecture/governance/agent_platform_gstack_adoption_decision.md
+      - 0_architecture/governance/agent_platform_memory_store_integration_design.md
+    authority_posture: non_authoritative
+    execution_allowed: false
