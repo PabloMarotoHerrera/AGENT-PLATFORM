@@ -22,6 +22,76 @@ Result marker:
 graphify_headless_cli_qwen3_5_reduced_scope_execution_record_ready
 ```
 
+## P10.5K-A Marker Compatibility Amendment
+
+Amendment date:
+
+```text
+2026-07-11
+```
+
+This amendment adds compatibility aliases only.
+No execution fact, output, warning, limitation, outcome, or authority
+classification is changed.
+
+The original P10.5K markers remain unchanged. The following exact aliases are added solely to align the P10.5K evidence vocabulary with the P10.5K-A dependency contract:
+
+```text
+graphify_headless_qwen3_5_reduced_scope_execution_success
+graphify_headless_ollama_backend_verified
+graphify_headless_semantic_chunks_completed
+graphify_headless_structured_output_accepted
+graphify_headless_graph_build_success
+graphify_headless_graph_json_generated
+graphify_headless_quality_warnings_present
+graphify_headless_outputs_local_untracked_unvalidated
+```
+
+Exact marker-to-evidence mapping:
+
+| P10.5K-A compatibility marker | Existing P10.5K supporting evidence |
+| --- | --- |
+| `graphify_headless_qwen3_5_reduced_scope_execution_success` | Outcome A and original marker `graphify_qwen3_5_headless_reduced_scope_execution_success`. |
+| `graphify_headless_ollama_backend_verified` | YAML records `backend: "ollama"`, `backend_scope: "local"`, model `qwen3.5:9b`, and successful execution. |
+| `graphify_headless_semantic_chunks_completed` | YAML records three total and three completed chunks; original marker `graphify_qwen3_5_headless_semantic_chunks_completed`. |
+| `graphify_headless_structured_output_accepted` | All three semantic chunks completed and Graphify accepted sufficient structured extraction output to merge/build and report a final `graph.json` path. This marker does not assert content validation. |
+| `graphify_headless_graph_build_success` | YAML records `graph_build_succeeded: true`; original marker `graphify_qwen3_5_headless_graph_build_success`; final metrics are 40 nodes, 33 edges, and 14 communities. |
+| `graphify_headless_graph_json_generated` | The exact final graph path is recorded and the supplied Graphify terminal evidence reported the graph write. Contents remain uninspected. |
+| `graphify_headless_quality_warnings_present` | Three cross-chunk ID collisions, dropped duplicate nodes, 30 extraction-quality issues, and missing `source_file` are recorded. |
+| `graphify_headless_outputs_local_untracked_unvalidated` | Outputs are recorded as local/untracked raw generated evidence; contents were not inspected or validated. |
+
+Structured-output interpretation boundary:
+
+```text
+graphify_headless_structured_output_accepted means that Graphify's parser/pipeline
+accepted sufficient structured extraction output to complete graph construction.
+
+It does not assert semantic correctness, completeness, provenance quality,
+schema perfection, or content validation.
+```
+
+Original facts explicitly preserved:
+
+```text
+three cross-chunk node-ID collisions
+duplicate nodes dropped
+30 extraction-quality issues
+missing source_file issue present
+GRAPH_REPORT.md not generated
+graph.html not generated
+generated output contents not inspected
+no extraction retry
+no cluster-only execution
+outputs remain local/untracked raw generated evidence
+```
+
+Amendment markers:
+
+```text
+graphify_p10_5k_marker_compatibility_amendment_applied
+graphify_p10_5k_original_facts_preserved
+```
+
 Outcome markers:
 
 ```text
