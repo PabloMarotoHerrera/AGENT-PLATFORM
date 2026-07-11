@@ -26,12 +26,10 @@ Governance inputs used by P12.6:
 
 | Input | Status | P12.6 use |
 | --- | --- | --- |
-| `0_architecture/governance/agent_platform_gstack_license_dependency_skill_audit.md` | Present; marker-searched | P12.2 license/dependency/skill/runtime boundary. |
 | `0_architecture/governance/agent_platform_skill_authority_execution_boundary.md` | Present; marker-searched | P12.4 skill non-authority and execution gate boundary. |
 | `0_architecture/governance/agent_platform_memory_store_integration_design.md` | Present; marker-searched | P12.7 memory-store relation and skill-memory boundary. |
 | `0_architecture/governance/agent_platform_memory_authority_model.md` | Present; marker-searched | P12.3 memory authority and GStack non-memory-authority posture. |
 | `0_architecture/governance/agent_platform_gbrain_adoption_graphify_semantic_replacement_decision.md` | Present by path check | P12.5 GBrain retrieval role and non-authority boundary from accepted context. |
-| `0_architecture/governance/agent_platform_gbrain_empty_graph_query_output_review.md` | Not separately inspected in P12.6 | GBrain Mode A closure context was not needed to decide GStack adoption. |
 | `0_architecture/governance/agent_platform_external_tool_execution_gate_model.md` | Not separately inspected in P12.6 | P12.2/P12.4 evidence was sufficient for tool execution blockers. |
 | `0_architecture/governance/agent_platform_human_approval_review_loop_operational_contract.md` | Not separately inspected in P12.6 | P12.4 evidence was sufficient for skill approval/execution boundary. |
 | `0_architecture/governance/agent_platform_audit_retention_rollback_baseline.md` | Not separately inspected in P12.6 | Retention/rollback design is not changed by this adoption decision. |
@@ -53,9 +51,7 @@ P12.6 did not inspect credentials, generated state, caches, `node_modules`, norm
 
 ## 4. P12.2 Dependency Status
 
-P12.2 exists as:
-
-`0_architecture/governance/agent_platform_gstack_license_dependency_skill_audit.md`
+P12.2 conclusions are retained as historical decision lineage in this adoption record.
 
 Required marker confirmed:
 
@@ -213,6 +209,8 @@ P12.6 decides:
 Setup remains deferred until a later controlled plan only if needed:
 
 `P12.2A - GStack Controlled Setup Boundary Plan`
+
+Any future controlled setup must select exactly one host integration, disable team mode, auto-upgrade, telemetry, plan-tune/settings hooks, browser/cookie/daemon/sidebar/pair-agent/ngrok surfaces, and Git/checkpoint behavior by default. `GSTACK_HOME` and every writable state path must be pinned to an approved sandbox. Setup must run without provider keys, Supabase tokens, GBrain bearer tokens, proxy credentials, or writes to normal-user Claude, Codex, OpenCode, or GStack directories. The selected version requires a fresh dependency and transitive-license review before installation.
 
 P12.6 does not require P12.2A immediately. P12.8 should proceed first from read-only evidence and decide later whether setup is necessary for P12.10.
 

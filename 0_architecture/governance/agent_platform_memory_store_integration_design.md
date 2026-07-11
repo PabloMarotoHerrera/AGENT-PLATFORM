@@ -205,6 +205,8 @@ GBrain integration rules:
 | Rebuildable/disposable | Index state can be discarded and rebuilt from canonical inputs. |
 | Provider blocked by default | `provider: none` / `mode: keyword_only` is the default future sandbox posture. |
 
+Future evidence-bound relation candidates must remain layered: deterministic structural relations, retrieval relations, model-assisted relation candidates, and presentation-only visualization relations. Every relation must retain source path/evidence, confidence, review status, and staleness metadata. These relations remain Tier B/C derived evidence and cannot become authority without a separate validation and promotion gate.
+
 Decision marker:
 
 `gbrain_derived_index_integration_defined`
@@ -443,6 +445,8 @@ Blocked automatic triggers:
 | External source update alone | Cannot feed memory without source/adoption gate. |
 | Tool suggestion alone | Cannot trigger indexing. |
 
+Input visibility is a mandatory preflight. Every manifest input must be visible to the selected importer, while generated outputs remain in an ignored sandbox. Physical file presence is insufficient for a Git-aware importer; zero visible manifest inputs is a hard stop.
+
 Reindex rule:
 
 No automatic operational reindex before explicit memory integration gate.
@@ -501,6 +505,8 @@ Future memory sandboxes must follow these boundaries:
 | No DB internals as context | DB files are implementation/storage, not memory authority. |
 | No raw generated content import | Operational memory imports refs/metadata first, not raw outputs. |
 | Rollback route | Any future indexed sandbox requires rollback and incident posture. |
+| Lifecycle scripts | `postinstall` and other state-mutating lifecycle scripts remain blocked unless separately reviewed and approved. |
+| Autopilot / daemon paths | Blocked unless a separate gate proves every write honors the approved sandbox; normal-user-home fallback is not allowed. |
 
 ## 15. CLEAN Dependency
 

@@ -101,7 +101,6 @@ Dependency implications:
 Governance inputs reviewed read-only:
 
 ```text
-0_architecture/governance/agent_platform_gstack_license_dependency_skill_audit.md
 0_architecture/governance/agent_platform_skill_authority_execution_boundary.md
 0_architecture/governance/agent_platform_gstack_adoption_decision.md
 0_architecture/governance/agent_platform_memory_store_integration_design.md

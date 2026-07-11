@@ -90,7 +90,7 @@ The following domains are the conceptual domains hidden across the previous corp
 | Adapter | Mature conceptual architecture. | Carry-forward candidate; adapters mediate without authority transfer. | `adapter_final_synthesis.md`, `adapter_architecture_final_synthesis.md`, adapter foundations, boundary, capability, taxonomy, governance, security, validation docs. | High; provider-facing work depends on this boundary. |
 | Workflow | Mature posture model, no engine. | Carry-forward candidate; workflow owns coordination posture only. | `workflow_final_synthesis.md`, `workflow_foundations.md`, `workflow_runtime.md`, `workflow_coordination.md`, `workflow_execution.md`. | Medium-high; useful after context/provider/adapter boundaries stay stable. |
 | Product | Mature but scope-limited. | Product-scope candidate only; not root workspace authority. | Product final syntheses, product component/structure/realization docs, `repository_vision.md`. | Medium; promote only after product workspace boundaries exist. |
-| Knowledge | Partial conceptual model. | Carry-forward candidate; knowledge is reviewed durable material, not truth by default. | `knowledge_layer.md`, `source_of_truth_strategy.md`, `product_knowledge_architecture.md`, `graphify_knowledge_research_coherence_audit.md`, W-00. | High; needed for semantic reuse and agent context selection. |
+| Knowledge | Partial conceptual model. | Carry-forward candidate; knowledge is reviewed durable material, not truth by default. | `knowledge_layer.md`, `source_of_truth_strategy.md`, `product_knowledge_architecture.md`, W-00. | High; needed for semantic reuse and agent context selection. |
 | Operations | Partial and mostly historical. | Migration evidence until current operations evidence model exists. | `operations_layer.md`, runtime docs, source-of-truth strategy, provider-specific reviews. | Medium; required before runtime/output evidence becomes durable. |
 | Security/Access | Mature as constraints but no current policy. | W-01 has canonical constraint posture; prior detailed docs are carry-forward candidates. | Agent, context, adapter security docs; provider-specific GSV reviews; `governance_layer.md`; W-01. | High; agent-native workspace cannot expose context/tools safely without it. |
 | Governance | Mature conceptual architecture but no current workflow. | W-01 canonicalizes governance as decision authority; detailed prior docs are carry-forward candidates. | `governance_layer.md`, agent/context/adapter/provider governance docs, semantic authority docs, source-of-truth strategy. | High; promotion, approval, and exception paths depend on it. |
@@ -361,7 +361,6 @@ W-02 is complete for semantic classification. No W-03 document is created here.
 | `previusknowledge/docs/architecture/adr_001_graphify_authority_proof.md` | `conflicted` | Semantic authority candidate | Preserve as evidence; requires neutral naming and substrate review. |
 | `previusknowledge/docs/architecture/adr_002_why_graph.md` | `conflicted` | Cognitive substrate candidate | Preserve as graph-hypothesis evidence, not a substrate decision. |
 | `previusknowledge/docs/architecture/agent_approval_model.md` | `carry_forward` | Agent governance | Preserve approval boundaries. |
-| `previusknowledge/docs/architecture/agent_architecture_closure.md` | `carry_forward` | Agent architecture | Preserve closure conclusions after workspace reframing. |
 | `previusknowledge/docs/architecture/agent_architecture_final_synthesis.md` | `carry_forward` | Agent architecture | Preserve as major synthesis input. |
 | `previusknowledge/docs/architecture/agent_architecture_foundations.md` | `carry_forward` | Agent architecture | Preserve foundational agent principles. |
 | `previusknowledge/docs/architecture/agent_autonomy_model.md` | `carry_forward` | Agent autonomy | Preserve autonomy boundaries. |
@@ -387,7 +386,6 @@ W-02 is complete for semantic classification. No W-03 document is created here.
 | `previusknowledge/docs/architecture/agent_security_model.md` | `carry_forward` | Agent security | Preserve security/access constraints. |
 | `previusknowledge/docs/architecture/agent_strategy.md` | `carry_forward` | Agent strategy | Preserve agent-native direction after workspace reframing. |
 | `previusknowledge/docs/architecture/agent_taxonomy_dimensions.md` | `carry_forward` | Agent taxonomy | Preserve taxonomy dimensions as candidate model. |
-| `previusknowledge/docs/architecture/agent_taxonomy_readiness_review.md` | `migration_evidence` | Agent taxonomy review | Use as readiness evidence only. |
 | `previusknowledge/docs/architecture/agent_taxonomy_synthesis.md` | `carry_forward` | Agent taxonomy | Preserve synthesis as candidate taxonomy input. |
 | `previusknowledge/docs/architecture/agent_type_derivation_rules.md` | `carry_forward` | Agent taxonomy | Preserve derivation logic as candidate rules. |
 | `previusknowledge/docs/architecture/canonical_adapter_type_candidates.md` | `migration_evidence` | Adapter candidates | Candidate list only; not current taxonomy. |
@@ -430,9 +428,7 @@ W-02 is complete for semantic classification. No W-03 document is created here.
 | `previusknowledge/docs/architecture/context_selection_architecture.md` | `carry_forward` | Context selection | Preserve selected-context model. |
 | `previusknowledge/docs/architecture/context_sensitivity_taxonomy.md` | `carry_forward` | Context taxonomy | Preserve sensitivity dimensions. |
 | `previusknowledge/docs/architecture/context_source_taxonomy.md` | `carry_forward` | Context taxonomy | Preserve source dimensions. |
-| `previusknowledge/docs/architecture/context_taxonomy_closure.md` | `carry_forward` | Context taxonomy | Preserve closure conclusions as candidate input. |
 | `previusknowledge/docs/architecture/context_taxonomy_dimensions.md` | `carry_forward` | Context taxonomy | Preserve taxonomy dimensions. |
-| `previusknowledge/docs/architecture/context_taxonomy_readiness_review.md` | `migration_evidence` | Context taxonomy review | Use as readiness evidence only. |
 | `previusknowledge/docs/architecture/context_taxonomy_synthesis.md` | `carry_forward` | Context taxonomy | Preserve synthesis as candidate taxonomy input. |
 | `previusknowledge/docs/architecture/context_type_derivation_rules.md` | `carry_forward` | Context taxonomy | Preserve derivation logic as candidate rules. |
 | `previusknowledge/docs/architecture/context_validation_model.md` | `carry_forward` | Context validation | Preserve validation posture concepts. |
@@ -459,7 +455,6 @@ W-02 is complete for semantic classification. No W-03 document is created here.
 | `previusknowledge/docs/architecture/graphify_import_export_schema_model.md` | `conflicted` | Semantic authority candidate | Preserve import/export ideas; no schema commitment. |
 | `previusknowledge/docs/architecture/graphify_infrastructure_architecture.md` | `conflicted` | Semantic authority candidate | Preserve as infrastructure evidence only. |
 | `previusknowledge/docs/architecture/graphify_integration_strategy.md` | `conflicted` | Semantic authority candidate | Preserve integration ideas after naming ADR. |
-| `previusknowledge/docs/architecture/graphify_knowledge_research_coherence_audit.md` | `conflicted` | Semantic authority candidate | Preserve audit findings as candidate evidence. |
 | `previusknowledge/docs/architecture/graphify_lifecycle_schema_model.md` | `conflicted` | Semantic authority candidate | Preserve lifecycle ideas; no schema commitment. |
 | `previusknowledge/docs/architecture/graphify_mcp_representation.md` | `conflicted` | Semantic authority candidate | Preserve MCP-representation ideas after neutral naming. |
 | `previusknowledge/docs/architecture/graphify_memory_representation.md` | `conflicted` | Semantic authority candidate | Preserve memory-representation ideas after neutral naming. |
@@ -508,7 +503,6 @@ W-02 is complete for semantic classification. No W-03 document is created here.
 | `previusknowledge/docs/architecture/opencode_runtime_differences.md` | `external_reference` | OpenCode provider evidence | Revalidate runtime assumptions. |
 | `previusknowledge/docs/architecture/operations_layer.md` | `migration_evidence` | Operations layer | Use as old responsibility-domain evidence only. |
 | `previusknowledge/docs/architecture/ownership_domains.md` | `carry_forward` | Ownership | Preserve ownership-domain concepts after workspace reframing. |
-| `previusknowledge/docs/architecture/platform_architecture_audit.md` | `migration_evidence` | Platform audit | Use as historical audit evidence. |
 | `previusknowledge/docs/architecture/platform_foundations.md` | `carry_forward` | Platform architecture | Preserve platform principles after workspace reframing. |
 | `previusknowledge/docs/architecture/platform_layer.md` | `carry_forward` | Platform architecture | Preserve platform layer concepts after workspace reframing. |
 | `previusknowledge/docs/architecture/platform_runtime_foundations.md` | `carry_forward` | Runtime posture | Preserve runtime foundation concepts without implementation commitment. |
@@ -518,7 +512,6 @@ W-02 is complete for semantic classification. No W-03 document is created here.
 | `previusknowledge/docs/architecture/product_architectural_principles.md` | `scope_limit` | Product workspace | Future product principles input only. |
 | `previusknowledge/docs/architecture/product_architecture_final_synthesis.md` | `scope_limit` | Product workspace | Major product-scope synthesis; not root authority. |
 | `previusknowledge/docs/architecture/product_architecture_overview.md` | `scope_limit` | Product workspace | Product overview only. |
-| `previusknowledge/docs/architecture/product_architecture_readiness_review.md` | `scope_limit` | Product workspace | Product readiness evidence only. |
 | `previusknowledge/docs/architecture/product_boundaries.md` | `scope_limit` | Product workspace | Product boundary input only. |
 | `previusknowledge/docs/architecture/product_building_blocks.md` | `scope_limit` | Product workspace | Product building-block input only. |
 | `previusknowledge/docs/architecture/product_capability_architecture.md` | `scope_limit` | Product workspace | Product capability input only. |

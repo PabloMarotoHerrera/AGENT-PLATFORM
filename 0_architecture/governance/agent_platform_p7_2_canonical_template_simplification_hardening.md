@@ -34,9 +34,8 @@ P7.2 does not execute a second pilot and does not start P7.3.
 | Input | Evidence | P7.2 use | Limitation |
 | --- | --- | --- | --- |
 | `agent_platform_manual_agent_native_work_packet_interface_template.md` | Required path and template markers present. | Modified with compact modes and hardening addendum. | No runtime execution. |
-| `agent_platform_p7_1_first_manual_agent_native_pilot_report.md` | Required path present. | Confirms first pilot output. | Not modified. |
-| `agent_platform_p7_1_first_manual_pilot_audit_lessons_learned.md` | Required findings markers present. | Source for simplification/hardening decisions. | Not modified. |
-| `agent_platform_manual_agentic_workflow_planning_closure.md` | Required path present. | Preserves P7.1 manual-only eligibility. | Not modified. |
+| Retained first-pilot findings | Accepted historical outcome and audit conclusions. | Source for simplification/hardening decisions. | Obsolete report citations removed. |
+| Manual-only workflow posture | Current governance constraint. | Preserves manual-only eligibility. | Does not authorize runtime. |
 | `agent_platform_manual_harness_opencode_hermes_boundary_strategy.md` | Required path present. | Preserves H0/H1/H2/H3 semantics. | Not modified. |
 | `agent_platform_reviewer_mesh_immune_safeguards_contract.md` | Required path present. | Preserves reviewer mesh boundary. | Not modified. |
 | `agent_platform_manual_integrator_commit_advisory_protocol.md` | Required path present. | Preserves CommitCandidate and exact-path Git boundary. | Not modified. |

@@ -83,17 +83,7 @@ P2.3 consumes or anticipates P2.1 vocabulary.
 
 P2.3 consumes or anticipates P2.2 evidence-reference contract.
 
-If P2.1 is present, P2.3 must use P2.1 canonical vocabulary.
-
-If P2.1 is absent, P2.3 must mark vocabulary-dependent names as `pending_P2.1_alignment`.
-
-If P2.2 is present, P2.3 must use P2.2 canonical EvidenceRef shape and relationship model.
-
-If P2.2 is absent, P2.3 must mark evidence-dependent names as `pending_P2.2_alignment`.
-
-P2.1 was absent during P2.3 posture checks, so vocabulary-dependent names in this document remain `pending_P2.1_alignment`.
-
-P2.2 was absent during P2.3 posture checks, so evidence-reference-dependent names in this document remain `pending_P2.2_alignment`.
+P2.1 and P2.2 are present and canonical. P2.3 uses the P2.1 vocabulary and P2.2 EvidenceRef shape and relationship model. Former `pending_P2.1_alignment` and `pending_P2.2_alignment` entries elsewhere in this baseline are retained only as historical labels and are closed by cross-lane reconciliation; they are not active blockers.
 
 P2.3 must not create, modify, or supersede P2.1 or P2.2.
 

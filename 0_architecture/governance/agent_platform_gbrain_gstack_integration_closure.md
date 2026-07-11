@@ -71,15 +71,12 @@ P12_R_GBrain_GStack_Integration_Closure:
 Governance records inspected read-only by marker search or bounded read:
 
 ```text
-0_architecture/governance/agent_platform_gstack_license_dependency_skill_audit.md
 0_architecture/governance/agent_platform_memory_authority_model.md
 0_architecture/governance/agent_platform_skill_authority_execution_boundary.md
 0_architecture/governance/agent_platform_gbrain_adoption_graphify_semantic_replacement_decision.md
 0_architecture/governance/agent_platform_gstack_adoption_decision.md
 0_architecture/governance/agent_platform_memory_store_integration_design.md
-0_architecture/governance/agent_platform_canonical_local_memory_sandbox_spike_record.md
 0_architecture/governance/agent_platform_skill_stack_bootstrap_design.md
-0_architecture/governance/agent_platform_skill_stack_bootstrap_spike_record.md
 0_architecture/governance/agent_platform_retention_rollback_incident_hardening.md
 ```
 
@@ -207,15 +204,12 @@ git push
 
 | Dependency | File | Required marker | Status | Closure use |
 | --- | --- | --- | --- | --- |
-| P12.2 GStack license/dependency/skill audit | `agent_platform_gstack_license_dependency_skill_audit.md` | `gstack_license_dependency_skill_audit_ready` | Confirmed | GStack source review completed read-only; setup/runtime still blocked. |
 | P12.3 Memory authority model | `agent_platform_memory_authority_model.md` | `memory_authority_model_ready` | Confirmed | Canonical source, derived memory, GBrain, Graphify, cleanup, and taxonomy boundaries accepted. |
 | P12.4 Skill authority/execution boundary | `agent_platform_skill_authority_execution_boundary.md` | `skill_authority_execution_boundary_ready` | Confirmed | Skills are not authority and require execution gates. |
 | P12.5 GBrain adoption / Graphify replacement decision | `agent_platform_gbrain_adoption_graphify_semantic_replacement_decision.md` | `gbrain_adoption_graphify_semantic_replacement_decision_ready` | Confirmed | GBrain adopted for local retrieval; Graphify semantic replacement closed. |
 | P12.6 GStack adoption decision | `agent_platform_gstack_adoption_decision.md` | `gstack_adoption_decision_ready` | Confirmed | GStack adopted only as read-only skill source candidate. |
 | P12.7 Memory store integration design | `agent_platform_memory_store_integration_design.md` | `memory_store_integration_design_ready` | Confirmed | Memory store and GBrain derived index integration design accepted. |
 | P12.8 Skill stack bootstrap design | `agent_platform_skill_stack_bootstrap_design.md` | `skill_stack_bootstrap_design_ready` | Confirmed | No-runtime internal skill bootstrap design accepted. |
-| P12.9 Canonical local memory sandbox spike | `agent_platform_canonical_local_memory_sandbox_spike_record.md` | `p12_9_canonical_memory_sandbox_execution_success` | Confirmed | Mode A keyword-only sandbox validated with 129 imported pages and 1763 chunks. |
-| P12.10 Skill stack bootstrap spike | `agent_platform_skill_stack_bootstrap_spike_record.md` | `skill_stack_bootstrap_spike_ready` | Confirmed | Static inactive skill skeleton and six seed blueprints accepted. |
 | P12.11 Retention / rollback / incident hardening | `agent_platform_retention_rollback_incident_hardening.md` | `retention_rollback_incident_hardening_ready` | Confirmed | Retention, rollback, incidents, and CLEAN handoff accepted. |
 
 Supporting P12.3 markers confirmed:
@@ -303,6 +297,10 @@ Final GBrain decisions:
 
 GBrain outputs and indexes remain derived evidence. Canonical governance files and accepted records remain source of truth.
 
+### Retained runtime and maintenance constraints
+
+The reviewed source CLI entrypoint is `src/cli.ts` through Bun/TypeScript; source execution does not require a compiled build. Installation lifecycle scripts, including `postinstall`, may mutate state and must not run implicitly. Any future runtime must constrain `GBRAIN_HOME`, database, export, and log paths to an approved sandbox. Autopilot/daemon paths remain separately gated because reviewed error handling may write under the normal user home. GBrain is MIT-licensed; copies or substantial reused portions must preserve the applicable copyright and permission notice. Local keyword-only operation does not erase the presence of network, database, vector, native, WASM, or hosted-provider-capable dependencies, which remain subject to their own gates.
+
 Decision markers:
 
 ```text
@@ -326,6 +324,8 @@ Final Graphify decisions:
 | Provider-backed semantic extraction | Non-primary and deferred. |
 
 Graphify remains available only as a future governed visualization/report/evidence-map candidate if an exact future gate approves the scope.
+
+One final root evidence-map refresh is compatible with this posture only after the partitioned provenance-safe pilot and global quality gates pass. The refresh must use an exact authorized source manifest and cannot be a direct unrestricted root extraction. It does not reverse GBrain semantic-retrieval adoption or promote Graphify to memory, authority, or source of truth.
 
 Decision markers:
 
@@ -490,7 +490,6 @@ closure_outcome: "project_12_gbrain_gstack_integration_closed"
 `git status --short` during P12.R showed only:
 
 ```text
-?? 0_architecture/implementation/graphify_command_candidate_confirmation.md
 ```
 
 That file is unrelated to P12.R and was not modified. No sandbox output or dependency artifact was staged.

@@ -78,7 +78,7 @@ Includes:
 
 | Class | Examples |
 | --- | --- |
-| P12.9 execution record | `agent_platform_canonical_local_memory_sandbox_spike_record.md`. |
+| Accepted P12.9 execution outcome | Retained historical evidence that the controlled sandbox completed successfully. |
 | Safe block records | Missing approval, blocked runtime, blocked provider, blocked setup. |
 | Controlled runtime execution records | Future accepted exact execution records. |
 | Installation records | Controlled install/setup records if ever approved. |

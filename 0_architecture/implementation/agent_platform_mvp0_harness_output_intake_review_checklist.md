@@ -63,9 +63,6 @@ legacy_p8_11_path_not_required:
 accepted_p7_0_f_reviewer_path:
 `0_architecture/governance/agent_platform_reviewer_mesh_immune_safeguards_contract.md`
 
-legacy_p7_0_f_path_not_required:
-`0_architecture/governance/agent_platform_manual_reviewer_approval_pipeline_contract.md`
-
 accepted_p8_13_implementation_record:
 `0_architecture/implementation/agent_platform_mvp0_workpacket_harness_package_renderer.md`
 
@@ -140,14 +137,11 @@ The user remains final Git authority.
 | `0_architecture/governance/agent_platform_p8_platform_mvp_scope_external_integration_boundary.md` | present | P8.0 external integration boundary | Path-only posture; content not inspected. |
 | `0_architecture/governance/agent_platform_external_source_inventory_graphify_gbrain_gstack_hermes_opencode.md` | present | P8.1 external source classification | Path-only posture; content not inspected. |
 | `0_architecture/governance/agent_platform_mvp_interaction_surface_architecture.md` | present | P8.2 interaction surface | Path-only posture; content not inspected. |
-| `0_architecture/governance/agent_platform_core_workflow_schema_candidates.md` | present | P8.3 schema candidates | Path-only posture; content not inspected. |
 | `0_architecture/governance/agent_platform_local_workspace_state_model.md` | present | P8.4 local workspace/state boundary | Path-only posture; content not inspected. |
 | `0_architecture/governance/agent_platform_p8_security_activation_gate_model.md` | present | P8.5 security activation gate model | Path-only posture; content not inspected. |
-| `0_architecture/governance/agent_platform_graphify_read_only_evidence_boundary.md` | present | P8.6 Graphify read-only evidence boundary | Path-only posture; content not inspected. |
 | `0_architecture/governance/agent_platform_gbrain_gstack_memory_compatibility_boundary.md` | present | P8.7 GBrain/GStack memory compatibility boundary | Path-only posture; content not inspected. |
 | `0_architecture/governance/agent_platform_hermes_interface_runtime_candidate_boundary.md` | present | P8.8 Hermes interface/runtime candidate boundary | Path-only posture; content not inspected. |
 | `0_architecture/governance/agent_platform_opencode_harness_upgrade_boundary.md` | present | P8.9 OpenCode harness upgrade boundary | Path-only posture; content not inspected. |
-| `0_architecture/governance/agent_platform_manual_agentic_workflow_planning_closure.md` | present | P7.R manual workflow closure | Path-only posture; content not inspected. |
 | `0_architecture/governance/agent_platform_agent_native_organization_research_carry_forward.md` | required workflow input | P7.0.0 agent-native carry-forward | Listed as mandatory input; not rechecked by the restricted P8.14 command set. |
 | `0_architecture/governance/agent_platform_manual_lead_agent_user_gateway_contract.md` | required workflow input | P7.0.A lead/user gateway | Listed as mandatory input; not rechecked by the restricted P8.14 command set. |
 | `0_architecture/governance/agent_platform_roadmap_generation_work_breakdown_contract.md` | required workflow input | P7.0.B work breakdown | Listed as mandatory input; not rechecked by the restricted P8.14 command set. |
@@ -157,18 +151,9 @@ The user remains final Git authority.
 | `0_architecture/governance/agent_platform_reviewer_mesh_immune_safeguards_contract.md` | present | Accepted P7.0.F reviewer mesh / immune safeguards contract | Path-only posture; content not inspected; legacy reviewer approval pipeline path not required. |
 | `0_architecture/governance/agent_platform_manual_integrator_commit_advisory_protocol.md` | present | P7.0.G integration protocol | Path-only posture; content not inspected. |
 | `0_architecture/governance/agent_platform_first_manual_agentic_workflow_pilot_playbook.md` | required workflow input | P7.0.H pilot playbook | Listed as mandatory input; not rechecked by the restricted P8.14 command set. |
-| `0_architecture/governance/agent_platform_operational_readiness_audit.md` | required governance input | P6.7 operational readiness | Listed as mandatory input; not rechecked by the restricted P8.14 command set. |
-| `0_architecture/governance/agent_platform_minimal_active_agent_platform_audit.md` | required governance input | P5.R minimal active platform audit | Listed as mandatory input; not rechecked by the restricted P8.14 command set. |
-| `0_architecture/governance/agent_platform_activation_decision_reconciliation_closure.md` | required governance input | P3.BR activation decision reconciliation | Listed as mandatory input; not rechecked by the restricted P8.14 command set. |
 | `0_architecture/governance/agent_platform_tool_execution_activation_decision.md` | required governance input | Tool execution activation decision | Listed as mandatory input; not rechecked by the restricted P8.14 command set. |
 | `0_architecture/governance/agent_platform_provider_auth_api_mcp_activation_decision.md` | required governance input | Provider/auth/API/MCP decision | Listed as mandatory input; not rechecked by the restricted P8.14 command set. |
 | `0_architecture/governance/agent_platform_agent_runtime_activation_decision.md` | required governance input | Agent runtime decision | Listed as mandatory input; not rechecked by the restricted P8.14 command set. |
-| `0_architecture/governance/agent_platform_activation_readiness_reconciliation_closure.md` | required governance input | Activation readiness reconciliation | Listed as mandatory input; not rechecked by the restricted P8.14 command set. |
-| `0_architecture/governance/agent_platform_controlled_source_classification_readiness.md` | required governance input | Source classification readiness | Listed as mandatory input; not rechecked by the restricted P8.14 command set. |
-| `0_architecture/governance/agent_platform_validation_execution_readiness.md` | required governance input | Validation readiness | Listed as mandatory input; not rechecked by the restricted P8.14 command set. |
-| `0_architecture/governance/agent_platform_security_enforcement_readiness.md` | required governance input | Security enforcement readiness | Listed as mandatory input; not rechecked by the restricted P8.14 command set. |
-| `0_architecture/governance/agent_platform_knowledge_retrieval_architecture_reconciliation_closure.md` | required governance input | Knowledge retrieval reconciliation | Listed as mandatory input; not rechecked by the restricted P8.14 command set. |
-| `0_architecture/governance/agent_platform_cross_lane_integration_reconciliation_closure.md` | required governance input | Cross-lane integration reconciliation | Listed as mandatory input; not rechecked by the restricted P8.14 command set. |
 | `0_architecture/governance/agent_platform_shared_metadata_vocabulary_alignment.md` | required governance input | P2.1 shared metadata vocabulary | Listed as mandatory input; not rechecked by the restricted P8.14 command set. |
 | `0_architecture/governance/agent_platform_cross_lane_evidence_reference_contract.md` | required governance input | P2.2 evidence reference contract | Listed as mandatory input; not rechecked by the restricted P8.14 command set. |
 | `0_architecture/governance/agent_platform_audit_retention_rollback_baseline.md` | required governance input | P2.3 audit/retention/rollback baseline | Listed as mandatory input; not rechecked by the restricted P8.14 command set. |
@@ -184,7 +169,6 @@ The user remains final Git authority.
 | `0_architecture/security/agent_platform_tool_shell_network_mcp_execution_policy.md` | required security input | Tool/shell/network/MCP execution policy | Listed as mandatory input; not rechecked by the restricted P8.14 command set. |
 | `0_architecture/security/agent_platform_local_only_secrets_credentials_policy.md` | required security input | Local-only secrets/credentials policy | Listed as mandatory input; not rechecked by the restricted P8.14 command set. |
 | `0_architecture/cognitive_semantic_system/agent_platform_cognitive_semantic_system_naming_substrate_adr.md` | required Cognitive Semantic System input | Naming/substrate ADR | Listed as mandatory input; not rechecked by the restricted P8.14 command set. |
-| `0_architecture/cognitive_semantic_system/agent_platform_cognitive_semantic_system_decision_audit.md` | required Cognitive Semantic System input | Decision audit | Listed as mandatory input; not rechecked by the restricted P8.14 command set. |
 | `README.md` | present | Repository boundary input | Path-only posture; content not inspected. |
 | `.gitignore` | present | Git boundary input | Path-only posture; content not inspected. |
 | `.graphifyignore` | present | Graphify boundary input | Path-only posture; content not inspected. |

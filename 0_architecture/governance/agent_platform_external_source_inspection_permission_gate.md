@@ -119,10 +119,6 @@ Legacy `external/sources` is not canonical.
 
 ## Path / Root Normalization
 
-Accepted P8.R path used by P9.3:
-
-- `0_architecture/governance/agent_platform_p8_platform_mvp_readiness_closure.md`
-
 Accepted P9.0 path used by P9.3:
 
 - `0_architecture/governance/agent_platform_p9_external_tool_integration_charter_adopt_not_rebuild_boundary.md`
@@ -153,28 +149,17 @@ GStack posture in P9.3:
 
 | input | status | role in P9.3 | limitations |
 | --- | --- | --- | --- |
-| `0_architecture/governance/agent_platform_p8_platform_mvp_readiness_closure.md` | present | Required post-P8 closure input | Corrected P8.R path; path-only posture; content not inspected. |
 | `0_architecture/governance/agent_platform_p9_external_tool_integration_charter_adopt_not_rebuild_boundary.md` | present | Required P9.0 policy authority | Corrected P9.0 path; path-only posture; content not inspected. |
 | `0_architecture/governance/agent_platform_p8_platform_mvp_scope_external_integration_boundary.md` | present | P8.0 external integration boundary | Path-only posture; content not inspected. |
 | `0_architecture/governance/agent_platform_external_source_inventory_graphify_gbrain_gstack_hermes_opencode.md` | present | P8.1 external source classification | Path-only posture; content not inspected. |
 | `0_architecture/governance/agent_platform_p8_security_activation_gate_model.md` | present | P8.5 security / activation gate model | Path-only posture; content not inspected. |
-| `0_architecture/governance/agent_platform_manual_agentic_workflow_planning_closure.md` | present | P7.R manual workflow closure | Path-only posture; content not inspected. |
 | `0_architecture/governance/agent_platform_agent_native_organization_research_carry_forward.md` | present | P7 native carry-forward context | Path-only posture; content not inspected. |
 | `0_architecture/governance/agent_platform_manual_harness_opencode_hermes_boundary_strategy.md` | present | P7 harness/OpenCode/Hermes boundary | Path-only posture; content not inspected. |
 | `0_architecture/governance/agent_platform_reviewer_mesh_immune_safeguards_contract.md` | present | P7.0.F reviewer mesh / immune safeguards | Path-only posture; content not inspected. |
 | `0_architecture/governance/agent_platform_manual_integrator_commit_advisory_protocol.md` | present | P7.0.G integration protocol | Path-only posture; content not inspected. |
-| `0_architecture/governance/agent_platform_operational_readiness_audit.md` | present | P6.7 operational readiness | Path-only posture; content not inspected. |
-| `0_architecture/governance/agent_platform_minimal_active_agent_platform_audit.md` | present | P5.R minimal active platform audit | Path-only posture; content not inspected. |
-| `0_architecture/governance/agent_platform_activation_decision_reconciliation_closure.md` | present | P3.BR activation decision reconciliation | Path-only posture; content not inspected. |
 | `0_architecture/governance/agent_platform_tool_execution_activation_decision.md` | mandatory input | Tool execution activation decision | Listed as mandatory input; not rechecked by the restricted P9.3 command set. |
 | `0_architecture/governance/agent_platform_provider_auth_api_mcp_activation_decision.md` | mandatory input | Provider/auth/API/MCP activation decision | Listed as mandatory input; not rechecked by the restricted P9.3 command set. |
 | `0_architecture/governance/agent_platform_agent_runtime_activation_decision.md` | mandatory input | Agent runtime activation decision | Listed as mandatory input; not rechecked by the restricted P9.3 command set. |
-| `0_architecture/governance/agent_platform_activation_readiness_reconciliation_closure.md` | mandatory input | Activation readiness reconciliation | Listed as mandatory input; not rechecked by the restricted P9.3 command set. |
-| `0_architecture/governance/agent_platform_controlled_source_classification_readiness.md` | mandatory input | Source classification readiness | Listed as mandatory input; not rechecked by the restricted P9.3 command set. |
-| `0_architecture/governance/agent_platform_validation_execution_readiness.md` | mandatory input | Validation execution readiness | Listed as mandatory input; not rechecked by the restricted P9.3 command set. |
-| `0_architecture/governance/agent_platform_security_enforcement_readiness.md` | mandatory input | Security enforcement readiness | Listed as mandatory input; not rechecked by the restricted P9.3 command set. |
-| `0_architecture/governance/agent_platform_knowledge_retrieval_architecture_reconciliation_closure.md` | present | P2.KR knowledge / retrieval reconciliation | Path-only posture; content not inspected. |
-| `0_architecture/governance/agent_platform_cross_lane_integration_reconciliation_closure.md` | present | P2.R cross-lane integration reconciliation | Path-only posture; content not inspected. |
 | `0_architecture/governance/agent_platform_shared_metadata_vocabulary_alignment.md` | present | P2.1 shared metadata vocabulary | Path-only posture; content not inspected. |
 | `0_architecture/governance/agent_platform_cross_lane_evidence_reference_contract.md` | present | P2.2 evidence reference contract | Path-only posture; content not inspected. |
 | `0_architecture/governance/agent_platform_audit_retention_rollback_baseline.md` | present | P2.3 audit / retention / rollback baseline | Path-only posture; content not inspected. |
@@ -190,7 +175,6 @@ GStack posture in P9.3:
 | `0_architecture/security/agent_platform_tool_shell_network_mcp_execution_policy.md` | present | Tool / shell / network / MCP execution policy | Path-only posture; content not inspected. |
 | `0_architecture/security/agent_platform_local_only_secrets_credentials_policy.md` | present | Local-only / secrets / credentials policy | Path-only posture; content not inspected. |
 | `0_architecture/cognitive_semantic_system/agent_platform_cognitive_semantic_system_naming_substrate_adr.md` | present | Cognitive Semantic System ADR | Path-only posture; content not inspected. |
-| `0_architecture/cognitive_semantic_system/agent_platform_cognitive_semantic_system_decision_audit.md` | present | Cognitive Semantic System audit | Path-only posture; content not inspected. |
 | `README.md` | present | Repository boundary input | Path-only posture; content not inspected. |
 | `.gitignore` | present | Git boundary input | Path-only posture; content not inspected or modified. |
 | `.graphifyignore` | present | Graphify boundary input | Path-only posture; content not inspected or modified. |

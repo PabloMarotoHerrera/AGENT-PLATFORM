@@ -173,6 +173,8 @@ OpenCode current use is not tool execution by AGENT PLATFORM.
 
 OpenCode current use is not OpenCode adoption as runtime.
 
+Project-local Agent Skills may be discovered and loaded through OpenCode's native skill tool. Discovery or loading only supplies instructions; it is not skill execution, command authorization, provider use, subagent authorization, file-write approval, or Git approval. The Graphify plugin is a reminder hook, not a skill loader or slash-command registrar. Graphify 0.9.5 did not establish a deterministic project custom command, and plain `/graphify` text is not proof of native skill invocation. Native skill loading is the preferred non-executing mechanism; any slash-command bridge is optional UX and separately gated.
+
 ## OpenCode Boundary Object Model
 | Object | Meaning | Required fields | Forbidden fields | Security posture | Validation posture | Activation posture |
 |---|---|---|---|---|---|---|

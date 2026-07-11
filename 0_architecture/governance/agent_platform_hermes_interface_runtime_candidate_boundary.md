@@ -43,12 +43,9 @@ The following posture is path-only and does not represent content inspection.
 | P8.1 | `0_architecture/governance/agent_platform_external_source_inventory_graphify_gbrain_gstack_hermes_opencode.md` | present | Required hard prerequisite satisfied. |
 | P8.5 | `0_architecture/governance/agent_platform_p8_security_activation_gate_model.md` | present | Required hard prerequisite satisfied. |
 | P8.2 | `0_architecture/governance/agent_platform_mvp_interaction_surface_architecture.md` | present | Interaction-surface alignment available. |
-| P8.3 | `0_architecture/governance/agent_platform_core_workflow_schema_candidates.md` | present | Schema-candidate alignment available. |
 | P8.4 | `0_architecture/governance/agent_platform_local_workspace_state_model.md` | present | Local workspace-state alignment available. |
-| P8.6 | `0_architecture/governance/agent_platform_graphify_read_only_evidence_boundary.md` | present | Graphify read-only evidence boundary alignment available by path-only recheck. |
 | P8.7 | `0_architecture/governance/agent_platform_gbrain_gstack_memory_compatibility_boundary.md` | absent | `pending_P8.7_gbrain_gstack_memory_boundary_alignment`. |
 | P8.9 | `0_architecture/governance/agent_platform_opencode_harness_upgrade_boundary.md` | present | OpenCode harness upgrade boundary alignment available by path-only recheck. |
-| P7.R | `0_architecture/governance/agent_platform_manual_agentic_workflow_planning_closure.md` | present | Manual workflow closure context available. |
 | P7.0.0 | `0_architecture/governance/agent_platform_agent_native_organization_research_carry_forward.md` | present | Agent-native carry-forward context available. |
 | P7.0.E | `0_architecture/governance/agent_platform_manual_harness_opencode_hermes_boundary_strategy.md` | present | Harness and Hermes boundary context available. |
 | P7.0.F legacy | `0_architecture/governance/agent_platform_manual_reviewer_approval_pipeline_contract.md` | absent | `pending_P7_legacy_reviewer_path_alignment`. |

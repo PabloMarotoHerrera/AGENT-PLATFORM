@@ -69,7 +69,6 @@ No active runtime, active agents, task execution, handoff execution, tool execut
 
 | input | status | role in P6.3 | limitations |
 | --- | --- | --- | --- |
-| `0_architecture/governance/agent_platform_minimal_active_agent_platform_audit.md` | Present / reviewed | P5.R baseline and AL-1 skeleton audit. | Audit is not activation. |
 | `0_architecture/implementation/agent_platform_validation_runner_minimal_implementation.md` | Present / reviewed | P5.1 validation skeleton posture. | No validation execution. |
 | `0_architecture/implementation/agent_platform_security_policy_dry_run_candidate.md` | Present / reviewed | P5.2 security dry-run skeleton posture. | No security enforcement activation. |
 | `0_architecture/implementation/agent_platform_context_assembly_runtime_candidate.md` | Present / reviewed | P5.3 context assembly skeleton and ContextPackRef source. | No source loading or context materialization. |
@@ -77,16 +76,9 @@ No active runtime, active agents, task execution, handoff execution, tool execut
 | `0_architecture/implementation/agent_platform_provider_adapter_runtime_candidate.md` | Present / reviewed | P5.5 provider metadata posture. | No provider/auth/API/MCP activation. |
 | `0_architecture/implementation/agent_platform_agent_task_runtime_handoff_candidate.md` | Present / reviewed | P5.6 agent task/handoff envelope posture. | No agent, task, or handoff execution. |
 | `0_architecture/implementation/agent_platform_audit_retention_rollback_runtime_hooks.md` | Present / reviewed | P5.7 audit, retention, rollback, incident, and blocker hook shapes. | No persistence, active logging, rollback automation, or incident automation. |
-| `0_architecture/governance/agent_platform_activation_decision_reconciliation_closure.md` | Present / reviewed | P3.BR reconciled activation decision posture. | Decision is not execution. |
 | `0_architecture/governance/agent_platform_tool_execution_activation_decision.md` | Present / reviewed | P3.3 tool activation decision. | Tool execution remains deferred/blocked. |
 | `0_architecture/governance/agent_platform_provider_auth_api_mcp_activation_decision.md` | Present / reviewed | P3.4 provider/auth/API/MCP decision. | Provider/auth/API/MCP activation remains deferred/blocked. |
 | `0_architecture/governance/agent_platform_agent_runtime_activation_decision.md` | Present / reviewed | P3.5 agent runtime decision. | Agent runtime activation remains deferred/blocked. |
-| `0_architecture/governance/agent_platform_activation_readiness_reconciliation_closure.md` | Present / reviewed | P3.R activation readiness closure. | Readiness is not activation. |
-| `0_architecture/governance/agent_platform_controlled_source_classification_readiness.md` | Present / reviewed | P3.0 source classification posture. | Classification is not source loading permission. |
-| `0_architecture/governance/agent_platform_validation_execution_readiness.md` | Present / reviewed | P3.1 validation readiness posture. | No validation run. |
-| `0_architecture/governance/agent_platform_security_enforcement_readiness.md` | Present / reviewed | P3.2 security readiness posture. | No scanner or enforcement runtime. |
-| `0_architecture/governance/agent_platform_knowledge_retrieval_architecture_reconciliation_closure.md` | Present / reviewed | P2.KR retrieval, memory, live connector, Cadence, Graphify, and substrate boundary. | No retrieval runtime, vector DB, graph DB, or live connector activation. |
-| `0_architecture/governance/agent_platform_cross_lane_integration_reconciliation_closure.md` | Present / reviewed | P2.R integrated P2 baseline. | Reconciliation only. |
 | `0_architecture/governance/agent_platform_shared_metadata_vocabulary_alignment.md` | Present / reviewed | P2.1 vocabulary for status, refs, blockers, sensitivity, posture, and source classification. | No schema runtime. |
 | `0_architecture/governance/agent_platform_cross_lane_evidence_reference_contract.md` | Present / reviewed | P2.2 EvidenceRef, SourceRef, ValidationRef, SecurityRef, GraphifyRef, ProductRef semantics. | Evidence supports; it does not decide. |
 | `0_architecture/governance/agent_platform_audit_retention_rollback_baseline.md` | Present / reviewed | P2.3 audit, retention, rollback, quarantine, incident, blocker, and tracking baseline. | No runtime logging, persistence, or automation. |
@@ -102,7 +94,6 @@ No active runtime, active agents, task execution, handoff execution, tool execut
 | `0_architecture/security/agent_platform_tool_shell_network_mcp_execution_policy.md` | Present / reviewed | S-04 execution policy and blocked defaults. | No shell, network, MCP, tool, package, test, build, CI, or Git execution. |
 | `0_architecture/security/agent_platform_local_only_secrets_credentials_policy.md` | Present / reviewed | S-03 local-only, secret, credential, generated output, and provider-auth handling. | No secret, credential, `.env`, provider config, token store, browser auth, or API key inspection. |
 | `0_architecture/cognitive_semantic_system/agent_platform_cognitive_semantic_system_naming_substrate_adr.md` | Present / reviewed | Accepted Cognitive Semantic System name and substrate deferral. | ADR is not implementation authorization. |
-| `0_architecture/cognitive_semantic_system/agent_platform_cognitive_semantic_system_decision_audit.md` | Present / reviewed | CSS naming/substrate audit. | No substrate selected. |
 | `README.md` | Present / reviewed | Repository orientation. | No runtime effect. |
 | `.gitignore` | Present / reviewed | Local-only/generated/secrets/provider-auth hygiene posture. | Not modified; ignore rules are not enforcement. |
 | `.graphifyignore` | Present / reviewed | Graphify default-deny and hard-exclusion posture. | Not modified; not permission to run or adopt Graphify. |

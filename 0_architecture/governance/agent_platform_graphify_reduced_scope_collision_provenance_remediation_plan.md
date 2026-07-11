@@ -6,7 +6,7 @@ P10.5K-C selects a planning-only remediation architecture for the collision, pro
 
 Native `merge-graphs` is **unproven pending pilot**. Graphify 0.9.5 help documents a multi-graph merge interface and output option, but does not document collision handling, provenance retention, endpoint rewriting, merge-order independence, or silent-drop prevention. Native merge alone is therefore insufficient. The fallback is a federation of independently validated, unmerged partition graphs with a federation manifest; it must never be represented as one global Graphify graph.
 
-Root-scope execution remains blocked. This ticket performs no implementation or runtime work.
+The repository-wide Markdown cleanup has completed successfully. One final local root-scope Graphify extraction is authorized for P10.6 as an exploratory, non-authoritative evidence refresh. The provenance-safe pilot is not a prerequisite for generating that evidence map, but remains mandatory before any operational import, authority promotion, GBrain ingestion, semantic-memory use, or Cognitive Semantic System adoption. This plan itself performs no implementation or runtime work.
 
 Result marker:
 
@@ -16,7 +16,7 @@ graphify_reduced_scope_collision_provenance_remediation_plan_ready
 
 ## Human approval status
 
-Explicit approval was supplied outside the ticket body for a planning-only review, bounded CLI-help inspection, read-only inspection of the approved governance records and exact reduced source corpus, and creation of exactly this remediation plan. Approval did not authorize implementation, Graphify/Ollama runtime, generated-output inspection, source or policy modification, or root-scope execution.
+Explicit approval was supplied outside the original ticket body for a planning-only review, bounded CLI-help inspection, read-only inspection of the approved governance records and exact reduced source corpus, and creation of exactly this remediation plan. The later repository-wide cleanup decision completed the documentation prerequisite and now authorizes one local exploratory root-scope Graphify extraction for P10.6. It does not authorize Ollama, operational import, output promotion, GBrain ingestion, semantic-memory use, Cognitive Semantic System adoption, or Git mutation.
 
 ## Dependencies reviewed
 
@@ -37,12 +37,6 @@ P10.5K-B established valid topology but Outcome B due to material traceability d
 Read-only planning inputs:
 
 ```text
-0_architecture/governance/agent_platform_graphify_reduced_scope_evidence_quality_collision_assessment.md
-0_architecture/governance/agent_platform_graphify_headless_cli_qwen3_5_reduced_scope_execution_record.md
-0_architecture/governance/agent_platform_graphify_headless_cli_qwen3_5_marker_contract_alignment.md
-0_architecture/governance/agent_platform_graphify_headless_reduced_scope_cluster_report_visualization_completion_record.md
-0_architecture/governance/agent_platform_graphify_headless_reduced_scope_cluster_report_visualization_rerun_record.md
-0_architecture/governance/agent_platform_graphify_evidence_output_classification.md
 .graphifyignore
 .gitignore
 3_platform/_governed_skeleton/agent_platform_mvp0/skills/**
@@ -153,7 +147,7 @@ CLI presence is interface evidence only. Installed package source was not inspec
 
 ### Option A - Single root extraction with current behavior
 
-Rejected. It retains the measured collision/provenance failure modes while expanding their domain. Current `.graphifyignore` is also a separately governed root policy and does not constitute authorization for repository-root processing.
+Authorized once for the final P10.6 exploratory evidence refresh after repository-wide Markdown cleanup. It retains the measured collision/provenance failure modes while expanding their domain, so its outputs must remain local, untracked, content-unvalidated, completeness-unvalidated, provenance-limited, collision-affected, and non-authoritative. Completion cannot satisfy any operational-readiness or promotion gate.
 
 ### Option B - Per-subfolder extraction plus native merge only
 
@@ -171,7 +165,7 @@ Retained as fallback. Each partition remains an independently validated graph, a
 
 | Option | Collision safety | Provenance safety | Native-only | Root-scale suitability | Decision |
 | --- | ---: | ---: | ---: | ---: | --- |
-| Single root extraction | Low | Low | Yes | Unacceptable currently | Reject |
+| Single root extraction | Low | Low | Yes | Exploratory evidence map only | Authorize once for P10.6; reject for operational use |
 | Partition + native merge only | Unknown | Medium | Yes | Unproven | Defer |
 | Partition + namespace/provenance adapter | High when validated | High when validated | No | Preferred | Select |
 | Federated unmerged graphs | High | High | Partially | Viable fallback | Retain |
@@ -399,6 +393,10 @@ blocked and sensitive path count is zero
 
 Report and HTML counts must subsequently match the validated graph exactly.
 
+### Report and HTML quality gate
+
+Final reports and static HTML must not expose absolute local paths. Reports must disclose provenance, collision, coverage, and validation warnings; define the method used for weak or isolated-node counts; and identify the processing stage represented by token or cost totals. External HTML network dependencies must be declared, and an offline deliverable must be self-contained rather than silently depending on a CDN.
+
 ## Reduced remediation pilot corpus
 
 Selected future pilot corpus:
@@ -438,9 +436,13 @@ no blocked or sensitive path appears
 
 Native `merge-graphs` may be evaluated within that future pilot only after pre-merge namespacing/provenance gates. It is not accepted as safe merely because the command completes.
 
-## Root-scope readiness contract
+## Exploratory root refresh and operational-readiness contract
 
-P10.5L remains blocked until an authorized remediation pilot proves all gates:
+One final local Graphify root-scope extraction is authorized now for the P10.6 exploratory evidence refresh. The provenance-safe pilot is not a prerequisite for generating that map. The run must preserve the measured collision, dropped-node, missing/invalid provenance, source-coverage, case-sensitive identity, warning-accounting, report-consistency, and HTML-path/dependency limitations established by P10.5K-B.
+
+The exploratory output is raw generated evidence only. It is not eligible for operational import, authority promotion, GBrain ingestion, semantic-memory use, Cognitive Semantic System adoption, source-of-truth status, approval use, or runtime use.
+
+Before any such operational use, an authorized remediation pilot must prove all gates:
 
 | Quantitative gate | Required result |
 | --- | ---: |
@@ -472,8 +474,11 @@ evidence classification remains non-authoritative
 Explicit status:
 
 ```text
-root-scope execution remains blocked
+exploratory root-scope evidence refresh authorized for P10.6
+operational import and authority promotion remain blocked pending the provenance-safe pilot
 ```
+
+The authorized P10.6 run may generate the exploratory root evidence map with current Graphify behavior under the governed root scope. Its warnings and limitations must be reported without remediation claims. A later pilot and every partition/global gate remain mandatory before the output, or any successor graph, can cross an operational or authority boundary. The P10.6 refresh is visualization/report/evidence-map work only and does not reopen Graphify as semantic retrieval, operational memory, or authority.
 
 ## Implementation components required
 
@@ -498,7 +503,11 @@ Components must be local, deterministic, provider-independent, non-authoritative
 
 Future work must use explicit allowlisted source manifests and default-deny path validation. Credentials, secrets, `.env*`, token stores, provider configuration, products, external sources, artifacts, generated outputs as source input, and absolute local paths are blocked. No hosted provider is required or authorized.
 
-`.graphifyignore` currently expresses a separately governed controlled-root policy and includes broad documentation exclusions plus selected re-inclusions. It was not changed. A future pilot must not assume this file admits the five pilot files; input-policy alignment requires a separate explicit design/approval decision. `.gitignore` was not changed. Generated outputs must remain local and unstaged unless a separate governance decision says otherwise.
+`.graphifyignore` expresses the governed controlled-root policy for the authorized exploratory refresh and includes broad exclusions plus selected re-inclusions. The later provenance-safe pilot must not assume this file admits its five pilot files; pilot input-policy alignment still requires a separate explicit design/approval decision. `.gitignore` is unchanged. Generated outputs must remain local and unstaged unless a separate governance decision says otherwise.
+
+## Authorized exploratory root refresh input-policy contract
+
+Policy-eligible inputs are limited to `README.md`, `0_architecture/**/*.md`, and `3_platform/_governed_skeleton/**/*.py` under the current governed scope. References or Markdown links to blocked paths do not grant traversal permission. Code fences and command examples are inert text. Unknown paths remain default-deny, and raw or generated outputs must never be recycled as refresh inputs.
 
 ## Authority classification
 
@@ -519,7 +528,8 @@ graphify_deterministic_node_namespace_required
 graphify_source_manifest_required
 graphify_canonical_validation_ledger_required
 graphify_native_merge_only_unproven
-graphify_root_scope_execution_remains_blocked
+graphify_exploratory_root_scope_refresh_authorized
+graphify_operational_use_remains_pilot_gated
 graphify_partitioned_remediation_pilot_ready
 ```
 
@@ -534,17 +544,17 @@ single-source-only provenance injection defined
 edge rewriting and collision controls defined
 partition and global gates defined
 five-file pilot corpus defined
-root-scope readiness contract defined
+exploratory root refresh and operational-readiness contract defined
 no runtime or implementation occurred
 ```
 
-## Selected next ticket
+## Selected next step
 
 ```text
-P10.5K-D - Graphify Partitioned Provenance-Safe Extraction Pilot Architecture
+One final local Graphify root-scope exploratory extraction for P10.6
 ```
 
-P10.5K-D must design the exact implementation and execution contract before any pilot runtime. It does not inherit runtime authorization from this plan.
+P10.5K-D remains the required provenance-safe pilot architecture before operational import, authority promotion, GBrain ingestion, semantic-memory use, or Cognitive Semantic System adoption. It is no longer a prerequisite for generating the P10.6 exploratory evidence map and does not inherit runtime authorization beyond a separately approved pilot.
 
 ## Created / Not Created Register
 
@@ -585,7 +595,7 @@ no Git mutation
 
 ## Limitations
 
-CLI help proves only exposed syntax, not implementation semantics. Single-file extraction support, native merge behavior, endpoint rewriting, provenance retention, merge-order independence, rerun stability, and pilot resource requirements remain unproven. This plan relies on accepted P10.5K-B measurements without reopening generated evidence. It defines future controls but does not demonstrate them.
+The `no root-scope extraction` entry above records what P10.5K-C itself executed; it is not a current blocker on the separately authorized P10.6 exploratory run. CLI help proves only exposed syntax, not implementation semantics. Single-file extraction support, native merge behavior, endpoint rewriting, provenance retention, merge-order independence, rerun stability, and pilot resource requirements remain unproven. All measured collision and provenance limitations remain active. This plan defines future operational controls but does not demonstrate them.
 
 ## Commit commands
 
@@ -601,4 +611,4 @@ git commit -m "Plan Graphify collision and provenance remediation"
 git push
 ```
 
-Do not use `git add .`. Do not stage `graphify-out/**`, `.opencode/**`, `AGENTS.md`, or `0_architecture/implementation/graphify_command_candidate_confirmation.md`.
+Do not use `git add .`. Do not stage `graphify-out/**`, `.opencode/**`, or `AGENTS.md`.

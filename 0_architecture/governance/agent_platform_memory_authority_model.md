@@ -22,9 +22,7 @@ The core rule is simple: retrieval systems, generated files, search results, sum
 
 ## 3. P12.0E-GRAPH-REVIEW Dependency Status
 
-P12.0E-GRAPH-REVIEW exists as:
-
-`0_architecture/governance/agent_platform_gbrain_empty_graph_query_output_review.md`
+P12.0E-GRAPH-REVIEW conclusions are retained as historical decision lineage in this model.
 
 Required marker confirmed:
 
@@ -54,13 +52,8 @@ P12.3 consumed only allowed governance and metadata inputs.
 
 | Input | Role in P12.3 | Inspection posture |
 | --- | --- | --- |
-| `agent_platform_gbrain_empty_graph_query_output_review.md` | P12.0E dependency and Mode A classification | Marker/content search only. |
-| `agent_platform_gbrain_license_dependency_storage_audit.md` | GBrain storage and sandbox boundary | Marker/content search only. |
-| `agent_platform_gbrain_source_review_authorization_graphify_replacement_feasibility.md` | GBrain versus Graphify role split | Marker/content search only. |
-| `agent_platform_gbrain_ollama_local_provider_graph_generation_feasibility_review.md` | Ollama/semantic candidate boundary | Marker/content search only. |
-| `agent_platform_graphify_evidence_output_classification.md` | Generated evidence and Graphify output authority boundary | Marker/content search only. |
-| `agent_platform_graphify_integration_scope_markdown_authorization.md` | Graphify allowed/blocked scope and authority boundary | Marker/content search only. |
-| `agent_platform_graphify_markdown_scope_safety_review.md` | Graphify markdown scope safety posture | Existing governance context only. |
+| Retained GBrain feasibility conclusions | Mode A capability classification, storage boundaries, provider deferral, and GBrain/Graphify role split | Historical decision lineage retained in this model; obsolete record citations removed. |
+| Retained Graphify governance conclusions | Generated-evidence, scope-safety, and non-authority boundaries | Current policy is stated directly in this model. |
 | `agent_platform_external_tool_execution_gate_model.md` | External execution and generated output gate model | Marker/content search only. |
 | `agent_platform_human_approval_review_loop_operational_contract.md` | Human approval and review authority boundary | Marker/content search only. |
 | `agent_platform_shared_context_evidence_bus_operational_contract.md` | EvidenceRef and context bus boundary | Marker/content search only. |

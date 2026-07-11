@@ -63,7 +63,6 @@ AGENT PLATFORM remains AL-1 metadata skeleton. P6.1 is operational contract only
 
 | Input group | Document | Review mode | Registry use | Limitation |
 | --- | --- | --- | --- | --- |
-| P5.R audit | `agent_platform_minimal_active_agent_platform_audit.md` | governance_markdown_review | Baseline audit reference. | No activation inferred. |
 | P5.1 validation runner skeleton | `agent_platform_validation_runner_minimal_implementation.md` | implementation_skeleton_review | Validation capability metadata. | No validation execution. |
 | P5.2 security dry-run skeleton | `agent_platform_security_policy_dry_run_candidate.md` | implementation_skeleton_review | Security dry-run capability metadata. | No enforcement activation. |
 | P5.3 context assembly skeleton | `agent_platform_context_assembly_runtime_candidate.md` | implementation_skeleton_review | Context capability metadata. | No source loading. |

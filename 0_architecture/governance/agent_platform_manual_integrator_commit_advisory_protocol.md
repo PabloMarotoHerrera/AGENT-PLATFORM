@@ -79,24 +79,14 @@ Inputs were consumed as governance and architecture metadata only. P7.0.G did no
 | `0_architecture/governance/agent_platform_manual_harness_opencode_hermes_boundary_strategy.md` | Absent by path-only check | Optional P7.0.E sibling. | `pending_P7.0.E_harness_boundary_alignment`. |
 | `0_architecture/governance/agent_platform_manual_reviewer_approval_pipeline_contract.md` | Absent by path-only check | Optional P7.0.F sibling. | `pending_P7.0.F_reviewer_mesh_alignment`. |
 | `0_architecture/governance/agent_platform_first_manual_agentic_workflow_pilot_playbook.md` | Absent by path-only check | Optional P7.0.H sibling. | `pending_P7.0.H_manual_agent_native_pilot_alignment`. |
-| `0_architecture/governance/agent_platform_manual_agentic_workflow_planning_closure.md` | Absent by path-only check | Optional P7.0.R sibling. | `pending_P7.0.R_manual_agent_native_closure_alignment`. |
-| `0_architecture/governance/agent_platform_operational_readiness_audit.md` | Present by path-only check | P6.7 readiness posture. | Planning only; no activation. |
 | `0_architecture/governance/agent_platform_agent_capability_registry_operational_contract.md` | Mandatory governance input | P6.1 registry/capability boundary. | Registry metadata is not runtime capability. |
 | `0_architecture/governance/agent_platform_agent_to_agent_communication_protocol.md` | Mandatory governance input | P6.2 message and handoff boundary. | Protocol metadata is not dispatch. |
 | `0_architecture/governance/agent_platform_shared_context_evidence_bus_operational_contract.md` | Mandatory governance input | P6.3 context/evidence boundary. | Bus metadata is not persistence or movement. |
 | `0_architecture/governance/agent_platform_human_approval_review_loop_operational_contract.md` | Mandatory governance input | P6.4 approval/review metadata boundary. | ApprovalRef is not approval by itself. |
 | `0_architecture/governance/agent_platform_runtime_monitoring_incident_handling_operational_contract.md` | Mandatory governance input | P6.5 monitoring and incident route boundary. | Monitoring metadata is not monitoring runtime. |
-| `0_architecture/governance/agent_platform_minimal_active_agent_platform_audit.md` | Present by path-only check | P5.R AL-1 skeleton baseline. | Skeletons are not activated. |
-| `0_architecture/governance/agent_platform_activation_decision_reconciliation_closure.md` | Present by path-only check | P3.BR activation-decision reconciliation. | Decision reconciliation is not execution. |
 | `0_architecture/governance/agent_platform_tool_execution_activation_decision.md` | Mandatory governance input | P3.3 tool execution decision. | Tool execution remains deferred/blocked. |
 | `0_architecture/governance/agent_platform_provider_auth_api_mcp_activation_decision.md` | Mandatory governance input | P3.4 provider/auth/API/MCP decision. | Provider/auth/API/MCP activation remains deferred/blocked. |
 | `0_architecture/governance/agent_platform_agent_runtime_activation_decision.md` | Mandatory governance input | P3.5 agent runtime decision. | Agent runtime remains deferred/blocked. |
-| `0_architecture/governance/agent_platform_activation_readiness_reconciliation_closure.md` | Mandatory governance input | P3.R readiness closure. | Readiness is not activation. |
-| `0_architecture/governance/agent_platform_controlled_source_classification_readiness.md` | Mandatory governance input | Source classification posture. | Classification is not source loading. |
-| `0_architecture/governance/agent_platform_validation_execution_readiness.md` | Mandatory governance input | Validation readiness posture. | No validation execution. |
-| `0_architecture/governance/agent_platform_security_enforcement_readiness.md` | Mandatory governance input | Security readiness posture. | No security enforcement activation. |
-| `0_architecture/governance/agent_platform_knowledge_retrieval_architecture_reconciliation_closure.md` | Present by path-only check | P2.KR retrieval/memory/live connector/Cadence boundary. | No retrieval runtime. |
-| `0_architecture/governance/agent_platform_cross_lane_integration_reconciliation_closure.md` | Present by path-only check | P2.R cross-lane reconciliation precedent. | Reconciliation only; no activation. |
 | `0_architecture/governance/agent_platform_shared_metadata_vocabulary_alignment.md` | Present by path-only check | P2.1 vocabulary baseline. | Vocabulary is not runtime schema. |
 | `0_architecture/governance/agent_platform_cross_lane_evidence_reference_contract.md` | Present by path-only check | P2.2 EvidenceRef semantics. | Evidence supports; it does not decide. |
 | `0_architecture/governance/agent_platform_audit_retention_rollback_baseline.md` | Present by path-only check | P2.3 retention, rollback, incident, source tracking, and generated-output blockers. | No persistence or rollback automation. |
@@ -112,7 +102,6 @@ Inputs were consumed as governance and architecture metadata only. P7.0.G did no
 | `0_architecture/security/agent_platform_tool_shell_network_mcp_execution_policy.md` | Present by path-only check | Tool/shell/network/MCP security boundary. | Policy is not execution approval. |
 | `0_architecture/security/agent_platform_local_only_secrets_credentials_policy.md` | Present by path-only check | Local-only, secrets, credentials, generated-output, provider-auth boundary. | No secret or credential inspection. |
 | `0_architecture/cognitive_semantic_system/agent_platform_cognitive_semantic_system_naming_substrate_adr.md` | Present by path-only check | Accepted Cognitive Semantic System name and substrate posture. | No substrate selection. |
-| `0_architecture/cognitive_semantic_system/agent_platform_cognitive_semantic_system_decision_audit.md` | Present by path-only check | CSS audit posture. | Audit is not implementation. |
 | `README.md` | Present by path-only check | Repository orientation. | No runtime effect. |
 | `.gitignore` | Present by path-only check | Local-only/generated/secrets/provider-auth hygiene posture. | Not modified. |
 | `.graphifyignore` | Present by path-only check | Graphify default-deny boundary. | Not modified and not permission to run Graphify. |

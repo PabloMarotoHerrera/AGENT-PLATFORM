@@ -58,10 +58,6 @@ AGENT PLATFORM remains pre-active at AL-1. P3.3 is decision only. Decision is no
 ## 4. Inputs Reviewed
 | Input group | Document | Review mode | Decision use | Limitation |
 | --- | --- | --- | --- | --- |
-| P3.R activation readiness reconciliation | `agent_platform_activation_readiness_reconciliation_closure.md` | readiness_record_review | Confirms P3-B eligibility. | Does not approve execution. |
-| P3.0 source classification readiness | `agent_platform_controlled_source_classification_readiness.md` | readiness_record_review | Defines allowed/blocked input classes. | Classification is not source loading. |
-| P3.1 validation execution readiness | `agent_platform_validation_execution_readiness.md` | readiness_record_review | Defines validation refs/gates. | Validation not executed. |
-| P3.2 security enforcement readiness | `agent_platform_security_enforcement_readiness.md` | readiness_record_review | Defines security refs/blockers. | Security not implemented. |
 | P2.3 audit/retention/rollback baseline | `agent_platform_audit_retention_rollback_baseline.md` | metadata_contract_review | Retention, rollback, incident posture. | No automation. |
 | P2.2 EvidenceRef contract | `agent_platform_cross_lane_evidence_reference_contract.md` | metadata_contract_review | Evidence boundaries. | Evidence does not decide. |
 | P2.1 shared vocabulary | `agent_platform_shared_metadata_vocabulary_alignment.md` | governance_markdown_review | Canonical vocabulary. | No schema runtime. |
@@ -75,7 +71,6 @@ AGENT PLATFORM remains pre-active at AL-1. P3.3 is decision only. Decision is no
 | P0.3 security hardening | `agent_platform_security_enforcement_hardening_plan.md` | governance_markdown_review | Security hardening input. | No enforcement. |
 | S-04 tool/shell/network/MCP policy | `agent_platform_tool_shell_network_mcp_execution_policy.md` | policy_review | Tool/shell/network/MCP constraints. | No execution. |
 | S-03 local-only/secrets/credentials policy | `agent_platform_local_only_secrets_credentials_policy.md` | policy_review | Secret/local-only constraints. | No secret inspection. |
-| Graphify Repo Map Summary | `agent_platform_graphify_repo_map_summary.md` | curated_evidence_review | Supporting generated evidence context. | Not authority. |
 | CSS ADR/audit | CSS ADR/audit docs. | governance_markdown_review | Substrate-deferred context. | No substrate selection. |
 | `.gitignore` | Root ignore policy. | policy_review | Tracking boundary context. | Not modified. |
 | `.graphifyignore` | Root Graphify boundary. | policy_review | Graphify/source boundary context. | Not modified. |

@@ -65,12 +65,9 @@ AGENT PLATFORM remains AL-1 metadata skeleton. P6.5 is operational contract only
 
 | Input group | Document | Review mode | Monitoring/incident use | Limitation |
 | --- | --- | --- | --- | --- |
-| P5.R audit | `agent_platform_minimal_active_agent_platform_audit.md` | governance_markdown_review | Baseline audit posture. | No activation inferred. |
 | P5.7 audit/retention/rollback hooks | `agent_platform_audit_retention_rollback_runtime_hooks.md` | implementation_skeleton_review | Audit, retention, rollback, incident metadata posture. | No persistence or automation. |
 | P5.6 agent task/handoff skeleton | `agent_platform_agent_task_runtime_handoff_candidate.md` | implementation_skeleton_review | Agent/task/handoff observation classes. | No agent execution or runtime monitoring. |
 | P5.2 security dry-run skeleton | `agent_platform_security_policy_dry_run_candidate.md` | implementation_skeleton_review | Security dry-run constraints. | No enforcement activation. |
-| P3.2 security readiness | `agent_platform_security_enforcement_readiness.md` | readiness_record_review | Security readiness boundaries. | Readiness is not activation. |
-| P3.BR activation decision reconciliation | `agent_platform_activation_decision_reconciliation_closure.md` | activation_decision_review | Activation decision baseline. | No activation shortcut. |
 | P2.3 audit/retention/rollback baseline | `agent_platform_audit_retention_rollback_baseline.md` | metadata_contract_review | Retention, rollback, incident vocabulary. | No automation. |
 | P2.2 EvidenceRef contract | `agent_platform_cross_lane_evidence_reference_contract.md` | metadata_contract_review | Evidence refs. | Evidence supports; it does not decide. |
 | P2.1 vocabulary | `agent_platform_shared_metadata_vocabulary_alignment.md` | metadata_contract_review | Naming alignment. | No runtime schema. |

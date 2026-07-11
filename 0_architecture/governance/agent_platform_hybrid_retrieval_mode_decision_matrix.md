@@ -404,7 +404,7 @@ P2.K2 does not implement runtime logging, persistence, telemetry, rollback autom
 
 ### P2.K1 Interface
 
-P2.K1 is absent, so Four Cs / five-level dependencies are marked `pending_P2.K1_alignment`.
+P2.K1 is present and reconciled. Four Cs / five-level mapping remains metadata guidance rather than retrieval activation.
 
 Expected future alignment:
 
@@ -418,13 +418,13 @@ Expected future alignment:
 
 ### P2.K3 Interface
 
-P2.K3 is absent, so harness-routing dependencies are marked `pending_P2.K3_alignment`.
+P2.K3 is present and reconciled. Harness-routing projections remain non-authoritative metadata guidance.
 
 RetrievalMode decisions must be consumable by multiple harnesses as metadata guidance only. A future canonical manifest may reference retrieval mode decisions. AGENTS.md/CLAUDE.md/OpenCode/Codex/Hermes projections must not duplicate or weaken this matrix. Harness routing is future metadata projection only.
 
 ### P2.K4 Interface
 
-P2.K4 is absent, so live-connection/cadence dependencies are marked `pending_P2.K4_alignment`.
+P2.K4 is present and reconciled. Live-connection/cadence runtime remains separately gated and blocked by default.
 
 Volatile data defaults to live connector posture. Cadence/GBrain/Hermes always-on behavior remains blocked. Live connectors require future gates, retention, rollback, incident handling, audit, provider/auth/security review, and exact activation approval.
 

@@ -80,7 +80,6 @@ Trackable now means eligible for future exact-path staging after explicit human 
 
 | Material | Trackable posture | Reason |
 | --- | --- | --- |
-| `0_architecture/product_workspaces/agent_platform_product_workspace_selection.md` | Trackable as product governance documentation. | P-00 route decision. |
 | `0_architecture/product_workspaces/agent_platform_product_charter_template_common_gate.md` | Trackable as product governance documentation. | P-01 common gate. |
 | `0_architecture/product_workspaces/agent_platform_omniverse_app_product_charter.md` | Trackable as product governance documentation. | P-02 inactive charter draft. |
 | `0_architecture/product_workspaces/agent_platform_backend_energyplus_product_charter.md` | Trackable as product governance documentation. | P-03 inactive charter draft. |

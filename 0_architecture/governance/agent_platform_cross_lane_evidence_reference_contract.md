@@ -21,7 +21,7 @@ P1 hardened component-specific metadata contracts for context, providers/adapter
 
 P2 integrates those contracts transversally without activation. P2.2 defines the common EvidenceRef shape and its relationships to SourceRef, ValidationRef, SecurityRef, GraphifyRef, ProductRef, generated outputs, local-only material, limitations, retention, and review requirements.
 
-P2.2 resolves evidence-reference drift where possible. Because P2.1 Shared Metadata Vocabulary Alignment is absent, shared vocabulary dependencies are marked `pending_P2.1_alignment`.
+P2.2 resolves evidence-reference drift. P2.1 Shared Metadata Vocabulary Alignment is present and canonical; the former `pending_P2.1_alignment` markers are historical and closed by cross-lane reconciliation.
 
 P2.2 does not run validation. P2.2 does not activate runtime. P2.2 does not start P2.3 or P3.1.
 
@@ -66,11 +66,11 @@ A cross-lane EvidenceRef is a metadata reference that records what evidence supp
 | field | required | meaning | allowed values or posture | forbidden content | validation posture | security posture |
 | --- | --- | --- | --- | --- | --- | --- |
 | `evidence_ref_id` | yes | Stable cross-lane evidence metadata identifier. | Unique ID scoped to the record family. | Raw evidence content or encoded payloads. | Future completeness check only. | Must not reveal sensitive values. |
-| `evidence_kind` | yes | Evidence class. | Terms in section 6; `pending_P2.1_alignment`. | Secret, credential, raw source, or provider payload class disguised as evidence. | Vocabulary conformance future target. | Unknown kind blocks promotion. |
+| `evidence_kind` | yes | Evidence class. | Canonical terms in section 6 aligned with P2.1. | Secret, credential, raw source, or provider payload class disguised as evidence. | Vocabulary conformance future target. | Unknown kind blocks promotion. |
 | `evidence_label` | yes | Human-readable safe label. | Safe metadata label. | Secret values, credentials, private identifiers, raw source excerpts. | Label consistency future target. | Redact or omit sensitive label details. |
 | `evidence_scope` | yes | Exact claim, object, blocker, limitation, or posture supported. | Exact scope only. | Broad authority claims. | Scope completeness future target. | Broad or unknown scope blocks promotion. |
 | `evidence_owner` | yes | Accountable owner or owning lane. | Governance, validation, security, context, provider, tool, agent, Cognitive Semantic System, Graphify evidence, product-readiness, audit, or `unknown`. | Credential owner details beyond safe metadata. | Owner required for future validation. | Unknown owner requires review. |
-| `evidence_status` | yes | Current evidence status. | Terms in section 7; `pending_P2.1_alignment`. | Activation or approval status by implication. | Status vocabulary future target. | Blocked statuses must propagate. |
+| `evidence_status` | yes | Current evidence status. | Canonical terms in section 7 aligned with P2.1. | Activation or approval status by implication. | Status vocabulary future target. | Blocked statuses must propagate. |
 | `evidence_source_ref` | yes | SourceRef or source metadata reference. | SourceRef ID, curated summary ref, or blocked-source marker. | Raw source body, raw generated output, `.env` content. | Source relationship future target. | Preserve source sensitivity and classification. |
 | `source_ref_relationship` | yes | How the EvidenceRef relates to SourceRef. | Terms in section 8. | Permission to read or track source. | Relationship conformance future target. | Blocked source relationships constrain use. |
 | `validation_refs` | yes | ValidationRef IDs related to the evidence. | IDs, `none`, or blocked/future refs. | Validation command output unless future-gated and reviewed. | Validation relationship future target. | Sensitive validation output blocked. |
@@ -93,13 +93,13 @@ A cross-lane EvidenceRef is a metadata reference that records what evidence supp
 | `blockers` | yes | Active blockers attached to the evidence. | Gate, source, validation, security, local-only, product, provider, tool, agent, generated-output, retention blockers. | Bypass instructions or hidden exceptions. | Blocker preservation future target. | Blockers are binding until exact future gate changes them. |
 | `aliases` | yes | Non-canonical aliases for readability or migration. | Safe alias terms only. | Deprecated terms as canonical. | Alias/deprecated detection future target. | Aliases cannot weaken blockers. |
 | `deprecated_terms` | yes | Terms that must not be canonical downstream. | Deprecated or rejected examples. | Deprecated terms used as accepted names. | Deprecated-term detection future target. | Historical/rejected terms must be marked. |
-| `pending_alignment_refs` | yes | Vocabulary or schema alignment dependencies. | `pending_P2.1_alignment`, P2.1 refs if later present. | Silent vocabulary drift. | P2.1 alignment check future target. | Unknown drift requires review. |
+| `pending_alignment_refs` | yes | Vocabulary or schema alignment dependencies. | Open alignment references only; the P2.1 marker is closed. | Silent vocabulary drift. | Alignment check future target. | Unknown drift requires review. |
 
 EvidenceRef must never include raw secret values, credential values, API keys, tokens, passwords, private keys, browser auth, provider configs, `.env` contents, raw local-only source, raw product source, raw external source, raw generated Graphify output, provider output payloads, tool execution output payloads, or agent execution output payloads.
 
 ## 6. Evidence Kind Vocabulary
 
-P2.1 is absent. All evidence kind vocabulary in this section is `pending_P2.1_alignment`.
+P2.1 is present. The evidence-kind vocabulary in this section is reconciled with the canonical shared vocabulary.
 
 | evidence_kind | meaning | examples | allowed AL-1 use | blocked use | required future gate |
 | --- | --- | --- | --- | --- | --- |

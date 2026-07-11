@@ -48,11 +48,9 @@ Inputs were consumed through allowed posture, path, and marker checks only. No e
 
 | Input | Review mode | P9.0 use | Limitation |
 | --- | --- | --- | --- |
-| `agent_platform_p8_platform_mvp_readiness_closure.md` | marker posture check | Confirms P8.R closure and no runtime/external adoption/Git readiness. | No P8.R modification. |
 | `agent_platform_mvp0_implementation_plan_authorization_boundary.md` | path posture check | Confirms P8.11 authorization boundary context. | No implementation scope changed. |
 | `agent_platform_p8_platform_mvp_scope_external_integration_boundary.md` | path posture check | Carries P8 external boundary. | No P8.0 modification. |
 | `agent_platform_p8_security_activation_gate_model.md` | path posture check | Carries activation/security gate model. | No P8.5 modification. |
-| `agent_platform_graphify_read_only_evidence_boundary.md` | path posture check | Carries Graphify read-only boundary. | No Graphify execution. |
 | `agent_platform_gbrain_gstack_memory_compatibility_boundary.md` | path posture check | Carries GBrain/GStack candidate boundary. | No source inspection. |
 | `agent_platform_hermes_interface_runtime_candidate_boundary.md` | path posture check | Carries Hermes candidate boundary. | No Hermes runtime. |
 | `agent_platform_opencode_harness_upgrade_boundary.md` | path posture check | Carries OpenCode H0/manual boundary. | No OpenCode execution. |

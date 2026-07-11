@@ -47,16 +47,9 @@ P5.1 consumes P3.1 validation readiness and P3.3 tool decision posture. P5.1 doe
 
 | Input group | Document | Review mode | Implementation use | Limitation |
 | --- | --- | --- | --- | --- |
-| P3-B | `agent_platform_activation_decision_reconciliation_closure.md` | activation_decision_review | Confirms reconciled activation posture. | No activation approval inferred. |
 | P3-B | `agent_platform_tool_execution_activation_decision.md` | activation_decision_review | Confirms tool execution remains deferred. | No tool execution approval. |
 | P3-B | `agent_platform_provider_auth_api_mcp_activation_decision.md` | activation_decision_review | Confirms provider/auth/API/MCP boundary. | No provider call approval. |
 | P3-B | `agent_platform_agent_runtime_activation_decision.md` | activation_decision_review | Confirms agent runtime boundary. | No agent execution approval. |
-| P3-A | `agent_platform_activation_readiness_reconciliation_closure.md` | readiness_record_review | Readiness context. | Readiness is not activation. |
-| P3-A | `agent_platform_controlled_source_classification_readiness.md` | readiness_record_review | Source classification metadata boundary. | Source classification is not source loading permission. |
-| P3-A | `agent_platform_validation_execution_readiness.md` | readiness_record_review | Validation readiness context. | Validation execution remains blocked. |
-| P3-A | `agent_platform_security_enforcement_readiness.md` | readiness_record_review | Security readiness context. | Security enforcement remains non-active. |
-| P2.K/P2.R | `agent_platform_knowledge_retrieval_architecture_reconciliation_closure.md` | governance_markdown_review | Retrieval/substrate boundary. | Cognitive Semantic System substrate remains deferred. |
-| P2.K/P2.R | `agent_platform_cross_lane_integration_reconciliation_closure.md` | governance_markdown_review | Cross-lane integration posture. | Does not authorize runtime. |
 | P2 | `agent_platform_shared_metadata_vocabulary_alignment.md` | metadata_contract_review | Vocabulary names used by contracts. | No automatic conformance proof. |
 | P2 | `agent_platform_cross_lane_evidence_reference_contract.md` | metadata_contract_review | EvidenceRef interface names. | Evidence supports; it does not decide. |
 | P2 | `agent_platform_audit_retention_rollback_baseline.md` | metadata_contract_review | Retention/rollback/incident refs. | No persistence, rollback, or audit logging. |
@@ -72,7 +65,6 @@ P5.1 consumes P3.1 validation readiness and P3.3 tool decision posture. P5.1 doe
 | Security | `agent_platform_tool_shell_network_mcp_execution_policy.md` | policy_review | S-04 execution boundary. | No shell/subprocess execution. |
 | Security | `agent_platform_local_only_secrets_credentials_policy.md` | policy_review | S-03 secrets boundary. | No secret or credential inspection. |
 | CSS | `agent_platform_cognitive_semantic_system_naming_substrate_adr.md` | governance_markdown_review | Accepted name and substrate deferral. | No Cognitive Semantic System substrate selection. |
-| CSS | `agent_platform_cognitive_semantic_system_decision_audit.md` | governance_markdown_review | Decision audit context. | No graph or vector substrate adoption. |
 | Root | `README.md`, `.gitignore`, `.graphifyignore` | governance_markdown_review | Workspace and tracking boundaries. | No generated output tracking or ignore-file modification. |
 | External candidate | `external/sources/gbrain-master` | not_reviewed_blocked | Optional path-only metadata if present. | Path absent in P5.1 check; contents not inspected. |
 

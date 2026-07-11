@@ -47,12 +47,6 @@ API key availability is not API key approval.
 ## 4. Inputs Reviewed
 | Input | P3.4 use | Limitation |
 | --- | --- | --- |
-| `0_architecture/governance/agent_platform_activation_readiness_reconciliation_closure.md` | P3.R closure, downstream P3.4 eligibility, AL-1 invariant. | No activation authority. |
-| `0_architecture/governance/agent_platform_controlled_source_classification_readiness.md` | P3.0 source classification, provider auth material, GBrain/external, generated-output, and product blockers. | No source loading or content inspection approval. |
-| `0_architecture/governance/agent_platform_validation_execution_readiness.md` | P3.1 validation readiness and provider/auth readiness candidate rules. | No validation execution. |
-| `0_architecture/governance/agent_platform_security_enforcement_readiness.md` | P3.2 security readiness and default-deny provider/network/MCP posture. | No enforcement implementation or scanner run. |
-| `0_architecture/governance/agent_platform_knowledge_retrieval_architecture_reconciliation_closure.md` | P2.KR retrieval, live connector, Cadence, GBrain/Hermes boundary. | No retrieval runtime or live connector activation. |
-| `0_architecture/governance/agent_platform_cross_lane_integration_reconciliation_closure.md` | P2.R reconciled P2 vocabulary/evidence/retention baseline. | No P3 activation authority. |
 | `0_architecture/governance/agent_platform_shared_metadata_vocabulary_alignment.md` | Canonical blocker, sensitivity, source, status, provider_auth_posture, and ref terms. | No schema or runtime implementation. |
 | `0_architecture/governance/agent_platform_cross_lane_evidence_reference_contract.md` | EvidenceRef, SourceRef, ValidationRef, SecurityRef, GraphifyRef, ProductRef boundaries. | No evidence execution or raw content inclusion. |
 | `0_architecture/governance/agent_platform_audit_retention_rollback_baseline.md` | Retention, rollback, quarantine, publication, tracking, incident posture. | No runtime logging, telemetry, persistence, rollback automation, or publication. |
@@ -66,11 +60,9 @@ API key availability is not API key approval.
 | `0_architecture/governance/agent_platform_security_enforcement_hardening_plan.md` | Security hardening posture for provider/auth, credentials, network, MCP, source, generated outputs. | No enforcement runtime. |
 | `0_architecture/governance/agent_platform_hybrid_parallel_work_packet_dependency_map.md` | G-19 sequencing for P3.4 and blocked activation lanes. | Planning only. |
 | `0_architecture/governance/agent_platform_activation_gate_charter.md` | G-01 GT-08 Provider / API / MCP Activation Gate and universal gate fields. | Charter is not activation. |
-| `0_architecture/governance/agent_platform_graphify_repo_map_summary.md` | Curated generated supporting evidence boundary. | Not authority, source, substrate, or provider approval. |
 | `0_architecture/security/agent_platform_local_only_secrets_credentials_policy.md` | S-03 local-only, secrets, credentials, provider auth, environment file, generated-output, Git safety rules. | No secret or credential inspection. |
 | `0_architecture/security/agent_platform_tool_shell_network_mcp_execution_policy.md` | S-04 execution risk levels, network/API/provider, authentication, MCP, Git, package, product execution blocks. | No execution approval. |
 | `0_architecture/cognitive_semantic_system/agent_platform_cognitive_semantic_system_naming_substrate_adr.md` | Accepted name and substrate-deferred posture. | No implementation authorization. |
-| `0_architecture/cognitive_semantic_system/agent_platform_cognitive_semantic_system_decision_audit.md` | CSS audit confirming no substrate selected and external/product/provider actions blocked. | Audit only. |
 | `README.md` | Root workspace orientation. | No runtime effect. |
 | `.gitignore` | Local-only, generated, secrets, credentials, provider auth hygiene posture. | Hygiene, not security enforcement. |
 | `.graphifyignore` | Graphify default-deny input boundary and hard exclusions. | Not permission to run Graphify or broaden source. |

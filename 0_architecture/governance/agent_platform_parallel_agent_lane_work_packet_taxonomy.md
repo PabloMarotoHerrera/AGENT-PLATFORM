@@ -50,13 +50,11 @@ Manual roles can coordinate work only through human-mediated prompts, explicit w
 
 | input | status | role in P7.0.C | limitations |
 | --- | --- | --- | --- |
-| `0_architecture/governance/agent_platform_operational_readiness_audit.md` | Present / reviewed | P6.7 readiness posture. Current file records accepted P6 readiness for operational planning while preserving AL-1 and no-runtime boundaries. | Audit is not activation and does not start runtime. |
 | `0_architecture/governance/agent_platform_agent_capability_registry_operational_contract.md` | Present / reviewed | P6.1 registry and capability metadata boundary. | Registry is not runtime; capability metadata is not execution. |
 | `0_architecture/governance/agent_platform_agent_to_agent_communication_protocol.md` | Present / reviewed | P6.2 protocol, message, dispatch, handoff, and no-dispatch posture. | Protocol is not message dispatch. |
 | `0_architecture/governance/agent_platform_shared_context_evidence_bus_operational_contract.md` | Present / reviewed | P6.3 context/evidence bus and evidence/context package posture. | Bus is not persistence; source refs are not source loading. |
 | `0_architecture/governance/agent_platform_human_approval_review_loop_operational_contract.md` | Present / reviewed | P6.4 approval/review metadata and exact-scope approval posture. | ApprovalRef is not approval. |
 | `0_architecture/governance/agent_platform_runtime_monitoring_incident_handling_operational_contract.md` | Present / reviewed | P6.5 monitoring/incident route metadata and stop-rule posture. | Monitoring model is not monitoring runtime; incident route is not incident automation. |
-| `0_architecture/governance/agent_platform_minimal_active_agent_platform_audit.md` | Present / reviewed | P5.R AL-1 skeleton audit baseline. | Audit is not activation. |
 | `0_architecture/implementation/agent_platform_validation_runner_minimal_implementation.md` | Present / reviewed | P5.1 validation skeleton limitation. | No validation execution. |
 | `0_architecture/implementation/agent_platform_security_policy_dry_run_candidate.md` | Present / reviewed | P5.2 dry-run security skeleton limitation. | No scanner or security enforcement activation. |
 | `0_architecture/implementation/agent_platform_context_assembly_runtime_candidate.md` | Present / reviewed | P5.3 context assembly skeleton limitation. | No source loading or context runtime activation. |
@@ -64,16 +62,9 @@ Manual roles can coordinate work only through human-mediated prompts, explicit w
 | `0_architecture/implementation/agent_platform_provider_adapter_runtime_candidate.md` | Present / reviewed | P5.5 provider adapter skeleton limitation. | No provider/auth/API/MCP activation, credential use, network call, or live connector activation. |
 | `0_architecture/implementation/agent_platform_agent_task_runtime_handoff_candidate.md` | Present / reviewed | P5.6 agent task/handoff skeleton limitation. | No agent, task, handoff, scheduler, orchestration, or autonomous loop activation. |
 | `0_architecture/implementation/agent_platform_audit_retention_rollback_runtime_hooks.md` | Present / reviewed | P5.7 audit/retention/rollback/incident hook limitation. | No persistence, telemetry, rollback automation, quarantine, deletion, publication, source tracking, or generated output tracking. |
-| `0_architecture/governance/agent_platform_activation_decision_reconciliation_closure.md` | Present / reviewed | P3.BR activation-decision reconciliation. | Decision is not execution. |
 | `0_architecture/governance/agent_platform_tool_execution_activation_decision.md` | Present / reviewed | P3.3 tool execution decision posture. | Tool execution remains deferred/blocked. |
 | `0_architecture/governance/agent_platform_provider_auth_api_mcp_activation_decision.md` | Present / reviewed | P3.4 provider/auth/API/MCP decision posture. | Provider/auth/API/MCP activation remains deferred/blocked. |
 | `0_architecture/governance/agent_platform_agent_runtime_activation_decision.md` | Present / reviewed | P3.5 agent runtime decision posture, interpreted through P3.BR reconciliation. | Agent runtime activation remains deferred/blocked. |
-| `0_architecture/governance/agent_platform_activation_readiness_reconciliation_closure.md` | Present / reviewed | P3.R readiness closure and no-readiness-activation posture. | Readiness is not activation. |
-| `0_architecture/governance/agent_platform_controlled_source_classification_readiness.md` | Present / reviewed | P3.0 source classification posture. | Classification is not source loading. |
-| `0_architecture/governance/agent_platform_validation_execution_readiness.md` | Present / reviewed | P3.1 validation readiness posture. | No validation execution. |
-| `0_architecture/governance/agent_platform_security_enforcement_readiness.md` | Present / reviewed | P3.2 security readiness posture. | No enforcement or scanner execution. |
-| `0_architecture/governance/agent_platform_knowledge_retrieval_architecture_reconciliation_closure.md` | Present / reviewed | P2.KR retrieval, memory, live connector, Cadence, Graphify, and substrate boundary. | No retrieval runtime, vector DB, graph DB, live connector, or Cadence activation. |
-| `0_architecture/governance/agent_platform_cross_lane_integration_reconciliation_closure.md` | Present / reviewed | P2.R cross-lane reconciliation precedent for parallel drift. | Reconciliation only; no activation. |
 | `0_architecture/governance/agent_platform_shared_metadata_vocabulary_alignment.md` | Present / reviewed | P2.1 shared vocabulary for statuses, refs, blockers, sensitivity, source, posture, and aliases. | Vocabulary is not runtime schema. |
 | `0_architecture/governance/agent_platform_cross_lane_evidence_reference_contract.md` | Present / reviewed | P2.2 EvidenceRef, SourceRef, ValidationRef, SecurityRef, GraphifyRef, ProductRef semantics. | Evidence supports; it does not decide. |
 | `0_architecture/governance/agent_platform_audit_retention_rollback_baseline.md` | Present / reviewed | P2.3 retention, rollback, incident, local-only, publication, source tracking, and generated-output blockers. | No logging, persistence, rollback automation, or incident automation. |
@@ -89,7 +80,6 @@ Manual roles can coordinate work only through human-mediated prompts, explicit w
 | `0_architecture/security/agent_platform_tool_shell_network_mcp_execution_policy.md` | Present / reviewed | S-04 execution policy and blocked defaults. | Policy is not enforcement or command approval. |
 | `0_architecture/security/agent_platform_local_only_secrets_credentials_policy.md` | Present / reviewed | S-03 local-only, secrets, credentials, generated output, and provider-auth boundary. | No secret or credential inspection. |
 | `0_architecture/cognitive_semantic_system/agent_platform_cognitive_semantic_system_naming_substrate_adr.md` | Present / reviewed | Accepted Cognitive Semantic System name and substrate neutrality. | ADR is not implementation authorization. |
-| `0_architecture/cognitive_semantic_system/agent_platform_cognitive_semantic_system_decision_audit.md` | Present / reviewed | CSS audit and no-substrate-selected posture. | Audit is not substrate selection. |
 | `README.md` | Present / reviewed | Root workspace orientation. | No runtime effect. |
 | `.gitignore` | Present / reviewed | Local-only/generated/secrets/provider-auth hygiene posture. | Ignore rules are not enforcement; not modified. |
 | `.graphifyignore` | Present / reviewed | Graphify default-deny boundary and hard exclusions. | Not permission to run or adopt Graphify; not modified. |

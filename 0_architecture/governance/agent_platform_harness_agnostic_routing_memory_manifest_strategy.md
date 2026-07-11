@@ -62,13 +62,13 @@ Validation evaluates; governance decides.
 Security constrains; it does not activate.
 
 ## 4. P2.K1 / P2.K2 / P2.K4 Dependency Posture
-P2.K3 checked for optional dependency documents before writing this strategy.
+P2.K3 originally checked for optional dependency documents before writing this strategy. P2.K1, P2.K2, and P2.K4 are now present; their former pending markers are closed by knowledge/retrieval reconciliation and are historical only.
 
 | Optional dependency | Expected path | Posture during P2.K3 | Alignment marker | P2.K3 handling |
 | --- | --- | --- | --- | --- |
-| P2.K1 - Four Cs / Five Levels Mapping | `0_architecture/governance/agent_platform_four_cs_five_levels_mapping.md` | Absent. | `pending_P2.K1_alignment` | Do not infer final context/routing level taxonomy. Carry forward pending marker. |
-| P2.K2 - Hybrid Retrieval Mode Decision Matrix | `0_architecture/governance/agent_platform_hybrid_retrieval_mode_decision_matrix.md` | Absent. | `pending_P2.K2_alignment` | Do not select retrieval mode, vector mode, graph mode, hybrid mode, or ranking strategy. Carry forward pending marker. |
-| P2.K4 - Live Connections / Cadence Boundary Strategy | `0_architecture/governance/agent_platform_live_connections_cadence_boundary_strategy.md` | Absent. | `pending_P2.K4_alignment` | Do not activate live connectors, watch mode, refresh cadence, background sync, or always-on behavior. Carry forward pending marker. |
+| P2.K1 - Four Cs / Five Levels Mapping | `0_architecture/governance/agent_platform_four_cs_five_levels_mapping.md` | Present. | Reconciled | Consume as metadata guidance only. |
+| P2.K2 - Hybrid Retrieval Mode Decision Matrix | `0_architecture/governance/agent_platform_hybrid_retrieval_mode_decision_matrix.md` | Present. | Reconciled | Consume without activating retrieval runtime. |
+| P2.K4 - Live Connections / Cadence Boundary Strategy | `0_architecture/governance/agent_platform_live_connections_cadence_boundary_strategy.md` | Present. | Reconciled | Live connectors and always-on behavior remain blocked. |
 
 P2.K3 does not create, modify, supersede, or start P2.K1, P2.K2, or P2.K4.
 

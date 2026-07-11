@@ -29,12 +29,7 @@ Inspection was limited to allowed governance marker checks and path-existence ch
 
 Marker-checked governance files:
 
-- `0_architecture/governance/agent_platform_gbrain_empty_graph_query_output_review.md`
-- `0_architecture/governance/agent_platform_gbrain_mode_a_direct_governance_import_sandbox_rerun_record.md`
-- `0_architecture/governance/agent_platform_gbrain_controlled_graph_query_exact_slug_execution_record.md`
-- `0_architecture/governance/agent_platform_gbrain_source_review_authorization_graphify_replacement_feasibility.md`
-- `0_architecture/governance/agent_platform_graphify_evidence_output_classification.md`
-- `0_architecture/governance/agent_platform_graphify_local_free_provider_feasibility_review.md`
+Historical P12.0A-P12.0E and Graphify evidence conclusions are retained as decision lineage in this record.
 
 Marker-checked governance file by final recheck:
 
@@ -42,9 +37,7 @@ Marker-checked governance file by final recheck:
 
 ## P12.0E-GRAPH-REVIEW Dependency Status
 
-P12.0E-GRAPH-REVIEW exists through:
-
-- `0_architecture/governance/agent_platform_gbrain_empty_graph_query_output_review.md`
+P12.0E-GRAPH-REVIEW conclusions are retained as historical decision lineage in this record.
 
 Required marker confirmed:
 

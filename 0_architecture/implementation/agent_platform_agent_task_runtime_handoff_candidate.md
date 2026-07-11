@@ -56,16 +56,9 @@ P5.6 does not execute agents. P5.6 does not execute tasks. P5.6 does not execute
 
 | Input group | Document | Review mode | Implementation use | Limitation |
 | --- | --- | --- | --- | --- |
-| P3-B | `agent_platform_activation_decision_reconciliation_closure.md` | activation_decision_review | Reconciled activation posture. | No execution approval inferred. |
 | P3-B | `agent_platform_tool_execution_activation_decision.md` | activation_decision_review | Tool execution boundary. | No tool execution. |
 | P3-B | `agent_platform_provider_auth_api_mcp_activation_decision.md` | activation_decision_review | Provider/API/MCP boundary. | No provider or MCP activation. |
 | P3-B | `agent_platform_agent_runtime_activation_decision.md` | activation_decision_review | Canonical agent runtime decision posture. | Agent execution remains blocked/deferred. |
-| P3-A | `agent_platform_activation_readiness_reconciliation_closure.md` | readiness_record_review | Readiness context. | Readiness is not activation. |
-| P3-A | `agent_platform_controlled_source_classification_readiness.md` | readiness_record_review | Source classification metadata boundary. | Source classification is not source loading permission. |
-| P3-A | `agent_platform_validation_execution_readiness.md` | readiness_record_review | Validation readiness posture. | No validation execution. |
-| P3-A | `agent_platform_security_enforcement_readiness.md` | readiness_record_review | Security readiness posture. | Security enforcement remains non-active. |
-| P2.K/P2.R | `agent_platform_knowledge_retrieval_architecture_reconciliation_closure.md` | governance_markdown_review | Retrieval/substrate boundary. | Cognitive Semantic System substrate remains deferred. |
-| P2.K/P2.R | `agent_platform_cross_lane_integration_reconciliation_closure.md` | governance_markdown_review | Cross-lane posture. | No runtime activation. |
 | P2 | `agent_platform_shared_metadata_vocabulary_alignment.md` | metadata_contract_review | Vocabulary naming. | No conformance proof generated. |
 | P2 | `agent_platform_cross_lane_evidence_reference_contract.md` | metadata_contract_review | EvidenceRef posture. | Evidence supports; it does not decide. |
 | P2 | `agent_platform_audit_retention_rollback_baseline.md` | metadata_contract_review | Retention/rollback/incident naming. | No persistence, rollback, quarantine, or incident route. |
@@ -81,7 +74,6 @@ P5.6 does not execute agents. P5.6 does not execute tasks. P5.6 does not execute
 | Security | `agent_platform_tool_shell_network_mcp_execution_policy.md` | policy_review | Shell/network/MCP boundary. | No shell, network, or MCP execution. |
 | Security | `agent_platform_local_only_secrets_credentials_policy.md` | policy_review | Secrets/credentials boundary. | No secret or credential inspection. |
 | CSS | `agent_platform_cognitive_semantic_system_naming_substrate_adr.md` | governance_markdown_review | Accepted naming. | No graph or vector substrate adoption. |
-| CSS | `agent_platform_cognitive_semantic_system_decision_audit.md` | governance_markdown_review | Decision audit boundary. | No substrate decision. |
 | Root | `README.md`, `.gitignore`, `.graphifyignore` | governance_markdown_review | Workspace and tracking boundary. | No ignore-file changes. |
 | P5 | `agent_platform_validation_runner_minimal_implementation.md` | sibling_skeleton_review | P5.1 validation skeleton posture present. | No validation execution. |
 | P5 | `agent_platform_security_policy_dry_run_candidate.md` | sibling_skeleton_review | P5.2 security dry-run posture present. | Security enforcement remains non-active. |

@@ -66,7 +66,6 @@ P12_4_Skill_Authority_Execution_Boundary:
 Governance files inspected read-only:
 
 ```text
-0_architecture/governance/agent_platform_gstack_license_dependency_skill_audit.md
 0_architecture/governance/agent_platform_memory_authority_model.md
 0_architecture/governance/agent_platform_gbrain_adoption_graphify_semantic_replacement_decision.md
 0_architecture/governance/agent_platform_external_tool_execution_gate_model.md
@@ -82,7 +81,6 @@ Governance files inspected read-only:
 Listed governance files that were expected and found:
 
 ```yaml
-agent_platform_gstack_license_dependency_skill_audit.md: present
 agent_platform_memory_authority_model.md: present
 agent_platform_gbrain_adoption_graphify_semantic_replacement_decision.md: present
 agent_platform_external_tool_execution_gate_model.md: present
@@ -210,11 +208,7 @@ git push
 
 ## P12.2 Dependency Status
 
-P12.2 exists:
-
-```text
-0_architecture/governance/agent_platform_gstack_license_dependency_skill_audit.md
-```
+P12.2 conclusions are retained as historical decision lineage in this boundary.
 
 Required marker confirmed:
 
@@ -1081,6 +1075,8 @@ Rollback posture by surface:
 | Git/deploy | explicit rollback owner, revert/deploy rollback plan, manual confirmation |
 
 ## What Must Be True Before Any Skill Can Execute
+
+Skill discovery, installation, selection, or instruction loading is not execution approval. A loaded skill cannot self-authorize its command, provider, MCP, browser, subagent, file-write, memory, settings, hook, or Git permissions; each active surface still requires its exact independent gate.
 
 Before any skill execution profile above S1 can execute, all of the following must be true:
 

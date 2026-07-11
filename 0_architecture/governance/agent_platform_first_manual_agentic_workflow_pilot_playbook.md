@@ -70,7 +70,6 @@ P7.0.H recommends a first safe pilot but does not execute it.
 | `agent_platform_manual_harness_opencode_hermes_boundary_strategy.md` | Present by safe path check; `H0` marker found. | H0/H1/H2/H3 manual harness semantics. | No internal harness activation. |
 | `agent_platform_reviewer_mesh_immune_safeguards_contract.md` | Present by safe path check; `ReviewerMesh` marker found. | Reviewer mesh and immune safeguard procedure. | No automatic review. |
 | `agent_platform_manual_integrator_commit_advisory_protocol.md` | Present by safe path check; `CommitCandidate` marker found. | Integration summary, drift register, commit candidate, command block. | No Git mutation. |
-| `agent_platform_operational_readiness_audit.md` | Present by safe path check. | Operational readiness boundaries. | Audit posture does not activate runtime. |
 | P6.1-P6.6 | Inherited governance inputs. | Capability, communication, evidence, approval, monitoring, and incident boundaries. | Operational metadata only. |
 | P5.R / P5.1-P5.7 | Inherited skeleton baseline. | Inert skeleton and non-activation posture. | No implementation. |
 | P3.BR / P3.3 / P3.4 / P3.5 | Inherited activation decisions. | Provider/tool/agent activation blocks. | No activation. |

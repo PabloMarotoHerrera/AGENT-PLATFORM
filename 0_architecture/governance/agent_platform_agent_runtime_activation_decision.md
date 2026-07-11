@@ -2,7 +2,7 @@
 
 Ticket: P3.5
 Status: Decision recorded; activation deferred
-Decision value: agent_runtime_activation_deferred_until_P3.3_P3.4_alignment
+Decision value: agent_runtime_activation_deferred
 Activation level: AGENT PLATFORM remains pre-active at AL-1
 
 ## Purpose
@@ -18,14 +18,14 @@ This document does not create, enable, configure, execute, import, adopt, or app
 
 The P3.5 decision is:
 
-`agent_runtime_activation_deferred_until_P3.3_P3.4_alignment`
+`agent_runtime_activation_deferred`
 
-This deferral is mandatory because the following prerequisite activation-decision records are absent:
+P3.3 and P3.4 are now present and canonical. Their former pending-alignment markers are closed; runtime activation remains independently deferred because no exact runtime execution gate exists.
 
 | Dependency | Required alignment marker | Current posture |
 | --- | --- | --- |
-| P3.3 Tool Execution Activation Decision | pending_P3.3_tool_execution_decision_alignment | Missing; unresolved |
-| P3.4 Provider / Auth / API / MCP Activation Decision | pending_P3.4_provider_auth_decision_alignment | Missing; unresolved |
+| P3.3 Tool Execution Activation Decision | reconciled | Present; tool execution remains gated |
+| P3.4 Provider / Auth / API / MCP Activation Decision | reconciled | Present; provider/auth/API/MCP remains gated |
 
 No runtime activation may proceed from this record. P3.5 may only preserve a narrow, metadata-only future candidate scope for later governance review after P3.3 and P3.4 exist and are reconciled.
 
@@ -127,8 +127,8 @@ P3.5 establishes dependency interfaces that must be resolved before any later ru
 
 | Interface | Required before activation | Current P3.5 posture |
 | --- | --- | --- |
-| Tool execution interface | P3.3 completed and reconciled | pending_P3.3_tool_execution_decision_alignment |
-| Provider/auth/API/MCP interface | P3.4 completed and reconciled | pending_P3.4_provider_auth_decision_alignment |
+| Tool execution interface | P3.3 completed and reconciled | Present; no execution approval |
+| Provider/auth/API/MCP interface | P3.4 completed and reconciled | Present; no activation approval |
 | Security enforcement interface | P3.2 constraints carried forward | Ready to constrain; not activation |
 | Validation interface | P3.1 constraints carried forward | Ready to evaluate; not activation |
 | Source classification interface | P3.0 constraints carried forward | Classification only; not source loading |
@@ -201,12 +201,8 @@ The following invariants are carried forward by P3.5:
 
 | Drift item | Status | Required alignment |
 | --- | --- | --- |
-| P3.3 absent | Open | pending_P3.3_tool_execution_decision_alignment |
-| P3.4 absent | Open | pending_P3.4_provider_auth_decision_alignment |
-| Agent runtime scope cannot be evaluated against tool execution decision | Open | Complete P3.3 first |
-| Agent runtime scope cannot be evaluated against provider/auth/API/MCP decision | Open | Complete P3.4 first |
-| P3.BR cannot close until P3.3, P3.4, and P3.5 exist | Open | Complete missing P3 activation-decision records |
-| P4 and P5 sequencing depends on P3.BR | Open | Do not advance P4 or P5 before P3.BR closure |
+| P3.3/P3.4 temporal absence | Resolved | Reconciled; historical pending markers closed |
+| Agent runtime execution gate | Open | Runtime remains deferred until an exact future gate |
 
 ## Future Validation Targets
 
