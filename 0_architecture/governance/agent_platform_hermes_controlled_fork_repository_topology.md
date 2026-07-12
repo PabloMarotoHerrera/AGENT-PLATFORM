@@ -2,15 +2,21 @@
 
 ## 0. Contexto obligatorio
 
-P12 is **Hermes Productization Foundation**. P12.1 is the controlled product repository topology ticket and depends on accepted P12.0 substantive content.
+P12 is **Hermes Productization Foundation**. P12.1 is reopened after P12.C1 determined that its product-root decision violated the human-authorized workspace boundary.
 
 P12.0 intentionally delegates the exact product-root, repository-mode, remote-policy and branch-policy decisions to P12.1. P12.1 owns those decisions under the P12.0 productization boundary; P12.0 was not required to predefine them.
 
-P12.1 establishes an empty sibling Git repository at `C:\Users\pablo\OneDrive\Escritorio\AGENT-PLATFORM-HERMES`. It preserves the P11.0-locked upstream source at `4_external/sources/hermes-agent` as an immutable read-only reference and imports no Hermes source. P12.2 owns the first controlled snapshot import, restrictive-subtree exclusion, notice baseline and provenance inventory.
+P12.1 historically established an empty sibling Git repository at `C:\Users\pablo\OneDrive\Escritorio\AGENT-PLATFORM-HERMES`. That decision was invalid, P12.2 later populated the root, and P12.C1 safely removed the complete misplaced repository after exact ownership proof. The P11.0-locked upstream source at `4_external/sources/hermes-agent` remains an immutable read-only reference.
 
 P12.1 does not install, build, test or execute Hermes. It does not perform license exclusion, create product files, contact a remote, stage, commit, push, use `git add .`, touch `.opencode/` or `AGENTS.md`, modify P11/P12.0, or create additional Markdown.
 
-Post-cleanup resolution uses current substantive canonical content rather than obsolete filename identity.
+Current status:
+
+```text
+rolled_back_due_to_unauthorized_out_of_workspace_product_root
+```
+
+P12.C1 supersedes every historical accepted, completed or ready statement below. The sibling-root decision is invalid, the material repository topology was removed, the upstream reference remained unchanged, P12.1 is reopened and not accepted, and P12.C2 must redefine the canonical topology before P12.1 or P12.2 is executed again. P12.3 and all later productization execution remain blocked.
 
 Document model:
 
@@ -22,17 +28,12 @@ HermesProductTopologyRecord
 Result markers:
 
 ```text
-hermes_controlled_fork_repository_topology_ready
-hermes_product_root_created
-hermes_product_repository_initialized
-hermes_product_main_branch_initialized
-hermes_upstream_remote_configured_without_network
-hermes_origin_remote_deferred
-hermes_source_snapshot_import_deferred_to_P12_2
+hermes_p12_1_material_result_rolled_back
+hermes_external_product_root_removed
 hermes_locked_upstream_reference_unchanged
-hermes_P12_2_ready
-no_source_copy_created
-no_product_commit_created
+hermes_topology_redefinition_required
+hermes_p12_1_reopened
+hermes_p12_2_reexecution_blocked_pending_corrected_P12_1
 no_remote_network_operation
 no_install_build_test_run
 no_agent_platform_git_mutation
@@ -44,13 +45,13 @@ no_agent_platform_git_mutation
 implementation / repository topology
 ```
 
-Execution posture: exact bounded local repository-topology creation completed; source import and all product execution remain blocked.
+Execution posture: historical topology creation rolled back; no current product repository exists; topology redefinition is assigned to P12.C2.
 
 ## 2. Objetivo
 
-P12.1:
+Historical P12.1 objectives were to:
 
-- creates the exact empty sibling Hermes product repository topology;
+- create the exact empty sibling Hermes product repository topology;
 - preserve the locked upstream reference;
 - establish `HermesProductRoot`;
 - establish `HermesProductRepositoryMode`;
@@ -58,11 +59,13 @@ P12.1:
 - establish `HermesProductBranchPolicy`;
 - establish the upstream relationship, no-touch boundary and Git boundary;
 - establish validation, cleanup and rollback posture;
-- prepares P12.2, P12.3, P12.5 and P12.6 without starting them.
+- prepare P12.2, P12.3, P12.5 and P12.6 without starting them.
 
-The selected topology is `sibling_fresh_git_repository` with `snapshot_import_without_upstream_git_history`. The product repository intentionally contains no source or product file before P12.2.
+The historical selection was `sibling_fresh_git_repository` with `snapshot_import_without_upstream_git_history`. It is no longer accepted or current, and P12.C1 does not select a replacement.
 
-## 3. Inputs and Prerequisite Resolution
+## 3. Historical Inputs and Prerequisite Resolution - Superseded
+
+Sections 3 through 14 preserve historical execution evidence only. Their accepted, completed and ready values do not describe current state and are controlled by the P12.C1 correction above and the current verdict in Section 23.
 
 | Prerequisite | Expected current canonical path or content | Exact path found? | Substantive content found? | Status | Action |
 | --- | --- | --- | --- | --- | --- |
@@ -394,9 +397,9 @@ Never use git add .
 | Product repo dirty after creation | Stop; do not stage/commit/clean; inventory safe status metadata | Status empty; no product files |
 | Accidental blocked-path overlap | Stop before creation; never delete locked upstream, `.opencode/`, `AGENTS.md` or unrelated content | Preflight proved no overlap |
 
-No rollback was required. If later correction is needed, the product root may be removed only when it remains certain that P12.1 created it and it contains no unrelated content; otherwise it must be quarantined for human review. No destructive Git remediation is authorized.
+Historical P12.1 recorded that no rollback was then required. P12.C1 later proved exact P12 ownership and removed the invalid root without destructive Git remediation or history rewrite.
 
-## 15. HermesProductTopologyValidation
+## 15. HermesProductTopologyValidation - Current Correction
 
 ```yaml
 HermesProductTopologyValidation:
@@ -405,39 +408,38 @@ HermesProductTopologyValidation:
   locked_upstream_status_unchanged_clean: true
   locked_upstream_tag_matches: true
   locked_upstream_origin_matches: true
-  product_root_exists: true
+  product_root_exists: false
   product_root_exact_absolute_path: true
   product_root_outside_agent_platform: true
   product_root_outside_locked_upstream: true
   product_root_outside_opencode: true
   product_root_outside_artifacts: true
   product_root_outside_graphify: true
-  product_repository_initialized: true
-  current_branch: main
+  product_repository_initialized: false_rolled_back
+  current_branch: none_no_current_product_repository
   repository_has_commit: false
-  working_tree_has_product_file: false
-  upstream_fetch_url_matches: true
-  upstream_push_url_disabled: true
-  origin_absent: true
+  working_tree_has_product_file: false_no_current_product_repository
+  upstream_fetch_url_matches: historical_metadata_removed_with_invalid_root
+  upstream_push_url_disabled: historical_metadata_removed_with_invalid_root
+  origin_absent: true_no_current_product_repository
   fetch_pull_push_occurred: false
   install_build_test_run_occurred: false
   git_staging_occurred: false
   opencode_changed: false
   agents_md_changed: false
-  topology_validation_status: passed_ready_for_P12_2
+  topology_validation_status: rolled_back_due_to_unauthorized_out_of_workspace_product_root
 ```
 
 Validation conclusion:
 
 ```text
-locked upstream no-touch validation passed
-product topology validation passed
-main is an unborn branch with no commits
-working tree contains no product file
-upstream metadata configured without network; origin absent
+locked upstream no-touch validation passed after P12.C1 removal
+historical product topology is invalid and removed
+no current product branch, worktree, remote or repository exists
+P12.C2 topology redefinition is required
 ```
 
-## 16. P12.2 Handoff
+## 16. P12.2 Handoff - Withdrawn
 
 P12.2 owns:
 
@@ -448,11 +450,11 @@ P12.2 owns:
 - file/subtree compliance inventory;
 - redistributability boundary.
 
-P12.1 performed no source import, license exclusion, removal or license-file alteration. P12.2 owns the first controlled snapshot import together with restrictive-subtree exclusion, NOTICE/attribution baseline and provenance inventory. The empty product repository remains local, unpublished, unreleased and non-distributed.
+P12.1 performed no source import, but its invalid root was later populated by P12.2. P12.C1 removed that material result. P12.2 is reopened and may be executed again only after P12.C2 and corrected P12.1 establish an authorized topology.
 
 ```text
-hermes_P12_2_ready
-hermes_source_snapshot_import_deferred_to_P12_2
+hermes_P12_2_blocked_pending_P12_C2_and_corrected_P12_1
+hermes_topology_redefinition_required
 ```
 
 ## 17. P12.3 / P12.4 / P12.5 / P12.6 Handoff
@@ -466,9 +468,9 @@ hermes_source_snapshot_import_deferred_to_P12_2
 | P12.7 Clean Rebuild and Rollback Drill | Topology, license, environment, build and sync evidence | Drill execution | P12.1-P12.6 completion and exact rollback gate |
 | P12.R Productization Foundation Closure | All P12 records | Closure claim | P12.1-P12.7 accepted evidence |
 
-No future ticket was started by P12.1.
+No future ticket may consume the historical topology. P12.3 and later execution are blocked until P12.C2 and corrected P12.1/P12.2 complete.
 
-## 18. Acceptance Criteria
+## 18. Historical Acceptance Criteria - Superseded
 
 | Criterion | Status |
 | --- | --- |
@@ -498,7 +500,7 @@ No future ticket was started by P12.1.
 | Final verdict explicit | Met |
 | Commit guidance avoids `git add .` | Met |
 
-P12.1 topology-readiness acceptance is satisfied. Source/legal baseline work remains deferred to P12.2.
+The historical acceptance is withdrawn. P12.1 is reopened and not accepted because the material topology used an unauthorized out-of-workspace root.
 
 ## 19. Validation Required
 
@@ -558,56 +560,52 @@ no AGENT PLATFORM or product-repository staging, commit, push, fetch, pull,
 
 ```yaml
 HermesProductTopologyBlocker:
-  active: false
-  prior_interpretation: P12.0 had to predefine exact topology values
-  correction: P12.0 delegates exact topology decisions to P12.1
-  resolution: current P12.1 exact instruction selected and created the bounded empty topology
+  active: true
+  status: rolled_back_due_to_unauthorized_out_of_workspace_product_root
+  invalid_decision: sibling product root outside the human-authorized workspace
+  material_result: removed_by_P12_C1
+  correction_owner: P12_C2
+  p12_1_acceptance: reopened_not_accepted
 ```
 
 Limitations retained:
 
-- the product repository contains no Hermes source and no commit;
-- P12.2 must perform the first controlled snapshot import and legal baseline;
+- no current product repository or snapshot exists;
+- P12.2 must be reexecuted after P12.C2 and corrected P12.1;
 - `origin` and any hosted product repository remain deferred;
 - fetch/pull/push and synchronization branches remain deferred to P12.5;
 - mixed-license/SBOM posture, broader provider/catalog/update egress, app-level graceful shutdown, adapter conformance, WorkPacket execution and production readiness remain unresolved.
 
-## 22. Recommended Next Ticket
-
-Parallel P12 queue after this topology record:
+## 22. Required Next Ticket
 
 ```text
-P12.2 - License Exclusion and Notice Baseline
-P12.3 - Reproducible Development Environment, after P12.2 source/legal baseline
-P12.5 - Upstream Synchronization Strategy, after P12.2 provenance baseline
+P12.C2 - Corrected Hermes Product Topology Definition
 ```
 
-Recommended actual next ticket:
-
-```text
-P12.2 - License Exclusion and Notice Baseline
-```
-
-P12.1 does not start P12.2, P12.3, P12.4, P12.5, P12.6, P12.7, P12.R or P13-P21.
+P12.C1 does not create the replacement topology. P12.1 and P12.2 remain reopened. P12.3, P12.4, P12.5, P12.6, P12.7, P12.R and later execution remain blocked.
 
 ## 23. HermesProductTopologyVerdict
 
 ```yaml
 HermesProductTopologyVerdict:
   p12_0_present_and_substantively_accepted: true
-  product_root_resolved: true
-  product_root_created: true
-  repository_mode: sibling_fresh_git_repository
-  source_history_mode: snapshot_import_without_upstream_git_history
-  default_branch: main
-  upstream_remote_configured: true
+  current_status: rolled_back_due_to_unauthorized_out_of_workspace_product_root
+  product_root_resolved: false_pending_P12_C2
+  product_root_created: false_removed_by_P12_C1
+  repository_mode: undefined_pending_P12_C2
+  source_history_mode: undefined_pending_P12_C2
+  default_branch: undefined_pending_P12_C2
+  upstream_remote_configured: false_no_current_product_repository
   upstream_fetch_performed: false
   origin_configured: false
-  source_import_performed: false
+  source_import_performed: false_currently_removed
   product_commit_created: false
   locked_upstream_unchanged: true
-  P12_2_may_proceed: true
-  final_topology_verdict: ready_for_P12_2_snapshot_and_license_baseline
+  P12_2_may_proceed: false
+  P12_C2_may_proceed: true
+  p12_1_reopened: true
+  p12_1_accepted: false
+  final_topology_verdict: rolled_back_topology_redefinition_required
   locked_upstream_commit_used: "9de9c25f620ff7f1ce0fd5457d596052d5159596"
   locked_upstream_head_matches: true
   locked_upstream_remained_clean: true
@@ -628,50 +626,44 @@ HermesProductTopologyVerdict:
   graphifyignore_modified: false
   agent_platform_git_mutated: false
   product_repository_committed_or_pushed: false
-  ready_marker_emitted: true
+  ready_marker_emitted: false_superseded
 ```
 
 Final answers:
 
 | Question | Answer |
 | --- | --- |
-| What did P12.1 create? | This canonical topology record and the exact empty sibling Git repository root. |
+| What did P12.1 create? | Historically, this record and a sibling repository; P12.C1 removed the material repository result. |
 | Was P12.0 present and accepted by substantive content? | Yes, at the current canonical `...authorization_and_boundary.md` path. |
-| What product root was resolved? | `C:\Users\pablo\OneDrive\Escritorio\AGENT-PLATFORM-HERMES`. |
-| What repository mode was selected? | `sibling_fresh_git_repository` with `snapshot_import_without_upstream_git_history`. |
-| What remote policy was applied or deferred? | Local metadata-only `upstream` configured with official fetch URL and push URL `DISABLED`; `origin` deferred. |
-| What branch policy was applied or deferred? | Unborn `main` initialized; no additional branch; sync branches deferred to P12.5. |
+| What product root was resolved? | The historical `C:\Users\pablo\OneDrive\Escritorio\AGENT-PLATFORM-HERMES` decision was invalid and removed; no current root is defined. |
+| What repository mode was selected? | The historical sibling mode is superseded; P12.C2 must define the replacement topology. |
+| What remote policy was applied or deferred? | Historically, metadata-only `upstream` used official fetch URL and push URL `DISABLED`; all product Git metadata was removed with the invalid root. |
+| What branch policy was applied or deferred? | Historically, unborn `main` existed; no current product branch exists. |
 | Which P11.0 lock was used? | Hermes `0.18.2`, tag `v2026.7.7.2`, commit `9de9c25f620ff7f1ce0fd5457d596052d5159596`, path `4_external/sources/hermes-agent`. |
 | Did locked upstream HEAD match? | Yes. |
 | Did locked upstream remain unchanged? | Yes; status was clean. |
-| Was product root created? | Yes, after fail-closed preflight. |
-| Was product root outside blocked paths? | Yes, outside AGENT PLATFORM, locked upstream, `.opencode`, artifacts and Graphify. |
+| Was product root created? | Historically yes, but it was unauthorized and P12.C1 removed it. |
+| Was the historical product root outside AGENT PLATFORM? | Yes; that was the invalid workspace-boundary decision corrected by P12.C1. |
 | Were hardlinks and symlinks avoided? | Yes; neither was created. |
 | Was any submodule created? | No. |
 | Was any remote network/fetch/pull/push performed? | No. |
-| Was any license exclusion performed? | No; P12.2 owns it. |
+| Was any license exclusion performed? | P12.2 historically performed filtering in the invalid root; its material result was removed and its logic remains evidence. |
 | Was any install/build/test/run performed? | No. |
 | Were credentials or `.env` inspected? | No. |
 | Were `.opencode/`, `AGENTS.md`, `.gitignore` or `.graphifyignore` modified? | No. |
 | Was AGENT PLATFORM Git mutated? | No. |
 | Was a product repository committed or pushed? | No; the repository has no commits and no push occurred. |
-| What remains for P12.2? | Restricted-skill exclusion, NOTICE/attribution baseline, compliance inventory and redistributability boundary. |
+| What remains for P12.2? | Re-execution after P12.C2 and corrected P12.1; its legal filtering logic remains evidence only. |
 | What remains for P12.3-P12.6? | Environment, baseline build/test/UI evidence, synchronization policy and extension/configuration seams after topology resolution. |
-| What is the final topology verdict? | Ready for P12.2 snapshot and license baseline. |
-| What is next? | P12.2 License Exclusion and Notice Baseline. |
+| What is the final topology verdict? | Rolled back; topology redefinition is required. |
+| What is next? | P12.C2 Corrected Hermes Product Topology Definition. |
 
 ```text
-hermes_controlled_fork_repository_topology_ready
-hermes_product_root_created
-hermes_product_repository_initialized
-hermes_product_main_branch_initialized
-hermes_upstream_remote_configured_without_network
-hermes_origin_remote_deferred
-hermes_source_snapshot_import_deferred_to_P12_2
+hermes_p12_1_material_result_rolled_back
+hermes_external_product_root_removed
 hermes_locked_upstream_reference_unchanged
-hermes_P12_2_ready
-no_source_copy_created
-no_product_commit_created
+hermes_topology_redefinition_required
+hermes_p12_1_reopened
 no_remote_network_operation
 no_install_build_test_run
 no_agent_platform_git_mutation
@@ -679,16 +671,6 @@ no_agent_platform_git_mutation
 
 ## Commit Commands
 
-P12.1 did not stage, commit or push. If the human accepts this topology record, the human may run:
-
-```powershell
-git status --short
-
-git add 0_architecture/governance/agent_platform_hermes_controlled_fork_repository_topology.md
-
-git commit -m "P12.1 - Controlled Fork and Repository Topology"
-
-git push origin main
-```
+P12.C1 did not stage, commit, push or rewrite history. This reopened P12.1 record is not a current topology acceptance and provides no product-repository commit recommendation.
 
 Never use `git add .`.
