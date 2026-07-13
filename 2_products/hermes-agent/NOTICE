@@ -1,0 +1,24 @@
+Hermes Agent Product Snapshot
+
+This product source snapshot is derived from NousResearch/hermes-agent release
+0.18.2, tag v2026.7.7.2, commit
+9de9c25f620ff7f1ce0fd5457d596052d5159596.
+
+The upstream Hermes project MIT license is preserved in LICENSE. Additional
+known MIT materials retain their own license files at
+plugins/hermes-achievements/LICENSE and skills/creative/humanizer/LICENSE.
+
+The imported plugins/security-guidance subtree retains its Apache License 2.0
+license and NOTICE at plugins/security-guidance/LICENSE and
+plugins/security-guidance/NOTICE.
+
+The restrictive skills/productivity/powerpoint subtree, two generated pages
+that reproduced its complete skill definition, and tracked skills index-cache
+material were excluded before import. Exact exclusions are recorded in
+SOURCE_EXCLUSIONS.tsv.
+
+The complete product tree is not represented as uniformly MIT. Dependency,
+asset, documentation, generated-content, trademark, release-package and binary
+redistribution review remains incomplete. This engineering notice does not
+grant redistribution, publication, hosted operation or commercial release
+clearance.
