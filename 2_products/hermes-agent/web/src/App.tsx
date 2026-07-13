@@ -101,6 +101,11 @@ import { useTheme } from "@/themes";
 import { isDashboardEmbeddedChatEnabled } from "@/lib/dashboard-flags";
 import { api } from "@/lib/api";
 import type { StatusResponse, UpdateCheckResponse } from "@/lib/api";
+import { useProductConfiguration } from "@/agent-platform/product-config-context";
+import {
+  mergeProductNavigation,
+  resolveRegisteredProductExtensions,
+} from "@/agent-platform/extensions";
 
 function RootRedirect() {
   return <Navigate to="/sessions" replace />;
@@ -351,6 +356,7 @@ export default function App() {
   const { pathname } = useLocation();
   const { manifests, loading: pluginsLoading } = usePlugins();
   const { theme } = useTheme();
+  const productConfiguration = useProductConfiguration();
   const [mobileOpen, setMobileOpen] = useState(false);
   const closeMobile = useCallback(() => setMobileOpen(false), []);
 
@@ -426,32 +432,56 @@ export default function App() {
     [embeddedChat],
   );
 
+  const productExtensions = useMemo(
+    () => resolveRegisteredProductExtensions(productConfiguration, Object.keys(builtinRoutes)),
+    [builtinRoutes, productConfiguration],
+  );
+
+  const productRoutes = useMemo<Record<string, ComponentType>>(
+    () => ({
+      ...builtinRoutes,
+      ...Object.fromEntries(
+        productExtensions.map((extension) => [
+          extension.route.path,
+          extension.route.component,
+        ]),
+      ),
+    }),
+    [builtinRoutes, productExtensions],
+  );
+
   const builtinNav = useMemo(() => {
     const base = embeddedChat
       ? [CHAT_NAV_ITEM, ...BUILTIN_NAV_REST]
       : BUILTIN_NAV_REST;
-    return showTokenAnalytics
+    const visible = showTokenAnalytics
       ? base
       : base.filter((n) => n.path !== "/analytics");
-  }, [embeddedChat, showTokenAnalytics]);
+    return mergeProductNavigation(visible, productExtensions);
+  }, [embeddedChat, productExtensions, showTokenAnalytics]);
 
   const sidebarNav = useMemo(
     () => partitionSidebarNav(builtinNav, manifests),
     [builtinNav, manifests],
   );
   const routes = useMemo(
-    () => buildRoutes(builtinRoutes, manifests),
-    [builtinRoutes, manifests],
+    () => buildRoutes(productRoutes, manifests),
+    [manifests, productRoutes],
   );
-  const pluginTabMeta = useMemo(
-    () =>
-      manifests
+  const extensionTabMeta = useMemo(
+    () => [
+      ...productExtensions.map((extension) => ({
+        path: extension.route.path,
+        label: extension.route.title,
+      })),
+      ...manifests
         .filter((m) => !m.tab.hidden)
         .map((m) => ({
           path: m.tab.override ?? m.tab.path,
           label: m.label,
         })),
-    [manifests],
+    ],
+    [manifests, productExtensions],
   );
 
   const layoutVariant = theme.layoutVariant ?? "standard";
@@ -715,7 +745,7 @@ export default function App() {
             </div>
           </aside>
 
-          <PageHeaderProvider pluginTabs={pluginTabMeta}>
+          <PageHeaderProvider pluginTabs={extensionTabMeta}>
             <div
               className={cn(
                 "relative z-2 flex min-w-0 min-h-0 flex-1 flex-col",
