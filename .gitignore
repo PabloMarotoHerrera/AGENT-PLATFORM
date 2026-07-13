@@ -5,8 +5,10 @@ Thumbs.db
 *.xlsx
 *.xls
 
-# Ignore products for now
-2_products/
+# Ignore products by default; exceptions require explicit product governance
+/2_products/*
+!/2_products/hermes-agent
+!/2_products/hermes-agent/**
 
 # Ignore external sources
 4_external/sources/

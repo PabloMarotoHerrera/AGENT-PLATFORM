@@ -5,6 +5,15 @@ Date: 2026-06-27
 Scope: Topology proposal for the AGENT PLATFORM workspace as a projection of the cognitive model  
 Authority: Physical workspace topology guidance only. This document does not move, rename, delete, migrate, implement, stage, commit, or push anything.
 
+## Current P12.C3 Tracking Correction
+
+P12.C3 retains `2_products` as the product class and replaces its historical
+whole-class ignore with a fail-closed per-product policy. All product children
+remain ignored by default; only the absent future `2_products/hermes-agent` path
+is currently excepted for normal main-repository tracking. The exception creates
+no source, grants no activation, permits no nested Git or independent remote,
+and does not apply to any sibling product.
+
 ## 1. Purpose
 
 Topology comes after W-04, W-05, and W-06 because physical folders should serve the workspace responsibility model, context strategy, and cognitive operating model.
@@ -53,7 +62,7 @@ and migrate safely. Folders do not decide what is true.
 | --- | --- | --- | --- |
 | `0_architecture/` | Architecture domain folders and current W-series docs in `workspace/`. | Canonical architecture area. | Keep. Needs continued status discipline. |
 | `1_research/` | Research areas for `ai/`, `digital twins/`, `engineering/`, `natural systems/`, and `papers/`. | Evidentiary area. | Keep. Needs research status policy. |
-| `2_products/` | Product candidates: `backend-energyplus/`, `cli/`, `desktop/`, `experimental/`, `omniverse-app/`, `web-platform/`. | Product-scoped and local-only. | Keep temporarily. Needs product workspace policy. |
+| `2_products/` | Product candidates: six local-only siblings plus the absent future `hermes-agent` path selected by P12.C2. | Product-scoped; ignored by default with one governed future Hermes tracking exception. | Keep; per-product tracking requires explicit governance. |
 | `3_platform/` | Platform-domain implementation candidate folders: `adapters/`, `agents/`, `context/`, `federation/`, `graphify/`, `knowledge/`, `operations/`, `providers/`, `runtime/`, `security/`, `workflows/`. | Implementation-scoped. | Keep temporarily. Needs implementation policy and semantic naming review. |
 | `4_external/` | `datasets/`, `licenses/`, `sources/`, `standarts/`. | External reference area. | Keep. Needs spelling/standards decision later; do not rename now. |
 | `5_workspace/` | `.gitkeep` only. | Workspace operations placeholder. | Keep. Needs context-pack/workspace-operations policy. |
@@ -68,7 +77,7 @@ and migrate safely. Folders do not decide what is true.
 | `14_sdk/` | Empty. | SDK/interface area. | Keep temporarily. Needs SDK boundary/compatibility policy. |
 | `previusknowledge/` | Previous corpus with `docs/` and `research/`. | Migration evidence. | Keep temporarily. Migrate or archive later by explicit tickets. |
 | `README.md` | Minimal workspace descriptor. | Entry-point documentation. | Keep. May later point to canonical docs. |
-| `.gitignore` | Ignores Office files, `2_products/`, `4_external/sources/`, `7_datasets/`, `8_models/`, `9_artifacts/`, runtime/generated folders, dependency folders. | Git posture control file. | Keep. Do not modify in W-07. |
+| `.gitignore` | Ignores Office files, product children by default, `4_external/sources/`, `7_datasets/`, `8_models/`, `9_artifacts/`, runtime/generated folders and dependency folders; P12.C3 excepts only future `2_products/hermes-agent`. | Git posture control file. | Keep; later changes require exact governance. |
 
 Current topology verdict:
 
@@ -111,7 +120,7 @@ The current shape is close enough to the recommended target topology to preserve
 | --- | --- | --- | --- | --- | --- | --- |
 | `0_architecture/` | Canonical and candidate architecture, decisions, responsibility maps, cognitive model, topology, and domain boundaries. | Canonical only when file status, scope, and currency say so. | Track reviewed architecture docs. | Read allowed; write by ticket only. | Primary source for Workspace Architecture Packs. | Receives promoted/restated architecture, not wholesale dumps. |
 | `1_research/` | Investigations, comparisons, papers, hypotheses, and source reviews. | Evidence only until promoted. | Track non-sensitive reviewed research by ticket. | Read allowed by task; write by research ticket. | Source for Research Packs and evidence sections. | Feeds architecture and product decisions after review. |
-| `2_products/` | Bounded product workspaces and product-specific behavior. | Product-scoped only after product decision. | Currently ignored/local-only. | Read/write only by product ticket. | Source for Product Workspace Packs. | Product migration target only after policy. |
+| `2_products/` | Bounded product workspaces and product-specific behavior. | Product-scoped only after product decision. | Ignored by default; only future `hermes-agent` has a P12.C3 tracking exception. | Read/write only by product ticket. | Source for Product Workspace Packs. | Per-product migration/tracking only after policy. |
 | `3_platform/` | Future platform implementation. | No architecture authority by code existence. | Track only after implementation tickets and validation. | Read by task; write prohibited until implementation ticket. | Source for Implementation Planning and Validation Packs after implementation begins. | May receive implementation after W-series readiness. |
 | `4_external/` | External sources, external datasets, licenses, standards, and provenance. | External evidence only. | Track metadata/licenses selectively; keep `sources/` local-only. | Read by source-review task; write prohibited except provenance/registry work. | Source for External Source Review Packs through W-03 registry. | External material may be reviewed, promoted, scoped, or archived. |
 | `5_workspace/` | Workspace operations, context-pack projections, task scaffolds, runbooks, and coordination artifacts. | Operational support only unless promoted. | Track reviewed lightweight operations docs; generated packs may be local-only. | Read allowed; write by workspace/context ticket. | Likely future home for physical context-pack projections. | May host migration process artifacts, not old corpus wholesale. |
@@ -256,8 +265,9 @@ Current product candidates:
 Topology recommendation:
 
 ```text
-Keep `2_products/` local-only until product workspace policy decides which product
-areas are active, tracked, archived, split, or renamed.
+Keep `2_products/` local-only by default until product workspace policy decides
+which product areas are active, tracked, archived, split, or renamed. P12.C3
+later excepts only the absent future `hermes-agent` path for normal tracking.
 ```
 
 ## 11. Platform Implementation Topology
@@ -303,7 +313,7 @@ authorize it.
 | `0_architecture/` | Track reviewed architecture docs. | Current canonical workspace docs live here. | Commit by human approval only. |
 | `1_research/` | Track reviewed non-sensitive research. | Research evidence can be useful. | Needs research status policy. |
 | `previusknowledge/` | Keep local-only for now. | Migration corpus should not be committed wholesale. | W-08 should define migration/archive policy. |
-| `2_products/` | Ignored/local-only. | Product candidates are not root authority and may be heavy/private. | Product policy must decide tracked subsets. |
+| `2_products/` | Ignored/local-only by default; future `hermes-agent` alone is excepted by P12.C3. | Product candidates are not root authority and may be heavy/private. | Product policy must decide every tracked product explicitly. |
 | `3_platform/` | Track only after implementation ticket. | Implementation must not precede architecture. | Requires implementation planning and validation. |
 | `4_external/sources/` | Ignored/local-only. | External source snapshots are risky, large, and licensing-sensitive. | Track metadata/reviews, not source snapshots by default. |
 | `4_external/licenses/` | May be tracked after review. | License metadata can support provenance. | Needs external metadata policy. |
@@ -422,7 +432,7 @@ W-08 should not move files unless explicitly authorized by its own ticket.
 | What is the recommended workspace topology? | Keep the current numbered top-level topology short-term as a provisional projection: `0_architecture/` through `14_sdk/`, with `_archive/` reserved as a future explicit migration target. |
 | Is current topology usable? | Yes, temporarily, if folders are treated as projections and `.gitignore` local-only boundaries are respected. |
 | Which folders are canonical now? | `0_architecture/workspace/` contains current canonical W-series workspace architecture. Other folders are evidentiary, product-scoped, local-only, implementation-scoped, operational, or placeholders unless explicitly promoted. |
-| Which folders stay local-only? | `2_products/`, `4_external/sources/`, `7_datasets/`, `8_models/`, `9_artifacts/`, generated outputs, runtime logs, Office temp files, secrets, credentials, and `previusknowledge/` until governance decides otherwise. |
+| Which folders stay local-only? | Product children except the future P12.C3-authorized `2_products/hermes-agent` path, plus `4_external/sources/`, `7_datasets/`, `8_models/`, `9_artifacts/`, generated outputs, runtime logs, Office temp files, secrets, credentials and `previusknowledge/` until governance decides otherwise. |
 | What must W-08 consume? | W-00 through W-07, `.gitignore`, current root topology, W-02 classifications, W-03 external registry, W-04 responsibility map, W-05 context strategy, and W-06 cognitive model. |
 | What must not be moved yet? | Everything. No folders, previous documents, products, external sources, generated artifacts, datasets, models, scripts, tools, tests, packages, SDKs, or archives should move before an explicit migration plan and approval. |
 

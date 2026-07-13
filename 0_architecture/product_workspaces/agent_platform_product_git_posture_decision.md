@@ -10,6 +10,15 @@
 | Authority | Git posture governance only; not staging, commit, push, publication, product activation, or source tracking action. |
 | Related documents | P-00 through P-07, M-A, M-07, M-06, M-08, W-12, W-11, W-03, W-13, V-01, V-02, V-04, V-05, S-series, CSS-series, H-series, Siamese Product Vision |
 
+### Current P12.C3 Exception
+
+P12.C3 supersedes this record's whole-class local-only posture for one exact,
+future product root only: `2_products/hermes-agent`. `2_products` remains ignored
+by default; every sibling remains ignored; the exception neither creates source
+nor activates a product. Hermes will be a normal subtree of the AGENT PLATFORM
+main repository with no nested Git, independent branch, history or remote. Every
+future product exception requires separate explicit governance.
+
 ## 2. Purpose
 P-08 decides the current Git posture for product work after the product workspace selection, common gate, five inactive product charter drafts, and experimental disposition.
 
@@ -24,7 +33,7 @@ Git posture is not product activation, implementation readiness, dependency appr
 | Area | P-08 decision | Boundary |
 | --- | --- | --- |
 | Product governance docs | Trackable as docs only under `0_architecture/product_workspaces/`. | No activation or source approval. |
-| Product source | Not trackable now. `2_products/` remains ignored/local-only. | No force-add or exception. |
+| Product source | Ignored/local-only by default. Only future `2_products/hermes-agent` is normally trackable under the P12.C3 exception. | No force-add; no sibling exception or activation. |
 | Generated/local/sensitive material | Not trackable now. | Exclude outputs, data, models, artifacts, logs, caches, secrets, credentials, sessions, and dependency folders. |
 | `.gitignore` | Unchanged. | No ignore-rule edit in P-08. |
 | Git actions | No staging, commit, push, force-add, amend, reset, clean, or publication. | Future Git action requires explicit approval and exact paths only. |
@@ -71,7 +80,7 @@ Safe metadata from P-00 through P-07, W-12, V-04, S-series, CSS-series, and H-se
 No candidate is active. No candidate receives implementation readiness, dependency adoption, validation baseline, publication approval, or product source tracking approval from P-08.
 
 ## 9. Current Local-only Git Evidence
-`.gitignore` keeps `2_products/` ignored/local-only. It also ignores external sources, previous knowledge corpus, datasets, models, artifacts, generated/runtime folders, dependency folders, secrets, credentials, provider auth, and local caches.
+`.gitignore` keeps product children ignored by default and grants only the exact future `2_products/hermes-agent` exception. It also ignores external sources, previous knowledge corpus, datasets, models, artifacts, generated/runtime folders, dependency folders, secrets, credentials, provider auth, and local caches.
 
 Git state is evidence, not authority. `git status`, `git diff`, and `git check-ignore` may support review, but they do not activate products or approve tracking.
 
@@ -94,7 +103,7 @@ These files are architecture evidence only. Tracking them does not track product
 ## 11. Not Trackable Now
 | Material | P-08 posture | Reason |
 | --- | --- | --- |
-| `2_products/` source and product internals | Not trackable now. | Local-only, inactive, source sensitivity and readiness unresolved. |
+| `2_products/` source and product internals except future `hermes-agent` | Not trackable now. | Local-only, inactive, source sensitivity and readiness unresolved; P12.C3 grants no sibling exception. |
 | Product generated outputs | Not trackable now. | Output provenance and sensitivity unresolved. |
 | Product logs, runs, outputs, temp, cache | Not trackable now. | Runtime/generated-sensitive. |
 | Product datasets, models, artifacts | Not trackable now. | Data/model/artifact review absent. |
@@ -109,7 +118,7 @@ Product governance documentation under `0_architecture/product_workspaces/` may 
 Tracked product governance documentation remains product-scoped and architecture-scoped evidence. It cannot override root architecture, root governance, validation rules, security rules, or the Cognitive Semantic System.
 
 ## 13. Product Source Rule
-`2_products/` remains ignored/local-only. Product source is not approved for tracking, force-adding, staging, commit, publication, or context inclusion by P-08.
+`2_products/` remains ignored/local-only by default. P12.C3 later approved only `2_products/hermes-agent` as a normally trackable main-repository path after corrected P12.1 creates it. P12.C3 approves no source creation, force-add, staging, commit, publication, context expansion or sibling tracking.
 
 Future source tracking requires a separate exact-scope governance decision after product owner, purpose, scope, non-goals, root boundary, dependency posture, security/access posture, generated-output posture, validation baseline, repository strategy, and exact include/exclude list are accepted.
 
@@ -119,7 +128,7 @@ Generated output is not source by default. Local data is not safe by default. Un
 Excluded material includes reports, screenshots, simulations, logs, exports, build outputs, caches, datasets, models, artifacts, local databases, browser state, desktop state, CLI logs, Omniverse artifacts, EnergyPlus outputs, web bundles, credentials, tokens, keys, environment files, provider auth, package registry auth, and local sessions.
 
 ## 15. `.gitignore` Rule
-P-08 does not modify `.gitignore`. The current ignore rules remain valid evidence for local-only posture.
+P-08 did not modify `.gitignore`. P12.C3 later replaced the whole-class rule with a fail-closed default plus the sole exact `2_products/hermes-agent` exception.
 
 Future `.gitignore` changes for product source, if ever needed, require separate governance, exact paths, security review, source classification, and explicit human approval. P-08 grants no such change.
 
@@ -171,7 +180,7 @@ Future source tracking must also decide whether the product remains in this repo
 ## 25. Future Posture Options
 | Option | Current P-08 status | Notes |
 | --- | --- | --- |
-| Keep product source local-only | Accepted now. | Default for all product source. |
+| Keep product source local-only | Accepted default. | Applies to all product source except an exact later governed exception; P12.C3 defines only `2_products/hermes-agent`. |
 | Track product governance docs only | Accepted now. | Applies to exact docs under `0_architecture/product_workspaces/`. |
 | Track selected product source in this repo | Blocked now. | Requires later exact governance and review. |
 | Split product into separate repository | Deferred. | Candidate for mature products after repository strategy. |
@@ -188,14 +197,14 @@ Future source tracking must also decide whether the product remains in this repo
 | Generated-output posture incomplete | Blocks output tracking/publication. | Output provenance and sensitivity policy. |
 | Product implementation readiness absent | Blocks implementation. | Future IR governance. |
 | Experimental remains ambiguous | Blocks charter/source tracking. | Future split/archive/defer review. |
-| `.gitignore` exceptions absent | Preserves local-only posture. | Separate future exact governance if needed. |
+| `.gitignore` exceptions | Sole P12.C3 exception exists for future `2_products/hermes-agent`. | Preserve fail-closed siblings; any other exception needs separate governance. |
 
 ## 27. P-08 Invariants and Anti-patterns
 | ID | Invariant |
 | --- | --- |
 | P08-001 | Product Git posture decision is not Git action. |
 | P08-002 | Product governance docs are trackable as docs only. |
-| P08-003 | Product source under `2_products/` is not trackable now. |
+| P08-003 | Product source under `2_products/` is ignored by default; P12.C3 later authorizes only future `2_products/hermes-agent` for normal main-repository tracking. |
 | P08-004 | `.gitignore` is unchanged. |
 | P08-005 | No broad staging or force-add is authorized. |
 | P08-006 | Product activation remains blocked. |
@@ -211,8 +220,8 @@ Anti-patterns: Git tracking as activation; docs-only tracking as source approval
 ## 28. Final Verdict and Stop Rule
 | Question | Answer |
 | --- | --- |
-| What does P-08 decide? | Product governance documentation under `0_architecture/product_workspaces/` is trackable as documentation only; product source remains local-only and not trackable now. |
-| Did P-08 approve source tracking under `2_products/`? | No. |
+| What is the current product tracking posture after P12.C3? | Product governance documentation remains trackable; product source remains ignored by default; only future `2_products/hermes-agent` has an exact normal-tracking exception. |
+| Did P-08 itself approve source tracking under `2_products/`? | No. P12.C3 later approved only the absent Hermes path without creating or staging source. |
 | Did P-08 modify `.gitignore`? | No. |
 | Did P-08 authorize force-adds or broad staging? | No. |
 | Did P-08 stage, commit, push, or publish? | No. |

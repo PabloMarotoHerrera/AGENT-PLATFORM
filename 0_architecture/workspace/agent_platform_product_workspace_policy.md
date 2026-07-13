@@ -5,6 +5,15 @@ Date: 2026-06-28
 Scope: Product workspace identification, activation, governance, validation, documentation, migration, Git posture, and retirement policy for AGENT PLATFORM  
 Authority: Product workspace policy only. This document does not move product files, rename product folders, delete product folders, migrate product docs, edit product code, modify `.gitignore`, run product code, install dependencies, stage, commit, push, create W-13, or implement product architecture.
 
+## Current P12.C3 Tracking Exception
+
+P12.C3 supersedes the whole-class local-only wording in this historical W-12
+baseline for one absent future root only: `2_products/hermes-agent`. Product
+children remain ignored by default, all existing siblings remain ignored, and
+the exception creates no source and grants no product activation. Hermes must be
+a normal AGENT PLATFORM main-repository subtree with no nested Git, independent
+history or remote. Every future product exception requires separate governance.
+
 ## 1. Purpose
 
 This document defines how product workspaces are identified, activated, governed, validated, documented, migrated, tracked in Git, and retired inside AGENT PLATFORM.
@@ -56,7 +65,7 @@ A product workspace is not:
 | The Cognitive Semantic System | Product scope cannot own accepted semantic truth for the workspace root. |
 | A provider | Product code or UI is not automatically a provider or adapter target. |
 | An external dependency | Product folders are internal candidates; external dependencies need separate review. |
-| Automatically tracked in Git | `2_products/` is ignored/local-only until governance changes posture. |
+| Automatically tracked in Git | Product children are ignored/local-only by default. P12.C3 grants only future `2_products/hermes-agent` a governed normal-tracking exception. |
 | Automatically active | Folder existence is not activation. |
 | A final architecture decision | Product material can inform proposals but does not decide root architecture. |
 
@@ -169,7 +178,7 @@ architecture constrains product work; product work does not silently constrain r
 Current rule:
 
 ```text
-`2_products/` remains ignored/local-only.
+`2_products/` remains ignored/local-only by default. The sole current governed exception is the absent future `2_products/hermes-agent` path selected by P12.C2 and enabled by P12.C3.
 ```
 
 Current implications:
@@ -177,7 +186,7 @@ Current implications:
 | Implication | Rule |
 | --- | --- |
 | No product commit in W-12. | W-12 creates only this policy document. |
-| No product code staging. | Product files remain local-only and should not be staged. |
+| No product code staging in P12.C3. | Existing product files remain local-only; the absent Hermes exception creates and stages nothing. |
 | No `git add .`. | Exact approved paths are required for any future staging. |
 | Product Git posture requires governance. | Tracking product docs/source needs explicit product decision. |
 
@@ -195,9 +204,10 @@ Future Git posture options:
 Default posture:
 
 ```text
-Keep all product candidates local-only until each product has a charter, owner,
-scope, validation baseline, external dependency posture, security posture, and Git
-decision.
+Keep product candidates local-only by default until each product has a charter,
+owner, scope, validation baseline, external dependency posture, security posture,
+and exact Git decision. P12.C3 records only the Hermes path-level exception and
+does not activate or import it.
 ```
 
 ## 8. Product Documentation Policy
@@ -283,7 +293,7 @@ Product agent behavior uses W-10 operating rules.
 | Do not run product code by default. | Product execution, builds, tests, packages, and scripts require explicit scope. |
 | Do not inspect deeply unless scoped. | Avoid reading source trees, dependencies, generated outputs, or local data without product task. |
 | Do not promote product docs to root. | Product docs remain product-scoped unless root governance promotes a bounded claim. |
-| Do not stage product files unless explicitly instructed. | `2_products/` is local-only and ignored. |
+| Do not stage product files unless explicitly instructed. | Product children are ignored by default; the Hermes exception still requires exact human Git authority after source exists. |
 | Product subagents return evidence only. | Subagents do not own product activation, validation approval, Git posture, or promotion. |
 | Report product uncertainty. | State when product source, docs, dependencies, validation, and risks were not inspected. |
 
@@ -345,7 +355,7 @@ dependency posture, security posture, root boundary, and governance posture are 
 | Risk | Severity | Mitigation | Blocks activation? |
 | --- | --- | --- | --- |
 | Product-root collapse | High | Require root-boundary statement and product-scoped authority labels. | Yes. |
-| Committing product code too early | High | Keep `2_products/` ignored/local-only until Git posture decision. | Yes. |
+| Committing product code too early | High | Keep product children ignored/local-only until an exact Git posture decision; P12.C3 grants only the absent Hermes path exception. | Yes. |
 | Product docs overriding root architecture | High | Use W-09 `product_scoped` status and cite root constraints. | Yes for canonical product docs. |
 | Product generated output treated as source | Medium-high | Label generated output and require provenance/validation before use. | Yes when output affects decisions. |
 | External domain engines adopted without review | High | Require W-03/W-11 license, security, validation, and governance review. | Yes. |
@@ -440,7 +450,7 @@ Readiness assessment:
 | --- | --- | --- |
 | Product boundary | Ready enough. | W-12 defines product scope and root-boundary rules. |
 | Product external dependency posture | Ready enough for W-13. | W-12 identifies product-specific dependency review needs. |
-| Product Git posture | Stable for now. | `2_products/` remains ignored/local-only. |
+| Product Git posture | Stable with one later exception. | Product children remain ignored/local-only by default; only future `2_products/hermes-agent` is excepted by P12.C3. |
 | Product activation | Not active. | No product is activated in W-12. |
 | External source handling | Ready for deeper policy. | W-03 registry and W-12 product dependency rules provide inputs. |
 | Product implementation | Not ready. | Product charters, validation, security, and Git posture remain unresolved. |
@@ -470,8 +480,8 @@ source deeply, run code, adopt dependencies, or change product Git posture.
 | --- | --- |
 | What is a product workspace? | A bounded workspace area for a user-facing, domain-facing, interface-facing, or implementation-facing product that consumes AGENT PLATFORM capabilities while preserving product-specific scope. |
 | Which product candidates exist now? | `backend-energyplus/`, `cli/`, `desktop/`, `experimental/`, `omniverse-app/`, and `web-platform/`. |
-| Are any products active now? | No. W-12 classifies all observed product folders as local-only candidates; `experimental/` is additionally experimental and blocked for activation by default. |
-| What remains local-only? | All `2_products/` content remains ignored/local-only, including product source, docs, generated outputs, dependencies, and product data unless future governance changes posture. |
+| Are any products active now? | No. All six observed sibling products remain local-only; the absent Hermes tracking exception is not activation. |
+| What remains local-only? | Every current sibling under `2_products/` remains ignored/local-only. Future `2_products/hermes-agent` alone is normally trackable after corrected P12.1, while generated outputs, dependencies and local data remain excluded. |
 | Can product files be committed now? | No. Product files must not be staged or committed until a product-specific governance decision changes Git posture and identifies exact approved files. |
 | What should W-13 consume? | W-03, W-04, W-08, W-10, W-11, and W-12, with focus on external-source provenance, license, security, validation, dependency adoption, execution, and product/domain boundaries. |
 
@@ -479,7 +489,8 @@ Final W-12 statement:
 
 ```text
 AGENT PLATFORM product workspaces are contained, governed, product-scoped areas.
-The current `2_products/` folders are candidates only and remain local-only. Product
+The current sibling folders under `2_products/` are candidates only and remain
+local-only. P12.C3 later defines only the absent Hermes tracking exception. Product
 activation, product Git posture, product validation, product documentation, product
 external dependencies, and product retirement require explicit governance. W-12
 stops at product workspace policy and does not start W-13.
