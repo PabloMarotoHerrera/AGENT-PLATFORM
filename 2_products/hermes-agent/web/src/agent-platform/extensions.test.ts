@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 
 import { parseProductConfiguration, type ProductFeatureState } from "./product-config";
 import {
+  AGENT_PLATFORM_EXTENSIONS,
   mergeProductNavigation,
   resolveProductExtensions,
+  resolveRegisteredProductExtensions,
   type ProductExtensionDescriptor,
   type ProductExtensionNavigation,
 } from "./extensions";
@@ -47,6 +49,19 @@ function descriptor(
 }
 
 describe("AGENT PLATFORM frontend extensions", () => {
+  it("compiles the overview descriptor while committed activation remains empty", () => {
+    expect(AGENT_PLATFORM_EXTENSIONS.map((entry) => entry.id)).toEqual([
+      "agent_platform.ui.overview",
+    ]);
+    const committed = configuration([], { "agent_platform.product_ui": "disabled" });
+
+    expect(resolveRegisteredProductExtensions(committed, ["/sessions"])).toEqual([]);
+    expect(mergeProductNavigation(
+      [{ path: "/sessions", label: "Sessions", icon: Icon }],
+      resolveRegisteredProductExtensions(committed, ["/sessions"]),
+    ).map((item) => item.path)).toEqual(["/sessions"]);
+  });
+
   it("uses configuration order and enables only explicitly enabled descriptors", () => {
     const first = descriptor("agent_platform.first", "/agent-platform/first");
     const second = descriptor("agent_platform.second", "/agent-platform/second");

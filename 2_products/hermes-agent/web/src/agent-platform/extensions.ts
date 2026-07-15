@@ -4,6 +4,7 @@ import {
   getProductFeatureState,
   type ProductConfiguration,
 } from "./product-config";
+import { RUNTIME_OVERVIEW_DESCRIPTOR } from "./runtime-overview/descriptor";
 
 export interface ProductExtensionNavigation {
   readonly groupId: "agent-platform";
@@ -38,7 +39,9 @@ export interface ProductNavigationItem {
 
 // P13 registers reviewed, statically imported descriptors here. Backend data
 // can select an ID but can never provide an import path or executable code.
-export const AGENT_PLATFORM_EXTENSIONS: readonly ProductExtensionDescriptor[] = Object.freeze([]);
+export const AGENT_PLATFORM_EXTENSIONS: readonly ProductExtensionDescriptor[] = Object.freeze([
+  RUNTIME_OVERVIEW_DESCRIPTOR,
+]);
 
 function validateDescriptors(
   descriptors: readonly ProductExtensionDescriptor[],
