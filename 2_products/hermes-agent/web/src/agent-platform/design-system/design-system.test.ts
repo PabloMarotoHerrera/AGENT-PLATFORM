@@ -1,11 +1,18 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
+import type { ComponentType } from "react";
 import { describe, expect, it } from "vitest";
 
+import {
+  mergeProductNavigation,
+  resolveProductExtensions,
+  type ProductExtensionDescriptor,
+} from "../extensions";
 import { ProductConfigurationContext } from "../product-config-context";
 import { ProductConfigurationProvider } from "../product-config-provider";
 import type { ProductConfiguration } from "../product-config";
+import { groupShellNavigation } from "../shell";
 import { BUILTIN_THEMES } from "../../themes/presets";
 import { createProductBrandIdentity } from "./brand";
 import {
@@ -64,12 +71,30 @@ const BRAND_SOURCE_PATH = fileURLToPath(new URL("./brand.ts", import.meta.url));
 const PROVIDER_SOURCE_PATH = fileURLToPath(
   new URL("../product-config-provider.tsx", import.meta.url),
 );
-const EXTENSIONS_SOURCE_PATH = fileURLToPath(
-  new URL("../extensions.ts", import.meta.url),
-);
 const BACKEND_CONFIG_PATH = fileURLToPath(
   new URL("../../../../hermes_cli/agent_platform/product_config.py", import.meta.url),
 );
+
+const CandidatePage: ComponentType = () => null;
+const CandidateIcon: ComponentType<{ className?: string }> = () => null;
+
+const COMPILED_DESCRIPTOR_CANDIDATE = Object.freeze({
+  id: "agent_platform.ui.candidate",
+  owner: "AGENT_PLATFORM",
+  featureId: "agent_platform.product_ui",
+  visibleWhenExperimental: true,
+  route: Object.freeze({
+    path: "/agent-platform/candidate",
+    component: CandidatePage,
+    title: "Candidate",
+  }),
+  navigation: Object.freeze({
+    groupId: "agent-platform",
+    label: "Candidate",
+    icon: CandidateIcon,
+    placement: Object.freeze({ kind: "end" }),
+  }),
+} satisfies ProductExtensionDescriptor);
 
 function makeConfiguration(): ProductConfiguration {
   return Object.freeze({
@@ -80,7 +105,7 @@ function makeConfiguration(): ProductConfiguration {
     upstreamProductName: "Synthetic Upstream",
     upstreamVersion: "8.9.0",
     upstreamCommit: "0123456789abcdef0123456789abcdef01234567",
-    featureFlags: Object.freeze({ "synthetic.feature": "disabled" as const }),
+    featureFlags: Object.freeze({ "agent_platform.product_ui": "disabled" as const }),
     extensionModules: Object.freeze([]),
     documentationUrl: null,
     supportUrl: null,
@@ -216,13 +241,44 @@ describe("product design-system integration", () => {
     expect(props.children).toBe("child");
   });
 
-  it("preserves disabled product UI and an empty extension registry", () => {
+  it("keeps compiled descriptor candidates inactive under committed configuration", () => {
     const backendSource = readFileSync(BACKEND_CONFIG_PATH, "utf8");
-    const extensionSource = readFileSync(EXTENSIONS_SOURCE_PATH, "utf8");
     expect(backendSource).toContain('"agent_platform.product_ui": FeatureState.DISABLED');
     expect(backendSource).toContain('"extension_modules": ()');
-    expect(extensionSource).toContain(
-      "export const AGENT_PLATFORM_EXTENSIONS: readonly ProductExtensionDescriptor[] = Object.freeze([])",
+    const configuration = makeConfiguration();
+    const compiledDescriptors = Object.freeze([COMPILED_DESCRIPTOR_CANDIDATE]);
+
+    expect(compiledDescriptors).toHaveLength(1);
+    expect(configuration.featureFlags["agent_platform.product_ui"]).toBe("disabled");
+    expect(configuration.extensionModules).toEqual([]);
+
+    const resolvedDescriptors = resolveProductExtensions(
+      configuration,
+      compiledDescriptors,
+      ["/sessions"],
     );
+    const runtimeProductRoutes = Object.fromEntries(
+      resolvedDescriptors.map((descriptor) => [
+        descriptor.route.path,
+        descriptor.route.component,
+      ]),
+    );
+    const navigation = mergeProductNavigation(
+      [{ path: "/sessions", label: "Sessions", icon: CandidateIcon }],
+      resolvedDescriptors,
+    );
+    const navigationGroups = groupShellNavigation(navigation, [], {
+      "agent-platform": "Synthetic Product",
+      "hermes-tools": "Synthetic Upstream Tools",
+      extensions: "Extensions",
+      administration: "Administration",
+    });
+
+    expect(resolvedDescriptors).toEqual([]);
+    expect(Object.keys(runtimeProductRoutes)).toEqual([]);
+    expect(
+      navigationGroups.some((group) => group.id === "agent-platform"),
+    ).toBe(false);
+    expect(navigationGroups.map((group) => group.id)).toEqual(["hermes-tools"]);
   });
 });
