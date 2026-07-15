@@ -106,6 +106,12 @@ import {
   mergeProductNavigation,
   resolveRegisteredProductExtensions,
 } from "@/agent-platform/extensions";
+import { createProductBrandIdentity } from "@/agent-platform/design-system";
+import {
+  filterProtectedPluginManifests,
+  groupShellNavigation,
+  ProductBrandLockup,
+} from "@/agent-platform/shell";
 
 function RootRedirect() {
   return <Navigate to="/sessions" replace />;
@@ -236,8 +242,8 @@ function resolveIcon(name: string): ComponentType<{ className?: string }> {
 }
 
 function buildNavItems(
-  builtIn: NavItem[],
-  manifests: PluginManifest[],
+  builtIn: readonly NavItem[],
+  manifests: readonly PluginManifest[],
 ): NavItem[] {
   const items = [...builtIn];
 
@@ -272,8 +278,8 @@ function buildNavItems(
 
 /** Split merged nav into built-in sidebar entries vs plugin tabs, preserving plugin order hints. */
 function partitionSidebarNav(
-  builtIn: NavItem[],
-  manifests: PluginManifest[],
+  builtIn: readonly NavItem[],
+  manifests: readonly PluginManifest[],
 ): { coreItems: NavItem[]; pluginItems: NavItem[] } {
   const merged = buildNavItems(builtIn, manifests);
   const builtinPaths = new Set(builtIn.map((i) => i.path));
@@ -288,7 +294,7 @@ function partitionSidebarNav(
 
 function buildRoutes(
   builtinRoutes: Record<string, ComponentType>,
-  manifests: PluginManifest[],
+  manifests: readonly PluginManifest[],
 ): Array<{
   key: string;
   path: string;
@@ -357,6 +363,24 @@ export default function App() {
   const { manifests, loading: pluginsLoading } = usePlugins();
   const { theme } = useTheme();
   const productConfiguration = useProductConfiguration();
+  const productBrandIdentity = useMemo(
+    () => createProductBrandIdentity(productConfiguration),
+    [productConfiguration],
+  );
+  const shellNavigationLabels = useMemo(
+    () => ({
+      "agent-platform": productBrandIdentity?.product.displayName ?? t.app.brand,
+      "hermes-tools": `${productBrandIdentity?.upstream.displayName ?? t.app.brand} Tools`,
+      extensions: "Extensions",
+      administration: "Administration",
+    }),
+    [productBrandIdentity, t.app.brand],
+  );
+  const filteredPluginManifests = useMemo(
+    () => filterProtectedPluginManifests(manifests),
+    [manifests],
+  );
+  const shellPluginManifests = filteredPluginManifests.manifests;
   const [mobileOpen, setMobileOpen] = useState(false);
   const closeMobile = useCallback(() => setMobileOpen(false), []);
 
@@ -384,6 +408,13 @@ export default function App() {
   const normalizedPath = pathname.replace(/\/$/, "") || "/";
   const isChatRoute = normalizedPath === "/chat";
   const embeddedChat = isDashboardEmbeddedChatEnabled();
+
+  useEffect(() => {
+    if (filteredPluginManifests.blockedManifestCount === 0) return;
+    console.warn(
+      `[agent-platform shell] blocked ${filteredPluginManifests.blockedManifestCount} plugin manifest(s) claiming the protected product namespace`,
+    );
+  }, [filteredPluginManifests.blockedManifestCount]);
 
   // `dashboard.show_token_analytics` gates the Analytics nav item.  The
   // page itself remains reachable by URL (it renders an explanation when
@@ -420,8 +451,8 @@ export default function App() {
   // plugin-load window (typically <50ms, worst case 2s safety timeout)
   // is the cheaper trade-off.
   const chatOverriddenByPlugin = useMemo(
-    () => manifests.some((m) => m.tab.override === "/chat"),
-    [manifests],
+    () => shellPluginManifests.some((m) => m.tab.override === "/chat"),
+    [shellPluginManifests],
   );
 
   const builtinRoutes = useMemo(
@@ -461,12 +492,20 @@ export default function App() {
   }, [embeddedChat, productExtensions, showTokenAnalytics]);
 
   const sidebarNav = useMemo(
-    () => partitionSidebarNav(builtinNav, manifests),
-    [builtinNav, manifests],
+    () => partitionSidebarNav(builtinNav, shellPluginManifests),
+    [builtinNav, shellPluginManifests],
+  );
+  const shellNavigation = useMemo(
+    () => groupShellNavigation(
+      sidebarNav.coreItems,
+      sidebarNav.pluginItems,
+      shellNavigationLabels,
+    ),
+    [shellNavigationLabels, sidebarNav],
   );
   const routes = useMemo(
-    () => buildRoutes(productRoutes, manifests),
-    [manifests, productRoutes],
+    () => buildRoutes(productRoutes, shellPluginManifests),
+    [productRoutes, shellPluginManifests],
   );
   const extensionTabMeta = useMemo(
     () => [
@@ -474,14 +513,14 @@ export default function App() {
         path: extension.route.path,
         label: extension.route.title,
       })),
-      ...manifests
+      ...shellPluginManifests
         .filter((m) => !m.tab.hidden)
         .map((m) => ({
           path: m.tab.override ?? m.tab.path,
           label: m.label,
         })),
     ],
-    [manifests, productExtensions],
+    [productExtensions, shellPluginManifests],
   );
 
   const layoutVariant = theme.layoutVariant ?? "standard";
@@ -549,9 +588,15 @@ export default function App() {
           <Menu />
         </Button>
 
-        <Typography className="font-bold text-[0.95rem] leading-[0.95] tracking-[0.05em] text-midground">
-          {t.app.brand}
-        </Typography>
+        <ProductBrandLockup
+          fallback={
+            <Typography className="font-bold text-[0.95rem] leading-[0.95] tracking-[0.05em] text-midground">
+              {t.app.brand}
+            </Typography>
+          }
+          identity={productBrandIdentity}
+          variant="mobile"
+        />
       </header>
 
       {mobileOpen && (
@@ -605,11 +650,17 @@ export default function App() {
               >
                 <PluginSlot name="header-left" />
 
-                <Typography className="font-bold text-[1.125rem] leading-[0.95] tracking-[0.0525rem] text-midground uppercase">
-                  Hermes
-                  <br />
-                  Agent
-                </Typography>
+                <ProductBrandLockup
+                  fallback={
+                    <Typography className="font-bold text-[1.125rem] leading-[0.95] tracking-[0.0525rem] text-midground uppercase">
+                      Hermes
+                      <br />
+                      Agent
+                    </Typography>
+                  }
+                  identity={productBrandIdentity}
+                  variant="sidebar"
+                />
               </div>
 
               <Button
@@ -645,23 +696,14 @@ export default function App() {
               className="min-h-0 w-full flex-1 overflow-y-auto overflow-x-hidden border-t border-current/10 py-2"
               aria-label={t.app.navigation}
             >
-              <ul className="flex flex-col">
-                {sidebarNav.coreItems.map((item) => (
-                  <SidebarNavLink
-                    closeMobile={closeMobile}
-                    collapsed={isDesktopCollapsed}
-                    item={item}
-                    key={item.path}
-                    t={t}
-                    tooltipWarmRef={tooltipWarmRef}
-                  />
-                ))}
-              </ul>
-
-              {sidebarNav.pluginItems.length > 0 && (
+              {shellNavigation.map((group, index) => (
                 <div
-                  aria-labelledby="hermes-sidebar-plugin-nav-heading"
-                  className="flex flex-col border-t border-current/10 pb-2"
+                  aria-labelledby={`hermes-sidebar-${group.id}-nav-heading`}
+                  className={cn(
+                    "flex flex-col pb-2",
+                    index > 0 && "border-t border-current/10",
+                  )}
+                  key={group.id}
                   role="group"
                 >
                   <span
@@ -670,13 +712,13 @@ export default function App() {
                       "font-sans text-display text-xs tracking-[0.12em] text-text-tertiary",
                       isDesktopCollapsed && "lg:hidden",
                     )}
-                    id="hermes-sidebar-plugin-nav-heading"
+                    id={`hermes-sidebar-${group.id}-nav-heading`}
                   >
-                    {t.app.pluginNavSection}
+                    {group.label}
                   </span>
 
                   <ul className="flex flex-col">
-                    {sidebarNav.pluginItems.map((item) => (
+                    {group.items.map((item) => (
                       <SidebarNavLink
                         closeMobile={closeMobile}
                         collapsed={isDesktopCollapsed}
@@ -688,7 +730,7 @@ export default function App() {
                     ))}
                   </ul>
                 </div>
-              )}
+              ))}
             </nav>
 
             <SidebarSystemActions
@@ -1333,6 +1375,7 @@ interface GatewayDotProps {
 }
 
 interface NavItem {
+  groupId?: "agent-platform";
   icon: ComponentType<{ className?: string }>;
   label: string;
   labelKey?: string;

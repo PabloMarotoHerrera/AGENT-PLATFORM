@@ -6,6 +6,7 @@ import {
 } from "./product-config";
 
 export interface ProductExtensionNavigation {
+  readonly groupId: "agent-platform";
   readonly icon: ComponentType<{ className?: string }>;
   readonly label: string;
   readonly placement:
@@ -28,6 +29,7 @@ export interface ProductExtensionDescriptor {
 }
 
 export interface ProductNavigationItem {
+  readonly groupId?: "agent-platform";
   readonly icon: ComponentType<{ className?: string }>;
   readonly label: string;
   readonly labelKey?: string;
@@ -44,10 +46,11 @@ function validateDescriptors(
 ): ReadonlyMap<string, ProductExtensionDescriptor> {
   const byId = new Map<string, ProductExtensionDescriptor>();
   const routePaths = new Set<string>();
+  const routePatterns: string[] = [];
 
   for (const descriptor of descriptors) {
     if (byId.has(descriptor.id)) throw new Error(`duplicate product extension id: ${descriptor.id}`);
-    if (!descriptor.route.path.startsWith("/") || descriptor.route.path.includes("*")) {
+    if (!isValidProductExtensionPath(descriptor.route.path)) {
       throw new Error(`invalid product extension path: ${descriptor.route.path}`);
     }
     if (routePaths.has(descriptor.route.path)) {
@@ -56,15 +59,59 @@ function validateDescriptors(
     if (reservedPaths.has(descriptor.route.path)) {
       throw new Error(`product extension path collides with built-in route: ${descriptor.route.path}`);
     }
+    if (routePatterns.some((path) => routePatternsOverlap(path, descriptor.route.path))) {
+      throw new Error(`ambiguous product extension path: ${descriptor.route.path}`);
+    }
     const placement = descriptor.navigation?.placement;
+    if (descriptor.navigation && descriptor.navigation.groupId !== "agent-platform") {
+      throw new Error(`invalid product navigation group: ${descriptor.navigation.groupId}`);
+    }
     if (placement && placement.kind !== "end" && !reservedPaths.has(placement.path)) {
       throw new Error(`product navigation anchor is not a built-in route: ${placement.path}`);
     }
     byId.set(descriptor.id, descriptor);
     routePaths.add(descriptor.route.path);
+    routePatterns.push(descriptor.route.path);
   }
 
   return byId;
+}
+
+function isValidProductExtensionPath(path: string): boolean {
+  let decodedPath: string;
+  let canonicalPath: string;
+  try {
+    decodedPath = decodeURIComponent(path);
+    canonicalPath = new URL(path, "https://agent-platform.invalid").pathname;
+  } catch {
+    return false;
+  }
+
+  return (
+    decodedPath === path &&
+    canonicalPath === path &&
+    path.startsWith("/agent-platform/") &&
+    !path.includes("*") &&
+    !path.includes("?") &&
+    !path.includes("#") &&
+    !path.includes("\\") &&
+    !path.includes("//") &&
+    !path.endsWith("/") &&
+    !path.split("/").some((segment) => segment === "." || segment === "..")
+  );
+}
+
+function routePatternsOverlap(left: string, right: string): boolean {
+  const leftSegments = left.split("/");
+  const rightSegments = right.split("/");
+  if (leftSegments.length !== rightSegments.length) return false;
+
+  return leftSegments.every(
+    (segment, index) =>
+      segment.toLowerCase() === rightSegments[index]?.toLowerCase() ||
+      segment.startsWith(":") ||
+      rightSegments[index]?.startsWith(":"),
+  );
 }
 
 export function resolveProductExtensions(
@@ -109,6 +156,7 @@ export function mergeProductNavigation(
   for (const extension of extensions) {
     if (!extension.navigation) continue;
     const item: ProductNavigationItem = {
+      groupId: extension.navigation.groupId,
       path: extension.route.path,
       label: extension.navigation.label,
       icon: extension.navigation.icon,

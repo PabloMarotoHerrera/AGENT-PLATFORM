@@ -42,14 +42,14 @@ function descriptor(
     featureId: `feature.${id}`,
     visibleWhenExperimental: false,
     route: { path, component: Page, title: id },
-    navigation: { label: id, icon: Icon, placement },
+    navigation: { groupId: "agent-platform", label: id, icon: Icon, placement },
   };
 }
 
 describe("AGENT PLATFORM frontend extensions", () => {
   it("uses configuration order and enables only explicitly enabled descriptors", () => {
-    const first = descriptor("agent_platform.first", "/product-first");
-    const second = descriptor("agent_platform.second", "/product-second");
+    const first = descriptor("agent_platform.first", "/agent-platform/first");
+    const second = descriptor("agent_platform.second", "/agent-platform/second");
     const config = configuration(
       [second.id, first.id],
       {
@@ -63,7 +63,7 @@ describe("AGENT PLATFORM frontend extensions", () => {
 
   it("keeps missing, disabled, unavailable, and unapproved experimental features hidden", () => {
     const values: ProductFeatureState[] = ["disabled", "unavailable", "experimental"];
-    const extension = descriptor("agent_platform.example", "/product-example");
+    const extension = descriptor("agent_platform.example", "/agent-platform/example");
 
     for (const state of values) {
       const config = configuration([extension.id], { [extension.featureId]: state });
@@ -74,7 +74,7 @@ describe("AGENT PLATFORM frontend extensions", () => {
   });
 
   it("rejects duplicate identifiers, duplicate routes, and built-in route collisions", () => {
-    const extension = descriptor("agent_platform.example", "/product-example");
+    const extension = descriptor("agent_platform.example", "/agent-platform/example");
     const config = configuration([], {});
 
     expect(() => resolveProductExtensions(config, [extension, extension], ["/sessions"]))
@@ -86,20 +86,71 @@ describe("AGENT PLATFORM frontend extensions", () => {
     )).toThrow(/duplicate product extension path/);
     expect(() => resolveProductExtensions(
       config,
-      [descriptor("agent_platform.collision", "/sessions")],
-      ["/sessions"],
+      [descriptor("agent_platform.collision", "/agent-platform/collision")],
+      ["/sessions", "/agent-platform/collision"],
     )).toThrow(/collides with built-in route/);
+  });
+
+  it("rejects routes outside the product namespace and ambiguous route patterns", () => {
+    const config = configuration([], {});
+
+    expect(() => resolveProductExtensions(
+      config,
+      [descriptor("agent_platform.outside", "/outside")],
+      ["/sessions"],
+    )).toThrow(/invalid product extension path/);
+    expect(() => resolveProductExtensions(
+      config,
+      [descriptor("agent_platform.root", "/agent-platform")],
+      ["/sessions"],
+    )).toThrow(/invalid product extension path/);
+    for (const path of [
+      "/agent-platform/../sessions",
+      "/agent-platform/%2e%2e/sessions",
+      "/agent-platform/..\\sessions",
+      "/agent-platform/.\t./sessions",
+      "/agent-platform/.\n./sessions",
+      "/agent-platform/.\r./sessions",
+    ]) {
+      expect(() => resolveProductExtensions(
+        config,
+        [descriptor("agent_platform.escape", path)],
+        ["/sessions"],
+      )).toThrow(/invalid product extension path/);
+    }
+    expect(() => resolveProductExtensions(
+      config,
+      [
+        descriptor("agent_platform.by_id", "/agent-platform/projects/:projectId"),
+        descriptor("agent_platform.by_slug", "/agent-platform/projects/:slug"),
+      ],
+      ["/sessions"],
+    )).toThrow(/ambiguous product extension path/);
+  });
+
+  it("requires product navigation entries to use the product group", () => {
+    const extension = descriptor("agent_platform.example", "/agent-platform/example");
+    const invalid = {
+      ...extension,
+      navigation: {
+        ...extension.navigation!,
+        groupId: "administration" as "agent-platform",
+      },
+    };
+
+    expect(() => resolveProductExtensions(configuration([], {}), [invalid], ["/sessions"]))
+      .toThrow(/invalid product navigation group/);
   });
 
   it("preserves configuration order for multiple entries at one navigation anchor", () => {
     const first = descriptor(
       "agent_platform.first",
-      "/product-first",
+      "/agent-platform/first",
       { kind: "after", path: "/sessions" },
     );
     const second = descriptor(
       "agent_platform.second",
-      "/product-second",
+      "/agent-platform/second",
       { kind: "after", path: "/sessions" },
     );
     const config = configuration(
@@ -111,6 +162,10 @@ describe("AGENT PLATFORM frontend extensions", () => {
     expect(mergeProductNavigation(
       [{ path: "/sessions", label: "Sessions", icon: Icon }],
       resolved,
-    ).map((item) => item.path)).toEqual(["/sessions", "/product-first", "/product-second"]);
+    ).map((item) => [item.path, item.groupId])).toEqual([
+      ["/sessions", undefined],
+      ["/agent-platform/first", "agent-platform"],
+      ["/agent-platform/second", "agent-platform"],
+    ]);
   });
 });
