@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import type { ComponentType } from "react";
 import { describe, expect, it } from "vitest";
 
@@ -10,6 +11,8 @@ import {
   type ProductExtensionDescriptor,
   type ProductExtensionNavigation,
 } from "./extensions";
+import { filterProtectedPluginManifests, groupShellNavigation } from "./shell";
+import type { PluginManifest } from "@/plugins";
 
 const Page: ComponentType = () => null;
 const Icon: ComponentType<{ className?: string }> = () => null;
@@ -49,17 +52,76 @@ function descriptor(
 }
 
 describe("AGENT PLATFORM frontend extensions", () => {
-  it("compiles the overview descriptor while committed activation remains empty", () => {
+  it("compiles the reviewed catalog while committed activation remains empty", () => {
     expect(AGENT_PLATFORM_EXTENSIONS.map((entry) => entry.id)).toEqual([
       "agent_platform.ui.overview",
+      "agent_platform.ui.projects",
+      "agent_platform.ui.project_detail",
+      "agent_platform.ui.ticket_detail",
     ]);
-    const committed = configuration([], { "agent_platform.product_ui": "disabled" });
+    expect(AGENT_PLATFORM_EXTENSIONS.map((entry) => entry.route.path)).toEqual([
+      "/agent-platform/overview",
+      "/agent-platform/projects",
+      "/agent-platform/projects/:boardSlug",
+      "/agent-platform/projects/:boardSlug/tickets/:taskId",
+    ]);
+    expect(AGENT_PLATFORM_EXTENSIONS.every((entry) =>
+      entry.owner === "AGENT_PLATFORM" &&
+      entry.featureId === "agent_platform.product_ui" &&
+      entry.visibleWhenExperimental)).toBe(true);
+    expect(AGENT_PLATFORM_EXTENSIONS.filter((entry) => entry.navigation).map((entry) => entry.id))
+      .toEqual(["agent_platform.ui.overview", "agent_platform.ui.projects"]);
 
-    expect(resolveRegisteredProductExtensions(committed, ["/sessions"])).toEqual([]);
+    const backendSource = readFileSync(
+      new URL("../../../hermes_cli/agent_platform/product_config.py", import.meta.url),
+      "utf8",
+    );
+    expect(backendSource).toContain('"agent_platform.product_ui": FeatureState.DISABLED');
+    expect(backendSource).toContain('"extension_modules": ()');
+    const committed = configuration([], { "agent_platform.product_ui": "disabled" });
+    const resolved = resolveRegisteredProductExtensions(committed, ["/sessions"]);
+
+    expect(resolved).toEqual([]);
+    expect(Object.fromEntries(resolved.map((entry) => [entry.route.path, entry.route.component])))
+      .toEqual({});
     expect(mergeProductNavigation(
       [{ path: "/sessions", label: "Sessions", icon: Icon }],
-      resolveRegisteredProductExtensions(committed, ["/sessions"]),
+      resolved,
     ).map((item) => item.path)).toEqual(["/sessions"]);
+    expect(groupShellNavigation(
+      mergeProductNavigation([{ path: "/sessions", label: "Sessions", icon: Icon }], resolved),
+      [],
+      {
+        "agent-platform": "Synthetic Product",
+        "hermes-tools": "Synthetic Upstream Tools",
+        extensions: "Extensions",
+        administration: "Administration",
+      },
+    ).map((group) => group.id)).not.toContain("agent-platform");
+  });
+
+  it("keeps dynamic plugins out of every product-owned route shape", () => {
+    const manifest = (path: string): PluginManifest => ({
+      name: `synthetic-${path}`,
+      label: "Synthetic plugin",
+      description: "Synthetic plugin",
+      icon: "Puzzle",
+      version: "1.0.0",
+      tab: { path },
+      entry: "index.js",
+      has_api: false,
+      source: "synthetic",
+    });
+    const filtered = filterProtectedPluginManifests([
+      manifest("/kanban"),
+      manifest("/agent-platform/projects"),
+      manifest("/agent-platform/projects/:boardSlug"),
+      manifest("/agent-platform/projects/:boardSlug/tickets/:taskId"),
+      manifest("/:namespace/*"),
+    ]);
+
+    expect(filtered.manifests.map((entry) => entry.tab.path)).toEqual(["/kanban"]);
+    expect(filtered.blockedManifestCount).toBe(4);
   });
 
   it("uses configuration order and enables only explicitly enabled descriptors", () => {
