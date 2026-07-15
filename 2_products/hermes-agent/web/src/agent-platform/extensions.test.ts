@@ -58,19 +58,23 @@ describe("AGENT PLATFORM frontend extensions", () => {
       "agent_platform.ui.projects",
       "agent_platform.ui.project_detail",
       "agent_platform.ui.ticket_detail",
+      "agent_platform.ui.approvals",
+      "agent_platform.ui.approval_detail",
     ]);
     expect(AGENT_PLATFORM_EXTENSIONS.map((entry) => entry.route.path)).toEqual([
       "/agent-platform/overview",
       "/agent-platform/projects",
       "/agent-platform/projects/:boardSlug",
       "/agent-platform/projects/:boardSlug/tickets/:taskId",
+      "/agent-platform/approvals",
+      "/agent-platform/approvals/:approvalId",
     ]);
     expect(AGENT_PLATFORM_EXTENSIONS.every((entry) =>
       entry.owner === "AGENT_PLATFORM" &&
       entry.featureId === "agent_platform.product_ui" &&
       entry.visibleWhenExperimental)).toBe(true);
     expect(AGENT_PLATFORM_EXTENSIONS.filter((entry) => entry.navigation).map((entry) => entry.id))
-      .toEqual(["agent_platform.ui.overview", "agent_platform.ui.projects"]);
+      .toEqual(["agent_platform.ui.overview", "agent_platform.ui.projects", "agent_platform.ui.approvals"]);
 
     const backendSource = readFileSync(
       new URL("../../../hermes_cli/agent_platform/product_config.py", import.meta.url),
@@ -117,11 +121,13 @@ describe("AGENT PLATFORM frontend extensions", () => {
       manifest("/agent-platform/projects"),
       manifest("/agent-platform/projects/:boardSlug"),
       manifest("/agent-platform/projects/:boardSlug/tickets/:taskId"),
+      manifest("/agent-platform/approvals"),
+      manifest("/agent-platform/approvals/:approvalId"),
       manifest("/:namespace/*"),
     ]);
 
     expect(filtered.manifests.map((entry) => entry.tab.path)).toEqual(["/kanban"]);
-    expect(filtered.blockedManifestCount).toBe(4);
+    expect(filtered.blockedManifestCount).toBe(6);
   });
 
   it("uses configuration order and enables only explicitly enabled descriptors", () => {
