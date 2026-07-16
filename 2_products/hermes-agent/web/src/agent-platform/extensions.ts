@@ -7,6 +7,7 @@ import {
 import { RUNTIME_OVERVIEW_DESCRIPTOR } from "./runtime-overview/descriptor";
 import { PROJECTS_TICKETS_DESCRIPTORS } from "./projects-tickets/descriptors";
 import { APPROVAL_INBOX_DESCRIPTORS } from "./approval-inbox/descriptors";
+import { EXECUTION_INSPECTOR_DESCRIPTORS } from "./execution-inspector/descriptors";
 
 export interface ProductExtensionNavigation {
   readonly groupId: "agent-platform";
@@ -45,6 +46,7 @@ export const AGENT_PLATFORM_EXTENSIONS: readonly ProductExtensionDescriptor[] = 
   RUNTIME_OVERVIEW_DESCRIPTOR,
   ...PROJECTS_TICKETS_DESCRIPTORS,
   ...APPROVAL_INBOX_DESCRIPTORS,
+  ...EXECUTION_INSPECTOR_DESCRIPTORS,
 ]);
 
 function validateDescriptors(

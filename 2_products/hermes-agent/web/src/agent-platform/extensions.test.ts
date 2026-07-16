@@ -60,6 +60,8 @@ describe("AGENT PLATFORM frontend extensions", () => {
       "agent_platform.ui.ticket_detail",
       "agent_platform.ui.approvals",
       "agent_platform.ui.approval_detail",
+      "agent_platform.ui.executions",
+      "agent_platform.ui.execution_detail",
     ]);
     expect(AGENT_PLATFORM_EXTENSIONS.map((entry) => entry.route.path)).toEqual([
       "/agent-platform/overview",
@@ -68,13 +70,20 @@ describe("AGENT PLATFORM frontend extensions", () => {
       "/agent-platform/projects/:boardSlug/tickets/:taskId",
       "/agent-platform/approvals",
       "/agent-platform/approvals/:approvalId",
+      "/agent-platform/executions",
+      "/agent-platform/executions/:executionId",
     ]);
     expect(AGENT_PLATFORM_EXTENSIONS.every((entry) =>
       entry.owner === "AGENT_PLATFORM" &&
       entry.featureId === "agent_platform.product_ui" &&
       entry.visibleWhenExperimental)).toBe(true);
     expect(AGENT_PLATFORM_EXTENSIONS.filter((entry) => entry.navigation).map((entry) => entry.id))
-      .toEqual(["agent_platform.ui.overview", "agent_platform.ui.projects", "agent_platform.ui.approvals"]);
+      .toEqual([
+        "agent_platform.ui.overview",
+        "agent_platform.ui.projects",
+        "agent_platform.ui.approvals",
+        "agent_platform.ui.executions",
+      ]);
 
     const backendSource = readFileSync(
       new URL("../../../hermes_cli/agent_platform/product_config.py", import.meta.url),
@@ -123,11 +132,13 @@ describe("AGENT PLATFORM frontend extensions", () => {
       manifest("/agent-platform/projects/:boardSlug/tickets/:taskId"),
       manifest("/agent-platform/approvals"),
       manifest("/agent-platform/approvals/:approvalId"),
+      manifest("/agent-platform/executions"),
+      manifest("/agent-platform/executions/:executionId"),
       manifest("/:namespace/*"),
     ]);
 
     expect(filtered.manifests.map((entry) => entry.tab.path)).toEqual(["/kanban"]);
-    expect(filtered.blockedManifestCount).toBe(6);
+    expect(filtered.blockedManifestCount).toBe(8);
   });
 
   it("uses configuration order and enables only explicitly enabled descriptors", () => {
