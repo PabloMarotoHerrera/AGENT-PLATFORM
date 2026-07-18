@@ -117,7 +117,7 @@ export interface FrontendQualityActivationCheck {
   readonly resolvedDescriptorCount: number;
   readonly runtimeRouteCount: number;
   readonly navigationItemCount: number;
-  readonly productUiFeature: "disabled";
+  readonly productUiFeature: "disabled" | "experimental";
   readonly extensionModules: readonly string[];
 }
 
