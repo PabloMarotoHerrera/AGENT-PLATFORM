@@ -12,6 +12,7 @@ import {
 import { loadProjectsWorkspaceRequest } from "./kanban-client";
 
 export const PROJECTS_WORKSPACE_POLL_MS = 10_000;
+export const PROJECTS_WORKSPACE_REQUEST_TIMEOUT_MS = 15_000;
 
 export const INITIAL_PROJECTS_WORKSPACE_STATE: ProjectsWorkspaceDataState = Object.freeze({
   phase: "loading",
@@ -52,6 +53,20 @@ export function createProjectsWorkspacePoller(
   let snapshot: ProjectsWorkspaceView | null = null;
   let lastSuccessAt: number | null = null;
   let phase: ProjectsWorkspacePhase = "loading";
+  let activeController: AbortController | null = null;
+
+  const settleOnAbort = <T,>(promise: Promise<T>, signal: AbortSignal): Promise<T> =>
+    new Promise<T>((resolve, reject) => {
+      const rejectAborted = () => reject(new DOMException("Aborted", "AbortError"));
+      if (signal.aborted) {
+        rejectAborted();
+        return;
+      }
+      signal.addEventListener("abort", rejectAborted, { once: true });
+      promise.then(resolve, reject).finally(() => {
+        signal.removeEventListener("abort", rejectAborted);
+      });
+    });
 
   const emit = (nextPhase: ProjectsWorkspacePhase, refreshing = false) => {
     phase = nextPhase;
@@ -69,10 +84,13 @@ export function createProjectsWorkspacePoller(
   const run = async (): Promise<boolean> => {
     if (stopped || inFlight) return false;
     inFlight = true;
+    const controller = new AbortController();
+    activeController = controller;
+    const requestTimeout = setTimeout(() => controller.abort(), PROJECTS_WORKSPACE_REQUEST_TIMEOUT_MS);
     if (snapshot) emit(phase, true);
     try {
-      const next = await load();
-      if (stopped) return false;
+      const next = await settleOnAbort(load(), controller.signal);
+      if (stopped || controller.signal.aborted) return false;
       if (next === null) {
         emit(snapshot ? "stale" : "unavailable");
         return false;
@@ -85,6 +103,8 @@ export function createProjectsWorkspacePoller(
       if (!stopped) emit(snapshot ? "stale" : "error");
       return false;
     } finally {
+      clearTimeout(requestTimeout);
+      if (activeController === controller) activeController = null;
       inFlight = false;
       schedule();
     }
@@ -102,6 +122,8 @@ export function createProjectsWorkspacePoller(
     },
     stop: () => {
       stopped = true;
+      activeController?.abort();
+      activeController = null;
       if (timer !== null) clearTimer(timer);
       timer = null;
     },

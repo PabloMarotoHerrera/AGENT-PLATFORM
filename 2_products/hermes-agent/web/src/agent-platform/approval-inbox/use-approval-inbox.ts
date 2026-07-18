@@ -12,6 +12,7 @@ import {
 import { loadApprovalInboxRequest, type ApprovalInboxLoader } from "./approval-client";
 
 export const APPROVAL_INBOX_POLL_MS = 10_000;
+export const APPROVAL_INBOX_REQUEST_TIMEOUT_MS = 15_000;
 
 export const INITIAL_APPROVAL_INBOX_STATE: ApprovalInboxDataState = Object.freeze({
   phase: "loading",
@@ -52,6 +53,20 @@ export function createApprovalInboxPoller(
   let snapshot: ApprovalInboxView | null = null;
   let lastSuccessAt: number | null = null;
   let phase: ApprovalInboxPhase = "loading";
+  let activeController: AbortController | null = null;
+
+  const settleOnAbort = <T,>(promise: Promise<T>, signal: AbortSignal): Promise<T> =>
+    new Promise<T>((resolve, reject) => {
+      const rejectAborted = () => reject(new DOMException("Aborted", "AbortError"));
+      if (signal.aborted) {
+        rejectAborted();
+        return;
+      }
+      signal.addEventListener("abort", rejectAborted, { once: true });
+      promise.then(resolve, reject).finally(() => {
+        signal.removeEventListener("abort", rejectAborted);
+      });
+    });
 
   const emit = (nextPhase: ApprovalInboxPhase, refreshing = false) => {
     phase = nextPhase;
@@ -69,10 +84,13 @@ export function createApprovalInboxPoller(
   const run = async (): Promise<boolean> => {
     if (stopped || inFlight) return false;
     inFlight = true;
+    const controller = new AbortController();
+    activeController = controller;
+    const requestTimeout = setTimeout(() => controller.abort(), APPROVAL_INBOX_REQUEST_TIMEOUT_MS);
     if (snapshot) emit(phase, true);
     try {
-      const next = await load();
-      if (stopped) return false;
+      const next = await settleOnAbort(load(), controller.signal);
+      if (stopped || controller.signal.aborted) return false;
       if (next === null) {
         emit(snapshot ? "stale" : "unavailable");
         return false;
@@ -85,6 +103,8 @@ export function createApprovalInboxPoller(
       if (!stopped) emit(snapshot ? "stale" : "error");
       return false;
     } finally {
+      clearTimeout(requestTimeout);
+      if (activeController === controller) activeController = null;
       inFlight = false;
       schedule();
     }
@@ -102,6 +122,8 @@ export function createApprovalInboxPoller(
     },
     stop: () => {
       stopped = true;
+      activeController?.abort();
+      activeController = null;
       if (timer !== null) clearTimer(timer);
       timer = null;
     },

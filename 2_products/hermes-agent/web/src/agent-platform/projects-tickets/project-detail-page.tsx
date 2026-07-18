@@ -28,7 +28,12 @@ const STATUS_SEMANTICS: Readonly<Partial<Record<KanbanSourceStatus, string>>> = 
   review: "Hermes source state only; it is not an ApprovalRequest.",
   scheduled: "Waiting source state; no wake timestamp is inferred.",
   blocked: "Hermes source state; it is not a pending approval.",
+  other: "Unrecognized Hermes source state; no workflow meaning is inferred.",
 });
+const PROJECT_DETAIL_STATUSES: readonly KanbanSourceStatus[] = Object.freeze([
+  ...KANBAN_STATUSES,
+  "other",
+]);
 
 function statusTone(status: KanbanSourceStatus): "success" | "warning" | "destructive" | "secondary" {
   if (status === "done") return "success";
@@ -47,7 +52,7 @@ export function ProjectDetailView({ state, profile, refresh }: WorkspaceViewProp
 
   return (
     <div className="h-full overflow-y-auto bg-[var(--agent-platform-surface-canvas)] text-[var(--agent-platform-text-primary)]" style={{ fontFamily: "var(--agent-platform-font-body)" }}>
-      <main className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
         <Link className="inline-flex w-fit items-center gap-2 text-sm text-[var(--agent-platform-text-secondary)] hover:text-[var(--agent-platform-text-primary)]" to={projectsPath}>
           <ArrowLeft className="h-4 w-4" /> Projects
         </Link>
@@ -98,7 +103,7 @@ export function ProjectDetailView({ state, profile, refresh }: WorkspaceViewProp
               <p className="py-8 text-center text-sm text-[var(--agent-platform-text-secondary)]">No Tickets match the local filter.</p>
             ) : (
               <section className="space-y-6" aria-label="Board-qualified tickets">
-                {KANBAN_STATUSES.map((status) => {
+                {PROJECT_DETAIL_STATUSES.map((status) => {
                   const tickets = visibleTickets.filter((ticket) => ticket.visualStatus === status);
                   if (!tickets.length) return null;
                   return (
@@ -145,7 +150,7 @@ export function ProjectDetailView({ state, profile, refresh }: WorkspaceViewProp
             )}
           </>
         )}
-      </main>
+      </div>
     </div>
   );
 }

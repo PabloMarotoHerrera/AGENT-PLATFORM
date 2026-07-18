@@ -58,6 +58,19 @@ export function createExecutionInspectorPoller(
   let phase: ExecutionInspectorPhase = "loading";
   let activeController: AbortController | null = null;
 
+  const settleOnAbort = <T,>(promise: Promise<T>, signal: AbortSignal): Promise<T> =>
+    new Promise<T>((resolve, reject) => {
+      const rejectAborted = () => reject(new DOMException("Aborted", "AbortError"));
+      if (signal.aborted) {
+        rejectAborted();
+        return;
+      }
+      signal.addEventListener("abort", rejectAborted, { once: true });
+      promise.then(resolve, reject).finally(() => {
+        signal.removeEventListener("abort", rejectAborted);
+      });
+    });
+
   const emit = (nextPhase: ExecutionInspectorPhase, refreshing = false) => {
     phase = nextPhase;
     publish(Object.freeze({ phase, snapshot, lastSuccessAt, refreshing }));
@@ -79,8 +92,8 @@ export function createExecutionInspectorPoller(
     const requestTimeout = setTimeout(() => controller.abort(), EXECUTION_INSPECTOR_REQUEST_TIMEOUT_MS);
     if (snapshot) emit(phase, true);
     try {
-      const next = await load(controller.signal);
-      if (stopped) return false;
+      const next = await settleOnAbort(load(controller.signal), controller.signal);
+      if (stopped || controller.signal.aborted) return false;
       if (next === null) {
         emit(snapshot ? "stale" : "unavailable");
         return false;

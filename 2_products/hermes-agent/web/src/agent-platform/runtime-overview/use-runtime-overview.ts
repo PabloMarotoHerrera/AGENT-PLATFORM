@@ -9,6 +9,7 @@ import {
 } from "./contract";
 
 export const RUNTIME_OVERVIEW_POLL_MS = 10_000;
+export const RUNTIME_OVERVIEW_REQUEST_TIMEOUT_MS = 15_000;
 
 export type RuntimeOverviewPhase =
   | "loading"
@@ -58,6 +59,20 @@ export function createRuntimeOverviewPoller(
   let snapshot: RuntimeOverviewSnapshot | null = null;
   let lastSuccessAt: number | null = null;
   let phase: RuntimeOverviewPhase = "loading";
+  let activeController: AbortController | null = null;
+
+  const settleOnAbort = <T,>(promise: Promise<T>, signal: AbortSignal): Promise<T> =>
+    new Promise<T>((resolve, reject) => {
+      const rejectAborted = () => reject(new DOMException("Aborted", "AbortError"));
+      if (signal.aborted) {
+        rejectAborted();
+        return;
+      }
+      signal.addEventListener("abort", rejectAborted, { once: true });
+      promise.then(resolve, reject).finally(() => {
+        signal.removeEventListener("abort", rejectAborted);
+      });
+    });
 
   const emit = (nextPhase: RuntimeOverviewPhase, refreshing = false) => {
     phase = nextPhase;
@@ -75,11 +90,14 @@ export function createRuntimeOverviewPoller(
   const run = async (): Promise<boolean> => {
     if (stopped || inFlight) return false;
     inFlight = true;
+    const controller = new AbortController();
+    activeController = controller;
+    const requestTimeout = setTimeout(() => controller.abort(), RUNTIME_OVERVIEW_REQUEST_TIMEOUT_MS);
     if (snapshot) emit(phase, true);
 
     try {
-      const parsed = parseRuntimeOverviewSnapshot(await loadStatus());
-      if (stopped) return false;
+      const parsed = parseRuntimeOverviewSnapshot(await settleOnAbort(loadStatus(), controller.signal));
+      if (stopped || controller.signal.aborted) return false;
       if (parsed === null) {
         emit(snapshot ? "stale" : "unavailable");
         return false;
@@ -92,6 +110,8 @@ export function createRuntimeOverviewPoller(
       if (!stopped) emit(snapshot ? "stale" : "error");
       return false;
     } finally {
+      clearTimeout(requestTimeout);
+      if (activeController === controller) activeController = null;
       inFlight = false;
       schedule();
     }
@@ -109,6 +129,8 @@ export function createRuntimeOverviewPoller(
     },
     stop: () => {
       stopped = true;
+      activeController?.abort();
+      activeController = null;
       if (timer !== null) clearTimer(timer);
       timer = null;
     },

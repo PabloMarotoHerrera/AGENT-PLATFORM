@@ -208,7 +208,7 @@ export function SafeSettingsView({ state, refresh, writePreference, retryWrite }
       className="h-full overflow-y-auto bg-[var(--agent-platform-surface-canvas)] text-[var(--agent-platform-text-primary)]"
       style={{ fontFamily: "var(--agent-platform-font-body)" }}
     >
-      <main className="mx-auto flex w-full max-w-7xl flex-col gap-7 px-4 py-6 sm:px-6 sm:py-8 lg:px-8" aria-labelledby="safe-settings-title">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-7 px-4 py-6 sm:px-6 sm:py-8 lg:px-8" aria-labelledby="safe-settings-title">
         <header className="grid gap-5 border-b border-[var(--agent-platform-border-default)] pb-6 lg:grid-cols-[1fr_auto] lg:items-end">
           <div>
             <p className="font-mono text-xs uppercase tracking-[0.2em] text-[var(--agent-platform-text-muted)]">
@@ -378,7 +378,7 @@ export function SafeSettingsView({ state, refresh, writePreference, retryWrite }
             </section>
           </>
         )}
-      </main>
+      </div>
     </div>
   );
 }

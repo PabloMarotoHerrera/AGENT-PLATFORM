@@ -71,7 +71,7 @@ export function ExecutionDetailView({
   ) ?? buildExecutionsPath(profile);
   return (
     <div className="h-full overflow-y-auto bg-[var(--agent-platform-surface-canvas)] text-[var(--agent-platform-text-primary)]" style={{ fontFamily: "var(--agent-platform-font-body)" }}>
-      <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
         <Link className="inline-flex w-fit items-center gap-2 text-sm text-[var(--agent-platform-text-secondary)] hover:text-[var(--agent-platform-text-primary)]" to={collectionPath ?? "/agent-platform/executions"}>
           <ArrowLeft className="h-4 w-4" /> Execution Inspector
         </Link>
@@ -195,7 +195,7 @@ export function ExecutionDetailView({
             </Card>
           </>
         )}
-      </main>
+      </div>
     </div>
   );
 }

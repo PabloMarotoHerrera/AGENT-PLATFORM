@@ -100,7 +100,7 @@ export function RuntimeOverviewView({ state, refresh }: RuntimeOverviewViewProps
       className="h-full overflow-y-auto bg-[var(--agent-platform-surface-canvas)] text-[var(--agent-platform-text-primary)]"
       style={{ fontFamily: "var(--agent-platform-font-body)" }}
     >
-      <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-6 sm:px-6 sm:py-8 lg:px-8" aria-labelledby="runtime-overview-title">
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-6 sm:px-6 sm:py-8 lg:px-8" aria-labelledby="runtime-overview-title">
         <header className="flex flex-col gap-5 border-b border-[var(--agent-platform-border-default)] pb-6 sm:flex-row sm:items-end sm:justify-between">
           <div className="space-y-2">
             <p className="font-mono text-xs uppercase tracking-[0.2em] text-[var(--agent-platform-text-muted)]">
@@ -231,7 +231,7 @@ export function RuntimeOverviewView({ state, refresh }: RuntimeOverviewViewProps
             </section>
           </>
         )}
-      </main>
+      </div>
     </div>
   );
 }

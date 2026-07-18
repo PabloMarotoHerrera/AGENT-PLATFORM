@@ -146,7 +146,7 @@ export function ExecutionInspectorView({ state, profile, refresh }: ExecutionIns
 
   return (
     <div className="h-full overflow-y-auto bg-[var(--agent-platform-surface-canvas)] text-[var(--agent-platform-text-primary)]" style={{ fontFamily: "var(--agent-platform-font-body)" }}>
-      <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
         <ExecutionInspectorHeader
           eyebrow="AGENT PLATFORM / Source evidence"
           title="Execution Inspector"
@@ -188,7 +188,7 @@ export function ExecutionInspectorView({ state, profile, refresh }: ExecutionIns
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--agent-platform-text-muted)]" />
                 <Input className="pl-9" value={filter} onChange={(event) => setStoredFilter({ identity: filterIdentity, value: event.target.value })} placeholder="Filter by run ID, profile, or outcome" />
               </label>
-              <label className="flex items-center gap-2 border border-[var(--agent-platform-border-default)] bg-[var(--agent-platform-surface-panel)] px-3">
+              <label className="flex items-center gap-2 border border-[var(--agent-platform-border-default)] bg-[var(--agent-platform-surface-panel)] px-3 focus-within:border-[var(--agent-platform-action-primary)] focus-within:ring-2 focus-within:ring-[var(--agent-platform-focus-ring)]">
                 <span className="sr-only">Source run status</span>
                 <select className="w-full bg-transparent py-2 text-sm outline-none" value={status} onChange={(event) => setStoredStatus({ identity: filterIdentity, value: event.target.value })}>
                   <option value="all">All source statuses</option>
@@ -242,7 +242,7 @@ export function ExecutionInspectorView({ state, profile, refresh }: ExecutionIns
             <p className="inline-flex items-center gap-2 text-xs text-[var(--agent-platform-text-muted)]"><Clock3 className="h-4 w-4" /> Ordering is within this one task source only; no cross-source chronology is implied.</p>
           </>
         )}
-      </main>
+      </div>
     </div>
   );
 }
