@@ -8,6 +8,7 @@ import { RUNTIME_OVERVIEW_DESCRIPTOR } from "./runtime-overview/descriptor";
 import { PROJECTS_TICKETS_DESCRIPTORS } from "./projects-tickets/descriptors";
 import { APPROVAL_INBOX_DESCRIPTORS } from "./approval-inbox/descriptors";
 import { EXECUTION_INSPECTOR_DESCRIPTORS } from "./execution-inspector/descriptors";
+import { SAFE_SETTINGS_DESCRIPTOR } from "./safe-settings/descriptor";
 
 export interface ProductExtensionNavigation {
   readonly groupId: "agent-platform";
@@ -40,6 +41,14 @@ export interface ProductNavigationItem {
   readonly path: string;
 }
 
+export interface ProductExtensionPosture {
+  readonly compiledDescriptorCount: number;
+  readonly selectedModuleCount: number;
+  readonly resolvedDescriptorCount: number;
+  readonly registeredRouteCount: number;
+  readonly registeredNavigationCount: number;
+}
+
 // P13 registers reviewed, statically imported descriptors here. Backend data
 // can select an ID but can never provide an import path or executable code.
 export const AGENT_PLATFORM_EXTENSIONS: readonly ProductExtensionDescriptor[] = Object.freeze([
@@ -47,6 +56,7 @@ export const AGENT_PLATFORM_EXTENSIONS: readonly ProductExtensionDescriptor[] = 
   ...PROJECTS_TICKETS_DESCRIPTORS,
   ...APPROVAL_INBOX_DESCRIPTORS,
   ...EXECUTION_INSPECTOR_DESCRIPTORS,
+  SAFE_SETTINGS_DESCRIPTOR,
 ]);
 
 function validateDescriptors(
@@ -152,6 +162,19 @@ export function resolveRegisteredProductExtensions(
   } catch {
     return [];
   }
+}
+
+export function getProductExtensionPosture(
+  configuration: ProductConfiguration | null,
+): ProductExtensionPosture {
+  const resolved = resolveRegisteredProductExtensions(configuration, []);
+  return Object.freeze({
+    compiledDescriptorCount: AGENT_PLATFORM_EXTENSIONS.length,
+    selectedModuleCount: configuration?.extensionModules.length ?? 0,
+    resolvedDescriptorCount: resolved.length,
+    registeredRouteCount: resolved.length,
+    registeredNavigationCount: resolved.filter((descriptor) => descriptor.navigation).length,
+  });
 }
 
 export function mergeProductNavigation(

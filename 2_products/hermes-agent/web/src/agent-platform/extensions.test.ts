@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { parseProductConfiguration, type ProductFeatureState } from "./product-config";
 import {
   AGENT_PLATFORM_EXTENSIONS,
+  getProductExtensionPosture,
   mergeProductNavigation,
   resolveProductExtensions,
   resolveRegisteredProductExtensions,
@@ -62,6 +63,7 @@ describe("AGENT PLATFORM frontend extensions", () => {
       "agent_platform.ui.approval_detail",
       "agent_platform.ui.executions",
       "agent_platform.ui.execution_detail",
+      "agent_platform.ui.settings",
     ]);
     expect(AGENT_PLATFORM_EXTENSIONS.map((entry) => entry.route.path)).toEqual([
       "/agent-platform/overview",
@@ -72,6 +74,7 @@ describe("AGENT PLATFORM frontend extensions", () => {
       "/agent-platform/approvals/:approvalId",
       "/agent-platform/executions",
       "/agent-platform/executions/:executionId",
+      "/agent-platform/settings",
     ]);
     expect(AGENT_PLATFORM_EXTENSIONS.every((entry) =>
       entry.owner === "AGENT_PLATFORM" &&
@@ -83,6 +86,7 @@ describe("AGENT PLATFORM frontend extensions", () => {
         "agent_platform.ui.projects",
         "agent_platform.ui.approvals",
         "agent_platform.ui.executions",
+        "agent_platform.ui.settings",
       ]);
 
     const backendSource = readFileSync(
@@ -95,6 +99,13 @@ describe("AGENT PLATFORM frontend extensions", () => {
     const resolved = resolveRegisteredProductExtensions(committed, ["/sessions"]);
 
     expect(resolved).toEqual([]);
+    expect(getProductExtensionPosture(committed)).toEqual({
+      compiledDescriptorCount: 9,
+      selectedModuleCount: 0,
+      resolvedDescriptorCount: 0,
+      registeredRouteCount: 0,
+      registeredNavigationCount: 0,
+    });
     expect(Object.fromEntries(resolved.map((entry) => [entry.route.path, entry.route.component])))
       .toEqual({});
     expect(mergeProductNavigation(
@@ -134,11 +145,12 @@ describe("AGENT PLATFORM frontend extensions", () => {
       manifest("/agent-platform/approvals/:approvalId"),
       manifest("/agent-platform/executions"),
       manifest("/agent-platform/executions/:executionId"),
+      manifest("/agent-platform/settings"),
       manifest("/:namespace/*"),
     ]);
 
     expect(filtered.manifests.map((entry) => entry.tab.path)).toEqual(["/kanban"]);
-    expect(filtered.blockedManifestCount).toBe(8);
+    expect(filtered.blockedManifestCount).toBe(9);
   });
 
   it("uses configuration order and enables only explicitly enabled descriptors", () => {
