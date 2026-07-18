@@ -104,16 +104,16 @@ async function expectIgnoredCancellationToSettle(
 }
 
 describe("P13.8 frontend quality evidence matrix", () => {
-  it("aligns every quality surface route with the compiled inactive descriptor catalog", () => {
+  it("aligns every quality surface route with the compiled experimental descriptor catalog", () => {
     const descriptorsById = new Map(AGENT_PLATFORM_EXTENSIONS.map((descriptor) => [descriptor.id, descriptor]));
     expect(FRONTEND_QUALITY_DESCRIPTOR_IDS).toEqual(AGENT_PLATFORM_EXTENSIONS.map((descriptor) => descriptor.id));
     expect(FRONTEND_QUALITY_ACTIVATION).toEqual({
       compiledDescriptorCount: AGENT_PLATFORM_EXTENSIONS.length,
-      resolvedDescriptorCount: 0,
-      runtimeRouteCount: 0,
-      navigationItemCount: 0,
-      productUiFeature: "disabled",
-      extensionModules: [],
+      resolvedDescriptorCount: AGENT_PLATFORM_EXTENSIONS.length,
+      runtimeRouteCount: AGENT_PLATFORM_EXTENSIONS.length,
+      navigationItemCount: AGENT_PLATFORM_EXTENSIONS.filter((descriptor) => descriptor.navigation).length,
+      productUiFeature: "experimental",
+      extensionModules: AGENT_PLATFORM_EXTENSIONS.map((descriptor) => descriptor.id),
     });
 
     for (const surface of FRONTEND_QUALITY_SURFACES) {

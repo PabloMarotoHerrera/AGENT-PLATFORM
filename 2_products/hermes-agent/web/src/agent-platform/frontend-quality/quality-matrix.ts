@@ -187,17 +187,17 @@ export const FRONTEND_QUALITY_SECURITY_CHECKS: readonly FrontendQualitySecurityC
 
 export const FRONTEND_QUALITY_ACTIVATION: FrontendQualityActivationCheck = Object.freeze({
   compiledDescriptorCount: AGENT_PLATFORM_EXTENSIONS.length,
-  resolvedDescriptorCount: 0,
-  runtimeRouteCount: 0,
-  navigationItemCount: 0,
-  productUiFeature: "disabled",
-  extensionModules: Object.freeze([]),
+  resolvedDescriptorCount: AGENT_PLATFORM_EXTENSIONS.length,
+  runtimeRouteCount: AGENT_PLATFORM_EXTENSIONS.length,
+  navigationItemCount: AGENT_PLATFORM_EXTENSIONS.filter((descriptor) => descriptor.navigation).length,
+  productUiFeature: "experimental",
+  extensionModules: Object.freeze(AGENT_PLATFORM_EXTENSIONS.map((descriptor) => descriptor.id)),
 });
 
 export const FRONTEND_QUALITY_CONSTRAINTS: readonly FrontendQualityConstraint[] = freezeQualityArray([
   { id: "wcag", description: "No full WCAG or assistive-technology certification is claimed.", evidence: ["source-inspection"] },
   { id: "browser-family", description: "Automated browser evidence is limited to locally available Chromium-family tooling.", evidence: ["browser"] },
-  { id: "activation", description: "Product routes remain compiled but inactive until P13.R activation governance.", evidence: ["integration"] },
+  { id: "activation", description: "Product routes are selected by tracked P13.R experimental activation governance.", evidence: ["integration"] },
 ]);
 
 export const FRONTEND_QUALITY_GATE_RESULT: FrontendQualityGateResult = Object.freeze({

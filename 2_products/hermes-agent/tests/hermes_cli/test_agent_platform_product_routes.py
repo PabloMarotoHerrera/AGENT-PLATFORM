@@ -10,6 +10,19 @@ from hermes_cli import web_server
 from hermes_cli.agent_platform.routes import router
 
 
+ACTIVATED_PRODUCT_MODULES = [
+    "agent_platform.ui.overview",
+    "agent_platform.ui.projects",
+    "agent_platform.ui.project_detail",
+    "agent_platform.ui.ticket_detail",
+    "agent_platform.ui.approvals",
+    "agent_platform.ui.approval_detail",
+    "agent_platform.ui.executions",
+    "agent_platform.ui.execution_detail",
+    "agent_platform.ui.settings",
+]
+
+
 @pytest.fixture
 def dashboard_client():
     previous_host = getattr(web_server.app.state, "bound_host", None)
@@ -45,8 +58,13 @@ def test_standalone_route_returns_validated_credential_free_shape():
         "documentation_url",
         "support_url",
     }
+    assert body["feature_flags"]["agent_platform.product_ui"] == "experimental"
+    assert body["extension_modules"] == ACTIVATED_PRODUCT_MODULES
     serialized = json.dumps(body).lower()
-    assert all(term not in serialized for term in ("api_key", "token", "credential", "provider"))
+    assert all(
+        term not in serialized
+        for term in ("api_key", "token", "credential", "provider")
+    )
 
 
 def test_integrated_route_uses_existing_dashboard_authentication(dashboard_client):
@@ -58,6 +76,9 @@ def test_integrated_route_uses_existing_dashboard_authentication(dashboard_clien
         headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN},
     )
     assert response.status_code == 200
+    assert (
+        response.json()["feature_flags"]["agent_platform.product_ui"] == "experimental"
+    )
 
 
 @pytest.mark.parametrize("method", ["post", "put", "patch", "delete"])
@@ -66,4 +87,7 @@ def test_product_configuration_boundary_is_read_only(method):
     app.include_router(router)
     client = TestClient(app)
 
-    assert getattr(client, method)("/api/agent-platform/product-configuration").status_code == 405
+    assert (
+        getattr(client, method)("/api/agent-platform/product-configuration").status_code
+        == 405
+    )

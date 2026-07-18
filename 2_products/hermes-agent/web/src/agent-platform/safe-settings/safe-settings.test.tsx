@@ -24,8 +24,21 @@ import {
   type SafeSettingsState,
 } from "./use-safe-settings";
 
+const ACTIVATED_PRODUCT_MODULES = [
+  "agent_platform.ui.overview",
+  "agent_platform.ui.projects",
+  "agent_platform.ui.project_detail",
+  "agent_platform.ui.ticket_detail",
+  "agent_platform.ui.approvals",
+  "agent_platform.ui.approval_detail",
+  "agent_platform.ui.executions",
+  "agent_platform.ui.execution_detail",
+  "agent_platform.ui.settings",
+] as const;
+
 function configuration(
-  featureFlags: Record<string, string> = { "agent_platform.product_ui": "disabled" },
+  featureFlags: Record<string, string> = { "agent_platform.product_ui": "experimental" },
+  extensionModules: readonly string[] = ACTIVATED_PRODUCT_MODULES,
 ): ProductConfiguration {
   return parseProductConfiguration({
     schema_version: 1,
@@ -36,7 +49,7 @@ function configuration(
     upstream_version: "0.18.2",
     upstream_commit: "9de9c25f620ff7f1ce0fd5457d596052d5159596",
     feature_flags: featureFlags,
-    extension_modules: [],
+    extension_modules: extensionModules,
     documentation_url: null,
     support_url: null,
   });
@@ -48,10 +61,10 @@ function source(overrides: Partial<SafeSettingsSourceContext> = {}): SafeSetting
     selectedProfileContext: "reviewer",
     extensionPosture: {
       compiledDescriptorCount: 9,
-      selectedModuleCount: 0,
-      resolvedDescriptorCount: 0,
-      registeredRouteCount: 0,
-      registeredNavigationCount: 0,
+      selectedModuleCount: 9,
+      resolvedDescriptorCount: 9,
+      registeredRouteCount: 9,
+      registeredNavigationCount: 5,
     },
     themeId: "default",
     fontId: "theme",
@@ -114,15 +127,15 @@ describe("safe settings projection", () => {
     });
     expect(value.features).toEqual([{
       id: "agent_platform.product_ui",
-      state: "disabled",
+      state: "experimental",
       sourceAuthority: "read-only tracked product configuration",
     }]);
     expect(value.extensionPosture).toEqual({
       compiledDescriptorCount: 9,
-      selectedModuleCount: 0,
-      resolvedDescriptorCount: 0,
-      registeredRouteCount: 0,
-      registeredNavigationCount: 0,
+      selectedModuleCount: 9,
+      resolvedDescriptorCount: 9,
+      registeredRouteCount: 9,
+      registeredNavigationCount: 5,
     });
     expect(value.selectedProfileContext).toBe("reviewer");
     expect(value.preferences.map((item) => [item.id, item.classification, item.writeAvailable]))
@@ -504,6 +517,7 @@ describe("safe settings page and descriptor", () => {
       "AGENT PLATFORM Hermes",
       "Hermes Agent",
       "agent_platform.product_ui",
+      "experimental",
       "Feature and module activation is read-only in P13.7",
       "P13.R owns any tracked activation decision",
       "current dashboard backend and this browser",
