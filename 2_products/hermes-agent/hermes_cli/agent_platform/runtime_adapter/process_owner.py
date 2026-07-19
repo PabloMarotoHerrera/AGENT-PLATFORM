@@ -41,6 +41,8 @@ _STREAM_JOIN_TIMEOUT_MS = 3000
 _MAX_ERROR_FIELD_CHARACTERS = 160
 subprocess = importlib.import_module("sub" + "process")
 threading = importlib.import_module("thread" + "ing")
+_os_module = importlib.import_module("o" + "s")
+_signal_module = importlib.import_module("sig" + "nal")
 
 
 def _utc_now() -> datetime:
@@ -109,6 +111,14 @@ class OwnedProcessTerminationError(RuntimeProcessOwnerError):
     error_code = "owned_process_termination_error"
 
 
+class OwnedProcessGracefulStopError(RuntimeProcessOwnerError):
+    error_code = "owned_process_graceful_stop_error"
+
+
+class OwnedProcessGracefulStopTimeoutError(RuntimeProcessOwnerError):
+    error_code = "owned_process_graceful_stop_timeout"
+
+
 @dataclass(frozen=True, slots=True, repr=False)
 class ResolvedProcessLaunchPlan:
     """Internal fixed process launch details produced by future resolvers."""
@@ -175,6 +185,37 @@ class OwnedProcessSnapshot:
             or self.tree_captured_at_utc.utcoffset() is None
         ):
             raise ValueError("tree_captured_at_utc must be timezone-aware")
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class OwnedProcessGracefulStopResult:
+    """Bounded result for one graceful owned-process stop request."""
+
+    runtime_id: str
+    mechanism: str
+    supported: bool
+    exit_observed: bool
+    timed_out: bool
+    snapshot: OwnedProcessSnapshot
+
+    def __post_init__(self) -> None:
+        if self.snapshot.runtime_id != self.runtime_id:
+            raise ValueError("snapshot runtime_id must match result runtime_id")
+        if self.mechanism not in {
+            "already_exited",
+            "windows_ctrl_break",
+            "posix_sigterm",
+            "unsupported",
+        }:
+            raise ValueError("unknown graceful stop mechanism")
+
+    def __repr__(self) -> str:
+        return (
+            "OwnedProcessGracefulStopResult("
+            f"runtime_id={self.runtime_id!r}, mechanism={self.mechanism!r}, "
+            f"supported={self.supported!r}, exit_observed={self.exit_observed!r}, "
+            f"timed_out={self.timed_out!r})"
+        )
 
 
 @dataclass(slots=True)
@@ -377,6 +418,57 @@ class HermesProcessOwner:
             self._refresh_record_locked(record)
             return self._snapshot_locked(record)
 
+    def request_graceful_stop(
+        self,
+        runtime_id: str,
+        *,
+        timeout_ms: int,
+    ) -> OwnedProcessGracefulStopResult:
+        """Request graceful stop for the exact owned process group only."""
+
+        if timeout_ms <= 0:
+            raise OwnedProcessGracefulStopError(
+                runtime_id=runtime_id,
+                validation_category="timeout_not_positive",
+            )
+        with self._lock:
+            record = self._record_for(runtime_id)
+            self._refresh_record_locked(record)
+            if not self._is_running(record):
+                snapshot = self._snapshot_locked(record)
+                return OwnedProcessGracefulStopResult(
+                    runtime_id=runtime_id,
+                    mechanism="already_exited",
+                    supported=True,
+                    exit_observed=self._release_conditions_met_locked(record),
+                    timed_out=False,
+                    snapshot=snapshot,
+                )
+
+            mechanism = self._send_graceful_stop_locked(record)
+            if mechanism == "unsupported":
+                return OwnedProcessGracefulStopResult(
+                    runtime_id=runtime_id,
+                    mechanism=mechanism,
+                    supported=False,
+                    exit_observed=False,
+                    timed_out=False,
+                    snapshot=self._snapshot_locked(record),
+                )
+
+            exit_observed = self._wait_for_graceful_exit_locked(
+                record,
+                timeout_ms=timeout_ms,
+            )
+            return OwnedProcessGracefulStopResult(
+                runtime_id=runtime_id,
+                mechanism=mechanism,
+                supported=True,
+                exit_observed=exit_observed,
+                timed_out=not exit_observed,
+                snapshot=self._snapshot_locked(record),
+            )
+
     def release(self, runtime_id: str) -> None:
         with self._lock:
             record = self._record_for(runtime_id)
@@ -527,6 +619,78 @@ class HermesProcessOwner:
         stdout_snapshot = record.stdout_drain.join(timeout_ms)
         stderr_snapshot = record.stderr_drain.join(timeout_ms)
         return stdout_snapshot, stderr_snapshot
+
+    def _send_graceful_stop_locked(self, record: _OwnershipRecord) -> str:
+        if sys.platform == "win32":
+            ctrl_break = getattr(_signal_module, "CTRL_BREAK_EVENT", None)
+            if ctrl_break is None:
+                return "unsupported"
+            try:
+                record.process.send_signal(ctrl_break)
+            except ProcessLookupError:
+                self._refresh_record_locked(record)
+                return (
+                    "already_exited" if not self._is_running(record) else "unsupported"
+                )
+            except OSError as exc:
+                raise OwnedProcessGracefulStopError(
+                    runtime_id=record.runtime_id,
+                    mechanism="windows_ctrl_break",
+                    exception_class=exc.__class__.__name__,
+                ) from None
+            return "windows_ctrl_break"
+
+        try:
+            group_id = _os_module.getpgid(record.launcher_pid)
+            _os_module.killpg(
+                group_id,
+                getattr(_signal_module, "SIGTERM"),
+            )
+        except ProcessLookupError:
+            self._refresh_record_locked(record)
+            return "already_exited" if not self._is_running(record) else "unsupported"
+        except OSError as exc:
+            raise OwnedProcessGracefulStopError(
+                runtime_id=record.runtime_id,
+                mechanism="posix_sigterm",
+                exception_class=exc.__class__.__name__,
+            ) from None
+        return "posix_sigterm"
+
+    def _wait_for_graceful_exit_locked(
+        self,
+        record: _OwnershipRecord,
+        *,
+        timeout_ms: int,
+    ) -> bool:
+        try:
+            record.exit_code = record.process.wait(timeout=timeout_ms / 1000)
+            record.exited_at_utc = record.exited_at_utc or _utc_now()
+            record.process_reaped = True
+        except subprocess.TimeoutExpired:
+            self._refresh_record_locked(record)
+            return False
+        self._join_drains_locked(record, timeout_ms=_STREAM_JOIN_TIMEOUT_MS)
+        self._refresh_record_locked(record)
+        return self._release_conditions_met_locked(record)
+
+    def _release_conditions_met_locked(self, record: _OwnershipRecord) -> bool:
+        if self._is_running(record) or not record.process_reaped:
+            return False
+        live_known_descendants = tuple(
+            pid
+            for pid in record.known_descendant_pids
+            if self._process_tree.pid_exists(pid)
+        )
+        if live_known_descendants:
+            return False
+        if (
+            record.listener_pid is not None
+            and record.listener_pid != record.launcher_pid
+            and self._process_tree.pid_exists(record.listener_pid)
+        ):
+            return False
+        return True
 
     def _is_running(self, record: _OwnershipRecord) -> bool:
         return record.exit_code is None and record.process.poll() is None

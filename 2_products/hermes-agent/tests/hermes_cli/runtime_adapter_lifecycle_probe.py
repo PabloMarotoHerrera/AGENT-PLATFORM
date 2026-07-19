@@ -25,6 +25,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--exit-code", type=int, default=0)
     parser.add_argument("--spawn-child", action="store_true")
     parser.add_argument("--child-sleep-ms", type=_positive_int, default=5000)
+    parser.add_argument("--ignore-graceful-stop", action="store_true")
+    parser.add_argument("--graceful-exit-code", type=int, default=0)
     return parser
 
 
@@ -46,19 +48,29 @@ def _sleep_bounded(sleep_ms: int) -> None:
         time.sleep(min(remaining, 0.05))
 
 
-def _install_signal_handler() -> None:
-    if sys.platform == "win32":
-        return
-
+def _install_signal_handler(
+    *, ignore_graceful_stop: bool, graceful_exit_code: int
+) -> None:
     def _handle_termination(_signum, _frame) -> None:
-        raise SystemExit(143)
+        if ignore_graceful_stop:
+            return
+        raise SystemExit(graceful_exit_code)
+
+    if sys.platform == "win32":
+        sigbreak = getattr(signal, "SIGBREAK", None)
+        if sigbreak is not None:
+            signal.signal(sigbreak, _handle_termination)
+        return
 
     signal.signal(signal.SIGTERM, _handle_termination)
 
 
 def main() -> int:
     args = _parser().parse_args()
-    _install_signal_handler()
+    _install_signal_handler(
+        ignore_graceful_stop=args.ignore_graceful_stop,
+        graceful_exit_code=args.graceful_exit_code,
+    )
 
     child: subprocess.Popen[bytes] | None = None
     if args.spawn_child:
@@ -70,6 +82,7 @@ def main() -> int:
                 str(args.child_sleep_ms),
                 "--exit-code",
                 "0",
+                *(("--ignore-graceful-stop",) if args.ignore_graceful_stop else ()),
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,

@@ -366,6 +366,28 @@ def test_failure_descriptors_and_environment_report_validation_are_bounded() -> 
     assert "process_launch_error" in codes
     assert "workspace_allocation_error" in codes
     assert "path_outside_containment_root" in codes
+    p14_6_codes = {
+        "owned_process_graceful_stop_error",
+        "owned_process_graceful_stop_timeout",
+        "runtime_lifecycle_control_error",
+        "runtime_lifecycle_request_identity_error",
+        "runtime_lifecycle_operation_conflict",
+        "runtime_lifecycle_ownership_error",
+        "runtime_graceful_shutdown_error",
+        "runtime_forced_shutdown_error",
+        "runtime_process_release_error",
+        "runtime_rollback_error",
+        "runtime_rollback_identity_error",
+        "runtime_rollback_state_error",
+        "runtime_rollback_process_still_owned",
+        "runtime_rollback_marker_error",
+        "runtime_rollback_tree_limit_error",
+        "runtime_rollback_entry_type_error",
+        "runtime_rollback_containment_error",
+        "runtime_rollback_deletion_error",
+        "runtime_rollback_allocator_release_error",
+    }
+    assert p14_6_codes <= codes
     assert validate_environment_report_for_normalization(
         environment_report()
     ).profile_id == (ra.TEST_LIFECYCLE_PROBE_PROFILE_ID)

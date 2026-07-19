@@ -454,12 +454,15 @@ def normalize_runtime_failure(
     evidence_refs: tuple[RuntimeEvidenceRef, ...] = (),
     failure_id_factory: Callable[[], str] | None = None,
 ) -> NormalizedRuntimeFailure:
-    if type(error) not in _SUPPORTED_ERROR_TYPES:
+    error_code = getattr(error, "error_code", None)
+    if type(error) not in _SUPPORTED_ERROR_TYPES and not _is_p14_6_error(
+        error,
+        error_code,
+    ):
         raise RuntimeFailureNormalizationError(
             runtime_id=runtime_handle.runtime_id,
             validation_category="unsupported_error_class",
         )
-    error_code = getattr(error, "error_code", None)
     descriptor = _FAILURE_DESCRIPTOR_BY_CODE.get(error_code)
     if descriptor is None:
         raise UnknownRuntimeFailureCodeError(
@@ -998,6 +1001,20 @@ _FAILURE_DESCRIPTORS = (
         RuntimeCleanupStatus.FAILED,
     ),
     _failure_descriptor(
+        "owned_process_graceful_stop_error",
+        RuntimeFailureStage.GRACEFUL_SHUTDOWN,
+        "Owned process graceful stop failed.",
+        RuntimeRetryability.SAFE_AFTER_CLEANUP,
+        RuntimeCleanupStatus.PENDING,
+    ),
+    _failure_descriptor(
+        "owned_process_graceful_stop_timeout",
+        RuntimeFailureStage.GRACEFUL_SHUTDOWN,
+        "Owned process graceful stop timed out.",
+        RuntimeRetryability.SAFE_AFTER_CLEANUP,
+        RuntimeCleanupStatus.PENDING,
+    ),
+    _failure_descriptor(
         "runtime_profile_registry_error",
         RuntimeFailureStage.PROFILE_RESOLUTION,
         "Runtime profile registry operation failed.",
@@ -1140,6 +1157,119 @@ _FAILURE_DESCRIPTORS = (
         RuntimeRetryability.POLICY_DECISION_REQUIRED,
         RuntimeCleanupStatus.FAILED,
     ),
+    _failure_descriptor(
+        "runtime_lifecycle_control_error",
+        RuntimeFailureStage.RUNTIME_OPERATION,
+        "Runtime lifecycle-control operation failed.",
+        RuntimeRetryability.POLICY_DECISION_REQUIRED,
+        RuntimeCleanupStatus.FAILED,
+    ),
+    _failure_descriptor(
+        "runtime_lifecycle_request_identity_error",
+        RuntimeFailureStage.REQUEST_VALIDATION,
+        "Runtime lifecycle request identity was invalid.",
+    ),
+    _failure_descriptor(
+        "runtime_lifecycle_operation_conflict",
+        RuntimeFailureStage.RUNTIME_OPERATION,
+        "Runtime lifecycle operation was already in progress.",
+        RuntimeRetryability.POLICY_DECISION_REQUIRED,
+        RuntimeCleanupStatus.NOT_STARTED,
+    ),
+    _failure_descriptor(
+        "runtime_lifecycle_ownership_error",
+        RuntimeFailureStage.RUNTIME_OPERATION,
+        "Runtime lifecycle process ownership was invalid.",
+        RuntimeRetryability.POLICY_DECISION_REQUIRED,
+        RuntimeCleanupStatus.FAILED,
+    ),
+    _failure_descriptor(
+        "runtime_graceful_shutdown_error",
+        RuntimeFailureStage.GRACEFUL_SHUTDOWN,
+        "Runtime graceful shutdown failed.",
+        RuntimeRetryability.SAFE_AFTER_CLEANUP,
+        RuntimeCleanupStatus.PENDING,
+    ),
+    _failure_descriptor(
+        "runtime_forced_shutdown_error",
+        RuntimeFailureStage.FORCED_TERMINATION,
+        "Runtime forced shutdown failed.",
+        RuntimeRetryability.POLICY_DECISION_REQUIRED,
+        RuntimeCleanupStatus.FAILED,
+    ),
+    _failure_descriptor(
+        "runtime_process_release_error",
+        RuntimeFailureStage.FORCED_TERMINATION,
+        "Runtime process ownership release failed.",
+        RuntimeRetryability.POLICY_DECISION_REQUIRED,
+        RuntimeCleanupStatus.FAILED,
+    ),
+    _failure_descriptor(
+        "runtime_rollback_error",
+        RuntimeFailureStage.ROLLBACK,
+        "Runtime rollback operation failed.",
+        RuntimeRetryability.POLICY_DECISION_REQUIRED,
+        RuntimeCleanupStatus.FAILED,
+    ),
+    _failure_descriptor(
+        "runtime_rollback_identity_error",
+        RuntimeFailureStage.ROLLBACK,
+        "Runtime rollback identity was invalid.",
+    ),
+    _failure_descriptor(
+        "runtime_rollback_state_error",
+        RuntimeFailureStage.ROLLBACK,
+        "Runtime rollback state was invalid.",
+    ),
+    _failure_descriptor(
+        "runtime_rollback_process_still_owned",
+        RuntimeFailureStage.ROLLBACK,
+        "Runtime rollback was blocked by process ownership.",
+        RuntimeRetryability.SAFE_AFTER_CLEANUP,
+        RuntimeCleanupStatus.PENDING,
+    ),
+    _failure_descriptor(
+        "runtime_rollback_marker_error",
+        RuntimeFailureStage.WORKSPACE_CLEANUP,
+        "Runtime rollback ownership marker was invalid.",
+        RuntimeRetryability.POLICY_DECISION_REQUIRED,
+        RuntimeCleanupStatus.FAILED,
+    ),
+    _failure_descriptor(
+        "runtime_rollback_tree_limit_error",
+        RuntimeFailureStage.WORKSPACE_CLEANUP,
+        "Runtime rollback workspace tree exceeded bounds.",
+        RuntimeRetryability.POLICY_DECISION_REQUIRED,
+        RuntimeCleanupStatus.FAILED,
+    ),
+    _failure_descriptor(
+        "runtime_rollback_entry_type_error",
+        RuntimeFailureStage.WORKSPACE_CLEANUP,
+        "Runtime rollback workspace entry type was unsupported.",
+        RuntimeRetryability.POLICY_DECISION_REQUIRED,
+        RuntimeCleanupStatus.FAILED,
+    ),
+    _failure_descriptor(
+        "runtime_rollback_containment_error",
+        RuntimeFailureStage.WORKSPACE_CLEANUP,
+        "Runtime rollback workspace containment failed.",
+        RuntimeRetryability.POLICY_DECISION_REQUIRED,
+        RuntimeCleanupStatus.FAILED,
+    ),
+    _failure_descriptor(
+        "runtime_rollback_deletion_error",
+        RuntimeFailureStage.WORKSPACE_CLEANUP,
+        "Runtime rollback workspace deletion failed.",
+        RuntimeRetryability.POLICY_DECISION_REQUIRED,
+        RuntimeCleanupStatus.FAILED,
+    ),
+    _failure_descriptor(
+        "runtime_rollback_allocator_release_error",
+        RuntimeFailureStage.ROLLBACK,
+        "Runtime rollback allocator release failed.",
+        RuntimeRetryability.POLICY_DECISION_REQUIRED,
+        RuntimeCleanupStatus.FAILED,
+    ),
 )
 _FAILURE_DESCRIPTOR_BY_CODE = MappingProxyType({
     descriptor.error_code: descriptor for descriptor in _FAILURE_DESCRIPTORS
@@ -1157,3 +1287,35 @@ _SUPPORTED_ERROR_TYPES = frozenset(
     )
     for error_type in hierarchy.__subclasses__() + [hierarchy]
 )
+
+_P14_6_FAILURE_CODES = frozenset({
+    "runtime_lifecycle_control_error",
+    "runtime_lifecycle_request_identity_error",
+    "runtime_lifecycle_operation_conflict",
+    "runtime_lifecycle_ownership_error",
+    "runtime_graceful_shutdown_error",
+    "runtime_forced_shutdown_error",
+    "runtime_process_release_error",
+    "runtime_rollback_error",
+    "runtime_rollback_identity_error",
+    "runtime_rollback_state_error",
+    "runtime_rollback_process_still_owned",
+    "runtime_rollback_marker_error",
+    "runtime_rollback_tree_limit_error",
+    "runtime_rollback_entry_type_error",
+    "runtime_rollback_containment_error",
+    "runtime_rollback_deletion_error",
+    "runtime_rollback_allocator_release_error",
+})
+_P14_6_FAILURE_MODULES = frozenset({
+    "hermes_cli.agent_platform.runtime_adapter.lifecycle_control",
+    "hermes_cli.agent_platform.runtime_adapter.rollback",
+})
+
+
+def _is_p14_6_error(error: object, error_code: object) -> bool:
+    return (
+        isinstance(error_code, str)
+        and error_code in _P14_6_FAILURE_CODES
+        and error.__class__.__module__ in _P14_6_FAILURE_MODULES
+    )

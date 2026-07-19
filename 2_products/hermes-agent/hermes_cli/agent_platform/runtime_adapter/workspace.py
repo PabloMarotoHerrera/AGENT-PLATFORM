@@ -485,6 +485,45 @@ class RuntimeWorkspaceAllocator:
         with self._lock:
             return tuple(sorted(self._allocations))
 
+    def release_after_cleanup(self, runtime_id: str, *, workspace_id: str) -> None:
+        """Release allocator ownership after an external verified cleanup."""
+
+        _validate_identifier(runtime_id, "runtime_id")
+        _validate_workspace_id(workspace_id)
+        with self._lock:
+            allocation = self._allocations.get(runtime_id)
+            if allocation is None:
+                raise UnknownRuntimeWorkspaceError(
+                    runtime_id=runtime_id,
+                    workspace_id=workspace_id,
+                    allocation_stage="release_after_cleanup",
+                )
+            if allocation.workspace_ref.workspace_id != workspace_id:
+                raise WorkspaceAllocationError(
+                    runtime_id=runtime_id,
+                    workspace_id=workspace_id,
+                    workspace_policy_id=allocation.workspace_policy_id,
+                    allocation_stage="release_after_cleanup",
+                    validation_category="workspace_id_mismatch",
+                )
+            if allocation.paths.workspace_root.exists():
+                raise WorkspaceAllocationError(
+                    runtime_id=runtime_id,
+                    workspace_id=workspace_id,
+                    workspace_policy_id=allocation.workspace_policy_id,
+                    allocation_stage="release_after_cleanup",
+                    validation_category="workspace_root_still_present",
+                )
+            if allocation.paths.ownership_marker.exists():
+                raise WorkspaceMarkerError(
+                    runtime_id=runtime_id,
+                    workspace_id=workspace_id,
+                    workspace_policy_id=allocation.workspace_policy_id,
+                    allocation_stage="release_after_cleanup",
+                    validation_category="marker_still_present",
+                )
+            del self._allocations[runtime_id]
+
 
 def get_runtime_workspace_policy(policy_id: str) -> RuntimeWorkspacePolicyDefinition:
     policy = _WORKSPACE_POLICY_BY_ID.get(policy_id)
