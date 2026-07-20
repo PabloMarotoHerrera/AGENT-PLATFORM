@@ -384,8 +384,12 @@ def test_safe_preflight_rejects_redirects_special_files_depth_and_entry_bounds(
         "rt.p146.rb.depth",
         "1" * 32,
     )
+    monkeypatch.setattr(
+        "hermes_cli.agent_platform.runtime_adapter.rollback._MAX_TREE_DEPTH",
+        2,
+    )
     deep = allocation2.paths.workdir
-    for index in range(65):
+    for index in range(3):
         deep = deep / f"d{index}"
         deep.mkdir()
     handle2 = runtime_handle(

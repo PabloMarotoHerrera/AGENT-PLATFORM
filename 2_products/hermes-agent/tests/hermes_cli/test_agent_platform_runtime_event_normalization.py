@@ -13,6 +13,7 @@ from hermes_cli.agent_platform.runtime_adapter.environment import (
     RuntimeEnvironmentSanitizationReport,
     RuntimePlatformFamily,
 )
+from hermes_cli.agent_platform.runtime_adapter.adapter import RuntimeAdapterLaunchError
 from hermes_cli.agent_platform.runtime_adapter.event_normalization import (
     MissingRuntimeEventReferenceError,
     RuntimeEventIdentifierError,
@@ -28,10 +29,16 @@ from hermes_cli.agent_platform.runtime_adapter.event_normalization import (
     normalize_runtime_failure,
     validate_environment_report_for_normalization,
 )
+from hermes_cli.agent_platform.runtime_adapter.listener_discovery import (
+    RuntimeListenerDiscoveryTimeoutError,
+)
 from hermes_cli.agent_platform.runtime_adapter.process_owner import (
     OwnedProcessSnapshot,
     ProcessLaunchError,
     RuntimeProcessOwnerError,
+)
+from hermes_cli.agent_platform.runtime_adapter.readiness import (
+    RuntimeReadinessProductConfigurationError,
 )
 from hermes_cli.agent_platform.runtime_adapter.stream_capture import (
     BoundedStreamSnapshot,
@@ -356,6 +363,75 @@ def test_failure_normalization_maps_supported_errors_and_bounds_evidence(
             process_status=ra.RuntimeProcessStatus.UNKNOWN,
             workspace_status=ra.RuntimeWorkspaceStatus.UNALLOCATED,
         )
+
+
+def test_p14_8_failure_normalization_maps_internal_adapter_errors() -> None:
+    handle = runtime_handle(ra.RuntimeLifecycleState.FAILED)
+    descriptors = {
+        descriptor.error_code for descriptor in list_runtime_failure_descriptors()
+    }
+    expected_codes = {
+        "runtime_listener_discovery_timeout",
+        "runtime_readiness_product_configuration_error",
+        "runtime_adapter_launch_error",
+    }
+
+    assert expected_codes.issubset(descriptors)
+
+    cases = (
+        (
+            RuntimeListenerDiscoveryTimeoutError(
+                runtime_id=handle.runtime_id,
+                port=8765,
+                attempt_count=2,
+                mechanism="fixture",
+            ),
+            "runtime_listener_discovery_timeout",
+            ra.RuntimeFailureStage.LISTENER_DISCOVERY,
+            ra.RuntimeRetryability.SAFE_AFTER_CLEANUP,
+            ra.RuntimeCleanupStatus.PENDING,
+        ),
+        (
+            RuntimeReadinessProductConfigurationError(
+                runtime_id=handle.runtime_id,
+                probe_id="probe.p148",
+                endpoint_kind="product_configuration",
+                attempt_count=1,
+                validation_category="fixture",
+            ),
+            "runtime_readiness_product_configuration_error",
+            ra.RuntimeFailureStage.READINESS,
+            ra.RuntimeRetryability.SAFE_AFTER_CLEANUP,
+            ra.RuntimeCleanupStatus.PENDING,
+        ),
+        (
+            RuntimeAdapterLaunchError(
+                runtime_id=handle.runtime_id,
+                profile_id=handle.profile_id,
+                operation="launch",
+                exception_class="FixtureError",
+            ),
+            "runtime_adapter_launch_error",
+            ra.RuntimeFailureStage.PROCESS_LAUNCH,
+            ra.RuntimeRetryability.SAFE_AFTER_CLEANUP,
+            ra.RuntimeCleanupStatus.PENDING,
+        ),
+    )
+
+    for error, code, stage, retryability, cleanup_status in cases:
+        normalized = normalize_runtime_failure(
+            error=error,
+            runtime_handle=handle,
+            process_status=ra.RuntimeProcessStatus.UNKNOWN,
+            workspace_status=ra.RuntimeWorkspaceStatus.ALLOCATED,
+            failure_id_factory=failure_id_factory(f"fail_{code}"),
+        )
+
+        assert normalized.source_error_code == code
+        assert normalized.failure.failure_code == code
+        assert normalized.failure.stage is stage
+        assert normalized.failure.retryability is retryability
+        assert normalized.failure.cleanup_status is cleanup_status
 
 
 def test_failure_descriptors_and_environment_report_validation_are_bounded() -> None:

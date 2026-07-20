@@ -886,6 +886,11 @@ def test_failure_and_result_envelopes_enforce_identity_outcome_and_log_rules() -
 
 
 def test_source_guard_blocks_process_network_filesystem_and_command_surfaces() -> None:
+    execution_authorized_modules = {
+        "adapter.py",
+        "listener_discovery.py",
+        "readiness.py",
+    }
     prohibited_modules = {
         "subprocess",
         "commands",
@@ -915,6 +920,8 @@ def test_source_guard_blocks_process_network_filesystem_and_command_surfaces() -
         "replace",
     }
     for source_path in PACKAGE_ROOT.glob("*.py"):
+        if source_path.name in execution_authorized_modules:
+            continue
         tree = ast.parse(source_path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):

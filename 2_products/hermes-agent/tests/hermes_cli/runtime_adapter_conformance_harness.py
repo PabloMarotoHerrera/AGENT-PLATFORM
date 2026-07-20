@@ -124,6 +124,8 @@ PROHIBITED_ENVIRONMENT_NAMES = frozenset({
     "NODE_OPTIONS",
 })
 MARKER_NAME = ".agent-platform-runtime-workspace.json"
+_PROCESS_WAIT_TIMEOUT_MS = 15_000
+_MAX_FAILURE_EVIDENCE_CHARACTERS = 160
 
 
 class RuntimeAdapterConformanceOutcome(StrEnum):
@@ -199,6 +201,31 @@ class _ConformanceSkip(RuntimeError):
     def __init__(self, reason_code: str) -> None:
         self.reason_code = reason_code
         super().__init__(reason_code)
+
+
+class _ConformanceAssertionError(AssertionError):
+    error_code = "conformance.assertion_failed"
+
+    def __init__(
+        self,
+        *,
+        category: str,
+        expected: str,
+        observed: object,
+        stage: str,
+    ) -> None:
+        self.category = _safe_evidence_text(category)
+        self.expected = _safe_evidence_text(expected)
+        self.observed = _safe_evidence_text(observed)
+        self.stage = _safe_evidence_text(stage)
+        self.evidence = (
+            f"code={self.error_code}",
+            f"category={self.category}",
+            f"stage={self.stage}",
+            f"expected={self.expected}",
+            f"observed={self.observed}",
+        )
+        super().__init__(" ".join(self.evidence))
 
 
 class _GracefulTimeoutProcessOwner:
@@ -335,11 +362,12 @@ class RuntimeAdapterConformanceHarness:
                 reason_code=exc.reason_code,
             )
         except Exception as exc:
+            reason_code = getattr(exc, "error_code", "conformance.case_failed")
             return RuntimeAdapterConformanceResult(
                 case_id=case_id,
                 outcome=RuntimeAdapterConformanceOutcome.FAILED,
-                reason_code="conformance.case_failed",
-                evidence=(exc.__class__.__name__,),
+                reason_code=reason_code,
+                evidence=_failure_evidence(exc),
             )
         return RuntimeAdapterConformanceResult(
             case_id=case_id,
@@ -611,10 +639,34 @@ class RuntimeAdapterConformanceHarness:
             snapshot = self._launch_and_wait(
                 ctx, "--sleep-ms", "10", "--exit-code", "0"
             )
-            _assert(snapshot.process_reference.launcher_pid is not None)
-            _assert(snapshot.process_reference.exit_code == 0)
-            _assert(snapshot.process_reference.exited_at_utc is not None)
-            _assert(ctx.runtime_id not in ctx.owner.owned_runtime_ids())
+            _assert(
+                snapshot.process_reference.launcher_pid is not None,
+                category="launcher_pid_missing",
+                expected="launcher_pid_present",
+                observed=_snapshot_observed_state(snapshot),
+                stage="process_natural_exit",
+            )
+            _assert(
+                snapshot.process_reference.exit_code == 0,
+                category="unexpected_exit_code",
+                expected="exit_code=0",
+                observed=_snapshot_observed_state(snapshot),
+                stage="process_natural_exit",
+            )
+            _assert(
+                snapshot.process_reference.exited_at_utc is not None,
+                category="exit_timestamp_missing",
+                expected="exited_at_present",
+                observed=_snapshot_observed_state(snapshot),
+                stage="process_natural_exit",
+            )
+            _assert(
+                ctx.runtime_id not in ctx.owner.owned_runtime_ids(),
+                category="owner_release_incomplete",
+                expected="runtime_owner_released",
+                observed=f"owned_runtime_count={len(ctx.owner.owned_runtime_ids())}",
+                stage="process_natural_release",
+            )
         finally:
             self._cleanup_context(ctx)
         return ("natural_process_lifecycle",)
@@ -636,7 +688,8 @@ class RuntimeAdapterConformanceHarness:
                 ctx.owner,
                 ctx.runtime_id,
                 lambda snap: bool(snap.process_reference.descendant_pids),
-                timeout_ms=5000,
+                timeout_ms=_PROCESS_WAIT_TIMEOUT_MS,
+                stage="process_tree_descendant_observed",
             )
             _assert(snapshot.process_reference.descendant_pids)
             ctx.owner.bind_listener_pid(
@@ -647,7 +700,10 @@ class RuntimeAdapterConformanceHarness:
             )
             with _expect_error(InvalidListenerOwnershipError):
                 ctx.owner.bind_listener_pid(ctx.runtime_id, os.getpid())
-            terminated = ctx.owner.terminate_owned_tree(ctx.runtime_id, timeout_ms=5000)
+            terminated = ctx.owner.terminate_owned_tree(
+                ctx.runtime_id,
+                timeout_ms=_PROCESS_WAIT_TIMEOUT_MS,
+            )
             _assert(
                 terminated.process_reference.process_status
                 is not ra.RuntimeProcessStatus.RUNNING
@@ -800,7 +856,8 @@ class RuntimeAdapterConformanceHarness:
                 ctx.owner,
                 ctx.runtime_id,
                 lambda snap: bool(snap.process_reference.descendant_pids),
-                timeout_ms=5000,
+                timeout_ms=_PROCESS_WAIT_TIMEOUT_MS,
+                stage="forced_shutdown_descendant_observed",
             )
             result = self._shutdown(
                 ctx,
@@ -1278,7 +1335,8 @@ class RuntimeAdapterConformanceHarness:
                 snap.process_reference.process_status
                 is not ra.RuntimeProcessStatus.RUNNING
             ),
-            timeout_ms=5000,
+            timeout_ms=_PROCESS_WAIT_TIMEOUT_MS,
+            stage="process_exit_observed",
         )
         ctx.owner.release(ctx.runtime_id)
         return snapshot
@@ -1300,7 +1358,7 @@ class RuntimeAdapterConformanceHarness:
             timeout = ra.RuntimeTimeoutPolicy(
                 readiness_timeout_ms=1000,
                 graceful_shutdown_timeout_ms=graceful_ms,
-                forced_termination_timeout_ms=5000,
+                forced_termination_timeout_ms=_PROCESS_WAIT_TIMEOUT_MS,
                 poll_interval_ms=50,
                 max_stdout_bytes=profile_timeout.max_stdout_bytes,
                 max_stderr_bytes=profile_timeout.max_stderr_bytes,
@@ -1346,7 +1404,13 @@ class RuntimeAdapterConformanceHarness:
                 state=ra.RuntimeLifecycleState.STOPPED,
             )
             result = self._rollback(ctx, handle)
-            _assert(result.outcome is ra.RuntimeOperationOutcome.ROLLED_BACK)
+            _assert(
+                result.outcome is ra.RuntimeOperationOutcome.ROLLED_BACK,
+                category="cleanup_rollback_failed",
+                expected="rolled_back",
+                observed=getattr(result.outcome, "value", result.outcome),
+                stage="cleanup_workspace_rollback",
+            )
 
     def _cleanup_owner(self, owner: HermesProcessOwner, runtime_id: str) -> None:
         if runtime_id not in owner.owned_runtime_ids():
@@ -1357,7 +1421,10 @@ class RuntimeAdapterConformanceHarness:
                 snapshot.process_reference.process_status
                 is ra.RuntimeProcessStatus.RUNNING
             ):
-                owner.terminate_owned_tree(runtime_id, timeout_ms=5000)
+                owner.terminate_owned_tree(
+                    runtime_id,
+                    timeout_ms=_PROCESS_WAIT_TIMEOUT_MS,
+                )
             self._wait_for_snapshot(
                 owner,
                 runtime_id,
@@ -1365,7 +1432,8 @@ class RuntimeAdapterConformanceHarness:
                     snap.process_reference.process_status
                     is not ra.RuntimeProcessStatus.RUNNING
                 ),
-                timeout_ms=5000,
+                timeout_ms=_PROCESS_WAIT_TIMEOUT_MS,
+                stage="cleanup_process_exit_observed",
             )
             owner.release(runtime_id)
         except (
@@ -1383,6 +1451,7 @@ class RuntimeAdapterConformanceHarness:
         predicate,
         *,
         timeout_ms: int,
+        stage: str,
     ) -> OwnedProcessSnapshot:
         deadline = time.monotonic() + (timeout_ms / 1000)
         last_snapshot = owner.snapshot(runtime_id)
@@ -1394,7 +1463,12 @@ class RuntimeAdapterConformanceHarness:
             if predicate(last_snapshot):
                 return last_snapshot
             time.sleep(0.05)
-        raise AssertionError("timed out waiting for owned process state")
+        raise _ConformanceAssertionError(
+            category="process_wait_timeout",
+            expected="owned_process_state_predicate_true",
+            observed=_snapshot_observed_state(last_snapshot),
+            stage=stage,
+        )
 
     def _restore_marker(self, allocation: RuntimeWorkspaceAllocation) -> None:
         if not allocation.paths.workspace_root.exists():
@@ -1577,9 +1651,56 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-def _assert(condition: bool) -> None:
+def _assert(
+    condition: bool,
+    *,
+    category: str = "condition_failed",
+    expected: str = "condition_true",
+    observed: object = "condition_false",
+    stage: str = "assertion",
+) -> None:
     if not condition:
-        raise AssertionError("conformance assertion failed")
+        raise _ConformanceAssertionError(
+            category=category,
+            expected=expected,
+            observed=observed,
+            stage=stage,
+        )
+
+
+def _failure_evidence(exc: BaseException) -> tuple[str, ...]:
+    if isinstance(exc, _ConformanceAssertionError):
+        return exc.evidence
+    error_code = getattr(exc, "error_code", "conformance.case_failed")
+    return (
+        f"code={_safe_evidence_text(error_code)}",
+        f"exception={exc.__class__.__name__}",
+    )
+
+
+def _snapshot_observed_state(snapshot: OwnedProcessSnapshot) -> str:
+    process = snapshot.process_reference
+    return ";".join((
+        f"status={process.process_status.value}",
+        f"exit_code={process.exit_code}",
+        f"descendant_count={len(process.descendant_pids)}",
+        f"stdout_bytes={snapshot.stdout_snapshot.total_bytes_read}",
+        f"stderr_bytes={snapshot.stderr_snapshot.total_bytes_read}",
+        f"stdout_drained={snapshot.stdout_snapshot.drain_complete}",
+        f"stderr_drained={snapshot.stderr_snapshot.drain_complete}",
+    ))
+
+
+def _safe_evidence_text(value: object) -> str:
+    text = str(value)
+    safe = []
+    for character in text:
+        if character.isalnum() or character in "._=;:-":
+            safe.append(character)
+        elif character.isspace():
+            safe.append("_")
+    bounded = "".join(safe)[:_MAX_FAILURE_EVIDENCE_CHARACTERS]
+    return bounded or "none"
 
 
 def _assert_round_trip(model) -> None:

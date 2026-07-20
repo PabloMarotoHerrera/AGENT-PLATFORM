@@ -455,9 +455,10 @@ def normalize_runtime_failure(
     failure_id_factory: Callable[[], str] | None = None,
 ) -> NormalizedRuntimeFailure:
     error_code = getattr(error, "error_code", None)
-    if type(error) not in _SUPPORTED_ERROR_TYPES and not _is_p14_6_error(
-        error,
-        error_code,
+    if (
+        type(error) not in _SUPPORTED_ERROR_TYPES
+        and not _is_p14_6_error(error, error_code)
+        and not _is_p14_8_error(error, error_code)
     ):
         raise RuntimeFailureNormalizationError(
             runtime_id=runtime_handle.runtime_id,
@@ -1205,6 +1206,152 @@ _FAILURE_DESCRIPTORS = (
         RuntimeCleanupStatus.FAILED,
     ),
     _failure_descriptor(
+        "runtime_listener_discovery_error",
+        RuntimeFailureStage.LISTENER_DISCOVERY,
+        "Runtime listener discovery failed.",
+        RuntimeRetryability.SAFE_AFTER_CLEANUP,
+        RuntimeCleanupStatus.PENDING,
+    ),
+    _failure_descriptor(
+        "invalid_runtime_listener_host",
+        RuntimeFailureStage.LISTENER_DISCOVERY,
+        "Runtime listener host was invalid.",
+    ),
+    _failure_descriptor(
+        "invalid_runtime_listener_port",
+        RuntimeFailureStage.LISTENER_DISCOVERY,
+        "Runtime listener port was invalid.",
+    ),
+    _failure_descriptor(
+        "runtime_listener_port_occupied",
+        RuntimeFailureStage.LISTENER_DISCOVERY,
+        "Runtime listener port was already occupied.",
+        RuntimeRetryability.POLICY_DECISION_REQUIRED,
+        RuntimeCleanupStatus.NOT_STARTED,
+    ),
+    _failure_descriptor(
+        "runtime_listener_discovery_timeout",
+        RuntimeFailureStage.LISTENER_DISCOVERY,
+        "Runtime listener discovery timed out.",
+        RuntimeRetryability.SAFE_AFTER_CLEANUP,
+        RuntimeCleanupStatus.PENDING,
+    ),
+    _failure_descriptor(
+        "runtime_listener_ownership_error",
+        RuntimeFailureStage.LISTENER_DISCOVERY,
+        "Runtime listener ownership could not be proven.",
+        RuntimeRetryability.POLICY_DECISION_REQUIRED,
+        RuntimeCleanupStatus.FAILED,
+    ),
+    _failure_descriptor(
+        "runtime_listener_ambiguity_error",
+        RuntimeFailureStage.LISTENER_DISCOVERY,
+        "Runtime listener ownership was ambiguous.",
+        RuntimeRetryability.POLICY_DECISION_REQUIRED,
+        RuntimeCleanupStatus.FAILED,
+    ),
+    _failure_descriptor(
+        "runtime_listener_inspection_unsupported",
+        RuntimeFailureStage.LISTENER_DISCOVERY,
+        "Runtime listener inspection was unsupported.",
+        RuntimeRetryability.POLICY_DECISION_REQUIRED,
+        RuntimeCleanupStatus.PENDING,
+    ),
+    _failure_descriptor(
+        "runtime_readiness_probe_error",
+        RuntimeFailureStage.READINESS,
+        "Runtime readiness probe failed.",
+        RuntimeRetryability.SAFE_AFTER_CLEANUP,
+        RuntimeCleanupStatus.PENDING,
+    ),
+    _failure_descriptor(
+        "invalid_runtime_readiness_endpoint",
+        RuntimeFailureStage.READINESS,
+        "Runtime readiness endpoint was invalid.",
+    ),
+    _failure_descriptor(
+        "runtime_dashboard_ready_file_error",
+        RuntimeFailureStage.READINESS,
+        "Runtime dashboard ready-file was invalid.",
+        RuntimeRetryability.SAFE_AFTER_CLEANUP,
+        RuntimeCleanupStatus.PENDING,
+    ),
+    _failure_descriptor(
+        "runtime_dashboard_ready_file_timeout",
+        RuntimeFailureStage.READINESS,
+        "Runtime dashboard ready-file was not observed before the deadline.",
+        RuntimeRetryability.SAFE_AFTER_CLEANUP,
+        RuntimeCleanupStatus.PENDING,
+    ),
+    _failure_descriptor(
+        "runtime_readiness_http_error",
+        RuntimeFailureStage.READINESS,
+        "Runtime readiness HTTP probe failed.",
+        RuntimeRetryability.SAFE_AFTER_CLEANUP,
+        RuntimeCleanupStatus.PENDING,
+    ),
+    _failure_descriptor(
+        "runtime_readiness_payload_error",
+        RuntimeFailureStage.READINESS,
+        "Runtime readiness payload was invalid.",
+        RuntimeRetryability.SAFE_AFTER_CLEANUP,
+        RuntimeCleanupStatus.PENDING,
+    ),
+    _failure_descriptor(
+        "runtime_readiness_product_configuration_error",
+        RuntimeFailureStage.READINESS,
+        "Runtime product configuration readiness check failed.",
+        RuntimeRetryability.SAFE_AFTER_CLEANUP,
+        RuntimeCleanupStatus.PENDING,
+    ),
+    _failure_descriptor(
+        "runtime_readiness_files_root_error",
+        RuntimeFailureStage.READINESS,
+        "Runtime managed files-root readiness check failed.",
+        RuntimeRetryability.SAFE_AFTER_CLEANUP,
+        RuntimeCleanupStatus.PENDING,
+    ),
+    _failure_descriptor(
+        "runtime_readiness_timeout",
+        RuntimeFailureStage.READINESS,
+        "Runtime readiness probe timed out.",
+        RuntimeRetryability.SAFE_AFTER_CLEANUP,
+        RuntimeCleanupStatus.PENDING,
+    ),
+    _failure_descriptor(
+        "runtime_adapter_error",
+        RuntimeFailureStage.RUNTIME_OPERATION,
+        "Runtime adapter composition failed.",
+        RuntimeRetryability.POLICY_DECISION_REQUIRED,
+        RuntimeCleanupStatus.FAILED,
+    ),
+    _failure_descriptor(
+        "runtime_adapter_profile_error",
+        RuntimeFailureStage.PROFILE_RESOLUTION,
+        "Runtime adapter profile selection failed.",
+    ),
+    _failure_descriptor(
+        "runtime_adapter_launch_error",
+        RuntimeFailureStage.PROCESS_LAUNCH,
+        "Runtime adapter launch failed.",
+        RuntimeRetryability.SAFE_AFTER_CLEANUP,
+        RuntimeCleanupStatus.PENDING,
+    ),
+    _failure_descriptor(
+        "runtime_adapter_cleanup_error",
+        RuntimeFailureStage.WORKSPACE_CLEANUP,
+        "Runtime adapter cleanup failed.",
+        RuntimeRetryability.POLICY_DECISION_REQUIRED,
+        RuntimeCleanupStatus.FAILED,
+    ),
+    _failure_descriptor(
+        "runtime_adapter_operation_conflict",
+        RuntimeFailureStage.RUNTIME_OPERATION,
+        "Runtime adapter operation was already in progress.",
+        RuntimeRetryability.POLICY_DECISION_REQUIRED,
+        RuntimeCleanupStatus.NOT_STARTED,
+    ),
+    _failure_descriptor(
         "runtime_rollback_error",
         RuntimeFailureStage.ROLLBACK,
         "Runtime rollback operation failed.",
@@ -1312,10 +1459,48 @@ _P14_6_FAILURE_MODULES = frozenset({
     "hermes_cli.agent_platform.runtime_adapter.rollback",
 })
 
+_P14_8_FAILURE_CODES = frozenset({
+    "runtime_listener_discovery_error",
+    "invalid_runtime_listener_host",
+    "invalid_runtime_listener_port",
+    "runtime_listener_port_occupied",
+    "runtime_listener_discovery_timeout",
+    "runtime_listener_ownership_error",
+    "runtime_listener_ambiguity_error",
+    "runtime_listener_inspection_unsupported",
+    "runtime_readiness_probe_error",
+    "invalid_runtime_readiness_endpoint",
+    "runtime_dashboard_ready_file_error",
+    "runtime_dashboard_ready_file_timeout",
+    "runtime_readiness_http_error",
+    "runtime_readiness_payload_error",
+    "runtime_readiness_product_configuration_error",
+    "runtime_readiness_files_root_error",
+    "runtime_readiness_timeout",
+    "runtime_adapter_error",
+    "runtime_adapter_profile_error",
+    "runtime_adapter_launch_error",
+    "runtime_adapter_cleanup_error",
+    "runtime_adapter_operation_conflict",
+})
+_P14_8_FAILURE_MODULES = frozenset({
+    "hermes_cli.agent_platform.runtime_adapter.listener_discovery",
+    "hermes_cli.agent_platform.runtime_adapter.readiness",
+    "hermes_cli.agent_platform.runtime_adapter.adapter",
+})
+
 
 def _is_p14_6_error(error: object, error_code: object) -> bool:
     return (
         isinstance(error_code, str)
         and error_code in _P14_6_FAILURE_CODES
         and error.__class__.__module__ in _P14_6_FAILURE_MODULES
+    )
+
+
+def _is_p14_8_error(error: object, error_code: object) -> bool:
+    return (
+        isinstance(error_code, str)
+        and error_code in _P14_8_FAILURE_CODES
+        and error.__class__.__module__ in _P14_8_FAILURE_MODULES
     )
