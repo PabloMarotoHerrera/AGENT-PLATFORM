@@ -10,7 +10,7 @@
     "archive_sha256":  "5b1db2e6642f6aee669951a8440aab03ec76b1d2832cbf3062ab49754aec3ba0",
     "locked_source_tree_sha256":  "ca41c8c6c688f7a8e94c238cecb45cb60cbec6c37555ba5eeb92530674e39e07",
     "upstream_filtered_payload_digest":  "6378effd082a4bc8210007f0a952adc0b287c444cb3bd39b677403c4bb551fd2",
-    "complete_candidate_product_digest":  "recorded_in_governance_record_after_metadata_overlay",
+    "complete_candidate_product_digest":  "superseded_by_P15_M1B_candidate_integrity",
     "source_file_count":  6737,
     "included_file_count":  6681,
     "excluded_file_count":  56,
@@ -36,40 +36,55 @@
                                  "source_present":  true,
                                  "product_present":  true,
                                  "source_sha256":  "e29dfaf6905a8d396a58ea4bd84ad27057756bbd9599b5bec0971ae34d2a2118",
-                                 "product_sha256":  "e29dfaf6905a8d396a58ea4bd84ad27057756bbd9599b5bec0971ae34d2a2118",
-                                 "preserved_in":  "product_candidate"
+                                 "product_sha256":  "821556e6336796450ab852d375117b48a4887e71d255794fd6318d99982a5ab6",
+                                 "preserved_in":  "product_candidate",
+                                 "product_hash_basis":  "committed Git blob bytes",
+                                 "source_hash_basis":  "raw upstream source bytes",
+                                 "storage_classification":  "included_canonical_text_lf"
                              },
                              {
                                  "path":  "plugins/hermes-achievements/LICENSE",
                                  "source_present":  true,
                                  "product_present":  true,
                                  "source_sha256":  "d40010024938b643e3d5e304a17563a2eec1815b8686726474dc00b3f797edc0",
-                                 "product_sha256":  "d40010024938b643e3d5e304a17563a2eec1815b8686726474dc00b3f797edc0",
-                                 "preserved_in":  "product_candidate"
+                                 "product_sha256":  "5c6bbd852eeff017e73830408977d26e4379c5f9bb6edb03fce171f81db5fe43",
+                                 "preserved_in":  "product_candidate",
+                                 "product_hash_basis":  "committed Git blob bytes",
+                                 "source_hash_basis":  "raw upstream source bytes",
+                                 "storage_classification":  "included_canonical_text_lf"
                              },
                              {
                                  "path":  "plugins/security-guidance/LICENSE",
                                  "source_present":  true,
                                  "product_present":  true,
                                  "source_sha256":  "3ddf9be5c28fe27dad143a5dc76eea25222ad1dd68934a047064e56ed2fa40c5",
-                                 "product_sha256":  "3ddf9be5c28fe27dad143a5dc76eea25222ad1dd68934a047064e56ed2fa40c5",
-                                 "preserved_in":  "product_candidate"
+                                 "product_sha256":  "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+                                 "preserved_in":  "product_candidate",
+                                 "product_hash_basis":  "committed Git blob bytes",
+                                 "source_hash_basis":  "raw upstream source bytes",
+                                 "storage_classification":  "included_canonical_text_lf"
                              },
                              {
                                  "path":  "plugins/security-guidance/NOTICE",
                                  "source_present":  true,
                                  "product_present":  true,
                                  "source_sha256":  "152c0f404a6bfcc9430cf90269fd05a984b92f2f971eeec7e6f1c4dc100a53af",
-                                 "product_sha256":  "152c0f404a6bfcc9430cf90269fd05a984b92f2f971eeec7e6f1c4dc100a53af",
-                                 "preserved_in":  "product_candidate"
+                                 "product_sha256":  "adc3dd09b90dd9240f56d5b9c782986028a312ab150c84a208de1a5d2b948227",
+                                 "preserved_in":  "product_candidate",
+                                 "product_hash_basis":  "committed Git blob bytes",
+                                 "source_hash_basis":  "raw upstream source bytes",
+                                 "storage_classification":  "included_canonical_text_lf"
                              },
                              {
                                  "path":  "skills/creative/humanizer/LICENSE",
                                  "source_present":  true,
                                  "product_present":  true,
                                  "source_sha256":  "caa1be9cba41c1afb88fe730ab1a4e04728295ea5b29ac2ee9f003a4ffbe3a77",
-                                 "product_sha256":  "caa1be9cba41c1afb88fe730ab1a4e04728295ea5b29ac2ee9f003a4ffbe3a77",
-                                 "preserved_in":  "product_candidate"
+                                 "product_sha256":  "4ac4810254ab36d45419141aeb8e69bf50652cfafe5b2dab947d06d44e5cbf96",
+                                 "preserved_in":  "product_candidate",
+                                 "product_hash_basis":  "committed Git blob bytes",
+                                 "source_hash_basis":  "raw upstream source bytes",
+                                 "storage_classification":  "included_canonical_text_lf"
                              },
                              {
                                  "path":  "skills/productivity/powerpoint/LICENSE.txt",
@@ -77,7 +92,8 @@
                                  "product_present":  false,
                                  "source_sha256":  "6f8bd7f4d8ec5cb52b7a59ccb9e8c14c2a4ba529cb5adfc5e0bc676892b8ca79",
                                  "product_sha256":  null,
-                                 "preserved_in":  "exclusion_manifest"
+                                 "preserved_in":  "exclusion_manifest",
+                                 "source_hash_basis":  "raw upstream source bytes"
                              }
                          ],
     "dependency_and_lock_inventory":  [
@@ -186,5 +202,81 @@
                                               "sha256":  "8bdc6037cc3f420a42317fddfe9876abe5bc74e4f37a3f99bde76add963d9872",
                                               "bytes":  1607
                                           }
-                                      ]
+                                      ],
+    "source_integrity":  {
+                             "representation":  "raw_upstream_source",
+                             "content_basis":  "exact archive bytes",
+                             "algorithm":  "agent-platform-tree-sha256-v1",
+                             "SHA256":  "ca41c8c6c688f7a8e94c238cecb45cb60cbec6c37555ba5eeb92530674e39e07",
+                             "file_count":  6737,
+                             "byte_count":  149140090,
+                             "authority":  "upstream identity and source provenance"
+                         },
+    "storage_policy":  {
+                           "text":  "canonical LF",
+                           "binary":  "byte exact when Git classifies content as non-text",
+                           "authority":  ".gitattributes",
+                           "rule":  "2_products/pepper-agent/** text=auto eol=lf",
+                           "global_core_autocrlf_observed":  "true",
+                           "working_tree_realization_authoritative":  false
+                       },
+    "import_classification_counts":  {
+                                         "included_byte_exact":  160,
+                                         "included_canonical_text_lf":  6517,
+                                         "transformed_by_canonical_compliance_rule":  4,
+                                         "transformed_with_LF_storage_canonicalization":  4,
+                                         "excluded_by_canonical_policy":  56,
+                                         "blocked_unresolved":  0
+                                     },
+    "payload_integrity":  {
+                              "representation":  "canonical_committed_payload",
+                              "content_basis":  "exact committed Git blob bytes for included and transformed upstream payload rows",
+                              "algorithm":  "agent-platform-git-tree-sha256-v1",
+                              "scope":  "AGENT_PLATFORM_IMPORT_MANIFEST.tsv rows with destination_path other than not_applicable; excludes AGENT_PLATFORM metadata",
+                              "file_count":  6681,
+                              "byte_count":  145406255,
+                              "SHA256":  "03295db99b2204ac962619251289e145432fe32946ee7efad6201dd0742e4ce6",
+                              "authoritative":  true,
+                              "portable_across_worktrees":  true
+                          },
+    "candidate_integrity":  {
+                                "representation":  "canonical_committed_candidate_except_baseline_record",
+                                "content_basis":  "exact committed/projected Git blob bytes",
+                                "algorithm":  "agent-platform-git-tree-sha256-v1-excluding-baseline-record",
+                                "scope":  "all tracked files below 2_products/pepper-agent except AGENT_PLATFORM_UPSTREAM_BASELINE.json",
+                                "excluded_self_referential_paths":  [
+                                                                        "AGENT_PLATFORM_UPSTREAM_BASELINE.json"
+                                                                    ],
+                                "file_count":  6684,
+                                "byte_count":  148145643,
+                                "SHA256":  "0eec7b33f97ba13f66b59d1b2cf3e1a66a26c7d90bfbd0ee5d88a8587cefc727",
+                                "authoritative":  true,
+                                "portable_across_worktrees":  true
+                            },
+    "baseline_record_hash_policy":  {
+                                        "scope":  "AGENT_PLATFORM_UPSTREAM_BASELINE.json only",
+                                        "stored_inside_itself":  false,
+                                        "stored_in":  "0_architecture/governance/agent_platform_hermes_0_19_product_baseline_storage_reconciliation.md",
+                                        "reason":  "avoid self-referential product digest ambiguity"
+                                    },
+    "legacy_checkout_digests":  {
+                                    "authoritative":  false,
+                                    "warning":  "checkout realization varies with Git EOL materialization and must not be used for durable product identity",
+                                    "P15M":  {
+                                                 "algorithm":  "sorted_path_sha256_bytes_lf",
+                                                 "SHA256":  "3c6f155eba3f01ad4ee924ba62c462de1cdb10fdc1f3099daa8ed1d82a9b912d",
+                                                 "byte_count":  149895563
+                                             },
+                                    "P15M2":  {
+                                                  "algorithm":  "sorted_path_sha256_bytes_lf",
+                                                  "SHA256":  "511fffdc2f575506cdcba49b63de3324519b201a6146d680e8a6513f5b5551a6",
+                                                  "byte_count":  149895745
+                                              }
+                                },
+    "superseded_digest":  {
+                              "SHA256":  "3c6f155eba3f01ad4ee924ba62c462de1cdb10fdc1f3099daa8ed1d82a9b912d",
+                              "prior_field":  "complete_candidate_product_digest",
+                              "reason":  "P15.M1 checkout-realization digest was not portable across clean worktrees",
+                              "authoritative":  false
+                          }
 }

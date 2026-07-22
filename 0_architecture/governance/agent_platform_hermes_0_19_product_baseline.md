@@ -324,34 +324,41 @@ implementation_rows: 0
 
 ## Deterministic Integrity
 
-Original source, filtered-payload and current-product rows use `agent-platform-tree-sha256-v1`.
+Original source, filtered-payload and current-product rows used the P15.M1 checkout-realization model. P15.M1B supersedes the checkout-realization product identity with a committed Git-blob model for portable downstream comparison.
 
 | Tree | Digest | Files | Dirs | Bytes | Zero-byte files | Reparse points |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
 | locked source tree | `ca41c8c6c688f7a8e94c238cecb45cb60cbec6c37555ba5eeb92530674e39e07` | 6737 | 905 | 149140090 | 37 | 0 |
 | upstream filtered payload | `6378effd082a4bc8210007f0a952adc0b287c444cb3bd39b677403c4bb551fd2` | 6681 | 894 | 147798105 | 35 | 0 |
-| complete candidate product before whitespace reconciliation | `d0dd419275bed370033dd4f8bafe5d3a48e7e457abe2597fe044c21556b5b00d` | 6685 | 894 | 149892539 | 35 | 0 |
+| complete candidate product before whitespace reconciliation, superseded checkout realization | `d0dd419275bed370033dd4f8bafe5d3a48e7e457abe2597fe044c21556b5b00d` | 6685 | 894 | 149892539 | 35 | 0 |
 | current product pre/post | `74f98240d937d300c6532b0284ce756d12da218f430501054744e3a5ef5e1d91` | 6246 | 872 | 136653052 | 35 | 0 |
 
-Post-reconciliation complete candidate product inventory digest:
+P15.M1 whitespace-reconciliation checkout inventory digest, now superseded as product authority:
 
 | Tree | Digest | Algorithm | Files | Dirs | Bytes | Zero-byte files | Reparse points |
 | --- | --- | --- | ---: | ---: | ---: | ---: | ---: |
 | complete candidate product after whitespace reconciliation | `3c6f155eba3f01ad4ee924ba62c462de1cdb10fdc1f3099daa8ed1d82a9b912d` | `sorted_path_sha256_bytes_lf` | 6685 | 894 | 149895563 | 35 | 0 |
 
-`sorted_path_sha256_bytes_lf` hashes UTF-8 records sorted by product-root-relative path, formatted as `path<TAB>file_sha256<TAB>byte_length<LF>`. It is recorded here because the original `agent-platform-tree-sha256-v1` helper implementation is not present in the repository, while the metadata-only reconciliation changed the complete candidate byte count.
+`sorted_path_sha256_bytes_lf` hashes checked-out filesystem bytes and is EOL-sensitive. It is retained only as historical P15.M1 evidence.
 
-Upstream filtered payload digest remains `6378effd082a4bc8210007f0a952adc0b287c444cb3bd39b677403c4bb551fd2` because no upstream byte-exact or transformed payload file changed during whitespace reconciliation.
+P15.M1B portable committed-storage authority:
+
+| Scope | Digest | Algorithm | Files | Bytes | Authority |
+| --- | --- | --- | ---: | ---: | --- |
+| imported and transformed upstream payload only | `03295db99b2204ac962619251289e145432fe32946ee7efad6201dd0742e4ce6` | `agent-platform-git-tree-sha256-v1` | 6681 | 145406255 | portable payload comparison |
+| tracked candidate below `2_products/pepper-agent` except `AGENT_PLATFORM_UPSTREAM_BASELINE.json` | `0eec7b33f97ba13f66b59d1b2cf3e1a66a26c7d90bfbd0ee5d88a8587cefc727` | `agent-platform-git-tree-sha256-v1-excluding-baseline-record` | 6684 | 148145643 | portable product comparison without self-reference |
+
+`agent-platform-git-tree-sha256-v1` hashes committed Git blob bytes, not checked-out filesystem bytes. Each record is `path<NUL>byte_count<NUL>sha256<LF>`, sorted by normalized `/` path. The baseline record is excluded from candidate integrity because a file must not contain an authoritative digest that includes itself without a separate canonical self-exclusion algorithm.
 
 ## License And Notice Preservation
 
-| Path | Source present | Product candidate present | Preservation |
+| Path | Source present | Product candidate present | Preservation after P15.M1B |
 | --- | --- | --- | --- |
-| `LICENSE` | true | true | byte-identical |
-| `plugins/hermes-achievements/LICENSE` | true | true | byte-identical |
-| `plugins/security-guidance/LICENSE` | true | true | byte-identical |
-| `plugins/security-guidance/NOTICE` | true | true | byte-identical |
-| `skills/creative/humanizer/LICENSE` | true | true | byte-identical |
+| `LICENSE` | true | true | included as `included_canonical_text_lf`; raw source hash and committed blob hash both recorded |
+| `plugins/hermes-achievements/LICENSE` | true | true | included as `included_canonical_text_lf`; raw source hash and committed blob hash both recorded |
+| `plugins/security-guidance/LICENSE` | true | true | included as `included_canonical_text_lf`; raw source hash and committed blob hash both recorded |
+| `plugins/security-guidance/NOTICE` | true | true | included as `included_canonical_text_lf`; raw source hash and committed blob hash both recorded |
+| `skills/creative/humanizer/LICENSE` | true | true | included as `included_canonical_text_lf`; raw source hash and committed blob hash both recorded |
 | `skills/productivity/powerpoint/LICENSE.txt` | true | false | explicitly recorded in exclusion manifest under `P12_restricted_powerpoint_subtree` |
 
 P15.M1 performs source preservation and evidence recording only. P15.M2 remains required before promotion, redistribution or release.
@@ -425,10 +432,17 @@ new_product:
   migration_candidate: true
   upstream_version: 0.19.0
   upstream_commit: 3ef6bbd201263d354fd83ec55b3c306ded2eb72a
-  complete_file_count: 6685
-  complete_byte_count: 149895563
-  complete_product_digest: 3c6f155eba3f01ad4ee924ba62c462de1cdb10fdc1f3099daa8ed1d82a9b912d
-  complete_product_digest_algorithm: sorted_path_sha256_bytes_lf
+  tracked_file_count: 6685
+  payload_file_count: 6681
+  payload_byte_count: 145406255
+  payload_digest: 03295db99b2204ac962619251289e145432fe32946ee7efad6201dd0742e4ce6
+  payload_digest_algorithm: agent-platform-git-tree-sha256-v1
+  candidate_integrity_file_count: 6684
+  candidate_integrity_byte_count: 148145643
+  candidate_integrity_digest: 0eec7b33f97ba13f66b59d1b2cf3e1a66a26c7d90bfbd0ee5d88a8587cefc727
+  candidate_integrity_algorithm: agent-platform-git-tree-sha256-v1-excluding-baseline-record
+  excluded_self_referential_path: AGENT_PLATFORM_UPSTREAM_BASELINE.json
+  superseded_checkout_digest: 3c6f155eba3f01ad4ee924ba62c462de1cdb10fdc1f3099daa8ed1d82a9b912d
   pre_reconciliation_complete_product_digest: d0dd419275bed370033dd4f8bafe5d3a48e7e457abe2597fe044c21556b5b00d
   nested_git_entries: 0
   ignored_candidate_files: 0
@@ -454,7 +468,7 @@ Full candidate whitespace inventory after reconciliation:
 
 | Classification | Files with findings | Trailing-whitespace lines | Disposition |
 | --- | ---: | ---: | --- |
-| `included_byte_exact` | 153 | 2854 | preserved as upstream source evidence |
+| `included_canonical_text_lf` | 153 | 2854 | preserved semantically while Git stores canonical LF |
 | `transformed_by_canonical_compliance_rule` | 0 | 0 | clean |
 | `baseline_governance_overlay` | 0 | 0 | clean after TSV normalization |
 | unknown/unclassified | 0 | 0 | none |
@@ -464,9 +478,10 @@ Validation model:
 ```yaml
 full_candidate_git_diff_check: expected_nonzero_due_to_preserved_upstream_whitespace
 pepper_owned_and_transformed_candidate_whitespace_check: required_clean
-byte_exact_upstream_whitespace: preserved
+raw_upstream_whitespace: preserved in source evidence
+committed_text_storage: canonical_LF
 automatic_upstream_whitespace_cleanup: prohibited
-included_byte_exact_files_modified_by_correction: 0
+implementation_payload_files_modified_by_correction: 0
 included_hash_mismatches: 0
 ```
 
@@ -474,10 +489,10 @@ Transformed-file whitespace review:
 
 | Source path | Destination path | Rule | Source SHA-256 | Destination SHA-256 | Whitespace status |
 | --- | --- | --- | --- | --- | --- |
-| `.gitignore` | `.gitignore` | `P12_tracking_compatibility_rederived_for_candidate` | `7975849d496ed2f6b6a21466cc45858578d484d779cbbddab76a738aed255c34` | `bc2d006f3ff5267ee633f5ce4b5c045b326804af55f54d6beb361a2c1bf18c32` | clean |
-| `website/docs/reference/skills-catalog.md` | `website/docs/reference/skills-catalog.md` | `P12_restricted_powerpoint_catalog_reference_removal` | `ac3d90913cf4ec258d48bc646ae85410d6eea991cb38cdab0d5592b939771a3e` | `36d0c05bd2f94b5717d4d152c64183ffd7a3d4049f043a20167f6c63ff7b243b` | clean |
-| `website/i18n/zh-Hans/docusaurus-plugin-content-docs/current/reference/skills-catalog.md` | `website/i18n/zh-Hans/docusaurus-plugin-content-docs/current/reference/skills-catalog.md` | `P12_restricted_powerpoint_catalog_reference_removal` | `8d6e26a39021936c95dda717d04275cd3b2312687d12d92abb0f767250f4c2c4` | `fa4d58e87c24df69965162d7e70953bc577b044ba2a7b2ece195e153334f749e` | clean |
-| `website/sidebars.ts` | `website/sidebars.ts` | `P12_restricted_powerpoint_sidebar_reference_removal` | `d79cd704442e892e82d51bb6bcfb47bd6075f6cbb0dccf89175e616a053d9b48` | `b16ac5bc3dcb4a34317eb2c669f1992ac09f70bdc38444c371fc91f10d324e46` | clean |
+| `.gitignore` | `.gitignore` | `P12_tracking_compatibility_rederived_for_candidate+P15_M1B_GIT_TEXT_LF_CANONICALIZATION` | `7975849d496ed2f6b6a21466cc45858578d484d779cbbddab76a738aed255c34` | `7cbca4bd2ef10871faab08ebd0c5feb8333c2b7bf78cff5dc1f3074deb055d30` | clean |
+| `website/docs/reference/skills-catalog.md` | `website/docs/reference/skills-catalog.md` | `P12_restricted_powerpoint_catalog_reference_removal+P15_M1B_GIT_TEXT_LF_CANONICALIZATION` | `ac3d90913cf4ec258d48bc646ae85410d6eea991cb38cdab0d5592b939771a3e` | `cf9a21fb2e885b2eca17c24a47d9a4e6aa9e0d6432db6fce78cec3c2c80b9074` | clean |
+| `website/i18n/zh-Hans/docusaurus-plugin-content-docs/current/reference/skills-catalog.md` | `website/i18n/zh-Hans/docusaurus-plugin-content-docs/current/reference/skills-catalog.md` | `P12_restricted_powerpoint_catalog_reference_removal+P15_M1B_GIT_TEXT_LF_CANONICALIZATION` | `8d6e26a39021936c95dda717d04275cd3b2312687d12d92abb0f767250f4c2c4` | `454d684cfd25f4859b46f78bbc7e6785d977d453de9c15269e474b4561091d03` | clean |
+| `website/sidebars.ts` | `website/sidebars.ts` | `P12_restricted_powerpoint_sidebar_reference_removal+P15_M1B_GIT_TEXT_LF_CANONICALIZATION` | `d79cd704442e892e82d51bb6bcfb47bd6075f6cbb0dccf89175e616a053d9b48` | `326c35e76aa19b6b76001ca79e5ad726ed832919699bce7687a5190b7d142eee` | clean |
 
 Explicit byte-exact examples stayed unchanged: `.env.example`, `.github/ISSUE_TEMPLATE/bug_report.yml`, `.github/PULL_REQUEST_TEMPLATE.md` and `.plans/streaming-support.md` all remain byte-identical to the locked source.
 
@@ -511,23 +526,32 @@ Current canonical product rollback is not required because `2_products/hermes-ag
 | current product tree unchanged | `true` |
 | new product nested Git entries | `0` |
 | new product ignored candidate files | `0` |
-| new product complete files | `6685` |
-| new product complete bytes after reconciliation | `149895563` |
-| new product post-reconciliation digest | `3c6f155eba3f01ad4ee924ba62c462de1cdb10fdc1f3099daa8ed1d82a9b912d` |
-| post-reconciliation digest algorithm | `sorted_path_sha256_bytes_lf` |
-| manifest included hash mismatches | `0` |
+| new product tracked files | `6685` |
+| portable payload files | `6681` |
+| portable payload bytes | `145406255` |
+| portable payload digest | `03295db99b2204ac962619251289e145432fe32946ee7efad6201dd0742e4ce6` |
+| portable payload digest algorithm | `agent-platform-git-tree-sha256-v1` |
+| portable candidate files excluding baseline record | `6684` |
+| portable candidate bytes excluding baseline record | `148145643` |
+| portable candidate digest excluding baseline record | `0eec7b33f97ba13f66b59d1b2cf3e1a66a26c7d90bfbd0ee5d88a8587cefc727` |
+| portable candidate digest algorithm | `agent-platform-git-tree-sha256-v1-excluding-baseline-record` |
+| superseded checkout digest | `3c6f155eba3f01ad4ee924ba62c462de1cdb10fdc1f3099daa8ed1d82a9b912d` |
+| manifest destination hash mismatches | `0` |
+| manifest non-EOL content mismatches | `0` |
+| manifest `included_byte_exact` rows | `160` |
+| manifest `included_canonical_text_lf` rows | `6517` |
 | import manifest blank field rows | `0` |
 | import manifest trailing tab rows | `0` |
 | exclusions manifest blank field rows | `0` |
 | exclusions manifest trailing tab rows | `0` |
-| full candidate whitespace findings | `2854`, all `included_byte_exact` |
+| full candidate whitespace findings | `2854`, all `included_canonical_text_lf` source-realization findings |
 | preserved upstream whitespace files | `153` |
 | Pepper-owned whitespace findings | `0` |
 | transformed payload whitespace findings | `0` |
 | unclassified whitespace findings | `0` |
 | full candidate Git diff whitespace check | `expected_nonzero_due_to_preserved_upstream_whitespace` |
 | Pepper-owned and transformed whitespace check | `required_clean_passed` |
-| byte-exact upstream whitespace | `preserved` |
+| raw upstream whitespace evidence | `preserved in source/worktree evidence; committed text storage is LF` |
 | automatic upstream whitespace cleanup | `prohibited` |
 | temporary clones | `0` |
 | temporary archives | `0` |
