@@ -1,0 +1,190 @@
+{
+    "schema_version":  "1.0",
+    "product":  "Pepper",
+    "upstream_project":  "Hermes Agent",
+    "upstream_repository":  "https://github.com/NousResearch/hermes-agent",
+    "upstream_version":  "0.19.0",
+    "upstream_tag":  "v2026.7.20",
+    "tag_object_sha":  "c7d08de287556b3d339df336b180a39d4980ebd7",
+    "upstream_commit":  "3ef6bbd201263d354fd83ec55b3c306ded2eb72a",
+    "archive_sha256":  "5b1db2e6642f6aee669951a8440aab03ec76b1d2832cbf3062ab49754aec3ba0",
+    "locked_source_tree_sha256":  "ca41c8c6c688f7a8e94c238cecb45cb60cbec6c37555ba5eeb92530674e39e07",
+    "upstream_filtered_payload_digest":  "6378effd082a4bc8210007f0a952adc0b287c444cb3bd39b677403c4bb551fd2",
+    "complete_candidate_product_digest":  "recorded_in_governance_record_after_metadata_overlay",
+    "source_file_count":  6737,
+    "included_file_count":  6681,
+    "excluded_file_count":  56,
+    "transformed_file_count":  4,
+    "metadata_overlay_file_count":  4,
+    "source_retrieval_date_utc":  "2026-07-22T16:49:23Z",
+    "import_policy_authority":  "filtered_snapshot_three_way_reapplication via P12.5/P15.M0 surviving filtered-import rules",
+    "update_strategy":  "filtered_snapshot_three_way_reapplication",
+    "current_canonical_product_path":  "2_products/hermes-agent",
+    "candidate_product_path":  "2_products/pepper-agent",
+    "canonical":  false,
+    "candidate":  true,
+    "rollback_source":  "remove 2_products/pepper-agent, remove P15.M1 governance record, revert .gitignore pepper-agent exceptions",
+    "native_Hermes_updater":  {
+                                  "present_in_source_when_applicable":  true,
+                                  "authorized_for_Pepper":  false
+                              },
+    "Pepper_update_strategy":  "filtered_snapshot_three_way_reapplication",
+    "future_one_click_update":  "prepared_governed_transaction",
+    "license_evidence":  [
+                             {
+                                 "path":  "LICENSE",
+                                 "source_present":  true,
+                                 "product_present":  true,
+                                 "source_sha256":  "e29dfaf6905a8d396a58ea4bd84ad27057756bbd9599b5bec0971ae34d2a2118",
+                                 "product_sha256":  "e29dfaf6905a8d396a58ea4bd84ad27057756bbd9599b5bec0971ae34d2a2118",
+                                 "preserved_in":  "product_candidate"
+                             },
+                             {
+                                 "path":  "plugins/hermes-achievements/LICENSE",
+                                 "source_present":  true,
+                                 "product_present":  true,
+                                 "source_sha256":  "d40010024938b643e3d5e304a17563a2eec1815b8686726474dc00b3f797edc0",
+                                 "product_sha256":  "d40010024938b643e3d5e304a17563a2eec1815b8686726474dc00b3f797edc0",
+                                 "preserved_in":  "product_candidate"
+                             },
+                             {
+                                 "path":  "plugins/security-guidance/LICENSE",
+                                 "source_present":  true,
+                                 "product_present":  true,
+                                 "source_sha256":  "3ddf9be5c28fe27dad143a5dc76eea25222ad1dd68934a047064e56ed2fa40c5",
+                                 "product_sha256":  "3ddf9be5c28fe27dad143a5dc76eea25222ad1dd68934a047064e56ed2fa40c5",
+                                 "preserved_in":  "product_candidate"
+                             },
+                             {
+                                 "path":  "plugins/security-guidance/NOTICE",
+                                 "source_present":  true,
+                                 "product_present":  true,
+                                 "source_sha256":  "152c0f404a6bfcc9430cf90269fd05a984b92f2f971eeec7e6f1c4dc100a53af",
+                                 "product_sha256":  "152c0f404a6bfcc9430cf90269fd05a984b92f2f971eeec7e6f1c4dc100a53af",
+                                 "preserved_in":  "product_candidate"
+                             },
+                             {
+                                 "path":  "skills/creative/humanizer/LICENSE",
+                                 "source_present":  true,
+                                 "product_present":  true,
+                                 "source_sha256":  "caa1be9cba41c1afb88fe730ab1a4e04728295ea5b29ac2ee9f003a4ffbe3a77",
+                                 "product_sha256":  "caa1be9cba41c1afb88fe730ab1a4e04728295ea5b29ac2ee9f003a4ffbe3a77",
+                                 "preserved_in":  "product_candidate"
+                             },
+                             {
+                                 "path":  "skills/productivity/powerpoint/LICENSE.txt",
+                                 "source_present":  true,
+                                 "product_present":  false,
+                                 "source_sha256":  "6f8bd7f4d8ec5cb52b7a59ccb9e8c14c2a4ba529cb5adfc5e0bc676892b8ca79",
+                                 "product_sha256":  null,
+                                 "preserved_in":  "exclusion_manifest"
+                             }
+                         ],
+    "dependency_and_lock_inventory":  [
+                                          {
+                                              "path":  "docker-compose.yml",
+                                              "sha256":  "df314eea77ea70e2580c96c532ebf33c9da1d8b191150852fcbebd6a0452530e",
+                                              "bytes":  3530
+                                          },
+                                          {
+                                              "path":  "Dockerfile",
+                                              "sha256":  "25b3ec8a3726324f0cdfe9a95ad68eacb30d9d0e0b47fe7f884ee57ec0a2df15",
+                                              "bytes":  20681
+                                          },
+                                          {
+                                              "path":  "package-lock.json",
+                                              "sha256":  "45ac4d939b5d5226f295f9a4b318afc77876aa15038899448e304e1c0b85ac92",
+                                              "bytes":  733260
+                                          },
+                                          {
+                                              "path":  "package.json",
+                                              "sha256":  "9c02d27204afe4054697ceab1de1bcfd55f5460a29612a35c78b24112d83f76f",
+                                              "bytes":  1550
+                                          },
+                                          {
+                                              "path":  "pyproject.toml",
+                                              "sha256":  "5ba57adbbb7b90587bc959384cb6f08d4ff05e8a477f224e93ff7f2362983b8e",
+                                              "bytes":  21734
+                                          },
+                                          {
+                                              "path":  "uv.lock",
+                                              "sha256":  "97aee767bf5b7b9574995fddcbea5f6a4a536260ee0cc749458e7f514a3a137d",
+                                              "bytes":  665936
+                                          },
+                                          {
+                                              "path":  "apps/bootstrap-installer/package.json",
+                                              "sha256":  "0c8f725df481fa0ca31a9958c695906766c442bd9ff2853635cd8e489d58e64a",
+                                              "bytes":  1910
+                                          },
+                                          {
+                                              "path":  "apps/desktop/package.json",
+                                              "sha256":  "801b62b7322e8c7c4769abf0e2cf75d383bf507bfc7542ef46cc0b657b624f73",
+                                              "bytes":  9677
+                                          },
+                                          {
+                                              "path":  "apps/shared/package.json",
+                                              "sha256":  "710ecbd328b32ab84464fb7a8a33363ca78439ee2e32e980caa5702cc26fff9c",
+                                              "bytes":  702
+                                          },
+                                          {
+                                              "path":  "optional-skills/finance/dcf-model/requirements.txt",
+                                              "sha256":  "c46e897bd9b37b6da13a8a96f9f5c4a1247e2489821ddb52884fc03a8a0973c7",
+                                              "bytes":  122
+                                          },
+                                          {
+                                              "path":  "plugins/platforms/photon/sidecar/package-lock.json",
+                                              "sha256":  "79e7de916eb9c287a850dfc98e8bf7eeae672e2501a68a3ba303df3da738618f",
+                                              "bytes":  71055
+                                          },
+                                          {
+                                              "path":  "plugins/platforms/photon/sidecar/package.json",
+                                              "sha256":  "4d07c1824d1b5715dc08af214a5346bc98631c36e611210811b4672a695fc91f",
+                                              "bytes":  711
+                                          },
+                                          {
+                                              "path":  "scripts/whatsapp-bridge/package-lock.json",
+                                              "sha256":  "4eefee7aa6a6105d064d755b37720ccd203b5c7840babb2c31742ee01352ff78",
+                                              "bytes":  79172
+                                          },
+                                          {
+                                              "path":  "scripts/whatsapp-bridge/package.json",
+                                              "sha256":  "3eb579923317f616eb3e07299dbdb19eb144e87340da8d07a520dbdd5280cd97",
+                                              "bytes":  436
+                                          },
+                                          {
+                                              "path":  "tests/e2e/matrix_xsign_bootstrap/docker-compose.yml",
+                                              "sha256":  "77dfcf6097e9e1e3b588f292c01d4cbdbdaa4004d00945edbfaaf5be0c5678e7",
+                                              "bytes":  880
+                                          },
+                                          {
+                                              "path":  "tests-js/package.json",
+                                              "sha256":  "a5865d5bc12de1efb12983c49a4c5d5960c3867eef8db7ef04d068210caebb4e",
+                                              "bytes":  485
+                                          },
+                                          {
+                                              "path":  "ui-tui/package.json",
+                                              "sha256":  "1475f388cf57194055c940bd9e8003baa6073d729ae53bdae469e3906d721cb0",
+                                              "bytes":  1571
+                                          },
+                                          {
+                                              "path":  "ui-tui/packages/hermes-ink/package.json",
+                                              "sha256":  "749b0ab9bd65dfd72eed3667bb8b53f672db86801da43f4582b688eecb97cb0a",
+                                              "bytes":  1577
+                                          },
+                                          {
+                                              "path":  "web/package.json",
+                                              "sha256":  "4a6699510879addead42860cfdeb153d1f1af01343d25231fb0bdb4bebc81136",
+                                              "bytes":  1718
+                                          },
+                                          {
+                                              "path":  "website/package-lock.json",
+                                              "sha256":  "fc855080475fda41273c63b5050265d9f7e4838c722b970d028c0010a9ab9ffd",
+                                              "bytes":  772305
+                                          },
+                                          {
+                                              "path":  "website/package.json",
+                                              "sha256":  "8bdc6037cc3f420a42317fddfe9876abe5bc74e4f37a3f99bde76add963d9872",
+                                              "bytes":  1607
+                                          }
+                                      ]
+}

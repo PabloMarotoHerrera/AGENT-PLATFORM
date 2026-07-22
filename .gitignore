@@ -9,6 +9,8 @@ Thumbs.db
 /2_products/*
 !/2_products/hermes-agent
 !/2_products/hermes-agent/**
+!/2_products/pepper-agent
+!/2_products/pepper-agent/**
 
 # Ignore external sources
 4_external/sources/
