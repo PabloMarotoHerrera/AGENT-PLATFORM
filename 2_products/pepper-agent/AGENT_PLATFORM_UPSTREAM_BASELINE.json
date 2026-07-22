@@ -240,25 +240,33 @@
                               "portable_across_worktrees":  true
                           },
     "candidate_integrity":  {
+                                "status":  "committed_final",
                                 "representation":  "canonical_committed_candidate_except_baseline_record",
-                                "content_basis":  "exact committed/projected Git blob bytes",
+                                "content_basis":  "exact HEAD Git blob bytes",
                                 "algorithm":  "agent-platform-git-tree-sha256-v1-excluding-baseline-record",
                                 "scope":  "all tracked files below 2_products/pepper-agent except AGENT_PLATFORM_UPSTREAM_BASELINE.json",
                                 "excluded_self_referential_paths":  [
                                                                         "AGENT_PLATFORM_UPSTREAM_BASELINE.json"
                                                                     ],
                                 "file_count":  6684,
-                                "byte_count":  148145643,
-                                "SHA256":  "0eec7b33f97ba13f66b59d1b2cf3e1a66a26c7d90bfbd0ee5d88a8587cefc727",
+                                "byte_count":  148145642,
+                                "SHA256":  "27b457b65d8a89bb5c39041bc43b82e6f46c4924c1554f5a1c0fcc7682c19bf7",
                                 "authoritative":  true,
                                 "portable_across_worktrees":  true
                             },
+    "superseded_precommit_candidate_integrity":  {
+                                                     "file_count":  6684,
+                                                     "byte_count":  148145643,
+                                                     "SHA256":  "0eec7b33f97ba13f66b59d1b2cf3e1a66a26c7d90bfbd0ee5d88a8587cefc727",
+                                                     "reason":  "computed before final index/commit LF normalization of the modification register header",
+                                                     "authority":  "provisional"
+                                                 },
     "baseline_record_hash_policy":  {
-                                        "scope":  "AGENT_PLATFORM_UPSTREAM_BASELINE.json only",
-                                        "stored_inside_itself":  false,
-                                        "stored_in":  "0_architecture/governance/agent_platform_hermes_0_19_product_baseline_storage_reconciliation.md",
-                                        "reason":  "avoid self-referential product digest ambiguity"
-                                    },
+                                         "scope":  "AGENT_PLATFORM_UPSTREAM_BASELINE.json only",
+                                         "stored_inside_itself":  false,
+                                         "stored_in":  "0_architecture/governance/agent_platform_hermes_0_19_product_baseline_commit_finalization.md",
+                                         "reason":  "avoid self-referential product digest ambiguity"
+                                     },
     "legacy_checkout_digests":  {
                                     "authoritative":  false,
                                     "warning":  "checkout realization varies with Git EOL materialization and must not be used for durable product identity",

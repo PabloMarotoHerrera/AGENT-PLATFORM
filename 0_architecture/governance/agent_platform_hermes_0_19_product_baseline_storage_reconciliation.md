@@ -1,8 +1,10 @@
 # P15.M1B - Hermes 0.19 Product Baseline Storage Reconciliation
 
-Status: P15.M1B canonical Git storage correction ready with constraints.
+Status: P15.M1B canonical Git storage correction ready with P15.M1C post-commit finalization addendum.
 
 Final verdict: `hermes_0_19_product_baseline_portable_integrity_ready`
+
+P15.M1C addendum verdict: `hermes_0_19_product_baseline_committed_integrity_finalized`
 
 ## Ticket Authority
 
@@ -157,12 +159,23 @@ Candidate integrity:
 
 | Field | Value |
 | --- | --- |
+| Status | `committed_final` |
 | Algorithm | `agent-platform-git-tree-sha256-v1-excluding-baseline-record` |
 | Scope | all tracked files below `2_products/pepper-agent` except `AGENT_PLATFORM_UPSTREAM_BASELINE.json` |
 | Excluded self-referential path | `AGENT_PLATFORM_UPSTREAM_BASELINE.json` |
 | File count | 6684 |
+| Byte count | 148145642 |
+| SHA-256 | `27b457b65d8a89bb5c39041bc43b82e6f46c4924c1554f5a1c0fcc7682c19bf7` |
+
+Superseded pre-commit candidate integrity:
+
+| Field | Value |
+| --- | --- |
+| Authority | `provisional` |
+| File count | 6684 |
 | Byte count | 148145643 |
 | SHA-256 | `0eec7b33f97ba13f66b59d1b2cf3e1a66a26c7d90bfbd0ee5d88a8587cefc727` |
+| Supersession reason | final committed Git blob for `AGENT_PLATFORM_MODIFICATIONS.tsv` normalized the header-only file from CRLF to LF, reducing candidate bytes by one |
 
 Baseline record hash handling:
 
@@ -170,8 +183,9 @@ Baseline record hash handling:
 | --- | --- |
 | Baseline record path | `2_products/pepper-agent/AGENT_PLATFORM_UPSTREAM_BASELINE.json` |
 | Baseline record SHA-256 after P15.M1B update | `7318f257f086a6f09be077eed3ec4f493ce72d0d9dc16fe313f6e33096613848` |
+| Baseline record SHA-256 after P15.M1C update | `92b15fb828d105dbd144599c0a49fcef454646667b53b6de227c9716e1aa234c` |
 | Stored inside itself | `false` |
-| Storage location | this governance record |
+| Storage location | `0_architecture/governance/agent_platform_hermes_0_19_product_baseline_commit_finalization.md` |
 
 Superseded checkout digests:
 
@@ -216,7 +230,7 @@ PowerPoint exclusion and generated-cache exclusions remain unchanged.
 
 ## Downstream Consequence
 
-P15.M2, P15.M3 and P15.M4 must not continue from the paused branches until P15.M1B is committed, pushed and propagated. Their prerequisite gates must use `candidate_integrity.SHA256` from `AGENT_PLATFORM_UPSTREAM_BASELINE.json`, not the superseded checkout digest.
+P15.M2, P15.M3 and P15.M4 must not continue from the paused branches until P15.M1C is accepted, committed, pushed and propagated. Their prerequisite gates must use the committed-final `candidate_integrity.SHA256` from `AGENT_PLATFORM_UPSTREAM_BASELINE.json`, not the superseded checkout digest or the superseded P15.M1B pre-commit projection.
 
 P15.M2 license reconciliation restarts after branch update. P15.M3 dependency reconciliation and P15.M4 Desktop/Workspace work remain parallel-lane tasks after propagation.
 
@@ -231,6 +245,8 @@ P15.M2 license reconciliation restarts after branch update. P15.M3 dependency re
 | destination hash mismatches | `0` |
 | non-EOL content mismatches | `0` |
 | blocked unresolved rows | `0` |
+| committed-final candidate digest | `27b457b65d8a89bb5c39041bc43b82e6f46c4924c1554f5a1c0fcc7682c19bf7` |
+| superseded pre-commit candidate digest | `0eec7b33f97ba13f66b59d1b2cf3e1a66a26c7d90bfbd0ee5d88a8587cefc727` |
 | TSV exact column counts | `true` |
 | TSV trailing whitespace | `0` |
 | JSON valid | `true` |

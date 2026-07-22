@@ -346,7 +346,8 @@ P15.M1B portable committed-storage authority:
 | Scope | Digest | Algorithm | Files | Bytes | Authority |
 | --- | --- | --- | ---: | ---: | --- |
 | imported and transformed upstream payload only | `03295db99b2204ac962619251289e145432fe32946ee7efad6201dd0742e4ce6` | `agent-platform-git-tree-sha256-v1` | 6681 | 145406255 | portable payload comparison |
-| tracked candidate below `2_products/pepper-agent` except `AGENT_PLATFORM_UPSTREAM_BASELINE.json` | `0eec7b33f97ba13f66b59d1b2cf3e1a66a26c7d90bfbd0ee5d88a8587cefc727` | `agent-platform-git-tree-sha256-v1-excluding-baseline-record` | 6684 | 148145643 | portable product comparison without self-reference |
+| tracked candidate below `2_products/pepper-agent` except `AGENT_PLATFORM_UPSTREAM_BASELINE.json`, final committed HEAD identity | `27b457b65d8a89bb5c39041bc43b82e6f46c4924c1554f5a1c0fcc7682c19bf7` | `agent-platform-git-tree-sha256-v1-excluding-baseline-record` | 6684 | 148145642 | portable product comparison without self-reference |
+| tracked candidate below `2_products/pepper-agent` except `AGENT_PLATFORM_UPSTREAM_BASELINE.json`, superseded P15.M1B pre-commit projection | `0eec7b33f97ba13f66b59d1b2cf3e1a66a26c7d90bfbd0ee5d88a8587cefc727` | `agent-platform-git-tree-sha256-v1-excluding-baseline-record` | 6684 | 148145643 | superseded by P15.M1C after final Git LF normalization of `AGENT_PLATFORM_MODIFICATIONS.tsv` |
 
 `agent-platform-git-tree-sha256-v1` hashes committed Git blob bytes, not checked-out filesystem bytes. Each record is `path<NUL>byte_count<NUL>sha256<LF>`, sorted by normalized `/` path. The baseline record is excluded from candidate integrity because a file must not contain an authoritative digest that includes itself without a separate canonical self-exclusion algorithm.
 
@@ -438,10 +439,12 @@ new_product:
   payload_digest: 03295db99b2204ac962619251289e145432fe32946ee7efad6201dd0742e4ce6
   payload_digest_algorithm: agent-platform-git-tree-sha256-v1
   candidate_integrity_file_count: 6684
-  candidate_integrity_byte_count: 148145643
-  candidate_integrity_digest: 0eec7b33f97ba13f66b59d1b2cf3e1a66a26c7d90bfbd0ee5d88a8587cefc727
+  candidate_integrity_byte_count: 148145642
+  candidate_integrity_digest: 27b457b65d8a89bb5c39041bc43b82e6f46c4924c1554f5a1c0fcc7682c19bf7
   candidate_integrity_algorithm: agent-platform-git-tree-sha256-v1-excluding-baseline-record
   excluded_self_referential_path: AGENT_PLATFORM_UPSTREAM_BASELINE.json
+  superseded_precommit_candidate_integrity_digest: 0eec7b33f97ba13f66b59d1b2cf3e1a66a26c7d90bfbd0ee5d88a8587cefc727
+  superseded_precommit_candidate_integrity_bytes: 148145643
   superseded_checkout_digest: 3c6f155eba3f01ad4ee924ba62c462de1cdb10fdc1f3099daa8ed1d82a9b912d
   pre_reconciliation_complete_product_digest: d0dd419275bed370033dd4f8bafe5d3a48e7e457abe2597fe044c21556b5b00d
   nested_git_entries: 0
@@ -532,9 +535,11 @@ Current canonical product rollback is not required because `2_products/hermes-ag
 | portable payload digest | `03295db99b2204ac962619251289e145432fe32946ee7efad6201dd0742e4ce6` |
 | portable payload digest algorithm | `agent-platform-git-tree-sha256-v1` |
 | portable candidate files excluding baseline record | `6684` |
-| portable candidate bytes excluding baseline record | `148145643` |
-| portable candidate digest excluding baseline record | `0eec7b33f97ba13f66b59d1b2cf3e1a66a26c7d90bfbd0ee5d88a8587cefc727` |
+| portable candidate bytes excluding baseline record | `148145642` |
+| portable candidate digest excluding baseline record | `27b457b65d8a89bb5c39041bc43b82e6f46c4924c1554f5a1c0fcc7682c19bf7` |
 | portable candidate digest algorithm | `agent-platform-git-tree-sha256-v1-excluding-baseline-record` |
+| superseded pre-commit candidate digest | `0eec7b33f97ba13f66b59d1b2cf3e1a66a26c7d90bfbd0ee5d88a8587cefc727` |
+| superseded pre-commit candidate bytes | `148145643` |
 | superseded checkout digest | `3c6f155eba3f01ad4ee924ba62c462de1cdb10fdc1f3099daa8ed1d82a9b912d` |
 | manifest destination hash mismatches | `0` |
 | manifest non-EOL content mismatches | `0` |
