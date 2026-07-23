@@ -4,6 +4,34 @@ Status: P15.M1C post-commit portable integrity finalized with constraints.
 
 Final verdict: `hermes_0_19_product_baseline_committed_integrity_finalized`
 
+## P15.M1D Canonical Integrity Addendum
+
+P15.M1D does not change the P15.M1C diagnosis that the one-byte pre-commit drift was final Git LF normalization of `AGENT_PLATFORM_MODIFICATIONS.tsv`. P15.M1D separately resolves the later P15.M3 aggregate-algorithm ambiguity.
+
+P15.M1D establishes `agent-platform-git-tree-sha256-v2` as the only downstream aggregate authority. The v2 algorithm is executable at `10_scripts/governance/pepper_baseline_integrity.py` and is tested by `12_tests/governance/test_pepper_baseline_integrity.py`.
+
+Downstream gates must use:
+
+```yaml
+candidate_integrity_v2:
+  files: 6684
+  bytes: 148145642
+  SHA256: fae505873168de748dd966972e2c20cbea15ac2cfc0ffdc075168ebcf525fa5b
+
+payload_integrity_v2:
+  files: 6681
+  bytes: 145406255
+  SHA256: 3470f71442bd0dd0ee15a1e70268db7cfe03d787adf58ba16697952c30e0d073
+
+baseline_record_integrity:
+  old_SHA256: 92b15fb828d105dbd144599c0a49fcef454646667b53b6de227c9716e1aa234c
+  new_candidate_SHA256_recorded_externally: 5aa7d9582e8036e66a9a81be772aa75b3cb930a978c0128bc0a6b2585baa0fea
+```
+
+The P15.M1C candidate digest `27b457b65d8a89bb5c39041bc43b82e6f46c4924c1554f5a1c0fcc7682c19bf7` and payload digest `03295db99b2204ac962619251289e145432fe32946ee7efad6201dd0742e4ce6` are preserved as `superseded_ambiguous`, not current authority. The pre-commit digest `0eec7b33f97ba13f66b59d1b2cf3e1a66a26c7d90bfbd0ee5d88a8587cefc727` remains an `explained_legacy_variant` caused by final Git LF normalization.
+
+After P15.M1D is committed, downstream lanes must verify the committed blob SHA-256 for `2_products/pepper-agent/AGENT_PLATFORM_UPSTREAM_BASELINE.json` equals `5aa7d9582e8036e66a9a81be772aa75b3cb930a978c0128bc0a6b2585baa0fea` before using the candidate.
+
 ## Ticket Authority
 
 P15.M1C finalizes the Hermes Agent 0.19.0-derived Pepper baseline candidate identity after P15.M1B was committed at `4b69f99b029a677f619b29b5c96a23e2131e1a38`.

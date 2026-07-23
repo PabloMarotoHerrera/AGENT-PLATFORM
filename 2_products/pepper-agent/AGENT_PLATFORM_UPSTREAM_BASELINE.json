@@ -228,14 +228,24 @@
                                          "excluded_by_canonical_policy":  56,
                                          "blocked_unresolved":  0
                                      },
+    "integrity_authority":  {
+                                "algorithm":  "agent-platform-git-tree-sha256-v2",
+                                "implementation":  "10_scripts/governance/pepper_baseline_integrity.py",
+                                "path_basis":  "product-relative",
+                                "path_sort":  "unsigned-raw-path-byte-lexicographic",
+                                "content_basis":  "exact committed Git blob bytes",
+                                "record_format":  "path_bytes + NUL + byte_count_ascii + NUL + lowercase_content_SHA256_ascii + LF",
+                                "additional_final_terminator":  false,
+                                "stored_inside_record":  false
+                            },
     "payload_integrity":  {
                               "representation":  "canonical_committed_payload",
                               "content_basis":  "exact committed Git blob bytes for included and transformed upstream payload rows",
-                              "algorithm":  "agent-platform-git-tree-sha256-v1",
-                              "scope":  "AGENT_PLATFORM_IMPORT_MANIFEST.tsv rows with destination_path other than not_applicable; excludes AGENT_PLATFORM metadata",
+                              "algorithm":  "agent-platform-git-tree-sha256-v2",
+                              "scope":  "AGENT_PLATFORM_IMPORT_MANIFEST.tsv rows classified as included_byte_exact, included_canonical_text_lf, or transformed_by_canonical_compliance_rule; excludes AGENT_PLATFORM metadata",
                               "file_count":  6681,
                               "byte_count":  145406255,
-                              "SHA256":  "03295db99b2204ac962619251289e145432fe32946ee7efad6201dd0742e4ce6",
+                              "SHA256":  "3470f71442bd0dd0ee15a1e70268db7cfe03d787adf58ba16697952c30e0d073",
                               "authoritative":  true,
                               "portable_across_worktrees":  true
                           },
@@ -243,17 +253,56 @@
                                 "status":  "committed_final",
                                 "representation":  "canonical_committed_candidate_except_baseline_record",
                                 "content_basis":  "exact HEAD Git blob bytes",
-                                "algorithm":  "agent-platform-git-tree-sha256-v1-excluding-baseline-record",
+                                "algorithm":  "agent-platform-git-tree-sha256-v2",
                                 "scope":  "all tracked files below 2_products/pepper-agent except AGENT_PLATFORM_UPSTREAM_BASELINE.json",
-                                "excluded_self_referential_paths":  [
-                                                                        "AGENT_PLATFORM_UPSTREAM_BASELINE.json"
-                                                                    ],
+                                "excluded_paths":  [
+                                                       "AGENT_PLATFORM_UPSTREAM_BASELINE.json"
+                                                   ],
                                 "file_count":  6684,
                                 "byte_count":  148145642,
-                                "SHA256":  "27b457b65d8a89bb5c39041bc43b82e6f46c4924c1554f5a1c0fcc7682c19bf7",
+                                "SHA256":  "fae505873168de748dd966972e2c20cbea15ac2cfc0ffdc075168ebcf525fa5b",
                                 "authoritative":  true,
                                 "portable_across_worktrees":  true
                             },
+    "baseline_record_integrity":  {
+                                      "algorithm":  "sha256-git-blob-v1",
+                                      "scope":  "AGENT_PLATFORM_UPSTREAM_BASELINE.json only",
+                                      "stored_inside_record":  false,
+                                      "pre_correction_SHA256":  "92b15fb828d105dbd144599c0a49fcef454646667b53b6de227c9716e1aa234c",
+                                      "new_candidate_SHA256_recorded_externally":  true
+                                  },
+    "superseded_integrity_evidence":  {
+                                        "P15_M1C_candidate_integrity_v1":  {
+                                                                               "algorithm":  "agent-platform-git-tree-sha256-v1-excluding-baseline-record",
+                                                                               "file_count":  6684,
+                                                                               "byte_count":  148145642,
+                                                                               "SHA256":  "27b457b65d8a89bb5c39041bc43b82e6f46c4924c1554f5a1c0fcc7682c19bf7",
+                                                                               "classification":  "superseded_ambiguous",
+                                                                               "reason":  "P15.M3 reproduced file and byte counts but not aggregate SHA-256 under the later explicit byte-stream contract"
+                                                                           },
+                                        "P15_M1C_payload_integrity_v1":  {
+                                                                             "algorithm":  "agent-platform-git-tree-sha256-v1",
+                                                                             "file_count":  6681,
+                                                                             "byte_count":  145406255,
+                                                                             "SHA256":  "03295db99b2204ac962619251289e145432fe32946ee7efad6201dd0742e4ce6",
+                                                                             "classification":  "superseded_ambiguous",
+                                                                             "reason":  "P15.M3 reproduced file and byte counts but not aggregate SHA-256 under the later explicit byte-stream contract"
+                                                                         },
+                                        "P15_M1D_candidate_integrity_v2":  {
+                                                                               "algorithm":  "agent-platform-git-tree-sha256-v2",
+                                                                               "file_count":  6684,
+                                                                               "byte_count":  148145642,
+                                                                               "SHA256":  "fae505873168de748dd966972e2c20cbea15ac2cfc0ffdc075168ebcf525fa5b",
+                                                                               "classification":  "reproduced_by_v2"
+                                                                           },
+                                        "P15_M1D_payload_integrity_v2":  {
+                                                                             "algorithm":  "agent-platform-git-tree-sha256-v2",
+                                                                             "file_count":  6681,
+                                                                             "byte_count":  145406255,
+                                                                             "SHA256":  "3470f71442bd0dd0ee15a1e70268db7cfe03d787adf58ba16697952c30e0d073",
+                                                                             "classification":  "reproduced_by_v2"
+                                                                         }
+                                    },
     "superseded_precommit_candidate_integrity":  {
                                                      "file_count":  6684,
                                                      "byte_count":  148145643,
