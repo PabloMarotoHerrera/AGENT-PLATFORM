@@ -69,21 +69,26 @@ Candidate posture from `AGENT_PLATFORM_UPSTREAM_BASELINE.json`:
 
 ## Portable Integrity
 
-P15.M2 uses committed Git blobs and the P15.M1C final identity. Checkout and pre-commit digests are historical only.
+P15.M2A re-attests P15.M2 against the committed P15.M1D canonical integrity authority. The current downstream authority is `agent-platform-git-tree-sha256-v2` as implemented by `10_scripts/governance/pepper_baseline_integrity.py`.
 
-| Scope | Files | Bytes | SHA-256 | Status |
-| --- | ---: | ---: | --- | --- |
-| Candidate below `2_products/pepper-agent` excluding `AGENT_PLATFORM_UPSTREAM_BASELINE.json` | 6684 | 148145642 | `27b457b65d8a89bb5c39041bc43b82e6f46c4924c1554f5a1c0fcc7682c19bf7` | matched P15.M1C final record and Git object file/byte count |
-| Included and transformed upstream payload rows only | 6681 | 145406255 | `03295db99b2204ac962619251289e145432fe32946ee7efad6201dd0742e4ce6` | matched P15.M1C final record and Git object file/byte count |
-| Baseline record `AGENT_PLATFORM_UPSTREAM_BASELINE.json` | 1 | 20517 | `92b15fb828d105dbd144599c0a49fcef454646667b53b6de227c9716e1aa234c` | exact committed content hash matched |
+| Scope | Algorithm | Files | Bytes | SHA-256 | Status |
+| --- | --- | ---: | ---: | --- | --- |
+| Candidate below `2_products/pepper-agent` excluding `AGENT_PLATFORM_UPSTREAM_BASELINE.json` | `agent-platform-git-tree-sha256-v2` | 6684 | 148145642 | `fae505873168de748dd966972e2c20cbea15ac2cfc0ffdc075168ebcf525fa5b` | matched canonical utility output from committed Git blobs |
+| Included and transformed upstream payload rows only | `agent-platform-git-tree-sha256-v2` | 6681 | 145406255 | `3470f71442bd0dd0ee15a1e70268db7cfe03d787adf58ba16697952c30e0d073` | matched canonical utility output from committed Git blobs |
+| Baseline record `AGENT_PLATFORM_UPSTREAM_BASELINE.json` | `sha256-git-blob-v1` | not_applicable | 25333 | `5aa7d9582e8036e66a9a81be772aa75b3cb930a978c0128bc0a6b2585baa0fea` | exact committed content hash matched |
 
-Superseded values not used for P15.M2 authority:
+Superseded historical values retained as evidence only:
 
-| Value | Reason |
-| --- | --- |
-| `3c6f155eba3f01ad4ee924ba62c462de1cdb10fdc1f3099daa8ed1d82a9b912d` | checkout realization digest |
-| `511fffdc2f575506cdcba49b63de3324519b201a6146d680e8a6513f5b5551a6` | checkout realization digest |
-| `0eec7b33f97ba13f66b59d1b2cf3e1a66a26c7d90bfbd0ee5d88a8587cefc727` | superseded P15.M1B pre-commit projection |
+| Value | Classification | Reason |
+| --- | --- | --- |
+| `27b457b65d8a89bb5c39041bc43b82e6f46c4924c1554f5a1c0fcc7682c19bf7` | `superseded_ambiguous` | P15.M1C candidate aggregate before the executable v2 record-stream contract. |
+| `03295db99b2204ac962619251289e145432fe32946ee7efad6201dd0742e4ce6` | `superseded_ambiguous` | P15.M1C payload aggregate before the executable v2 record-stream contract. |
+| `92b15fb828d105dbd144599c0a49fcef454646667b53b6de227c9716e1aa234c` | `superseded_baseline_record` | Pre-P15.M1D baseline-record blob hash before canonical metadata update. |
+| `3c6f155eba3f01ad4ee924ba62c462de1cdb10fdc1f3099daa8ed1d82a9b912d` | `explained_legacy_variant` | checkout realization digest. |
+| `511fffdc2f575506cdcba49b63de3324519b201a6146d680e8a6513f5b5551a6` | `explained_legacy_variant` | checkout realization digest. |
+| `0eec7b33f97ba13f66b59d1b2cf3e1a66a26c7d90bfbd0ee5d88a8587cefc727` | `explained_legacy_variant` | superseded P15.M1B pre-commit projection. |
+
+Dedicated re-attestation record: `0_architecture/governance/agent_platform_hermes_0_19_license_notice_v2_reattestation.md`.
 
 ## Raw Source Evidence
 
@@ -407,8 +412,10 @@ The ignored source root may be removed by the human if no longer needed for evid
 | --- | --- |
 | Candidate integrity files | `6684` |
 | Candidate integrity bytes | `148145642` |
-| Candidate integrity SHA-256 | `27b457b65d8a89bb5c39041bc43b82e6f46c4924c1554f5a1c0fcc7682c19bf7` |
-| Baseline record SHA-256 | `92b15fb828d105dbd144599c0a49fcef454646667b53b6de227c9716e1aa234c` |
+| Candidate integrity algorithm | `agent-platform-git-tree-sha256-v2` |
+| Candidate integrity SHA-256 | `fae505873168de748dd966972e2c20cbea15ac2cfc0ffdc075168ebcf525fa5b` |
+| Payload integrity SHA-256 | `3470f71442bd0dd0ee15a1e70268db7cfe03d787adf58ba16697952c30e0d073` |
+| Baseline record SHA-256 | `5aa7d9582e8036e66a9a81be772aa75b3cb930a978c0128bc0a6b2585baa0fea` |
 | Candidate digest before equals after | `true` |
 | Baseline record hash before equals after | `true` |
 | Product changes | `0` |
@@ -419,11 +426,15 @@ The ignored source root may be removed by the human if no longer needed for evid
 | TSV exact column count | `true` |
 | Markdown trailing whitespace | `0` |
 | TSV trailing whitespace | `0` |
+| P15.M2A re-attestation record | `0_architecture/governance/agent_platform_hermes_0_19_license_notice_v2_reattestation.md` |
+| P15.M2A verdict | `hermes_0_19_license_notice_reconciliation_v2_reattested_with_constraints` |
 | Authorized candidate files | `2` |
 | Unexpected candidate files | `0` |
 
 ## Sequencing
 
-P15.M2 is ready for human review and commit. P15.M3 and P15.M4 may continue in parallel. Product notice application remains dependency-gated. P15.M5 remains gated. Public binary distribution, public container publication, live OAuth, provider calls and inference remain unauthorized.
+P15.M2A is ready for human review and commit. P15.M3 may restart using V2. P15.M4 may proceed using V2. Product notice application remains dependency-gated. P15.M5 remains gated pending parallel-lane integration. Public binary distribution, public container publication, live OAuth, provider calls and inference remain unauthorized.
+
+P15.M2A verdict: `hermes_0_19_license_notice_reconciliation_v2_reattested_with_constraints`.
 
 Final verdict: `hermes_0_19_license_notice_reconciliation_ready_with_constraints`
