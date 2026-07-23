@@ -4,6 +4,35 @@ Status: P15.M1B canonical Git storage correction ready with P15.M1C post-commit 
 
 Final verdict: `hermes_0_19_product_baseline_portable_integrity_ready`
 
+## P15.M1D Canonical Integrity Addendum
+
+P15.M1D resolves the aggregate-algorithm ambiguity discovered by P15.M3. The P15.M1B and P15.M1C file counts and byte counts remain valid, but the P15.M1C aggregate SHA-256 values are not downstream authority.
+
+Only this algorithm is authoritative for downstream gates:
+
+```text
+agent-platform-git-tree-sha256-v2
+```
+
+The executable authority is:
+
+```text
+10_scripts/governance/pepper_baseline_integrity.py
+```
+
+Canonical v2 identities:
+
+| Scope | Files | Bytes | SHA-256 |
+| --- | ---: | ---: | --- |
+| Candidate excluding `AGENT_PLATFORM_UPSTREAM_BASELINE.json` | 6684 | 148145642 | `fae505873168de748dd966972e2c20cbea15ac2cfc0ffdc075168ebcf525fa5b` |
+| Included/transformed payload | 6681 | 145406255 | `3470f71442bd0dd0ee15a1e70268db7cfe03d787adf58ba16697952c30e0d073` |
+| Pre-correction baseline record | not_applicable | 20517 | `92b15fb828d105dbd144599c0a49fcef454646667b53b6de227c9716e1aa234c` |
+| P15.M1D candidate baseline record | not_applicable | 25333 | `5aa7d9582e8036e66a9a81be772aa75b3cb930a978c0128bc0a6b2585baa0fea` |
+
+The old P15.M1C candidate digest `27b457b65d8a89bb5c39041bc43b82e6f46c4924c1554f5a1c0fcc7682c19bf7` and payload digest `03295db99b2204ac962619251289e145432fe32946ee7efad6201dd0742e4ce6` are `superseded_ambiguous`. They are retained only as historical evidence that lacked a canonical executable byte-stream contract. The pre-commit and checkout-realization digests remain `explained_legacy_variant` evidence.
+
+Downstream lanes must re-attest with v2 after the P15.M1D commit. P15.M17 owns future use of this utility in the governed upstream synchronization engine.
+
 P15.M1C addendum verdict: `hermes_0_19_product_baseline_committed_integrity_finalized`
 
 ## Ticket Authority

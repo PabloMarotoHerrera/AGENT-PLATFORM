@@ -4,6 +4,45 @@ Status: P15.M1 new editable product baseline ready with constraints.
 
 Final verdict: `hermes_0_19_product_baseline_ready_with_constraints`
 
+## P15.M1D Canonical Integrity Addendum
+
+P15.M1D supersedes the ambiguous P15.M1C aggregate algorithm labels for downstream gates. The only downstream aggregate authority is now:
+
+```yaml
+candidate_integrity_v2:
+  algorithm: agent-platform-git-tree-sha256-v2
+  implementation: 10_scripts/governance/pepper_baseline_integrity.py
+  path_basis: product-relative UTF-8 Git path bytes
+  path_sort: unsigned raw path-byte lexical ordering
+  content_basis: exact committed Git blob bytes
+  files: 6684
+  bytes: 148145642
+  SHA256: fae505873168de748dd966972e2c20cbea15ac2cfc0ffdc075168ebcf525fa5b
+
+payload_integrity_v2:
+  algorithm: agent-platform-git-tree-sha256-v2
+  implementation: 10_scripts/governance/pepper_baseline_integrity.py
+  files: 6681
+  bytes: 145406255
+  SHA256: 3470f71442bd0dd0ee15a1e70268db7cfe03d787adf58ba16697952c30e0d073
+
+baseline_record_integrity:
+  algorithm: sha256-git-blob-v1
+  old_SHA256: 92b15fb828d105dbd144599c0a49fcef454646667b53b6de227c9716e1aa234c
+  new_candidate_SHA256_recorded_externally: 5aa7d9582e8036e66a9a81be772aa75b3cb930a978c0128bc0a6b2585baa0fea
+```
+
+The previously recorded P15.M1C aggregate values remain historical evidence only:
+
+| Digest | Classification | Reason |
+| --- | --- | --- |
+| `27b457b65d8a89bb5c39041bc43b82e6f46c4924c1554f5a1c0fcc7682c19bf7` | `superseded_ambiguous` | P15.M3 reproduced candidate file and byte counts but not the aggregate SHA-256 under the explicit v2 record stream. |
+| `03295db99b2204ac962619251289e145432fe32946ee7efad6201dd0742e4ce6` | `superseded_ambiguous` | P15.M3 reproduced payload file and byte counts but not the aggregate SHA-256 under the explicit v2 record stream. |
+| `0eec7b33f97ba13f66b59d1b2cf3e1a66a26c7d90bfbd0ee5d88a8587cefc727` | `explained_legacy_variant` | Pre-commit projection before final Git LF normalization of the header-only modification register. |
+| `3c6f155eba3f01ad4ee924ba62c462de1cdb10fdc1f3099daa8ed1d82a9b912d` | `explained_legacy_variant` | Historical checkout-realization digest, not committed Git-blob authority. |
+
+Downstream P15.M2, P15.M3 and P15.M4 re-attestation must use `agent-platform-git-tree-sha256-v2` and must verify the committed baseline-record blob equals the externally recorded new candidate SHA-256 after P15.M1D is committed. P15.M17 owns future governed update-planner use or revision of this integrity algorithm.
+
 ## Ticket Authority
 
 P15.M1 creates a separate tracked editable Pepper product baseline derived from the exact locked Hermes Agent 0.19.0 upstream source ratified by P15.M0.
