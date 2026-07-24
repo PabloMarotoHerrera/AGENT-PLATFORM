@@ -244,8 +244,8 @@
                               "algorithm":  "agent-platform-git-tree-sha256-v2",
                               "scope":  "AGENT_PLATFORM_IMPORT_MANIFEST.tsv rows classified as included_byte_exact, included_canonical_text_lf, or transformed_by_canonical_compliance_rule; excludes AGENT_PLATFORM metadata",
                               "file_count":  6681,
-                              "byte_count":  145406255,
-                              "SHA256":  "3470f71442bd0dd0ee15a1e70268db7cfe03d787adf58ba16697952c30e0d073",
+                              "byte_count":  145409765,
+                              "SHA256":  "56a538886ac9cc98050be853f173e631e8f568495a6c5aeef27a2128981524e7",
                               "authoritative":  true,
                               "portable_across_worktrees":  true
                           },
@@ -258,9 +258,9 @@
                                 "excluded_paths":  [
                                                        "AGENT_PLATFORM_UPSTREAM_BASELINE.json"
                                                    ],
-                                "file_count":  6684,
-                                "byte_count":  148145642,
-                                "SHA256":  "fae505873168de748dd966972e2c20cbea15ac2cfc0ffdc075168ebcf525fa5b",
+                                "file_count":  6703,
+                                "byte_count":  148235965,
+                                "SHA256":  "1897e20d93858c7125ad5ddee6ac5e56fe808b154c6e786ce42a204730a14146",
                                 "authoritative":  true,
                                 "portable_across_worktrees":  true
                             },
@@ -269,7 +269,11 @@
                                       "scope":  "AGENT_PLATFORM_UPSTREAM_BASELINE.json only",
                                       "stored_inside_record":  false,
                                       "pre_correction_SHA256":  "92b15fb828d105dbd144599c0a49fcef454646667b53b6de227c9716e1aa234c",
-                                      "new_candidate_SHA256_recorded_externally":  true
+                                      "new_candidate_SHA256_recorded_externally":  true,
+                                      "pre_P15_M6R_byte_count":  25333,
+                                      "pre_P15_M6R_SHA256":  "5aa7d9582e8036e66a9a81be772aa75b3cb930a978c0128bc0a6b2585baa0fea",
+                                      "post_P15_M6R_SHA256_recorded_externally":  true,
+                                      "post_P15_M6R_external_record":  "0_architecture/governance/agent_platform_hermes_0_19_pepper_product_identity_post_commit_integrity_closure.md"
                                   },
     "superseded_integrity_evidence":  {
                                         "P15_M1C_candidate_integrity_v1":  {
@@ -296,13 +300,29 @@
                                                                                "classification":  "reproduced_by_v2"
                                                                            },
                                         "P15_M1D_payload_integrity_v2":  {
-                                                                             "algorithm":  "agent-platform-git-tree-sha256-v2",
-                                                                             "file_count":  6681,
-                                                                             "byte_count":  145406255,
-                                                                             "SHA256":  "3470f71442bd0dd0ee15a1e70268db7cfe03d787adf58ba16697952c30e0d073",
-                                                                             "classification":  "reproduced_by_v2"
-                                                                         }
-                                    },
+                                                                              "algorithm":  "agent-platform-git-tree-sha256-v2",
+                                                                              "file_count":  6681,
+                                                                              "byte_count":  145406255,
+                                                                              "SHA256":  "3470f71442bd0dd0ee15a1e70268db7cfe03d787adf58ba16697952c30e0d073",
+                                                                              "classification":  "reproduced_by_v2"
+                                                                          },
+                                        "P15_M6_pre_register_repair_candidate_integrity_v2":  {
+                                                                                                  "algorithm":  "agent-platform-git-tree-sha256-v2",
+                                                                                                  "file_count":  6703,
+                                                                                                  "byte_count":  148235965,
+                                                                                                  "SHA256":  "803fa9a9dfa6b3b27c3f184e44a424d77d66d56fa0a805d4352a4010820866de",
+                                                                                                  "classification":  "superseded_by_P15_M6A_register_metadata_repair",
+                                                                                                  "reason":  "P15.M6A replaced three modification-register hashes that matched working-tree bytes with exact committed Git blob SHA-256 values; no product implementation payload changed."
+                                                                                              },
+                                        "P15_M6_pre_register_repair_payload_integrity_v2":  {
+                                                                                                "algorithm":  "agent-platform-git-tree-sha256-v2",
+                                                                                                "file_count":  6681,
+                                                                                                "byte_count":  145409765,
+                                                                                                "SHA256":  "56a538886ac9cc98050be853f173e631e8f568495a6c5aeef27a2128981524e7",
+                                                                                                "classification":  "reproduced_after_P15_M6A_register_metadata_repair",
+                                                                                                "reason":  "P15.M6A modified only register metadata; payload identity is unchanged from P15.M6."
+                                                                          }
+                                     },
     "superseded_precommit_candidate_integrity":  {
                                                      "file_count":  6684,
                                                      "byte_count":  148145643,
