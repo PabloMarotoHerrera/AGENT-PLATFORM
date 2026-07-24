@@ -103,7 +103,7 @@ The historical V1 product aggregate values remain non-authoritative for P15.M4 d
 
 Hermes Workspace 2.3.0 remains an ignored source-only reference under `4_external/sources/hermes-workspace-v2.3.0`.
 
-Locked Workspace identity consumed from `0_architecture/governance/agent_platform_hermes_0_19_workspace_source_lock.md`:
+Locked Workspace upstream identity consumed from `0_architecture/governance/agent_platform_hermes_0_19_workspace_source_lock.md` and canonicalized by `0_architecture/governance/agent_platform_hermes_workspace_2_3_0_source_integrity_canonicalization.md`:
 
 | Field | Value |
 | --- | --- |
@@ -112,17 +112,26 @@ Locked Workspace identity consumed from `0_architecture/governance/agent_platfor
 | Tag | `v2.3.0` |
 | Tag object SHA | `0218dbafce50fa69ba9ce045e2c8a3f5383bd1db` |
 | Commit | `15fa9cd706f5c04e4db288fb958e21d10fc776da` |
-| Archive SHA-256 | `10119f375ee7632443353fd7d2f1e45ca613caa971123f0f72c3890c8dc3c438` |
-| Tree digest algorithm recorded by source lock | `agent-platform-tree-sha256-v1` |
-| Source-lock tree SHA-256 | `f00b66d6e7dc5bef87602cb026bdf14e593314b9fd242e3e1af48c20704616b9` |
+| Historical ambient archive SHA-256 | `10119f375ee7632443353fd7d2f1e45ca613caa971123f0f72c3890c8dc3c438` |
+| Canonical archive SHA-256 | `12684835e4d0bf3acff0e6e8e044dde7fab3c2fa1ce91c50d9e377a0282c24c6` |
+| Historical source-lock tree algorithm | `agent-platform-tree-sha256-v1` |
+| Historical source-lock tree SHA-256 | `f00b66d6e7dc5bef87602cb026bdf14e593314b9fd242e3e1af48c20704616b9` |
+| Current Git source tree algorithm | `agent-platform-git-source-tree-sha256-v2` |
+| Current Git source tree SHA-256 | `6a16ebca192555e6afa95fe6bcd701c2d50e57440de4766cdf58e07a2054c394` |
+| Current materialized source tree algorithm | `agent-platform-materialized-source-tree-sha256-v1` |
+| Current materialized source tree SHA-256 | `6a16ebca192555e6afa95fe6bcd701c2d50e57440de4766cdf58e07a2054c394` |
 | Regular files | 1057 |
 | Directories | 142 |
-| Regular-file bytes | 100799318 |
+| Regular-file bytes | 100314437 |
 | Symlinks | 0 |
 | Reparse points | 0 |
 | Nested Git entries | 0 |
+| Source manifest | `0_architecture/governance/agent_platform_hermes_workspace_2_3_0_source_manifest.tsv` |
+| Source manifest rows | 1057 |
+| Source manifest columns | 12 |
+| Source manifest SHA-256 | `dfdbbd8e6eb1595661fec1dadb4392b6026863cfefbc66716795d07c572525ec` |
 
-P15.M4 current worktree evidence:
+P15.M5A current worktree evidence:
 
 | Check | Result |
 | --- | --- |
@@ -131,10 +140,10 @@ P15.M4 current worktree evidence:
 | Tracked files under Workspace root | `0` |
 | Visible untracked files under Workspace root | `0` |
 | `package.json` identity | `name=hermes-workspace`, `version=2.3.0`, `private=true` |
-| Current count scan | `files=1057`, `dirs=142`, `bytes=100799318` |
-| Current exploratory digest variants matching source-lock V1 tree SHA | `0` |
+| Current canonical count scan | `files=1057`, `dirs=142`, `bytes=100314437` |
+| Git-source/materialized-source comparison | `match` |
 
-The exact historical `agent-platform-tree-sha256-v1` source-tree implementation is not committed in this repository. P15.M4 therefore does not claim a fresh V1 tree digest recomputation. P15.M4 relies on the committed source-lock tree SHA as prior source identity evidence and on current exact count, ignore, package and acquisition evidence for local read-only reference use. Because Workspace is not imported, promoted, executed or adopted by P15.M4, this is not a product-integrity blocker.
+The exact historical `agent-platform-tree-sha256-v1` source-tree implementation is not committed in this repository. P15.M5A therefore supersedes that value for current Workspace 2.3.0 source-integrity authority. This does not change the P15.M4 productization decision: Workspace is not imported, promoted, executed, deployed or adopted, and remains ignored reference-only source.
 
 ## Static Methodology
 

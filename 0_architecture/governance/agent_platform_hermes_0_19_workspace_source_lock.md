@@ -18,6 +18,28 @@ Task-specific source persistence is binding:
 - no external source was force-added;
 - this governance record is the only tracked P15.U0 candidate.
 
+## P15.M5A Current Workspace Source-Integrity Authority
+
+P15.M5A supersedes the Workspace 2.3.0 `agent-platform-tree-sha256-v1` tree-integrity value recorded by P15.U0. The historical value is retained below as prior source-lock evidence, but it is not current authority because the exact V1 implementation is not committed in this repository.
+
+Current Workspace 2.3.0 source authority is defined by:
+
+| Artifact | Current authority |
+| --- | --- |
+| Canonicalization record | `0_architecture/governance/agent_platform_hermes_workspace_2_3_0_source_integrity_canonicalization.md` |
+| Canonical utility | `10_scripts/governance/external_source_tree_integrity.py` |
+| Dedicated tests | `12_tests/governance/test_external_source_tree_integrity.py` |
+| Per-file manifest | `0_architecture/governance/agent_platform_hermes_workspace_2_3_0_source_manifest.tsv` |
+
+Current canonical Workspace 2.3.0 integrity:
+
+| Scope | Algorithm | Files | Directories | Bytes | SHA-256 |
+| --- | --- | ---: | ---: | ---: | --- |
+| Git source tree | `agent-platform-git-source-tree-sha256-v2` | 1057 | 142 | 100314437 | `6a16ebca192555e6afa95fe6bcd701c2d50e57440de4766cdf58e07a2054c394` |
+| Materialized source tree | `agent-platform-materialized-source-tree-sha256-v1` | 1057 | 142 | 100314437 | `6a16ebca192555e6afa95fe6bcd701c2d50e57440de4766cdf58e07a2054c394` |
+
+Canonical materialization uses command-scoped, non-mutating EOL settings for Git archive export: `git -c core.autocrlf=false -c core.eol=lf archive`. Ambient Git archive export bytes remain historical/superseded evidence only. The current effective ignore rule for the Workspace source root is `.gitignore:16:4_external/sources/`.
+
 ## Dynamic Start
 
 - Branch: `p15.u-hermes-adoption-assessment`
@@ -54,7 +76,7 @@ Persistence classification:
 - Unexpected visible untracked task candidates: `0`
 - Missing local source roots: `0`
 
-P15.U must run in this worktree while the verified local source roots remain present. Future worktrees must reacquire these sources from the exact locked identities and verify the recorded tree hashes.
+P15.U must run in this worktree while the verified local source roots remain present. Future worktrees must reacquire these sources from the exact locked identities and verify the recorded tree hashes. For Workspace 2.3.0, current verification authority is the P15.M5A Git-source and materialized-source canonical integrity pair above, not the historical V1 digest.
 
 ## Acquisition Method
 
@@ -152,8 +174,10 @@ Script-like inventory:
 
 Reuse status:
 
-- Provisional acquisition reused unchanged: `true`
-- Current tree digest matches recorded digest: `true`
+- Provisional P15.U0 acquisition reused as current authority: `false`
+- P15.M5A reacquisition from exact upstream identity completed: `true`
+- Historical `agent-platform-tree-sha256-v1` digest preserved as prior evidence only: `true`
+- Current Git-source and materialized-source canonical identities match: `true`
 
 Identity:
 
@@ -238,8 +262,10 @@ Script-like inventory:
 
 Reuse status:
 
-- Provisional acquisition reused unchanged: `true`
-- Current tree digest matches recorded digest: `true`
+- Provisional P15.U0 acquisition reused as current authority: `false`
+- P15.M5A reacquisition from exact upstream identity completed: `true`
+- Historical `agent-platform-tree-sha256-v1` digest preserved as prior evidence only: `true`
+- Current Git-source and materialized-source canonical identities match: `true`
 
 Identity:
 
@@ -257,15 +283,26 @@ Identity:
 Archive and tree integrity:
 
 - Archive format: `tar`
-- Archive byte count: `101693440`
-- Archive SHA-256: `10119f375ee7632443353fd7d2f1e45ca613caa971123f0f72c3890c8dc3c438`
+- Historical ambient archive byte count: `101693440`
+- Historical ambient archive SHA-256: `10119f375ee7632443353fd7d2f1e45ca613caa971123f0f72c3890c8dc3c438`
+- Historical ambient archive retained as current authority: `false`
+- Canonical archive byte count: `101201920`
+- Canonical archive SHA-256: `12684835e4d0bf3acff0e6e8e044dde7fab3c2fa1ce91c50d9e377a0282c24c6`
 - Archive created from commit: `15fa9cd706f5c04e4db288fb958e21d10fc776da`
 - Archive retained in repository: `false`
-- Tree digest algorithm: `agent-platform-tree-sha256-v1`
-- Tree SHA-256: `f00b66d6e7dc5bef87602cb026bdf14e593314b9fd242e3e1af48c20704616b9`
-- Regular file count: `1057`
-- Directory count: `142`
-- Total regular-file bytes: `100799318`
+- Historical tree digest algorithm: `agent-platform-tree-sha256-v1`
+- Historical tree SHA-256: `f00b66d6e7dc5bef87602cb026bdf14e593314b9fd242e3e1af48c20704616b9`
+- Historical tree digest current authority: `false`
+- Current Git source tree algorithm: `agent-platform-git-source-tree-sha256-v2`
+- Current Git source tree SHA-256: `6a16ebca192555e6afa95fe6bcd701c2d50e57440de4766cdf58e07a2054c394`
+- Current materialized source tree algorithm: `agent-platform-materialized-source-tree-sha256-v1`
+- Current materialized source tree SHA-256: `6a16ebca192555e6afa95fe6bcd701c2d50e57440de4766cdf58e07a2054c394`
+- Current regular file count: `1057`
+- Current directory count: `142`
+- Current total regular-file bytes: `100314437`
+- Current source manifest rows: `1057`
+- Current source manifest columns: `12`
+- Current source manifest SHA-256: `dfdbbd8e6eb1595661fec1dadb4392b6026863cfefbc66716795d07c572525ec`
 - Zero-byte file count: `0`
 - Symlink count: `0`
 - Reparse-point count: `0`
