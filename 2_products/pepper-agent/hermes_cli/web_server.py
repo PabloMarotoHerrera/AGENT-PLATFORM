@@ -267,8 +267,24 @@ app = FastAPI(title="Hermes Agent", version=__version__, lifespan=_lifespan)
 
 # Memory-provider OAuth connect routes live in the memory layer, not here.
 from hermes_cli.memory_oauth import router as _memory_oauth_router  # noqa: E402
+from hermes_cli.agent_platform.product_config import (  # noqa: E402
+    ProductConfiguration,
+    load_product_configuration,
+)
 
 app.include_router(_memory_oauth_router)
+
+
+@app.get(
+    "/api/agent-platform/product-configuration",
+    response_model=ProductConfiguration,
+    summary="Get validated Pepper product configuration",
+    tags=["agent-platform"],
+)
+def get_agent_platform_product_configuration() -> ProductConfiguration:
+    """Return deterministic metadata without consulting user or provider state."""
+
+    return load_product_configuration()
 
 # ---------------------------------------------------------------------------
 # Session token for protecting sensitive endpoints (reveal).
