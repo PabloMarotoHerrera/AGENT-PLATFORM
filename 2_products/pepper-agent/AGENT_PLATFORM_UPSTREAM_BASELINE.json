@@ -240,7 +240,7 @@
                             },
     "payload_integrity":  {
                                "representation":  "canonical_committed_payload",
-                               "status":  "committed_post_P15_M7",
+                               "status":  "committed_post_P15_M8",
                                "content_basis":  "exact committed Git blob bytes for included and transformed upstream payload rows",
                                "algorithm":  "agent-platform-git-tree-sha256-v2",
                                "scope":  "current_HEAD_blobs_selected_by_committed_import_manifest_destination_paths",
@@ -251,7 +251,7 @@
                                 "portable_across_worktrees":  true
                             },
     "candidate_integrity":  {
-                                "status":  "committed_post_P15_M7",
+                                "status":  "committed_post_P15_M8",
                                 "representation":  "canonical_committed_candidate_except_baseline_record",
                                 "content_basis":  "exact HEAD Git blob bytes",
                                 "algorithm":  "agent-platform-git-tree-sha256-v2",
@@ -259,12 +259,22 @@
                                 "excluded_paths":  [
                                                        "AGENT_PLATFORM_UPSTREAM_BASELINE.json"
                                                    ],
-                                "file_count":  6739,
-                                "byte_count":  148980102,
-                                "SHA256":  "f1ae63052455e39e4e259e432075de601123f0f0d538d492ac15acae4cda1d39",
+                                "file_count":  6768,
+                                "byte_count":  149234329,
+                                "SHA256":  "f0dceedbe9ae1b6b0738c00b0d643678d8bc5acd2b9766729f7adcb238c08e59",
                                 "authoritative":  true,
                                 "portable_across_worktrees":  true
                             },
+    "pre_P15_M8_candidate_integrity":  {
+                                             "file_count":  6739,
+                                             "byte_count":  148980102,
+                                             "SHA256":  "f1ae63052455e39e4e259e432075de601123f0f0d538d492ac15acae4cda1d39"
+                                         },
+    "pre_P15_M8_payload_integrity":  {
+                                           "file_count":  6681,
+                                           "byte_count":  145409765,
+                                           "SHA256":  "56a538886ac9cc98050be853f173e631e8f568495a6c5aeef27a2128981524e7"
+                                       },
     "pre_P15_M7_candidate_integrity":  {
                                              "file_count":  6703,
                                              "byte_count":  148235965,
@@ -306,6 +316,36 @@
                                   "tool_execution":  false,
                                   "MCP_execution":  false
                               },
+    "provider_credential_state":  {
+                                      "owner_ticket":  "P15.M8",
+                                      "P15_M8_commit":  "a1d189bedb8b69df9307b52865b75697557dc7cc",
+                                      "P15_M8A_commit":  "61c072eb0573b5bf07b169aaaf01fdd02ff385dc",
+                                      "contract_schema_version":  1,
+                                      "source_files":  17,
+                                      "test_files":  12,
+                                      "modification_rows":  29,
+                                      "provider_credential_rows":  11,
+                                      "provider_runtime_rows":  8,
+                                      "provider_worker_rows":  10,
+                                      "application_manifest":  "0_architecture/governance/agent_platform_hermes_0_19_openai_codex_provider_credential_manifest.tsv",
+                                      "application_manifest_rows":  29,
+                                      "application_manifest_columns":  23,
+                                      "application_manifest_bytes":  28938,
+                                      "application_manifest_SHA256":  "71a3fcf959f31eba1f1a4a6f5107b5f87ddaa9d85a9db0c8bded587f9130985a",
+                                      "contract_capability_state":  "implemented_dry_run_boundary_ready",
+                                      "real_credential_configuration":  false,
+                                      "credential_access":  false,
+                                      "OAuth_execution":  false,
+                                      "provider_calls":  0,
+                                      "model_list_calls":  0,
+                                      "usage_calls":  0,
+                                      "inference_calls":  0,
+                                      "worker_launch":  false,
+                                      "agent_launch":  false,
+                                      "tool_execution":  false,
+                                      "MCP_execution":  false,
+                                      "live_OAuth_and_first_inference_owner":  "P15.M11"
+                                  },
     "baseline_record_integrity":  {
                                        "algorithm":  "sha256-git-blob-v1",
                                        "scope":  "AGENT_PLATFORM_UPSTREAM_BASELINE.json only",
@@ -314,9 +354,13 @@
                                         "new_candidate_SHA256_recorded_externally":  true,
                                         "pre_P15_M6R_byte_count":  25333,
                                         "pre_P15_M6R_SHA256":  "5aa7d9582e8036e66a9a81be772aa75b3cb930a978c0128bc0a6b2585baa0fea",
-                                        "post_P15_M6R_SHA256_recorded_externally":  true,
-                                        "post_P15_M6R_external_record":  "0_architecture/governance/agent_platform_hermes_0_19_pepper_product_identity_post_commit_integrity_closure.md"
-                                  },
+                                         "post_P15_M6R_SHA256_recorded_externally":  true,
+                                         "post_P15_M6R_external_record":  "0_architecture/governance/agent_platform_hermes_0_19_pepper_product_identity_post_commit_integrity_closure.md",
+                                         "pre_P15_M8R_byte_count":  30860,
+                                         "pre_P15_M8R_SHA256":  "ce0c1875182b9aae46448102ed285f1cf9343b96724cf522a0503fc9f3873719",
+                                         "post_P15_M8R_SHA256_recorded_externally":  true,
+                                         "post_P15_M8R_external_record":  "0_architecture/governance/agent_platform_hermes_0_19_openai_codex_provider_credential_post_commit_integrity_closure.md"
+                                   },
     "superseded_integrity_evidence":  {
                                         "P15_M1C_candidate_integrity_v1":  {
                                                                                "algorithm":  "agent-platform-git-tree-sha256-v1-excluding-baseline-record",
