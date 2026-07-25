@@ -347,6 +347,24 @@ Specific P15.M6 normalization check:
 - unverified records: `0`;
 - live OAuth claim violations: `0`.
 
+## Application Manifest Committed Identity Reconciliation
+
+```yaml
+manifest_path: 0_architecture/governance/agent_platform_hermes_0_19_openai_codex_provider_credential_manifest.tsv
+manifest_commit: a1d189bedb8b69df9307b52865b75697557dc7cc
+manifest_content_basis: exact_HEAD_Git_blob_bytes
+manifest_rows: 29
+manifest_columns: 23
+manifest_bytes: 28938
+manifest_SHA256: 71a3fcf959f31eba1f1a4a6f5107b5f87ddaa9d85a9db0c8bded587f9130985a
+manifest_register_mapping_mismatches: 0
+manifest_HEAD_blob_hash_mismatches: 0
+reconciliation_owner: P15.M8A
+reconciliation_status: committed_manifest_identity_recorded
+```
+
+The manifest content was not modified by P15.M8A. No product implementation, tests or register rows were modified. No OAuth or credential operation occurred. The original P15.M8 verdict remains unchanged and still means implementation and dry-run readiness only. P15.M11 remains the owner of live OAuth and first inference. P15.M8R must validate the current amended governance record rather than requiring its blob to equal the original P15.M8 commit.
+
 No P15.M8 register rows exist for:
 
 - `0_architecture/**` governance records;
