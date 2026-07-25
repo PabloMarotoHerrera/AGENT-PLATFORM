@@ -243,7 +243,7 @@ function resolveIcon(name: string): ComponentType<{ className?: string }> {
 
 function buildNavItems(
   builtIn: NavItem[],
-  manifests: PluginManifest[],
+  manifests: readonly PluginManifest[],
 ): NavItem[] {
   const items = [...builtIn];
 
@@ -279,7 +279,7 @@ function buildNavItems(
 /** Split merged nav into built-in sidebar entries vs plugin tabs, preserving plugin order hints. */
 function partitionSidebarNav(
   builtIn: NavItem[],
-  manifests: PluginManifest[],
+  manifests: readonly PluginManifest[],
 ): { coreItems: NavItem[]; pluginItems: NavItem[] } {
   const merged = buildNavItems(builtIn, manifests);
   const builtinPaths = new Set(builtIn.map((i) => i.path));
@@ -294,7 +294,7 @@ function partitionSidebarNav(
 
 function buildRoutes(
   builtinRoutes: Record<string, ComponentType>,
-  manifests: PluginManifest[],
+  manifests: readonly PluginManifest[],
 ): Array<{
   key: string;
   path: string;
