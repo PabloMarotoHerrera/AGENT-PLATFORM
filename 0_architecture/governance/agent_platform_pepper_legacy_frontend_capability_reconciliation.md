@@ -1,14 +1,14 @@
 # P15.C3A - Pepper Legacy Frontend Capability Reconciliation
 
-Status: P15.C3A candidate prepared for human review.
+Status: P15.C3A committed, pushed and fully validated.
 
-Final verdict: `pepper_legacy_frontend_capability_reconciled_product_ui_inert`
+Final verdict: `hermes_0_19_pepper_legacy_frontend_capabilities_reconciled_with_disabled_activation`
 
 ## Authority
 
-P15.C3A forward-ports the accepted P13 frontend presentation surfaces from the legacy Hermes product into canonical Pepper frontend source only. The committed Pepper product configuration remains disabled: `agent_platform.product_ui` is disabled and `extension_modules` remains empty, so the compiled descriptors resolve zero routes and zero navigation entries.
+P15.C3A forward-ports the accepted P13 frontend presentation surfaces from the retained Hermes legacy product into canonical Pepper frontend source only. The committed Pepper product configuration remains disabled: `agent_platform.product_ui` is disabled and `extension_modules` is empty, so the compiled descriptors resolve zero routes and zero navigation entries.
 
-No backend, gateway, plugin, cron, provider, OAuth, worker, package, lockfile, Docker, Graphify, staging, commit or push action is part of this candidate.
+No backend, gateway, plugin, cron, provider, OAuth, worker, package, lockfile, Docker, Graphify, staging, commit or push action was performed by the agent for this candidate. Frontend dependency installation occurred only in a temporary external validation workspace and left no repository dependency or build residue.
 
 ## Source And Product Context
 
@@ -17,8 +17,8 @@ No backend, gateway, plugin, cron, provider, OAuth, worker, package, lockfile, D
 | Canonical product | `2_products/pepper-agent` |
 | Pepper upstream version | `Hermes Agent 0.19.0` |
 | Pepper upstream commit | `3ef6bbd201263d354fd83ec55b3c306ded2eb72a` |
-| Legacy semantic source | `2_products/hermes-agent/web/src/agent-platform` |
-| Legacy upstream version | `Hermes Agent 0.18.2` |
+| Retained semantic source | `2_products/hermes-agent/web/src/agent-platform` |
+| Retained source upstream version | `Hermes Agent 0.18.2` |
 | Activation state | Product UI disabled, no selected extension modules |
 
 ## Forward-Ported Surfaces
@@ -27,34 +27,36 @@ No backend, gateway, plugin, cron, provider, OAuth, worker, package, lockfile, D
 | --- | --- | --- |
 | Runtime Overview | `web/src/agent-platform/runtime-overview/` | Read-only `/api/status` projection through bounded parser |
 | Projects and Tickets | `web/src/agent-platform/projects-tickets/` | Read-only Hermes Kanban board/task projection with exact identity validation |
-| Approval Inbox | `web/src/agent-platform/approval-inbox/` | Deliberately unavailable production HTTP source; no approval/rejection action |
+| Approval Inbox | `web/src/agent-platform/approval-inbox/` | Deliberately unavailable production HTTP source; no approval or rejection action |
 | Execution Inspector | `web/src/agent-platform/execution-inspector/` | Board/task-qualified Kanban run evidence only; no execution controls |
 | Safe Settings | `web/src/agent-platform/safe-settings/` | Strict read-only product, feature, extension and display preference projection |
 | Extension registry | `web/src/agent-platform/extensions.ts` | Compiles accepted descriptors but resolves none from committed disabled config |
 
 ## Accepted Descriptor Set
 
-| Descriptor ID | Route Pattern | Navigation |
-| --- | --- | --- |
-| `agent_platform.ui.overview` | `/agent-platform/overview` | `Overview` |
-| `agent_platform.ui.projects` | `/agent-platform/projects` | `Projects` |
-| `agent_platform.ui.project_detail` | `/agent-platform/projects/:boardSlug` | none |
-| `agent_platform.ui.ticket_detail` | `/agent-platform/projects/:boardSlug/tickets/:taskId` | none |
-| `agent_platform.ui.approvals` | `/agent-platform/approvals` | `Approvals` |
-| `agent_platform.ui.approval_detail` | `/agent-platform/approvals/:approvalId` | none |
-| `agent_platform.ui.executions` | `/agent-platform/executions` | `Executions` |
-| `agent_platform.ui.execution_detail` | `/agent-platform/executions/:executionId` | none |
-| `agent_platform.ui.settings` | `/agent-platform/settings` | `Settings` |
+| Descriptor | Descriptor ID | Route Pattern | Navigation |
+| --- | --- | --- | --- |
+| Runtime Overview | `agent_platform.ui.overview` | `/agent-platform/overview` | `Overview` |
+| Projects | `agent_platform.ui.projects` | `/agent-platform/projects` | `Projects` |
+| Project Detail | `agent_platform.ui.project_detail` | `/agent-platform/projects/:boardSlug` | none |
+| Ticket Detail | `agent_platform.ui.ticket_detail` | `/agent-platform/projects/:boardSlug/tickets/:taskId` | none |
+| Approval Inbox | `agent_platform.ui.approvals` | `/agent-platform/approvals` | `Approvals` |
+| Approval Detail | `agent_platform.ui.approval_detail` | `/agent-platform/approvals/:approvalId` | none |
+| Execution Inspector | `agent_platform.ui.executions` | `/agent-platform/executions` | `Executions` |
+| Execution Detail | `agent_platform.ui.execution_detail` | `/agent-platform/executions/:executionId` | none |
+| Safe Settings | `agent_platform.ui.settings` | `/agent-platform/settings` | `Settings` |
 
-Expected committed posture remains:
+Committed activation posture:
 
 | Field | Value |
 | --- | ---: |
 | Compiled descriptors | 9 |
 | Selected modules | 0 |
 | Resolved descriptors | 0 |
-| Registered routes | 0 |
-| Registered navigation entries | 0 |
+| Runtime routes | 0 |
+| Navigation items | 0 |
+| Product UI | disabled |
+| Extension modules | `[]` |
 
 ## Boundary Decisions
 
@@ -63,49 +65,152 @@ Expected committed posture remains:
 | Product activation | Product UI remains disabled and routes/navigation stay inert. |
 | Dynamic plugins | `/agent-platform/*` remains protected from plugin manifest claims. |
 | Approval Inbox | No dashboard endpoint was invented and no fallback to Kanban, chat, logs, providers, workers, OAuth or transient prompts was added. |
-| Safe Settings | Legacy write paths were removed for Pepper; theme, font and locale are displayed as trusted read-only catalog facts. |
+| Safe Settings | Pepper exposes trusted settings facts as read-only catalog facts; no setting write authority remains in the P15.C3A surface. |
 | Execution Inspector | Only exact Kanban board/task/run source evidence is projected; API-server runs, cron sessions, logs, PIDs and process telemetry are not fallback sources. |
 | Projects and Tickets | Kanban data is labeled provisional and does not become canonical Project, Ticket, WorkPacket, ApprovalRequest or governed execution authority. |
 
+## Read-Only And Security Boundary
+
+| Boundary | Result |
+| --- | --- |
+| HTTP GET sources | `/api/status`, `/api/plugins/kanban` |
+| HTTP POST | 0 |
+| HTTP PUT | 0 |
+| HTTP PATCH | 0 |
+| HTTP DELETE | 0 |
+| Settings writes | 0 |
+| Approval actions | 0 |
+| Execution actions | 0 |
+| Provider actions | 0 |
+| OAuth actions | 0 |
+| Credential actions | 0 |
+| Worker actions | 0 |
+| Tool actions | 0 |
+| MCP actions | 0 |
+| Sensitive values rendered | 0 |
+| Raw source objects retained | false |
+| Raw errors retained | false |
+
 ## Control Records
 
-| File | Change |
+| File | Accepted evidence |
 | --- | --- |
-| `2_products/pepper-agent/AGENT_PLATFORM_MODIFICATIONS.tsv` | Updated `P15.M6-018` and `P15.M6-019`; added `P15.C3A-001` through `P15.C3A-038`. |
-| `2_products/pepper-agent/AGENT_PLATFORM_IMPORT_MANIFEST.tsv` | Added 40 legacy-source attribution rows for registry, tests and forwarded module files. |
+| `2_products/pepper-agent/AGENT_PLATFORM_MODIFICATIONS.tsv` | `150` total rows; `40` P15.C3A attribution rows; `38` new P15.C3A IDs; `2` updated existing rows; `0` duplicate IDs; `0` duplicate paths; `0` hash mismatches. |
+| `2_products/pepper-agent/AGENT_PLATFORM_IMPORT_MANIFEST.tsv` | `6804` total rows; `40` P15.C3A attribution rows; classification `AGENT_PLATFORM_product_addition`; included in upstream payload `false`; `0` duplicate destinations; `0` hash mismatches. |
 
-## Verification
+## Frontend Validation
 
-| Check | Result |
+Temporary validation workspace:
+
+| Field | Result |
 | --- | --- |
-| `Test-Path -LiteralPath "node_modules"` in `2_products/pepper-agent/web` | `False` |
-| `npm run typecheck` in `2_products/pepper-agent/web` | Blocked: `tsc` is not available because local dependencies are absent |
-| Targeted `npx vitest run ...` | Blocked: cannot resolve `vitest/config`, `@vitejs/plugin-react` or package `vitest` |
-| Modification register validation | `150` rows, `38` new P15.C3A rows, `0` bad column counts, `0` duplicate IDs, `0` duplicate paths, `0` hash mismatches |
-| Import manifest validation | `6804` rows, `40` P15.C3A source attribution rows, `0` bad column counts, `0` source/destination hash mismatches |
-| LF canonical text check | `43` touched files checked, `0` files with CR bytes |
-| `git diff --check` | clean |
-| Safe Settings write/storage/reload grep | clean for forwarded Safe Settings module |
-| Approval/Execution source-text test grep | clean for forwarded Approval Inbox and Execution Inspector modules |
-| P13.5/P13.6/P13.7/P13.R user-facing copy grep | clean in forwarded Pepper frontend modules |
+| Location | outside repository |
+| Removed after validation | true |
+| Runtime residue | 0 |
 
-Blocked frontend verification is classified as dependency absence, not a product behavior failure. No install was performed because dependency installation was outside P15.C3A authority.
+Dependency installation:
+
+| Field | Result |
+| --- | --- |
+| Command | `npm ci --no-audit --no-fund` |
+| Location | temporary workspace only |
+| Repository `node_modules` created | false |
+| Repository package manifest modified | false |
+| Repository lockfile modified | false |
+
+Focused tests:
+
+| Field | Result |
+| --- | ---: |
+| Files | 6 |
+| Passed | 105 |
+| Failed | 0 |
+| Errors | 0 |
+| Unexpected skips | 0 |
+
+Focused test files:
+
+| Test file |
+| --- |
+| `src/agent-platform/extensions.test.ts` |
+| `src/agent-platform/runtime-overview/runtime-overview.test.tsx` |
+| `src/agent-platform/projects-tickets/projects-tickets.test.tsx` |
+| `src/agent-platform/approval-inbox/approval-inbox.test.tsx` |
+| `src/agent-platform/execution-inspector/execution-inspector.test.tsx` |
+| `src/agent-platform/safe-settings/safe-settings.test.tsx` |
+
+Complete frontend suite:
+
+| Field | Result |
+| --- | ---: |
+| Files | 26 |
+| Passed | 230 |
+| Failed | 0 |
+| Errors | 0 |
+| Unexpected skips | 0 |
+
+TypeScript:
+
+| Field | Result |
+| --- | --- |
+| Result | passed |
+| Errors | 0 |
+
+ESLint:
+
+| Field | Result |
+| --- | ---: |
+| Errors | 0 |
+| Candidate warnings | 0 |
+| Introduced warnings | 0 |
+| Inherited noncandidate warnings | 24 |
+
+Production build:
+
+| Field | Result |
+| --- | --- |
+| Result | passed |
+| Modules transformed | 553 |
+| Large chunk warning | inherited |
+| Repository build output modified | false |
+| Retained product references in temporary bundle | 0 |
+
+The existing `hermes_cli/agent_platform/product_config.py` file was copied only into the temporary validation workspace to satisfy an existing design-system test. The repository copy was not modified.
+
+## Pepper Integrity
+
+| Identity | Files | Bytes | SHA-256 |
+| --- | ---: | ---: | --- |
+| Candidate | 6831 | 149941138 | `2735cb45f0e087cc9dd2901ae5c1140e89ddcee886d526b0d2fbf253a13d9e50` |
+| Payload | 6681 | 145409792 | `1472224d58182eac232e700b3e586fe5d70fd167eb484659c623921b9b66b34c` |
+| Baseline record | not applicable | 38693 | `fd74d3a61e5c17f679a7e781e02b9c0dd6c56908bb1c03795c489f601c99c030` |
+
+This documentation-only authority correction must not change Pepper identity.
 
 ## Runtime And Governance Non-Actions
 
 | Action | Count |
 | --- | ---: |
-| Backend changes | 0 |
+| Repository dependency installs | 0 |
+| Temporary external `npm ci` | 1 |
+| Temporary workspace removed | true |
+| Graphify actions | 0 |
 | Provider calls | 0 |
 | OAuth flows | 0 |
 | Worker starts | 0 |
 | Docker actions | 0 |
-| Dependency installs | 0 |
-| Graphify actions | 0 |
 | Git staging by agent | 0 |
 | Git commits by agent | 0 |
 | Git pushes by agent | 0 |
 
-## Human Review Notes
+## P15.C3B Handoff
 
-Human review should focus on whether compiling these descriptors while committed configuration remains disabled is acceptable for P15.C3A, and whether the dependency-blocked frontend checks should be rerun after restoring `web/node_modules` through the normal project dependency workflow.
+| Field | Value |
+| --- | --- |
+| P15.C3A implementation committed | true |
+| P15.C3A validation complete | true |
+| P15.C3A canonical authority corrected | true |
+| P15.C3B | may begin after this correction is reviewed, committed and pushed |
+| Legacy product | retained |
+| P16 | blocked until P15.CR |
+| Production readiness | not claimed |
