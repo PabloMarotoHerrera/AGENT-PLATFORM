@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+from ctypes import wintypes
 import json
 import os
 import stat
@@ -107,13 +108,17 @@ class StoreProtectionBackend:
     def prepare_directory(self, path: Path) -> StoreProtectionReport:
         _reject_redirect(path, path_role="store_directory")
         path.mkdir(mode=_POSIX_DIRECTORY_MODE, parents=True, exist_ok=True)
-        if os.name != "nt":
+        if os.name == "nt":
+            _apply_windows_dacl(path)
+        else:
             path.chmod(_POSIX_DIRECTORY_MODE)
         return self.validate_directory(path)
 
     def prepare_file(self, path: Path) -> StoreProtectionReport:
         _reject_redirect(path, path_role="auth_file")
-        if os.name != "nt":
+        if os.name == "nt":
+            _apply_windows_dacl(path)
+        else:
             path.chmod(_POSIX_FILE_MODE)
         return self.validate_file(path)
 
@@ -364,43 +369,223 @@ def _validate_windows_dacl(path: Path, *, path_role: str) -> StoreProtectionRepo
     )
 
 
-def _sid_to_string(sid_pointer: int) -> str:
+def _set_ctypes_signature(
+    function: Any, *, argtypes: tuple[Any, ...], restype: Any
+) -> None:
+    try:
+        function.argtypes = argtypes
+        function.restype = restype
+    except AttributeError:
+        return
+
+
+def _windows_security_libraries() -> tuple[Any, Any]:
     advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    string_sid = ctypes.c_wchar_p()
+    lpvoid_pointer = ctypes.POINTER(wintypes.LPVOID)
+    _set_ctypes_signature(
+        advapi32.ConvertSidToStringSidW,
+        argtypes=(wintypes.LPVOID, ctypes.POINTER(wintypes.LPWSTR)),
+        restype=wintypes.BOOL,
+    )
+    _set_ctypes_signature(
+        advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW,
+        argtypes=(
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            lpvoid_pointer,
+            ctypes.POINTER(wintypes.DWORD),
+        ),
+        restype=wintypes.BOOL,
+    )
+    _set_ctypes_signature(
+        advapi32.GetAce,
+        argtypes=(wintypes.LPVOID, wintypes.DWORD, lpvoid_pointer),
+        restype=wintypes.BOOL,
+    )
+    _set_ctypes_signature(
+        advapi32.GetAclInformation,
+        argtypes=(wintypes.LPVOID, wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD),
+        restype=wintypes.BOOL,
+    )
+    _set_ctypes_signature(
+        advapi32.GetNamedSecurityInfoW,
+        argtypes=(
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            lpvoid_pointer,
+            lpvoid_pointer,
+            lpvoid_pointer,
+            lpvoid_pointer,
+            lpvoid_pointer,
+        ),
+        restype=wintypes.DWORD,
+    )
+    _set_ctypes_signature(
+        advapi32.GetSecurityDescriptorDacl,
+        argtypes=(
+            wintypes.LPVOID,
+            ctypes.POINTER(wintypes.BOOL),
+            lpvoid_pointer,
+            ctypes.POINTER(wintypes.BOOL),
+        ),
+        restype=wintypes.BOOL,
+    )
+    _set_ctypes_signature(
+        advapi32.GetTokenInformation,
+        argtypes=(
+            wintypes.HANDLE,
+            wintypes.DWORD,
+            wintypes.LPVOID,
+            wintypes.DWORD,
+            ctypes.POINTER(wintypes.DWORD),
+        ),
+        restype=wintypes.BOOL,
+    )
+    _set_ctypes_signature(
+        advapi32.OpenProcessToken,
+        argtypes=(
+            wintypes.HANDLE,
+            wintypes.DWORD,
+            ctypes.POINTER(wintypes.HANDLE),
+        ),
+        restype=wintypes.BOOL,
+    )
+    _set_ctypes_signature(
+        advapi32.SetNamedSecurityInfoW,
+        argtypes=(
+            wintypes.LPWSTR,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.LPVOID,
+            wintypes.LPVOID,
+            wintypes.LPVOID,
+            wintypes.LPVOID,
+        ),
+        restype=wintypes.DWORD,
+    )
+    _set_ctypes_signature(
+        kernel32.CloseHandle,
+        argtypes=(wintypes.HANDLE,),
+        restype=wintypes.BOOL,
+    )
+    _set_ctypes_signature(
+        kernel32.GetCurrentProcess,
+        argtypes=(),
+        restype=wintypes.HANDLE,
+    )
+    _set_ctypes_signature(
+        kernel32.LocalFree,
+        argtypes=(wintypes.HLOCAL,),
+        restype=wintypes.HLOCAL,
+    )
+    return advapi32, kernel32
+
+
+def _apply_windows_dacl(path: Path) -> None:
+    advapi32, kernel32 = _windows_security_libraries()
+    current_user_sid = _current_windows_user_sid()
+    sddl = f"D:P(A;;FA;;;{current_user_sid})(A;;FA;;;SY)(A;;FA;;;BA)"
+    security_descriptor = wintypes.LPVOID()
+    dacl = wintypes.LPVOID()
+    dacl_present = wintypes.BOOL()
+    dacl_defaulted = wintypes.BOOL()
+    SDDL_REVISION_1 = 1
+    SE_FILE_OBJECT = 1
+    DACL_SECURITY_INFORMATION = 0x00000004
+    PROTECTED_DACL_SECURITY_INFORMATION = 0x80000000
+    if not advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+        sddl,
+        SDDL_REVISION_1,
+        ctypes.byref(security_descriptor),
+        None,
+    ):
+        raise ProviderCredentialStoreProtectionError(
+            validation_category="windows_dacl_sddl_failed",
+            detail=str(ctypes.get_last_error()),
+        )
+    try:
+        if not advapi32.GetSecurityDescriptorDacl(
+            security_descriptor,
+            ctypes.byref(dacl_present),
+            ctypes.byref(dacl),
+            ctypes.byref(dacl_defaulted),
+        ):
+            raise ProviderCredentialStoreProtectionError(
+                validation_category="windows_dacl_extract_failed",
+                detail=str(ctypes.get_last_error()),
+            )
+        if not dacl_present.value or not dacl.value:
+            raise ProviderCredentialStoreProtectionError(
+                validation_category="windows_dacl_missing_after_sddl"
+            )
+        security_info = DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION
+        result = advapi32.SetNamedSecurityInfoW(
+            str(path),
+            SE_FILE_OBJECT,
+            security_info,
+            None,
+            None,
+            dacl,
+            None,
+        )
+        if result != 0:
+            raise ProviderCredentialStoreProtectionError(
+                validation_category="windows_dacl_apply_failed",
+                detail=str(result),
+            )
+    finally:
+        if security_descriptor.value:
+            kernel32.LocalFree(security_descriptor)
+
+
+def _sid_to_string(sid_pointer: int) -> str:
+    advapi32, kernel32 = _windows_security_libraries()
+    string_sid = wintypes.LPWSTR()
     if not advapi32.ConvertSidToStringSidW(
-        ctypes.c_void_p(sid_pointer), ctypes.byref(string_sid)
+        wintypes.LPVOID(sid_pointer), ctypes.byref(string_sid)
     ):
         raise OSError(ctypes.get_last_error())
     try:
         return string_sid.value or ""
     finally:
-        kernel32.LocalFree(string_sid)
+        kernel32.LocalFree(ctypes.cast(string_sid, wintypes.HLOCAL))
 
 
 def _current_windows_user_sid() -> str:
-    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    token = ctypes.c_void_p()
+    advapi32, kernel32 = _windows_security_libraries()
+    token = wintypes.HANDLE()
+    TOKEN_QUERY = 0x0008
     if not advapi32.OpenProcessToken(
-        kernel32.GetCurrentProcess(), 0x0008, ctypes.byref(token)
+        kernel32.GetCurrentProcess(), TOKEN_QUERY, ctypes.byref(token)
     ):
         raise OSError(ctypes.get_last_error())
     try:
-        needed = ctypes.c_uint32(0)
-        advapi32.GetTokenInformation(token, 1, None, 0, ctypes.byref(needed))
+        TokenUser = 1
+        needed = wintypes.DWORD(0)
+        advapi32.GetTokenInformation(token, TokenUser, None, 0, ctypes.byref(needed))
         if needed.value <= 0:
             raise OSError(ctypes.get_last_error())
         buffer = ctypes.create_string_buffer(needed.value)
         if not advapi32.GetTokenInformation(
             token,
-            1,
+            TokenUser,
             buffer,
-            needed,
+            needed.value,
             ctypes.byref(needed),
         ):
             raise OSError(ctypes.get_last_error())
-        sid_pointer = ctypes.c_void_p.from_buffer(buffer).value
+
+        class SidAndAttributes(ctypes.Structure):
+            _fields_ = [("Sid", wintypes.LPVOID), ("Attributes", wintypes.DWORD)]
+
+        class TokenUserBuffer(ctypes.Structure):
+            _fields_ = [("User", SidAndAttributes)]
+
+        sid_pointer = ctypes.cast(
+            buffer, ctypes.POINTER(TokenUserBuffer)
+        ).contents.User.Sid
         if sid_pointer is None:
             raise OSError("missing token user sid")
         return _sid_to_string(sid_pointer)
@@ -409,14 +594,15 @@ def _current_windows_user_sid() -> str:
 
 
 def _read_windows_allowed_dacl_sids(path: Path) -> set[str]:
-    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    security_descriptor = ctypes.c_void_p()
-    dacl = ctypes.c_void_p()
+    advapi32, kernel32 = _windows_security_libraries()
+    SE_FILE_OBJECT = 1
+    DACL_SECURITY_INFORMATION = 0x00000004
+    security_descriptor = wintypes.LPVOID()
+    dacl = wintypes.LPVOID()
     result = advapi32.GetNamedSecurityInfoW(
         str(path),
-        1,
-        0x00000004,
+        SE_FILE_OBJECT,
+        DACL_SECURITY_INFORMATION,
         None,
         None,
         ctypes.byref(dacl),
@@ -452,12 +638,16 @@ def _read_windows_allowed_dacl_sids(path: Path) -> set[str]:
         ):
             raise OSError(ctypes.get_last_error())
         allowed_sids: set[str] = set()
+        ACCESS_ALLOWED_ACE_TYPE = 0
+        INHERIT_ONLY_ACE = 0x08
         for index in range(info.AceCount):
             ace = ctypes.c_void_p()
             if not advapi32.GetAce(dacl, index, ctypes.byref(ace)):
                 raise OSError(ctypes.get_last_error())
             header = AceHeader.from_address(ace.value)
-            if header.AceFlags & 0x08 or header.AceType != 0:
+            if header.AceFlags & INHERIT_ONLY_ACE:
+                continue
+            if header.AceType != ACCESS_ALLOWED_ACE_TYPE:
                 continue
             allowed_sids.add(_sid_to_string(int(ace.value) + 8))
         return allowed_sids

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import ctypes
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -294,6 +295,202 @@ def test_windows_dacl_policy_rejects_broad_or_unknown_principals() -> None:
         validate_windows_dacl_principals(
             {current, "S-1-5-21-unknown"}, current_user_sid=current
         )
+    with pytest.raises(ProviderCredentialStoreProtectionError):
+        validate_windows_dacl_principals({"S-1-5-18"}, current_user_sid=current)
+
+
+def test_windows_dacl_backend_uses_typed_native_handles(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    current_sid = "S-1-5-21-1000"
+    system_sid = "S-1-5-18"
+    admin_sid = "S-1-5-32-544"
+    process_handle = 0x1234567887654321
+    token_handle = 0x2234567898765432
+    dacl_handle = 0x3334567898765432
+    security_descriptor = 0x4434567898765432
+    token_sid_pointer = 0x5534567898765432
+    sid_by_pointer = {token_sid_pointer: current_sid}
+    closed_handles: list[int] = []
+    freed_handles: list[int] = []
+    applied_sddl: list[str] = []
+    set_named_security_info_calls: list[tuple[str, int, int]] = []
+
+    class FakeFunction:
+        def __init__(self, implementation):
+            self.implementation = implementation
+            self.argtypes = None
+            self.restype = None
+
+        def __call__(self, *args):
+            return self.implementation(self, *args)
+
+    class FakeAccessAllowedAce(ctypes.Structure):
+        _fields_ = [
+            ("AceType", ctypes.c_ubyte),
+            ("AceFlags", ctypes.c_ubyte),
+            ("AceSize", ctypes.c_ushort),
+            ("Mask", ctypes.c_uint32),
+            ("SidStart", ctypes.c_uint32),
+        ]
+
+    ace_buffers = [
+        FakeAccessAllowedAce(0, 0, ctypes.sizeof(FakeAccessAllowedAce), 0, 0),
+        FakeAccessAllowedAce(0, 0, ctypes.sizeof(FakeAccessAllowedAce), 0, 0),
+        FakeAccessAllowedAce(0, 0, ctypes.sizeof(FakeAccessAllowedAce), 0, 0),
+    ]
+    sid_by_pointer[ctypes.addressof(ace_buffers[0]) + 8] = current_sid
+    sid_by_pointer[ctypes.addressof(ace_buffers[1]) + 8] = system_sid
+    sid_by_pointer[ctypes.addressof(ace_buffers[2]) + 8] = admin_sid
+
+    def handle_value(value):
+        if hasattr(value, "value"):
+            return value.value
+        return value
+
+    def convert_sid_to_string(fn, sid_pointer, string_sid_out):
+        assert fn.restype is store.wintypes.BOOL
+        string_sid_out._obj.value = sid_by_pointer[handle_value(sid_pointer)]
+        return 1
+
+    def convert_sddl_to_security_descriptor(
+        fn,
+        sddl,
+        revision,
+        security_descriptor_out,
+        descriptor_size_out,
+    ):
+        assert fn.restype is store.wintypes.BOOL
+        assert revision == 1
+        assert descriptor_size_out is None
+        assert sddl == f"D:P(A;;FA;;;{current_sid})(A;;FA;;;SY)(A;;FA;;;BA)"
+        applied_sddl.append(sddl)
+        security_descriptor_out._obj.value = security_descriptor
+        return 1
+
+    def get_named_security_info(fn, path, object_type, security_info, *outputs):
+        assert fn.restype is store.wintypes.DWORD
+        assert path.endswith("auth.json")
+        assert object_type == 1
+        assert security_info == 0x00000004
+        outputs[2]._obj.value = dacl_handle
+        outputs[4]._obj.value = security_descriptor
+        return 0
+
+    def get_acl_information(fn, dacl, info_out, _info_size, info_class):
+        assert fn.restype is store.wintypes.BOOL
+        assert handle_value(dacl) == dacl_handle
+        assert info_class == 2
+        info_out._obj.AceCount = len(ace_buffers)
+        return 1
+
+    def get_security_descriptor_dacl(
+        fn,
+        descriptor,
+        dacl_present_out,
+        dacl_out,
+        dacl_defaulted_out,
+    ):
+        assert fn.restype is store.wintypes.BOOL
+        assert handle_value(descriptor) == security_descriptor
+        dacl_present_out._obj.value = True
+        dacl_out._obj.value = dacl_handle
+        dacl_defaulted_out._obj.value = False
+        return 1
+
+    def get_ace(fn, dacl, index, ace_out):
+        assert fn.restype is store.wintypes.BOOL
+        assert handle_value(dacl) == dacl_handle
+        ace_out._obj.value = ctypes.addressof(ace_buffers[index])
+        return 1
+
+    def get_current_process(fn):
+        assert fn.restype is store.wintypes.HANDLE
+        return process_handle
+
+    def open_process_token(fn, process, access, token_out):
+        assert fn.restype is store.wintypes.BOOL
+        assert handle_value(process) == process_handle
+        assert access == 0x0008
+        token_out._obj.value = token_handle
+        return 1
+
+    def get_token_information(fn, token, token_class, buffer, buffer_size, needed_out):
+        assert fn.restype is store.wintypes.BOOL
+        assert handle_value(token) == token_handle
+        assert token_class == 1
+        if buffer is None:
+            needed_out._obj.value = 32
+            return 0
+        assert buffer_size == 32
+        ctypes.c_void_p.from_buffer(buffer).value = token_sid_pointer
+        needed_out._obj.value = 32
+        return 1
+
+    def close_handle(fn, handle):
+        assert fn.restype is store.wintypes.BOOL
+        closed_handles.append(handle_value(handle))
+        return 1
+
+    def local_free(fn, handle):
+        assert fn.restype is store.wintypes.HLOCAL
+        freed_handles.append(handle_value(handle))
+        return 0
+
+    def set_named_security_info(fn, path, object_type, security_info, *args):
+        assert fn.restype is store.wintypes.DWORD
+        assert path.endswith("auth.json")
+        assert object_type == 1
+        assert security_info == 0x80000004
+        owner, group, dacl, sacl = args
+        assert owner is None
+        assert group is None
+        assert handle_value(dacl) == dacl_handle
+        assert sacl is None
+        set_named_security_info_calls.append((path, security_info, dacl_handle))
+        return 0
+
+    class FakeAdvapi32:
+        def __init__(self) -> None:
+            self.ConvertSidToStringSidW = FakeFunction(convert_sid_to_string)
+            self.ConvertStringSecurityDescriptorToSecurityDescriptorW = FakeFunction(
+                convert_sddl_to_security_descriptor
+            )
+            self.GetAce = FakeFunction(get_ace)
+            self.GetAclInformation = FakeFunction(get_acl_information)
+            self.GetNamedSecurityInfoW = FakeFunction(get_named_security_info)
+            self.GetSecurityDescriptorDacl = FakeFunction(get_security_descriptor_dacl)
+            self.GetTokenInformation = FakeFunction(get_token_information)
+            self.OpenProcessToken = FakeFunction(open_process_token)
+            self.SetNamedSecurityInfoW = FakeFunction(set_named_security_info)
+
+    class FakeKernel32:
+        def __init__(self) -> None:
+            self.CloseHandle = FakeFunction(close_handle)
+            self.GetCurrentProcess = FakeFunction(get_current_process)
+            self.LocalFree = FakeFunction(local_free)
+
+    fake_dlls = {"advapi32": FakeAdvapi32(), "kernel32": FakeKernel32()}
+
+    def fake_windll(name: str, *, use_last_error: bool):
+        assert use_last_error is True
+        return fake_dlls[name]
+
+    synthetic_path = tmp_path / "auth.json"
+    synthetic_path.write_text('{"synthetic": true}\n', encoding="utf-8")
+    monkeypatch.setattr(store.ctypes, "WinDLL", fake_windll, raising=False)
+    monkeypatch.setattr(store.os, "name", "nt")
+
+    report = store.StoreProtectionBackend().prepare_file(synthetic_path)
+
+    assert report.protected is True
+    assert report.dacl_inspected is True
+    assert report.allowed_principal_count == 3
+    assert len(set_named_security_info_calls) == 1
+    assert applied_sddl == [f"D:P(A;;FA;;;{current_sid})(A;;FA;;;SY)(A;;FA;;;BA)"]
+    assert closed_handles == [token_handle, token_handle]
+    assert freed_handles.count(security_descriptor) == 2
 
 
 def test_store_source_has_no_user_store_merge_or_provider_call_authority() -> None:
