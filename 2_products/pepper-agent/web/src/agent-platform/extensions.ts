@@ -4,6 +4,11 @@ import {
   getProductFeatureState,
   type ProductConfiguration,
 } from "./product-config";
+import { APPROVAL_INBOX_DESCRIPTORS } from "./approval-inbox";
+import { EXECUTION_INSPECTOR_DESCRIPTORS } from "./execution-inspector";
+import { PROJECTS_TICKETS_DESCRIPTORS } from "./projects-tickets";
+import { RUNTIME_OVERVIEW_DESCRIPTOR } from "./runtime-overview";
+import { SAFE_SETTINGS_DESCRIPTOR } from "./safe-settings";
 
 export interface ProductExtensionNavigation {
   readonly groupId: "agent-platform";
@@ -44,9 +49,16 @@ export interface ProductExtensionPosture {
   readonly registeredNavigationCount: number;
 }
 
-// P15.M6 deliberately registers no P13 route descriptors. Backend configuration
-// cannot activate UI modules until a later governed migration supplies them.
-export const AGENT_PLATFORM_EXTENSIONS: readonly ProductExtensionDescriptor[] = Object.freeze([]);
+// P15.C3A compiles the accepted P13 frontend descriptors but leaves them inert:
+// Pepper's tracked product configuration keeps product_ui disabled and selects
+// no extension_modules, so no route or navigation item is activated here.
+export const AGENT_PLATFORM_EXTENSIONS: readonly ProductExtensionDescriptor[] = Object.freeze([
+  RUNTIME_OVERVIEW_DESCRIPTOR,
+  ...PROJECTS_TICKETS_DESCRIPTORS,
+  ...APPROVAL_INBOX_DESCRIPTORS,
+  ...EXECUTION_INSPECTOR_DESCRIPTORS,
+  SAFE_SETTINGS_DESCRIPTOR,
+]);
 
 function validateDescriptors(
   descriptors: readonly ProductExtensionDescriptor[],

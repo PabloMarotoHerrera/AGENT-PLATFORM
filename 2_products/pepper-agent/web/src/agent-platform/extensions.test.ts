@@ -52,13 +52,23 @@ function descriptor(
 }
 
 describe("Pepper frontend extensions", () => {
-  it("keeps the committed registry empty and fail-closed", () => {
+  it("compiles the accepted P13 descriptors while the committed configuration keeps them inert", () => {
     const committed = configuration([], { "agent_platform.product_ui": "disabled" });
 
-    expect(AGENT_PLATFORM_EXTENSIONS).toEqual([]);
+    expect(AGENT_PLATFORM_EXTENSIONS.map((descriptor) => descriptor.id)).toEqual([
+      "agent_platform.ui.overview",
+      "agent_platform.ui.projects",
+      "agent_platform.ui.project_detail",
+      "agent_platform.ui.ticket_detail",
+      "agent_platform.ui.approvals",
+      "agent_platform.ui.approval_detail",
+      "agent_platform.ui.executions",
+      "agent_platform.ui.execution_detail",
+      "agent_platform.ui.settings",
+    ]);
     expect(resolveRegisteredProductExtensions(committed, ["/sessions"])).toEqual([]);
     expect(getProductExtensionPosture(committed)).toEqual({
-      compiledDescriptorCount: 0,
+      compiledDescriptorCount: 9,
       selectedModuleCount: 0,
       resolvedDescriptorCount: 0,
       registeredRouteCount: 0,
@@ -66,15 +76,15 @@ describe("Pepper frontend extensions", () => {
     });
   });
 
-  it("does not resolve unregistered module IDs even if configuration is malformed upstream", () => {
+  it("does not resolve selected module IDs while product UI remains disabled", () => {
     const committed = configuration(
       ["agent_platform.ui.overview"],
-      { "agent_platform.product_ui": "enabled" },
+      { "agent_platform.product_ui": "disabled" },
     );
 
     expect(resolveRegisteredProductExtensions(committed, ["/sessions"])).toEqual([]);
     expect(getProductExtensionPosture(committed)).toEqual({
-      compiledDescriptorCount: 0,
+      compiledDescriptorCount: 9,
       selectedModuleCount: 1,
       resolvedDescriptorCount: 0,
       registeredRouteCount: 0,
@@ -96,6 +106,7 @@ describe("Pepper frontend extensions", () => {
     });
     const filtered = filterProtectedPluginManifests([
       manifest("/kanban"),
+      manifest("/agent-platform/overview"),
       manifest("/agent-platform/projects"),
       manifest("/agent-platform/projects/:boardSlug"),
       manifest("/agent-platform/projects/:boardSlug/tickets/:taskId"),
@@ -108,7 +119,7 @@ describe("Pepper frontend extensions", () => {
     ]);
 
     expect(filtered.manifests.map((entry) => entry.tab.path)).toEqual(["/kanban"]);
-    expect(filtered.blockedManifestCount).toBe(9);
+    expect(filtered.blockedManifestCount).toBe(10);
   });
 
   it("uses configuration order and enables only explicitly enabled descriptors", () => {
