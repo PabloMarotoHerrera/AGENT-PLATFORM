@@ -18,6 +18,7 @@ from hermes_cli.agent_platform.provider_credentials import store
 from hermes_cli.agent_platform.provider_credentials.store import (
     ExistingProviderCredentialStoreError,
     InvalidProviderCredentialStoreError,
+    InvalidProviderCredentialStoreRootError,
     ProviderCredentialStoreProtectionError,
     clear_local_openai_codex_credential,
     default_openai_codex_credential_store_root,
@@ -109,10 +110,124 @@ def test_default_durable_root_is_isolated_below_hermes_home(tmp_path: Path) -> N
         / "hermes-home"
         / "agent-platform"
         / "provider-credentials"
+        / "openai-codex.primary"
+    )
+    relative_segments = root.relative_to(tmp_path / "hermes-home").parts
+    assert relative_segments == (
+        "agent-platform",
+        "provider-credentials",
+        "openai-codex.primary",
+    )
+    assert relative_segments.count("agent-platform") == 1
+    assert relative_segments.count("provider-credentials") == 1
+    assert relative_segments.count("openai-codex.primary") == 1
+
+
+def test_legacy_duplicated_root_layout_is_distinct_and_bounded(tmp_path: Path) -> None:
+    hermes_home = tmp_path / "hermes-home"
+    canonical = store._canonical_openai_codex_credential_store_root(hermes_home)
+    legacy = store._legacy_duplicated_openai_codex_credential_store_root(hermes_home)
+
+    assert canonical == (
+        hermes_home / "agent-platform" / "provider-credentials" / "openai-codex.primary"
+    )
+    assert legacy == (
+        hermes_home
+        / "agent-platform"
+        / "provider-credentials"
         / "agent-platform"
         / "provider-credentials"
         / "openai-codex.primary"
     )
+    assert canonical != legacy
+    assert canonical.is_relative_to(hermes_home)
+    assert legacy.is_relative_to(hermes_home)
+
+
+def test_default_root_resolution_prefers_canonical_for_new_or_canonical_store(
+    tmp_path: Path,
+) -> None:
+    hermes_home = tmp_path / "hermes-home"
+    canonical = store._canonical_openai_codex_credential_store_root(hermes_home)
+
+    assert default_openai_codex_credential_store_root(hermes_home) == canonical
+    assert not hermes_home.exists()
+
+    canonical.mkdir(parents=True)
+    assert default_openai_codex_credential_store_root(hermes_home) == canonical
+
+
+def test_default_root_resolution_keeps_legacy_only_store_discoverable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hermes_home = tmp_path / "hermes-home"
+    legacy = store._legacy_duplicated_openai_codex_credential_store_root(hermes_home)
+    legacy.mkdir(parents=True)
+    (legacy / "auth.json").write_text("not-json-but-not-read\n", encoding="utf-8")
+    monkeypatch.setattr(
+        store,
+        "_load_json_auth_store",
+        lambda _path: pytest.fail("resolver must not read auth.json"),
+    )
+
+    assert default_openai_codex_credential_store_root(hermes_home) == legacy
+    assert not store._canonical_openai_codex_credential_store_root(hermes_home).exists()
+
+
+def test_default_root_resolution_fails_closed_when_both_layouts_exist(
+    tmp_path: Path,
+) -> None:
+    hermes_home = tmp_path / "hermes-home"
+    canonical = store._canonical_openai_codex_credential_store_root(hermes_home)
+    legacy = store._legacy_duplicated_openai_codex_credential_store_root(hermes_home)
+    canonical.mkdir(parents=True)
+    legacy.mkdir(parents=True)
+
+    with pytest.raises(InvalidProviderCredentialStoreRootError) as exc_info:
+        default_openai_codex_credential_store_root(hermes_home)
+    assert (
+        exc_info.value.validation_category
+        == "ambiguous_canonical_and_legacy_credential_store_roots"
+    )
+
+
+def test_root_resolver_creates_no_layout_and_malformed_root_validates_later(
+    tmp_path: Path,
+) -> None:
+    hermes_home = tmp_path / "hermes-home"
+    canonical = store._canonical_openai_codex_credential_store_root(hermes_home)
+
+    selected = default_openai_codex_credential_store_root(hermes_home)
+
+    assert selected == canonical
+    assert not canonical.exists()
+    assert not hermes_home.exists()
+
+    canonical.parent.mkdir(parents=True)
+    canonical.write_text("synthetic malformed root\n", encoding="utf-8")
+    assert store._store_root_layout_present(canonical) is True
+    assert default_openai_codex_credential_store_root(hermes_home) == canonical
+    with pytest.raises(InvalidProviderCredentialStoreRootError) as exc_info:
+        read_openai_codex_credential_status(
+            canonical,
+            protection_backend=FakeProtectionBackend(),
+            now=NOW,
+        )
+    assert exc_info.value.validation_category == "not_directory"
+
+
+def test_p15c1_windows_protection_helpers_remain_present() -> None:
+    for helper_name in (
+        "_windows_security_libraries",
+        "_apply_windows_dacl",
+        "_sid_to_string",
+        "_current_windows_user_sid",
+        "_read_windows_allowed_dacl_sids",
+        "_validate_windows_dacl",
+        "validate_windows_dacl_principals",
+    ):
+        assert hasattr(store, helper_name)
 
 
 def test_status_for_missing_store_is_secret_free_and_read_only(tmp_path: Path) -> None:

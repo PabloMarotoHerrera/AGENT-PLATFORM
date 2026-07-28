@@ -162,6 +162,19 @@ def default_openai_codex_credential_store_root(hermes_home: Path | None = None) 
         from hermes_constants import get_hermes_home
 
         hermes_home = get_hermes_home()
+    return _resolve_default_openai_codex_credential_store_root(Path(hermes_home))
+
+
+def _canonical_openai_codex_credential_store_root(hermes_home: Path) -> Path:
+    return (
+        Path(hermes_home)
+        / "agent-platform"
+        / "provider-credentials"
+        / OPENAI_CODEX_CREDENTIAL_STORE_ID
+    )
+
+
+def _legacy_duplicated_openai_codex_credential_store_root(hermes_home: Path) -> Path:
     return (
         Path(hermes_home)
         / "agent-platform"
@@ -170,6 +183,28 @@ def default_openai_codex_credential_store_root(hermes_home: Path | None = None) 
         / "provider-credentials"
         / OPENAI_CODEX_CREDENTIAL_STORE_ID
     )
+
+
+def _store_root_layout_present(path: Path) -> bool:
+    try:
+        path.lstat()
+    except OSError:
+        return False
+    return True
+
+
+def _resolve_default_openai_codex_credential_store_root(hermes_home: Path) -> Path:
+    canonical_root = _canonical_openai_codex_credential_store_root(hermes_home)
+    legacy_root = _legacy_duplicated_openai_codex_credential_store_root(hermes_home)
+    canonical_present = _store_root_layout_present(canonical_root)
+    legacy_present = _store_root_layout_present(legacy_root)
+    if canonical_present and legacy_present:
+        raise InvalidProviderCredentialStoreRootError(
+            validation_category="ambiguous_canonical_and_legacy_credential_store_roots"
+        )
+    if legacy_present:
+        return legacy_root
+    return canonical_root
 
 
 def _utc_now() -> datetime:
