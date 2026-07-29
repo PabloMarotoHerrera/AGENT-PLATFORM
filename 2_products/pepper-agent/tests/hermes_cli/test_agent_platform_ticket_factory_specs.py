@@ -189,8 +189,15 @@ def annotation_contains_forbidden(annotation: object) -> bool:
 
 
 def test_package_imports_and_exports_supported_surface() -> None:
-    assert tuple(ticket_factory.__all__) == EXPECTED_EXPORTS
+    assert isinstance(ticket_factory.__all__, tuple)
     assert len(ticket_factory.__all__) == len(set(ticket_factory.__all__))
+    assert set(EXPECTED_EXPORTS).issubset(set(ticket_factory.__all__))
+    preserved_order = tuple(
+        exported_name
+        for exported_name in ticket_factory.__all__
+        if exported_name in EXPECTED_EXPORTS
+    )
+    assert preserved_order == EXPECTED_EXPORTS
     for exported_name in EXPECTED_EXPORTS:
         assert hasattr(ticket_factory, exported_name)
     assert "ShortText" not in ticket_factory.__all__

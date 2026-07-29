@@ -1,4 +1,21 @@
-"""Planning-only Ticket Factory schema contracts."""
+"""Planning-only Ticket Factory contracts."""
+
+from hermes_cli.agent_platform.ticket_factory.context_packs import (
+    CONTEXT_PACK_SCHEMA_VERSION,
+    ContextAssemblyPolicy,
+    ContextAssemblyRequest,
+    ContextPack,
+    ContextPackAssemblyError,
+    ContextPackBudgetError,
+    ContextPackItem,
+    ContextPackSensitiveContentError,
+    ContextPriority,
+    ContextSensitivity,
+    ContextSourceKind,
+    ContextSourceSpec,
+    OptionalSourceOverflowStrategy,
+    assemble_context_pack,
+)
 
 from hermes_cli.agent_platform.ticket_factory.specs import (
     PROJECT_SPEC_SCHEMA_VERSION,
@@ -20,11 +37,16 @@ from hermes_cli.agent_platform.ticket_factory.specs import (
 __all__ = (
     "PROJECT_SPEC_SCHEMA_VERSION",
     "TICKET_SPEC_SCHEMA_VERSION",
+    "CONTEXT_PACK_SCHEMA_VERSION",
     "TicketType",
     "DependencyKind",
     "DependencyScope",
     "ParallelizationHint",
     "AuthorityReferenceKind",
+    "ContextSourceKind",
+    "ContextSensitivity",
+    "ContextPriority",
+    "OptionalSourceOverflowStrategy",
     "AuthorityReferenceSpec",
     "TicketDependencySpec",
     "RepositoryScopeSpec",
@@ -32,4 +54,13 @@ __all__ = (
     "TicketResponseContractSpec",
     "ProjectSpec",
     "TicketSpec",
+    "ContextSourceSpec",
+    "ContextAssemblyPolicy",
+    "ContextAssemblyRequest",
+    "ContextPackItem",
+    "ContextPack",
+    "ContextPackAssemblyError",
+    "ContextPackBudgetError",
+    "ContextPackSensitiveContentError",
+    "assemble_context_pack",
 )
