@@ -17,6 +17,23 @@ from hermes_cli.agent_platform.ticket_factory.context_packs import (
     assemble_context_pack,
 )
 
+from hermes_cli.agent_platform.ticket_factory.generator_roles import (
+    TICKET_GENERATOR_ROLE_SCHEMA_VERSION,
+    GeneratorAssignment,
+    GeneratorRoleProfile,
+    TicketGenerationRequest,
+    TicketGeneratorCompatibilityError,
+    TicketGeneratorRole,
+    TicketGeneratorRoleError,
+    TicketProposal,
+    TicketProposalValidationError,
+    build_ticket_proposal,
+    get_ticket_generator_role_profile,
+    list_ticket_generator_role_profiles,
+    prepare_ticket_generator_assignments,
+    validate_ticket_generator_proposal,
+)
+
 from hermes_cli.agent_platform.ticket_factory.specs import (
     PROJECT_SPEC_SCHEMA_VERSION,
     TICKET_SPEC_SCHEMA_VERSION,
@@ -63,4 +80,18 @@ __all__ = (
     "ContextPackBudgetError",
     "ContextPackSensitiveContentError",
     "assemble_context_pack",
+    "TICKET_GENERATOR_ROLE_SCHEMA_VERSION",
+    "TicketGeneratorRole",
+    "GeneratorRoleProfile",
+    "TicketGenerationRequest",
+    "GeneratorAssignment",
+    "TicketProposal",
+    "TicketGeneratorRoleError",
+    "TicketGeneratorCompatibilityError",
+    "TicketProposalValidationError",
+    "get_ticket_generator_role_profile",
+    "list_ticket_generator_role_profiles",
+    "prepare_ticket_generator_assignments",
+    "build_ticket_proposal",
+    "validate_ticket_generator_proposal",
 )
