@@ -1,0 +1,58 @@
+# Kit generated/runtime directories.
+_build/
+_compiler/
+_repo/
+/_cache/
+
+# Product source-of-truth lives under source/apps and source/extensions.
+# Do not globally ignore /source; local app and extension code must be visible to Git.
+
+# Compiled python files and caches.
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Temporary repository analysis dumps.
+repo_tree.txt
+source_tree.txt
+tools_tree.txt
+important_files.txt
+extensions_list.txt
+source/source_tree.txt
+templates/templates_tree.txt
+
+# Visual Studio files.
+/.vs
+**/.vscode/ipch
+
+# macOS files.
+.DS_Store
+
+# Generated license file.
+PACKAGE-DEPS.yaml
+
+# packman .user config
+*.packman.xml.user
+
+# kit user config
+deps/**/user.toml
+
+# vscode settings are copied and filled in from 'settings.json.template'
+.vscode/settings.json
+
+# PyCharm files.
+/.idea/
+
+# Linux in docker build $HOME dirs
+/.nvidia-omniverse
+/.local
+/.cache
+
+# Omniverse EULA breadcrumb
+/.omniverse_eula_accepted.txt
+
+# Streaming EventTrace
+*.etli
+
+# Vendor/runtime dependencies such as EnergyPlusV24-2-0 should be classified
+# before adding an active ignore rule.
