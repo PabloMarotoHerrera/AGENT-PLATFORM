@@ -90,7 +90,7 @@ class ConfigurationTests(unittest.TestCase):
     def test_runtime_lane_dependencies_are_explicit(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            product = root / "2_products" / "hermes-agent"
+            product = root / "2_products" / "pepper-agent"
             (product / "web").mkdir(parents=True)
             (product / "hermes_cli").mkdir()
             (product / "web" / "package.json").write_text("{}", encoding="utf-8")
@@ -357,7 +357,7 @@ class RegisterAndResultTests(unittest.TestCase):
     def test_orchestrator_cleans_dashboard_when_browser_lane_raises(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            product = root / "2_products" / "hermes-agent"
+            product = root / "2_products" / "pepper-agent"
             target = product / "web" / "src" / "agent-platform" / "fixture.ts"
             target.parent.mkdir(parents=True)
             target.write_text("export const fixture = true;\n", encoding="utf-8")

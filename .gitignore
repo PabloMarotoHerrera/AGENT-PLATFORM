@@ -5,12 +5,14 @@ Thumbs.db
 *.xlsx
 *.xls
 
-# Ignore products by default; exceptions require explicit product governance
-/2_products/*
-!/2_products/hermes-agent
-!/2_products/hermes-agent/**
-!/2_products/pepper-agent
-!/2_products/pepper-agent/**
+# Product generated residue only; product roots and arbitrary source stay visible
+/2_products/*/**/web_dist/
+/2_products/*/**/*.egg-info/
+/2_products/*/**/tsconfig.tsbuildinfo
+/2_products/*/**/test_durations.json
+/2_products/*/**/.pytest_cache/
+/2_products/*/**/.mypy_cache/
+/2_products/*/**/.ruff_cache/
 
 # Ignore external sources
 4_external/sources/

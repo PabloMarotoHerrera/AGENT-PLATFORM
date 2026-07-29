@@ -116,19 +116,10 @@ graphify-out/**
 product/**
 products/**
 
-# GRAPHIFY-SCOPE-01 - admit only the active Hermes product.
-# Installed Graphify 0.9.5 evaluates ordered rules with last-match-wins and
-# requires every excluded parent to be reopened explicitly. Anchored rules keep
-# sibling and future products denied by default.
-/2_products/
-/2_products/**
-!/2_products/
-!/2_products/hermes-agent/
-!/2_products/hermes-agent/**
+# Frozen product posture: product roots remain excluded and no active product
+# refresh target is admitted by this read-only evidence profile.
 
-# Reassert dependency, environment, cache, build and runtime directory names
-# after the Hermes allow rule. Graphify's unanchored directory-name matching
-# applies these exclusions at any depth without reopening sibling products.
+# Reassert dependency, environment, cache, build and runtime directory names.
 node_modules/
 .venv/
 venv/

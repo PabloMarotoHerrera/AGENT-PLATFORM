@@ -23,7 +23,7 @@ SPEC.loader.exec_module(gate)
 
 
 def _write_product_root(root: Path) -> Path:
-    product = root / "2_products" / "hermes-agent"
+    product = root / "2_products" / "pepper-agent"
     (product / "hermes_cli").mkdir(parents=True)
     (product / "hermes_cli" / "main.py").write_text("", encoding="utf-8")
     return product
@@ -128,7 +128,7 @@ class ConfigurationTests(unittest.TestCase):
 
     def test_web_dist_short_circuits_build_when_prebuilt(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            product = Path(directory) / "2_products" / "hermes-agent"
+            product = Path(directory) / "2_products" / "pepper-agent"
             dist = product / "hermes_cli" / "web_dist"
             dist.mkdir(parents=True)
             (dist / "index.html").write_text("<html></html>", encoding="utf-8")
@@ -142,7 +142,7 @@ class ConfigurationTests(unittest.TestCase):
 
     def test_build_uses_fixed_node_npm_argv_without_shell(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            product = Path(directory) / "2_products" / "hermes-agent"
+            product = Path(directory) / "2_products" / "pepper-agent"
             web = product / "web"
             web.mkdir(parents=True)
             (product / "hermes_cli").mkdir()

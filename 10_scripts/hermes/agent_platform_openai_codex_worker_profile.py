@@ -69,7 +69,7 @@ def _repository_root() -> Path:
 
 
 def _product_root() -> Path:
-    return _repository_root() / "2_products" / "hermes-agent"
+    return _repository_root() / "2_products" / "pepper-agent"
 
 
 def _load_product_modules(product_root: Path) -> WorkerProfileModules:

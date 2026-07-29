@@ -24,7 +24,7 @@ gate = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = gate
 SPEC.loader.exec_module(gate)
 
-PRODUCT_ROOT = ROOT / "2_products" / "hermes-agent"
+PRODUCT_ROOT = ROOT / "2_products" / "pepper-agent"
 if str(PRODUCT_ROOT) not in sys.path:
     sys.path.insert(0, str(PRODUCT_ROOT))
 

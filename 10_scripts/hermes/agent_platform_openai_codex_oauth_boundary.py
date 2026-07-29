@@ -35,7 +35,7 @@ def _repository_root() -> Path:
 
 
 def _product_root() -> Path:
-    return _repository_root() / "2_products" / "hermes-agent"
+    return _repository_root() / "2_products" / "pepper-agent"
 
 
 def _load_product_modules(product_root: Path):
@@ -113,7 +113,7 @@ def run_status(
     status = reader(resolved_config.trusted_store_root)
     acquisition = planner(
         product_root=resolved_config.product_root,
-        trusted_store_root=resolved_config.trusted_store_root,
+        trusted_acquisition_root=resolved_config.trusted_store_root,
     )
     public_plan = getattr(acquisition, "public_plan", acquisition)
     return {
@@ -143,7 +143,9 @@ def run_status(
             "execution_disabled_by_default": bool(
                 public_plan.execution_disabled_by_default
             ),
-            "uses_product_local_python": bool(public_plan.uses_product_local_python),
+            "uses_product_local_python": (
+                public_plan.working_directory_role == "Pepper_product_root"
+            ),
             "argv_suffix": list(public_plan.command_argv_suffix),
             "environment_keys": list(public_plan.environment_keys),
             "caller_label_allowed": False,

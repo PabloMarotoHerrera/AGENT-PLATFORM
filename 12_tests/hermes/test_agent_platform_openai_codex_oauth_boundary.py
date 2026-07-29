@@ -25,7 +25,7 @@ gate = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = gate
 SPEC.loader.exec_module(gate)
 
-PRODUCT_ROOT = ROOT / "2_products" / "hermes-agent"
+PRODUCT_ROOT = ROOT / "2_products" / "pepper-agent"
 if str(PRODUCT_ROOT) not in sys.path:
     sys.path.insert(0, str(PRODUCT_ROOT))
 from hermes_cli.agent_platform.provider_credentials import contracts, delivery  # noqa: E402
@@ -67,9 +67,9 @@ class BoundaryGateTests(unittest.TestCase):
                     active_provider_matches=False,
                 )
 
-            def fake_planner(*, product_root: Path, trusted_store_root: Path):
+            def fake_planner(*, product_root: Path, trusted_acquisition_root: Path):
                 self.assertEqual(product_root, PRODUCT_ROOT)
-                self.assertEqual(trusted_store_root, synthetic_root)
+                self.assertEqual(trusted_acquisition_root, synthetic_root)
                 return SimpleNamespace(
                     public_plan=contracts.ProviderCredentialAcquisitionPlan(
                         command_argv_suffix=(
@@ -83,6 +83,10 @@ class BoundaryGateTests(unittest.TestCase):
                         ),
                         environment_keys=(
                             "HERMES_HOME",
+                            "HOME",
+                            "USERPROFILE",
+                            "APPDATA",
+                            "LOCALAPPDATA",
                             "PYTHONIOENCODING",
                             "PYTHONUTF8",
                         ),

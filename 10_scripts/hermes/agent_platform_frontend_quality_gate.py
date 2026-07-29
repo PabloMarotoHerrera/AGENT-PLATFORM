@@ -340,7 +340,7 @@ def _validate_scenario(scenario: BrowserScenario) -> None:
 
 def _validate_config(config: GateConfig) -> tuple[Path, Path]:
     repo_root = config.repo_root.resolve()
-    product_root = repo_root / "2_products" / "hermes-agent"
+    product_root = repo_root / "2_products" / "pepper-agent"
     required = (
         product_root / "web" / "package.json",
         product_root / "AGENT_PLATFORM_MODIFICATIONS.tsv",
@@ -580,7 +580,7 @@ def _run_command_lane(
     record: dict[str, Any] = {
         "lane": lane,
         "status": "failed",
-        "cwd": "2_products/hermes-agent/web",
+        "cwd": "2_products/pepper-agent/web",
         "timeout_seconds": timeout_seconds,
     }
     try:
@@ -882,7 +882,7 @@ def _start_dashboard(
     record: dict[str, Any] = {
         "lane": "dashboard",
         "status": "failed",
-        "cwd": "2_products/hermes-agent",
+        "cwd": "2_products/pepper-agent",
         "argv": [
             "<python>",
             "-B",

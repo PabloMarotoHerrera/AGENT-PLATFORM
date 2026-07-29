@@ -69,7 +69,7 @@ def _safe_error(error: BaseException, *paths: Path) -> str:
 
 def _validate_config(config: GateConfig) -> None:
     repo_root = config.repo_root.resolve()
-    product_root = repo_root / "2_products" / "hermes-agent"
+    product_root = repo_root / "2_products" / "pepper-agent"
     if not product_root.is_dir():
         raise LifecycleGatePrerequisiteError("Hermes product root was not found")
     if not (product_root / "hermes_cli" / "main.py").is_file():
@@ -83,7 +83,7 @@ def _validate_config(config: GateConfig) -> None:
 
 
 def _product_root(repo_root: Path) -> Path:
-    return repo_root.resolve() / "2_products" / "hermes-agent"
+    return repo_root.resolve() / "2_products" / "pepper-agent"
 
 
 def _resolve_product_python_executable(
