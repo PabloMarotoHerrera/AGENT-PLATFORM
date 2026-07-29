@@ -17,6 +17,26 @@ from hermes_cli.agent_platform.ticket_factory.context_packs import (
     assemble_context_pack,
 )
 
+from hermes_cli.agent_platform.ticket_factory.dependency_planning import (
+    DEPENDENCY_PLAN_SCHEMA_VERSION,
+    DependencyCollectionValidationError,
+    DependencyCycleError,
+    DependencyEdge,
+    DependencyPlanningError,
+    ExternalDependencyResolution,
+    ExternalDependencyState,
+    ParallelPlanningPolicy,
+    ParallelWave,
+    ScopeCollision,
+    ScopeCollisionKind,
+    TicketBlocker,
+    TicketBlockerKind,
+    TicketDependencyPlan,
+    TicketPlanningRequest,
+    WaveDisposition,
+    build_ticket_dependency_plan,
+)
+
 from hermes_cli.agent_platform.ticket_factory.generator_roles import (
     TICKET_GENERATOR_ROLE_SCHEMA_VERSION,
     GeneratorAssignment,
@@ -94,4 +114,21 @@ __all__ = (
     "prepare_ticket_generator_assignments",
     "build_ticket_proposal",
     "validate_ticket_generator_proposal",
+    "DEPENDENCY_PLAN_SCHEMA_VERSION",
+    "ExternalDependencyState",
+    "ScopeCollisionKind",
+    "TicketBlockerKind",
+    "WaveDisposition",
+    "ExternalDependencyResolution",
+    "DependencyEdge",
+    "ScopeCollision",
+    "TicketBlocker",
+    "ParallelPlanningPolicy",
+    "TicketPlanningRequest",
+    "ParallelWave",
+    "TicketDependencyPlan",
+    "DependencyPlanningError",
+    "DependencyCollectionValidationError",
+    "DependencyCycleError",
+    "build_ticket_dependency_plan",
 )
