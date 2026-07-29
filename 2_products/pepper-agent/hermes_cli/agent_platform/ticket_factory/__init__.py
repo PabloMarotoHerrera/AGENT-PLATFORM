@@ -71,6 +71,24 @@ from hermes_cli.agent_platform.ticket_factory.specs import (
     TicketValidationStepSpec,
 )
 
+from hermes_cli.agent_platform.ticket_factory.ticket_policy import (
+    TICKET_POLICY_SCHEMA_VERSION,
+    TicketLintDiagnostic,
+    TicketLintDisposition,
+    TicketLintReport,
+    TicketLintRequest,
+    TicketLintRuleCode,
+    TicketLintScope,
+    TicketLintSeverity,
+    TicketLintSummary,
+    TicketPolicyError,
+    TicketPolicyInputError,
+    TicketPolicyProfile,
+    TicketPolicyProfileName,
+    get_ticket_policy_profile,
+    lint_ticket_collection,
+)
+
 __all__ = (
     "PROJECT_SPEC_SCHEMA_VERSION",
     "TICKET_SPEC_SCHEMA_VERSION",
@@ -131,4 +149,19 @@ __all__ = (
     "DependencyCollectionValidationError",
     "DependencyCycleError",
     "build_ticket_dependency_plan",
+    "TICKET_POLICY_SCHEMA_VERSION",
+    "TicketPolicyProfileName",
+    "TicketLintSeverity",
+    "TicketLintScope",
+    "TicketLintDisposition",
+    "TicketLintRuleCode",
+    "TicketPolicyProfile",
+    "TicketLintRequest",
+    "TicketLintDiagnostic",
+    "TicketLintSummary",
+    "TicketLintReport",
+    "TicketPolicyError",
+    "TicketPolicyInputError",
+    "get_ticket_policy_profile",
+    "lint_ticket_collection",
 )
