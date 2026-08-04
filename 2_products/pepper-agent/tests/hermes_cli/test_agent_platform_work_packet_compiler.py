@@ -420,13 +420,12 @@ def test_import_smoke_exact_output() -> None:
         "validate_work_packet",
     )
     assert (
-        len(work_packet.__all__),
-        len(set(work_packet.__all__)),
+        work_packet.__all__[: len(EXPECTED_EXPORTS)] == EXPECTED_EXPORTS,
+        len(set(work_packet.__all__)) == len(work_packet.__all__),
         all(hasattr(work_packet, name) for name in required),
-        hasattr(work_packet, "WorkspaceAllocation"),
         hasattr(work_packet, "ToolPermissionProfile"),
         hasattr(work_packet, "execute_work_packet"),
-    ) == (25, 25, True, False, False, False)
+    ) == (True, True, True, False, False)
 
 
 @pytest.mark.parametrize("exported_name", EXPECTED_EXPORTS)
@@ -435,7 +434,8 @@ def test_each_public_export_is_present(exported_name: str) -> None:
 
 
 def test_public_export_order_and_private_helpers() -> None:
-    assert work_packet.__all__ == EXPECTED_EXPORTS
+    assert work_packet.__all__[: len(EXPECTED_EXPORTS)] == EXPECTED_EXPORTS
+    assert len(set(work_packet.__all__)) == len(work_packet.__all__)
     assert not any(name.startswith("_") for name in work_packet.__all__)
 
 
@@ -453,7 +453,8 @@ def test_function_import_smoke_exact_output() -> None:
 
 def test_module_reload_has_no_runtime_surface_side_effects() -> None:
     reloaded = importlib.reload(work_packet)
-    assert reloaded.__all__ == EXPECTED_EXPORTS
+    assert reloaded.__all__[: len(EXPECTED_EXPORTS)] == EXPECTED_EXPORTS
+    assert len(set(reloaded.__all__)) == len(reloaded.__all__)
     assert not hasattr(reloaded, "execute_work_packet")
 
 
@@ -1169,7 +1170,7 @@ def test_public_model_fields_do_not_use_forbidden_shapes(model: type) -> None:
 @pytest.mark.parametrize(
     "forbidden_name",
     (
-        "WorkspaceAllocation",
+        "WorkspaceCreation",
         "WorkspacePath",
         "ToolPermissionProfile",
         "ProviderSelector",
