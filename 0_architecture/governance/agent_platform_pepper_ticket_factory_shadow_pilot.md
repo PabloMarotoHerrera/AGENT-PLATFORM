@@ -131,4 +131,4 @@ Graphify was not run under the explicit P16.8 constraint. No dependencies, lockf
 
 ## Final Verdict
 
-The canonical P16.8 shadow-pilot readiness verdict is held by the response contract.
+`hermes_0_19_pepper_ticket_factory_shadow_pilot_ready_with_shadow_only_non_executing_evidence`
