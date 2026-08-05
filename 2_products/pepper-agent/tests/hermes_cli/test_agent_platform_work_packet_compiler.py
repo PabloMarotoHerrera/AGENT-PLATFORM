@@ -425,7 +425,7 @@ def test_import_smoke_exact_output() -> None:
         all(hasattr(work_packet, name) for name in required),
         hasattr(work_packet, "ToolPermissionProfile"),
         hasattr(work_packet, "execute_work_packet"),
-    ) == (True, True, True, False, False)
+    ) == (True, True, True, True, False)
 
 
 @pytest.mark.parametrize("exported_name", EXPECTED_EXPORTS)
@@ -1172,7 +1172,6 @@ def test_public_model_fields_do_not_use_forbidden_shapes(model: type) -> None:
     (
         "WorkspaceCreation",
         "WorkspacePath",
-        "ToolPermissionProfile",
         "ProviderSelector",
         "ModelSelector",
         "AgentAllocator",

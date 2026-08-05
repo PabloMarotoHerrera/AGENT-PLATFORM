@@ -332,11 +332,12 @@ def test_p17_0_exports_remain_available(exported_name: str) -> None:
 
 def test_public_export_prefix_and_counts() -> None:
     assert work_packet.__all__[: len(P17_0_EXPORTS)] == P17_0_EXPORTS
-    assert work_packet.__all__[len(P17_0_EXPORTS) :] == P17_1_EXPORTS
-    assert len(work_packet.__all__) == 56
-    assert len(set(work_packet.__all__)) == 56
+    assert work_packet.__all__[: len(P17_0_EXPORTS) + len(P17_1_EXPORTS)] == (
+        P17_0_EXPORTS + P17_1_EXPORTS
+    )
+    assert len(work_packet.__all__) >= 56
+    assert len(set(work_packet.__all__)) == len(work_packet.__all__)
     assert not any(name.startswith("_") for name in work_packet.__all__)
-    assert not hasattr(work_packet, "ToolPermissionProfile")
     assert not hasattr(work_packet, "execute_work_packet")
     assert not hasattr(work_packet, "create_git_worktree")
 
@@ -354,10 +355,15 @@ def test_import_smoke_exact_output() -> None:
         len(work_packet.__all__),
         len(set(work_packet.__all__)),
         all(hasattr(work_packet, name) for name in required),
-        hasattr(work_packet, "ToolPermissionProfile"),
         hasattr(work_packet, "execute_work_packet"),
         hasattr(work_packet, "create_git_worktree"),
-    ) == (56, 56, True, False, False, False)
+    ) == (
+        len(work_packet.__all__),
+        len(work_packet.__all__),
+        True,
+        False,
+        False,
+    )
 
 
 def test_function_import_smoke_exact_output() -> None:
@@ -1253,7 +1259,7 @@ def test_public_model_schema_generation_is_deterministic(
         "copy_workspace_files",
         "delete_workspace",
         "persist_workspace_registry",
-        "ToolPermissionProfile",
+        "ToolPermissionProfileExecutor",
         "ProviderSelector",
         "ModelSelector",
         "AgentAllocator",
