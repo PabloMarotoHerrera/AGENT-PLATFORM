@@ -868,6 +868,142 @@ def test_workspace_inspection_evidence_digest_recomputes(
     )
 
 
+def dirty_inspection_evidence(
+    *,
+    status_entry_count: int,
+    clean: bool = False,
+    clean_as_string: str | None = None,
+) -> WorkspaceInspectionEvidence:
+    data = {
+        "workspace_root": WORKSPACE_ROOT,
+        "resolved_workspace_root": WORKSPACE_ROOT,
+        "git_top_level": WORKSPACE_ROOT,
+        "source_commit": SOURCE_COMMIT,
+        "workspace_branch": WORKSPACE_BRANCH,
+        "inside_work_tree": True,
+        "linked_worktree": True,
+        "clean": clean_as_string if clean_as_string is not None else clean,
+        "status_entry_count": status_entry_count,
+    }
+    return WorkspaceInspectionEvidence(
+        **data,
+        inspection_SHA256=allocator_module._inspection_evidence_digest_from_record(
+            data
+        ),
+    )
+
+
+def test_dirty_workspace_inspection_allowed_when_clean_not_required(
+    monkeypatch: pytest.MonkeyPatch,
+    repository_identity: WorkspaceRepositoryIdentity,
+) -> None:
+    patch_inspection(monkeypatch, responses=git_responses(status=" M changed.py"))
+    evidence = inspect_human_provisioned_workspace(
+        workspace_root=WORKSPACE_ROOT,
+        repository_identity=repository_identity,
+        require_clean_worktree=False,
+        require_linked_worktree=True,
+    )
+    assert evidence.clean is False
+    assert evidence.status_entry_count == 1
+    assert evidence.inspection_SHA256 == allocator_module._inspection_evidence_digest(
+        evidence
+    )
+
+
+def test_dirty_workspace_inspection_counts_multiple_entries(
+    monkeypatch: pytest.MonkeyPatch,
+    repository_identity: WorkspaceRepositoryIdentity,
+) -> None:
+    patch_inspection(
+        monkeypatch,
+        responses=git_responses(status=" M changed.py\n?? new.py\n D removed.py"),
+    )
+    first = inspect_human_provisioned_workspace(
+        workspace_root=WORKSPACE_ROOT,
+        repository_identity=repository_identity,
+        require_clean_worktree=False,
+        require_linked_worktree=True,
+    )
+    patch_inspection(
+        monkeypatch,
+        responses=git_responses(status=" M changed.py\n?? new.py\n D removed.py"),
+    )
+    second = inspect_human_provisioned_workspace(
+        workspace_root=WORKSPACE_ROOT,
+        repository_identity=repository_identity,
+        require_clean_worktree=False,
+        require_linked_worktree=True,
+    )
+    assert first.status_entry_count == 3
+    assert first.clean is False
+    assert first == second
+
+
+def test_clean_required_still_rejects_dirty_workspace(
+    monkeypatch: pytest.MonkeyPatch,
+    repository_identity: WorkspaceRepositoryIdentity,
+) -> None:
+    patch_inspection(monkeypatch, responses=git_responses(status=" M changed.py"))
+    with pytest.raises(WorkspaceAllocatorInspectionError, match="clean"):
+        inspect_human_provisioned_workspace(
+            workspace_root=WORKSPACE_ROOT,
+            repository_identity=repository_identity,
+            require_clean_worktree=True,
+            require_linked_worktree=True,
+        )
+
+
+def test_inspection_evidence_cleanliness_consistency_rules() -> None:
+    clean = dirty_inspection_evidence(status_entry_count=0, clean=True)
+    dirty = dirty_inspection_evidence(status_entry_count=1, clean=False)
+    assert clean.clean is True
+    assert clean.status_entry_count == 0
+    assert dirty.clean is False
+    assert dirty.status_entry_count == 1
+
+    with pytest.raises(ValidationError, match="clean must match"):
+        dirty_inspection_evidence(status_entry_count=0, clean=False)
+    with pytest.raises(ValidationError, match="clean must match"):
+        dirty_inspection_evidence(status_entry_count=1, clean=True)
+    with pytest.raises(ValidationError):
+        dirty_inspection_evidence(
+            status_entry_count=1,
+            clean=False,
+            clean_as_string="false",
+        )
+
+
+def test_dirty_inspection_json_round_trip_preserves_false_clean() -> None:
+    evidence = dirty_inspection_evidence(status_entry_count=2, clean=False)
+    reloaded = WorkspaceInspectionEvidence.model_validate_json(
+        evidence.model_dump_json()
+    )
+    assert reloaded == evidence
+    assert reloaded.clean is False
+    assert reloaded.status_entry_count == 2
+
+
+def test_allocation_still_requires_clean_initial_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+    allocation_request: WorkspaceAllocationRequest,
+) -> None:
+    patch_inspection(monkeypatch, responses=git_responses(status=" M changed.py"))
+    with pytest.raises(WorkspaceAllocatorInspectionError, match="clean"):
+        allocate_workspace(allocation_request)
+
+
+def test_validate_workspace_allocation_rejects_dirty_initial_inspection(
+    allocation: WorkspaceAllocation,
+) -> None:
+    dirty_evidence = dirty_inspection_evidence(status_entry_count=1, clean=False)
+    tampered = allocation.model_copy(
+        update={"inspection_evidence": dirty_evidence},
+    )
+    with pytest.raises(WorkspaceAllocatorIntegrityError, match="integrity"):
+        validate_workspace_allocation(tampered)
+
+
 def test_scope_projection_is_exact(allocation: WorkspaceAllocation) -> None:
     projection = allocation.scope_projection
     source_scope = build_bundle()["result"].work_packet.repository_scope

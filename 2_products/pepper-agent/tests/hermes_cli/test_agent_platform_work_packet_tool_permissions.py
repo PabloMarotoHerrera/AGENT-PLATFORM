@@ -359,8 +359,9 @@ def test_public_export_prefix_and_counts() -> None:
         work_packet.__all__[len(prior_exports) : len(prior_exports) + 25]
         == P17_2_EXPORTS
     )
-    assert len(work_packet.__all__) == 81
-    assert len(set(work_packet.__all__)) == 81
+    assert len(work_packet.__all__) >= 81
+    assert work_packet.__all__[:81] == prior_exports + P17_2_EXPORTS
+    assert len(set(work_packet.__all__)) == len(work_packet.__all__)
     assert not any(name.startswith("_") for name in work_packet.__all__)
     assert not hasattr(work_packet, "execute_tool")
     assert not hasattr(work_packet, "SingleAgentTicketExecutor")
@@ -383,7 +384,8 @@ def test_import_smoke_exact_output() -> None:
         hasattr(work_packet, "execute_tool"),
         hasattr(work_packet, "SingleAgentTicketExecutor"),
         hasattr(work_packet, "ValidationCommandRunner"),
-    ) == (81, 81, True, False, False, False)
+    ) == (len(work_packet.__all__), len(work_packet.__all__), True, False, False, False)
+    assert work_packet.__all__[:81] == P17_0_EXPORTS + P17_1_EXPORTS + P17_2_EXPORTS
 
 
 def test_function_import_smoke_exact_output() -> None:

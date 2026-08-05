@@ -292,7 +292,7 @@ class WorkspaceInspectionEvidence(_WorkspaceAllocatorModel):
     workspace_branch: WorkspaceBranchIdentifier
     inside_work_tree: Literal[True] = True
     linked_worktree: Literal[True] = True
-    clean: Literal[True] = True
+    clean: StrictBool
     status_entry_count: int = Field(ge=0, strict=True)
     inspection_SHA256: DigestText
 
@@ -300,8 +300,9 @@ class WorkspaceInspectionEvidence(_WorkspaceAllocatorModel):
     def _validate_evidence(self) -> WorkspaceInspectionEvidence:
         if self.git_top_level != self.resolved_workspace_root:
             raise ValueError("git top level must equal resolved workspace root")
-        if self.status_entry_count != 0:
-            raise ValueError("clean inspection evidence must have zero status entries")
+        expected_clean = self.status_entry_count == 0
+        if self.clean != expected_clean:
+            raise ValueError("clean must match whether status_entry_count is zero")
         if self.inspection_SHA256 != _inspection_evidence_digest(self):
             raise ValueError("inspection_SHA256 must match inspection evidence digest")
         return self

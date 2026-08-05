@@ -65,6 +65,21 @@ Linked-worktree verification uses the relationship between `--git-dir` and `--gi
 
 The worktree must be clean. Any tracked or untracked status entry rejects allocation.
 
+## Execution-Time Reinspection Compatibility
+
+`inspect_human_provisioned_workspace(..., require_clean_worktree=False)` may return immutable read-only inspection evidence with `clean=false` and a positive `status_entry_count`. This supports downstream execution-time reinspection after a governed filesystem mutation has made the linked worktree dirty.
+
+This does not authorize allocation of a dirty workspace and does not mutate Git or the workspace. Allocation still calls inspection with `require_clean_worktree=True`, and allocation integrity still requires `clean=true` with `status_entry_count=0`.
+
+Cleanliness evidence is bidirectional:
+
+| Status entries | `clean` |
+| --- | --- |
+| `0` | `true` |
+| positive count | `false` |
+
+Linked-worktree verification, workspace-root canonicality, branch identity, and `HEAD` identity remain unchanged for both clean and dirty inspection evidence.
+
 ## Scope Projection
 
 `WorkspaceScopeProjection` copies the WorkPacket repository scope exactly:
