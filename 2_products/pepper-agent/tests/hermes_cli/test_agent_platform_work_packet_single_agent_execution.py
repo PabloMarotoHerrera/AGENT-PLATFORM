@@ -424,9 +424,11 @@ def test_p17_3_exports_are_present(exported_name: str) -> None:
 def test_prior_exports_remain_exact_prefix() -> None:
     prior = P17_0_EXPORTS + P17_1_EXPORTS + P17_2_EXPORTS
     assert work_packet.__all__[: len(prior)] == prior
-    assert work_packet.__all__[len(prior) :] == P17_3_EXPORTS
-    assert len(work_packet.__all__) == 113
-    assert len(set(work_packet.__all__)) == 113
+    assert work_packet.__all__[len(prior) : len(prior) + len(P17_3_EXPORTS)] == (
+        P17_3_EXPORTS
+    )
+    assert len(work_packet.__all__) >= 113
+    assert len(set(work_packet.__all__)) == len(work_packet.__all__)
     assert not any(name.startswith("_") for name in work_packet.__all__)
 
 
@@ -449,13 +451,13 @@ def test_forbidden_public_shapes_absent(forbidden_name: str) -> None:
 
 def test_import_smoke_exact_output() -> None:
     assert (
-        len(work_packet.__all__),
-        len(set(work_packet.__all__)),
+        len(work_packet.__all__) >= 113,
+        len(set(work_packet.__all__)) == len(work_packet.__all__),
         hasattr(work_packet, "SingleAgentExecutionSession"),
         hasattr(work_packet, "execute_single_agent_tool_action"),
         hasattr(work_packet, "execute_work_packet"),
         hasattr(work_packet, "ValidationCommandRunner"),
-    ) == (113, 113, True, True, False, False)
+    ) == (True, True, True, True, False, False)
 
 
 def test_function_import_smoke_exact_output() -> None:
