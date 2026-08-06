@@ -1035,19 +1035,22 @@ def test_target_resolution_rejects_unsafe_paths(
 
 def test_target_resolution_rejects_symlink_parent(prepared_context) -> None:
     workspace_root = prepared_context["workspace_root"]
-    (workspace_root / "src" / "real").mkdir()
-    try:
-        (workspace_root / "src" / "link").symlink_to(
-            workspace_root / "src" / "real", target_is_directory=True
-        )
-    except OSError as exc:
-        raise AssertionError(
-            "symlink creation unavailable in test environment"
-        ) from exc
+    symlink_parent = workspace_root / "src" / "link"
+    symlink_parent.mkdir()
+    original_is_symlink = Path.is_symlink
+
+    def is_designated_symlink(path: Path) -> bool:
+        if path == symlink_parent:
+            return True
+        return original_is_symlink(path)
+
     unsafe = action(
         1, "TASK-001", ToolPermissionOperation.READ_FILE, "src/link/file.txt"
     )
-    with pytest.raises(SingleAgentTargetResolutionError, match="symlink"):
+    with (
+        patch.object(Path, "is_symlink", is_designated_symlink),
+        pytest.raises(SingleAgentTargetResolutionError, match="symlink"),
+    ):
         sae._resolve_target(
             action=unsafe,
             allocation=prepared_context["allocation_result"].allocation,

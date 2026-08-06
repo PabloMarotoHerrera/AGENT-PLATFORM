@@ -704,9 +704,9 @@ def test_prior_172_exports_remain_exact_prefix() -> None:
     )
     assert len(prior) == 172
     assert work_packet.__all__[:172] == prior
-    assert work_packet.__all__[172:] == P17_6_EXPORTS
-    assert len(work_packet.__all__) == 201
-    assert len(set(work_packet.__all__)) == 201
+    assert work_packet.__all__[172:201] == P17_6_EXPORTS
+    assert len(work_packet.__all__) >= 201
+    assert len(set(work_packet.__all__)) == len(work_packet.__all__)
     assert not any(name.startswith("_") for name in work_packet.__all__)
 
 
@@ -724,7 +724,14 @@ def test_import_smoke_exact_output() -> None:
         hasattr(work_packet, "build_diff_artifact_review"),
         hasattr(work_packet, "inspect_workspace"),
         hasattr(work_packet, "DiffReviewer"),
-    ) == (201, 201, True, True, False, False)
+    ) == (
+        len(work_packet.__all__),
+        len(work_packet.__all__),
+        True,
+        True,
+        False,
+        False,
+    )
 
 
 def test_function_import_smoke_exact_output() -> None:

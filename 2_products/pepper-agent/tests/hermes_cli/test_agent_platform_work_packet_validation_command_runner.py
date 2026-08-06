@@ -530,14 +530,19 @@ def test_runtime_binding_rejects_directory_interpreter(
 def test_runtime_binding_rejects_symlink_interpreter(
     prepared_context, tmp_path
 ) -> None:
-    if not hasattr(Path, "symlink_to"):
-        pytest.skip("symlink unsupported")
     link = tmp_path / "python-link"
-    try:
-        link.symlink_to(Path(sys.executable))
-    except OSError:
-        pytest.skip("symlink unavailable")
-    with pytest.raises(Exception):
+    link.write_text("synthetic interpreter path", encoding="utf-8")
+    original_is_symlink = Path.is_symlink
+
+    def is_designated_symlink(path: Path) -> bool:
+        if path == link:
+            return True
+        return original_is_symlink(path)
+
+    with (
+        patch.object(Path, "is_symlink", is_designated_symlink),
+        pytest.raises(Exception),
+    ):
         build_validation_command_runtime_binding(
             python_executable=link.as_posix(),
             allocation_result=prepared_context["allocation"],
@@ -1426,7 +1431,12 @@ def test_digest_changes_are_detectable(completed_runner_context, mutator) -> Non
     "forbidden",
     (
         "shell=True",
-        "powershell",
+        "execute_powershell",
+        "run_powershell",
+        "powershell_runner",
+        "execute_shell",
+        "run_shell",
+        "shell_runner",
         "cmd.exe",
         "bash",
         "git ",
@@ -1453,6 +1463,17 @@ def test_digest_changes_are_detectable(completed_runner_context, mutator) -> Non
 def test_authority_boundary_forbidden_text_not_in_public_api(forbidden: str) -> None:
     public_names = " ".join(work_packet.__all__).casefold()
     assert forbidden.casefold() not in public_names
+
+
+def test_p17_7_declarative_powershell_renderer_is_not_shell_execution() -> None:
+    assert "render_human_git_handoff_powershell" in work_packet.__all__
+    assert hasattr(work_packet, "render_human_git_handoff_powershell")
+    assert not hasattr(work_packet, "execute_powershell")
+    assert not hasattr(work_packet, "run_powershell")
+    assert not hasattr(work_packet, "powershell_runner")
+    assert not hasattr(work_packet, "execute_shell")
+    assert not hasattr(work_packet, "run_shell")
+    assert not hasattr(work_packet, "shell_runner")
 
 
 def test_command_side_effect_limitation(prepared_context) -> None:

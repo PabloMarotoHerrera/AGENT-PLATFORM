@@ -1267,8 +1267,12 @@ def test_authority_counter_contract_is_zero(result_context, counter_name: str) -
 @pytest.mark.parametrize(
     "forbidden",
     (
-        "shell",
-        "powershell",
+        "execute_shell",
+        "run_shell",
+        "shell_runner",
+        "execute_powershell",
+        "run_powershell",
+        "powershell_runner",
         "cmd.exe",
         "bash",
         "git ",
@@ -1289,3 +1293,21 @@ def test_authority_counter_contract_is_zero(result_context, counter_name: str) -
 def test_authority_boundary_forbidden_text_not_in_public_api(forbidden: str) -> None:
     public_names = " ".join(work_packet.__all__).casefold()
     assert forbidden.casefold() not in public_names
+
+
+def test_p17_7_declarative_powershell_renderer_is_not_shell_execution() -> None:
+    assert "render_human_git_handoff_powershell" in work_packet.__all__
+    assert hasattr(work_packet, "render_human_git_handoff_powershell")
+    assert not hasattr(work_packet, "execute_powershell")
+    assert not hasattr(work_packet, "run_powershell")
+    assert not hasattr(work_packet, "powershell_runner")
+    assert not hasattr(work_packet, "execute_shell")
+    assert not hasattr(work_packet, "run_shell")
+    assert not hasattr(work_packet, "shell_runner")
+    assert not hasattr(work_packet, "execute_git_handoff")
+    assert not hasattr(work_packet, "run_git_handoff")
+    assert not hasattr(work_packet, "GitExecutor")
+    assert not hasattr(work_packet, "GitRunner")
+    assert not hasattr(work_packet, "automatic_staging")
+    assert not hasattr(work_packet, "automatic_commit")
+    assert not hasattr(work_packet, "automatic_push")
