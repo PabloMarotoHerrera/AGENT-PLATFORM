@@ -326,9 +326,9 @@ def test_prior_113_exports_remain_exact_prefix() -> None:
     prior = P17_0_EXPORTS + P17_1_EXPORTS + P17_2_EXPORTS + P17_3_EXPORTS
     assert len(prior) == 113
     assert work_packet.__all__[:113] == prior
-    assert work_packet.__all__[113:] == P17_4_EXPORTS
-    assert len(work_packet.__all__) == 145
-    assert len(set(work_packet.__all__)) == 145
+    assert work_packet.__all__[113:145] == P17_4_EXPORTS
+    assert len(work_packet.__all__) == 172
+    assert len(set(work_packet.__all__)) == 172
     assert not any(name.startswith("_") for name in work_packet.__all__)
 
 
@@ -343,9 +343,11 @@ def test_import_smoke_exact_output() -> None:
         len(set(work_packet.__all__)),
         hasattr(work_packet, "ValidationCommandRunnerSession"),
         hasattr(work_packet, "execute_validation_command"),
+        hasattr(work_packet, "OutcomeEnvelope"),
+        hasattr(work_packet, "build_outcome_envelope"),
         hasattr(work_packet, "execute_work_packet"),
         hasattr(work_packet, "ValidationCommandRunner"),
-    ) == (145, 145, True, True, False, False)
+    ) == (172, 172, True, True, True, True, False, False)
 
 
 def test_function_import_smoke_exact_output() -> None:
@@ -1440,7 +1442,7 @@ def test_digest_changes_are_detectable(completed_runner_context, mutator) -> Non
         "script.py",
         "ThreadPool",
         "asyncio",
-        "retry",
+        "retry_work_packet",
         "fallback",
         "result envelope",
         "diff review complete",
