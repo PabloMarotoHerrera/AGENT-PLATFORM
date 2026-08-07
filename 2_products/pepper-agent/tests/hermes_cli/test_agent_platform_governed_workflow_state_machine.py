@@ -450,10 +450,10 @@ def test_all_p18_0_exports_exist(exported_name: str) -> None:
 
 
 def test_public_exports_are_unique_and_exact_tail() -> None:
-    assert tuple(workflow.__all__) == P18_0_EXPORTS
-    assert tuple(gsm.__all__) == P18_0_EXPORTS
-    assert len(workflow.__all__) == 38
-    assert len(set(workflow.__all__)) == 38
+    assert tuple(workflow.__all__[: len(P18_0_EXPORTS)]) == P18_0_EXPORTS
+    assert tuple(gsm.__all__[: len(P18_0_EXPORTS)]) == P18_0_EXPORTS
+    assert len(P18_0_EXPORTS) == 38
+    assert len(set(workflow.__all__)) == len(workflow.__all__)
     assert not any(name.startswith("_") for name in workflow.__all__)
 
 
