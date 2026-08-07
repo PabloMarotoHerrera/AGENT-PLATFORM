@@ -610,9 +610,9 @@ def test_prior_228_exports_remain_exact_prefix() -> None:
     )
     assert len(prior) == 228
     assert work_packet.__all__[:228] == prior
-    assert work_packet.__all__[228:] == P17_8_EXPORTS
-    assert len(work_packet.__all__) == 255
-    assert len(set(work_packet.__all__)) == 255
+    assert work_packet.__all__[228:255] == P17_8_EXPORTS
+    assert len(work_packet.__all__) >= 255
+    assert len(set(work_packet.__all__)) == len(work_packet.__all__)
     assert not any(name.startswith("_") for name in work_packet.__all__)
 
 
@@ -624,7 +624,7 @@ def test_import_smoke_exact_output() -> None:
         hasattr(work_packet, "build_non_critical_ticket_pilot"),
         hasattr(work_packet, "execute_pilot"),
         hasattr(work_packet, "PilotExecutor"),
-    ) == (255, 255, True, True, False, False)
+    ) == (283, 283, True, True, False, False)
 
 
 def test_function_import_smoke_exact_names() -> None:
