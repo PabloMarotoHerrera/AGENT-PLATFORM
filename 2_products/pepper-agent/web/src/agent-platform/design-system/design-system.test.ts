@@ -105,7 +105,7 @@ function makeConfiguration(): ProductConfiguration {
     upstreamProductName: "Synthetic Upstream",
     upstreamVersion: "8.9.0",
     upstreamCommit: "0123456789abcdef0123456789abcdef01234567",
-    featureFlags: Object.freeze({ "agent_platform.product_ui": "disabled" as const }),
+    featureFlags: Object.freeze({ "agent_platform.product_ui": "enabled" as const }),
     extensionModules: Object.freeze([]),
     documentationUrl: null,
     supportUrl: null,
@@ -241,9 +241,9 @@ describe("product design-system integration", () => {
     expect(props.children).toBe("child");
   });
 
-  it("keeps compiled descriptor candidates inactive under committed Pepper defaults", () => {
+  it("keeps unselected compiled descriptor candidates inactive under committed Pepper defaults", () => {
     const backendSource = readFileSync(BACKEND_CONFIG_PATH, "utf8");
-    expect(backendSource).toContain('"agent_platform.product_ui": FeatureState.DISABLED');
+    expect(backendSource).toContain('"agent_platform.product_ui": FeatureState.ENABLED');
     expect(backendSource).not.toContain('"agent_platform.ui.candidate"');
     const configuration = makeConfiguration();
     const compiledDescriptors = Object.freeze([COMPILED_DESCRIPTOR_CANDIDATE]);

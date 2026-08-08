@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from hermes_cli.agent_platform.product_config import (
     FeatureState,
+    PRODUCT_UI_EXTENSION_MODULE_IDS,
     ProductConfiguration,
     get_feature_state,
     load_product_configuration,
@@ -22,15 +23,60 @@ def test_tracked_defaults_form_the_validated_dual_version_contract():
     assert configuration.product_version == "0.1.0-dev"
     assert configuration.upstream_product_name == "Hermes Agent"
     assert configuration.upstream_version == "0.19.0"
+    assert configuration.upstream_commit == "3ef6bbd201263d354fd83ec55b3c306ded2eb72a"
     assert (
-        configuration.upstream_commit
-        == "3ef6bbd201263d354fd83ec55b3c306ded2eb72a"
+        configuration.feature_flags["agent_platform.product_ui"] is FeatureState.ENABLED
     )
-    assert (
-        configuration.feature_flags["agent_platform.product_ui"]
-        is FeatureState.DISABLED
+    assert configuration.extension_modules == PRODUCT_UI_EXTENSION_MODULE_IDS
+    assert len(configuration.extension_modules) == 9
+    assert len(configuration.extension_modules) == len(
+        set(configuration.extension_modules)
     )
-    assert configuration.extension_modules == ()
+    assert all(
+        module_id.startswith("agent_platform.ui.")
+        for module_id in configuration.extension_modules
+    )
+
+
+def test_product_ui_activation_ids_are_the_exact_accepted_registry_order():
+    assert PRODUCT_UI_EXTENSION_MODULE_IDS == (
+        "agent_platform.ui.overview",
+        "agent_platform.ui.projects",
+        "agent_platform.ui.project_detail",
+        "agent_platform.ui.ticket_detail",
+        "agent_platform.ui.approvals",
+        "agent_platform.ui.approval_detail",
+        "agent_platform.ui.executions",
+        "agent_platform.ui.execution_detail",
+        "agent_platform.ui.settings",
+    )
+
+
+def test_tracked_defaults_enable_only_the_product_ui_feature_flag():
+    configuration = load_product_configuration()
+
+    assert configuration.feature_flags == {
+        "agent_platform.product_ui": FeatureState.ENABLED
+    }
+
+
+def test_product_configuration_is_frozen_after_validation():
+    configuration = load_product_configuration()
+
+    with pytest.raises(ValidationError):
+        configuration.product_display_name = "Synthetic Override"  # type: ignore[misc]
+
+
+def test_extension_modules_reject_invalid_activation_identifiers():
+    for invalid_module_id in (
+        "/agent-platform/overview",
+        "Agent_Platform.UI.Overview",
+    ):
+        payload = load_product_configuration().model_dump(mode="json")
+        payload["extension_modules"] = [invalid_module_id]
+
+        with pytest.raises(ValidationError):
+            ProductConfiguration.model_validate(payload)
 
 
 def test_absent_features_default_to_disabled():
@@ -42,7 +88,7 @@ def test_absent_features_default_to_disabled():
     )
     assert (
         get_feature_state(configuration, "agent_platform.product_ui")
-        is FeatureState.DISABLED
+        is FeatureState.ENABLED
     )
 
 

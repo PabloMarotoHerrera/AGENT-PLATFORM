@@ -16,6 +16,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
+from hermes_cli.agent_platform.product_config import load_product_configuration
 from hermes_cli.agent_platform.runtime_adapter.contracts import RuntimeReadinessRef
 from hermes_cli.agent_platform.runtime_adapter.enums import RuntimeReadinessState
 
@@ -37,7 +38,11 @@ READINESS_CHECK_IDS = (
     "dashboard.files_root",
     "dashboard.files_outside_root",
 )
-_PRODUCT_EXTENSION_IDS: tuple[str, ...] = ()
+_PRODUCT_CONFIGURATION = load_product_configuration()
+_PRODUCT_EXTENSION_IDS: tuple[str, ...] = _PRODUCT_CONFIGURATION.extension_modules
+_PRODUCT_UI_FEATURE_STATE = _PRODUCT_CONFIGURATION.feature_flags[
+    "agent_platform.product_ui"
+]
 _ROOT_REQUIRED_ASSET_MARKER = "/assets/"
 _ROOT_FORBIDDEN_VITE_MARKERS = (
     "/@vite/client",
@@ -281,8 +286,10 @@ class RuntimeReadinessProbeResult:
             raise ValueError("unauthenticated product configuration must be denied")
         if self.authenticated_config_status != 200:
             raise ValueError("authenticated product configuration must return 200")
-        if self.product_feature_state != "disabled":
-            raise ValueError("product UI feature state must be disabled")
+        if self.product_feature_state != str(_PRODUCT_UI_FEATURE_STATE):
+            raise ValueError(
+                "product UI feature state must match product configuration"
+            )
         if self.extension_module_count != len(_PRODUCT_EXTENSION_IDS):
             raise ValueError("extension module count must match the product registry")
         if not self.extension_module_order_valid:
@@ -1149,16 +1156,15 @@ def _validate_product_configuration(
             attempt_count=attempt_count,
             validation_category="product_id_mismatch",
         )
-    if (
-        not isinstance(feature_flags, dict)
-        or feature_flags.get("agent_platform.product_ui") != "disabled"
-    ):
+    if not isinstance(feature_flags, dict) or feature_flags.get(
+        "agent_platform.product_ui"
+    ) != str(_PRODUCT_UI_FEATURE_STATE):
         raise RuntimeReadinessProductConfigurationError(
             runtime_id=runtime_id,
             probe_id=probe_id,
             endpoint_kind="dashboard.product_config_authenticated",
             attempt_count=attempt_count,
-            validation_category="product_ui_not_disabled",
+            validation_category="product_ui_state_mismatch",
         )
     if not isinstance(modules, list) or len(modules) != len(_PRODUCT_EXTENSION_IDS):
         raise RuntimeReadinessProductConfigurationError(
@@ -1188,7 +1194,7 @@ def _validate_product_configuration(
         )
     return {
         "product_id": product_id,
-        "product_feature_state": "disabled",
+        "product_feature_state": str(_PRODUCT_UI_FEATURE_STATE),
         "extension_module_count": len(modules),
         "extension_module_order_valid": extension_module_order_valid,
     }

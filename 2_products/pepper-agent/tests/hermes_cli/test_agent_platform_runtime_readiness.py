@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from hermes_cli.agent_platform.product_config import PRODUCT_UI_EXTENSION_MODULE_IDS
 from hermes_cli.agent_platform import runtime_adapter as ra
 from hermes_cli.agent_platform.runtime_adapter.readiness import (
     READINESS_CHECK_IDS,
@@ -16,11 +17,12 @@ from hermes_cli.agent_platform.runtime_adapter.readiness import (
     RuntimeHttpProbeResponse,
     RuntimeReadinessFilesRootError,
     RuntimeReadinessPayloadError,
+    RuntimeReadinessProductConfigurationError,
 )
 
 
 UTC = timezone.utc
-PRODUCT_EXTENSION_IDS: tuple[str, ...] = ()
+PRODUCT_EXTENSION_IDS: tuple[str, ...] = PRODUCT_UI_EXTENSION_MODULE_IDS
 
 
 def utc_now() -> datetime:
@@ -31,7 +33,7 @@ def product_payload() -> dict[str, object]:
     return {
         "schema_version": 1,
         "product_id": "pepper",
-        "feature_flags": {"agent_platform.product_ui": "disabled"},
+        "feature_flags": {"agent_platform.product_ui": "enabled"},
         "extension_modules": list(PRODUCT_EXTENSION_IDS),
     }
 
@@ -153,8 +155,8 @@ def test_readiness_probe_validates_status_product_and_locked_files_root(
     assert result.provider_count == 0
     assert result.unauthenticated_config_status == 401
     assert result.authenticated_config_status == 200
-    assert result.product_feature_state == "disabled"
-    assert result.extension_module_count == 0
+    assert result.product_feature_state == "enabled"
+    assert result.extension_module_count == len(PRODUCT_EXTENSION_IDS)
     assert result.extension_module_order_valid is True
     assert result.plugin_manifest_valid is True
     assert result.plugin_route_conflict_count == 0
@@ -253,6 +255,63 @@ def test_readiness_probe_fails_when_status_cannot_prove_zero_activity(
         )
     assert exc_info.value.endpoint_kind == "dashboard.status"
     assert exc_info.value.validation_category == "gateway_running_not_false"
+
+
+@pytest.mark.parametrize(
+    ("payload_override", "validation_category"),
+    [
+        (
+            {"feature_flags": {"agent_platform.product_ui": "disabled"}},
+            "product_ui_state_mismatch",
+        ),
+        (
+            {"extension_modules": list(reversed(PRODUCT_EXTENSION_IDS))},
+            "extension_module_order_mismatch",
+        ),
+        (
+            {"extension_modules": list(PRODUCT_EXTENSION_IDS[:-1])},
+            "extension_module_count_mismatch",
+        ),
+    ],
+)
+def test_readiness_probe_fails_on_invalid_product_activation_evidence(
+    tmp_path: Path,
+    payload_override: dict[str, object],
+    validation_category: str,
+) -> None:
+    files_root = tmp_path / "files-root"
+    files_root.mkdir()
+    product = product_payload()
+    product.update(payload_override)
+
+    def transport(
+        url: str, _headers, _timeout_seconds: float
+    ) -> RuntimeHttpProbeResponse:
+        path = urllib.parse.urlsplit(url).path
+        if path == "/":
+            return root_response()
+        if path == "/api/status":
+            return RuntimeHttpProbeResponse(200, status_payload())
+        if path == "/api/agent-platform/product-configuration":
+            if "X-Hermes-Session-Token" not in _headers:
+                return RuntimeHttpProbeResponse(401, {"detail": "auth required"})
+            return RuntimeHttpProbeResponse(200, product)
+        return RuntimeHttpProbeResponse(404, {})
+
+    probe = RuntimeDashboardReadinessProbe(transport=transport, clock=utc_now)
+
+    with pytest.raises(RuntimeReadinessProductConfigurationError) as exc_info:
+        probe.wait_for_dashboard(
+            runtime_id="rt.p148.product_config",
+            host="127.0.0.1",
+            port=8765,
+            session_token="session-token",
+            files_root=files_root,
+            timeout_ms=100,
+            poll_interval_ms=50,
+        )
+    assert exc_info.value.endpoint_kind == "dashboard.product_config_authenticated"
+    assert exc_info.value.validation_category == validation_category
 
 
 def test_readiness_probe_fails_on_plugin_agent_platform_route_conflict(

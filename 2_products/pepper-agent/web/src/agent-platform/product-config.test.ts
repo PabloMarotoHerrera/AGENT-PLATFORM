@@ -15,8 +15,18 @@ function validWireConfiguration(): Record<string, unknown> {
     upstream_product_name: "Hermes Agent",
     upstream_version: "0.19.0",
     upstream_commit: "3ef6bbd201263d354fd83ec55b3c306ded2eb72a",
-    feature_flags: { "agent_platform.product_ui": "disabled" },
-    extension_modules: [],
+    feature_flags: { "agent_platform.product_ui": "enabled" },
+    extension_modules: [
+      "agent_platform.ui.overview",
+      "agent_platform.ui.projects",
+      "agent_platform.ui.project_detail",
+      "agent_platform.ui.ticket_detail",
+      "agent_platform.ui.approvals",
+      "agent_platform.ui.approval_detail",
+      "agent_platform.ui.executions",
+      "agent_platform.ui.execution_detail",
+      "agent_platform.ui.settings",
+    ],
     documentation_url: null,
     support_url: null,
   };
@@ -34,7 +44,36 @@ describe("product configuration", () => {
     expect(configuration.productId).toBe("pepper");
     expect(configuration.productDisplayName).toBe("Pepper");
     expect(configuration.upstreamVersion).toBe("0.19.0");
-    expect(configuration.extensionModules).toEqual([]);
+    expect(configuration.extensionModules).toEqual([
+      "agent_platform.ui.overview",
+      "agent_platform.ui.projects",
+      "agent_platform.ui.project_detail",
+      "agent_platform.ui.ticket_detail",
+      "agent_platform.ui.approvals",
+      "agent_platform.ui.approval_detail",
+      "agent_platform.ui.executions",
+      "agent_platform.ui.execution_detail",
+      "agent_platform.ui.settings",
+    ]);
+  });
+
+  it("freezes activated feature flags and extension module arrays", () => {
+    const configuration = parseProductConfiguration(validWireConfiguration());
+
+    expect(Object.isFrozen(configuration.featureFlags)).toBe(true);
+    expect(Object.isFrozen(configuration.extensionModules)).toBe(true);
+  });
+
+  it("rejects duplicate activated extension module identifiers", () => {
+    const raw = {
+      ...validWireConfiguration(),
+      extension_modules: [
+        "agent_platform.ui.projects",
+        "agent_platform.ui.projects",
+      ],
+    };
+
+    expect(() => parseProductConfiguration(raw)).toThrow(/unique identifiers/);
   });
 
   it.each(["api_key", "token", "providers", "credential_path"])(
@@ -49,7 +88,7 @@ describe("product configuration", () => {
   it("defaults missing features to disabled and unavailable transport to unavailable", () => {
     const configuration = parseProductConfiguration(validWireConfiguration());
 
-    expect(getProductFeatureState(configuration, "agent_platform.product_ui")).toBe("disabled");
+    expect(getProductFeatureState(configuration, "agent_platform.product_ui")).toBe("enabled");
     expect(getProductFeatureState(configuration, "agent_platform.future")).toBe("disabled");
     expect(getProductFeatureState(null, "agent_platform.future")).toBe("unavailable");
   });

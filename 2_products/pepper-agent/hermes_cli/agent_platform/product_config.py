@@ -65,6 +65,19 @@ class ProductConfiguration(BaseModel):
         return value
 
 
+PRODUCT_UI_EXTENSION_MODULE_IDS: tuple[str, ...] = (
+    "agent_platform.ui.overview",
+    "agent_platform.ui.projects",
+    "agent_platform.ui.project_detail",
+    "agent_platform.ui.ticket_detail",
+    "agent_platform.ui.approvals",
+    "agent_platform.ui.approval_detail",
+    "agent_platform.ui.executions",
+    "agent_platform.ui.execution_detail",
+    "agent_platform.ui.settings",
+)
+
+
 _PRODUCT_DEFAULTS = {
     "schema_version": 1,
     "product_id": "pepper",
@@ -74,9 +87,9 @@ _PRODUCT_DEFAULTS = {
     "upstream_version": "0.19.0",
     "upstream_commit": "3ef6bbd201263d354fd83ec55b3c306ded2eb72a",
     "feature_flags": {
-        "agent_platform.product_ui": FeatureState.DISABLED,
+        "agent_platform.product_ui": FeatureState.ENABLED,
     },
-    "extension_modules": (),
+    "extension_modules": PRODUCT_UI_EXTENSION_MODULE_IDS,
     "documentation_url": None,
     "support_url": None,
 }

@@ -22,9 +22,21 @@ import {
   type SafeSettingsState,
 } from "./use-safe-settings";
 
+const ACTIVATED_PRODUCT_EXTENSION_IDS = Object.freeze([
+  "agent_platform.ui.overview",
+  "agent_platform.ui.projects",
+  "agent_platform.ui.project_detail",
+  "agent_platform.ui.ticket_detail",
+  "agent_platform.ui.approvals",
+  "agent_platform.ui.approval_detail",
+  "agent_platform.ui.executions",
+  "agent_platform.ui.execution_detail",
+  "agent_platform.ui.settings",
+]);
+
 function configuration(
-  featureFlags: Record<string, string> = { "agent_platform.product_ui": "disabled" },
-  extensionModules: readonly string[] = [],
+  featureFlags: Record<string, string> = { "agent_platform.product_ui": "enabled" },
+  extensionModules: readonly string[] = ACTIVATED_PRODUCT_EXTENSION_IDS,
 ): ProductConfiguration {
   return parseProductConfiguration({
     schema_version: 1,
@@ -47,10 +59,10 @@ function source(overrides: Partial<SafeSettingsSourceContext> = {}): SafeSetting
     selectedProfileContext: "reviewer",
     extensionPosture: {
       compiledDescriptorCount: 9,
-      selectedModuleCount: 0,
-      resolvedDescriptorCount: 0,
-      registeredRouteCount: 0,
-      registeredNavigationCount: 0,
+      selectedModuleCount: 9,
+      resolvedDescriptorCount: 9,
+      registeredRouteCount: 9,
+      registeredNavigationCount: 5,
     },
     themeId: "default",
     fontId: "theme",
@@ -81,7 +93,7 @@ afterEach(() => {
 });
 
 describe("Pepper safe settings projection", () => {
-  it("projects Pepper identity, disabled activation posture, and read-only preference facts", async () => {
+  it("projects Pepper identity, activated extension posture, and read-only preference facts", async () => {
     const value = await snapshot();
 
     expect(value.product).toEqual({
@@ -96,15 +108,15 @@ describe("Pepper safe settings projection", () => {
     });
     expect(value.features).toEqual([{
       id: "agent_platform.product_ui",
-      state: "disabled",
+      state: "enabled",
       sourceAuthority: "read-only tracked product configuration",
     }]);
     expect(value.extensionPosture).toEqual({
       compiledDescriptorCount: 9,
-      selectedModuleCount: 0,
-      resolvedDescriptorCount: 0,
-      registeredRouteCount: 0,
-      registeredNavigationCount: 0,
+      selectedModuleCount: 9,
+      resolvedDescriptorCount: 9,
+      registeredRouteCount: 9,
+      registeredNavigationCount: 5,
     });
     expect(value.preferences.map((item) => [item.id, item.classification, item.writeAvailable]))
       .toEqual([

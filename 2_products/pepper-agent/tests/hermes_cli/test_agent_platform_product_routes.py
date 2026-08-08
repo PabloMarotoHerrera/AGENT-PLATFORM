@@ -1,10 +1,18 @@
 """Tests for the protected Pepper product-configuration dashboard boundary."""
 
 import json
+import warnings
 
 import pytest
 from fastapi.testclient import TestClient
 
+warnings.filterwarnings(
+    "ignore",
+    message='Field "model_like" has conflict with protected namespace "model_".',
+    category=UserWarning,
+)
+
+from hermes_cli.agent_platform.product_config import PRODUCT_UI_EXTENSION_MODULE_IDS
 from hermes_cli import web_server
 
 
@@ -46,8 +54,8 @@ def test_integrated_route_returns_validated_credential_free_shape(dashboard_clie
         "upstream_product_name": "Hermes Agent",
         "upstream_version": "0.19.0",
         "upstream_commit": "3ef6bbd201263d354fd83ec55b3c306ded2eb72a",
-        "feature_flags": {"agent_platform.product_ui": "disabled"},
-        "extension_modules": [],
+        "feature_flags": {"agent_platform.product_ui": "enabled"},
+        "extension_modules": list(PRODUCT_UI_EXTENSION_MODULE_IDS),
         "documentation_url": None,
         "support_url": None,
     }
@@ -65,7 +73,8 @@ def test_integrated_route_uses_existing_dashboard_authentication(dashboard_clien
     response = dashboard_client.get(path, headers=_auth_headers())
 
     assert response.status_code == 200
-    assert response.json()["feature_flags"]["agent_platform.product_ui"] == "disabled"
+    assert response.json()["feature_flags"]["agent_platform.product_ui"] == "enabled"
+    assert response.json()["extension_modules"] == list(PRODUCT_UI_EXTENSION_MODULE_IDS)
 
 
 @pytest.mark.parametrize("method", ["post", "put", "patch", "delete"])

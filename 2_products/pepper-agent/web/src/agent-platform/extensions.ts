@@ -49,9 +49,9 @@ export interface ProductExtensionPosture {
   readonly registeredNavigationCount: number;
 }
 
-// P15.C3A compiles the accepted P13 frontend descriptors but leaves them inert:
-// Pepper's tracked product configuration keeps product_ui disabled and selects
-// no extension_modules, so no route or navigation item is activated here.
+// P18.UI-A activates the accepted P13 frontend descriptors through Pepper's
+// tracked product configuration. The registry remains static and fail-closed:
+// only IDs selected by extension_modules can resolve routes or navigation.
 export const AGENT_PLATFORM_EXTENSIONS: readonly ProductExtensionDescriptor[] = Object.freeze([
   RUNTIME_OVERVIEW_DESCRIPTOR,
   ...PROJECTS_TICKETS_DESCRIPTORS,

@@ -16,6 +16,17 @@ import type { PluginManifest } from "@/plugins";
 
 const Page: ComponentType = () => null;
 const Icon: ComponentType<{ className?: string }> = () => null;
+const ACTIVATED_PRODUCT_EXTENSION_IDS = Object.freeze([
+  "agent_platform.ui.overview",
+  "agent_platform.ui.projects",
+  "agent_platform.ui.project_detail",
+  "agent_platform.ui.ticket_detail",
+  "agent_platform.ui.approvals",
+  "agent_platform.ui.approval_detail",
+  "agent_platform.ui.executions",
+  "agent_platform.ui.execution_detail",
+  "agent_platform.ui.settings",
+]);
 
 function configuration(
   extensionModules: string[],
@@ -52,22 +63,78 @@ function descriptor(
 }
 
 describe("Pepper frontend extensions", () => {
-  it("compiles the accepted P13 descriptors while the committed configuration keeps them inert", () => {
-    const committed = configuration([], { "agent_platform.product_ui": "disabled" });
+  it("resolves the accepted P18 product UI activation descriptors", () => {
+    const committed = configuration(
+      [...ACTIVATED_PRODUCT_EXTENSION_IDS],
+      { "agent_platform.product_ui": "enabled" },
+    );
 
-    expect(AGENT_PLATFORM_EXTENSIONS.map((descriptor) => descriptor.id)).toEqual([
-      "agent_platform.ui.overview",
-      "agent_platform.ui.projects",
-      "agent_platform.ui.project_detail",
-      "agent_platform.ui.ticket_detail",
-      "agent_platform.ui.approvals",
-      "agent_platform.ui.approval_detail",
-      "agent_platform.ui.executions",
-      "agent_platform.ui.execution_detail",
-      "agent_platform.ui.settings",
+    expect(AGENT_PLATFORM_EXTENSIONS.map((descriptor) => descriptor.id)).toEqual(
+      ACTIVATED_PRODUCT_EXTENSION_IDS,
+    );
+    const resolved = resolveRegisteredProductExtensions(committed, ["/sessions", "/kanban"]);
+    expect(resolved.map((descriptor) => descriptor.id)).toEqual(ACTIVATED_PRODUCT_EXTENSION_IDS);
+    expect(resolved.some((descriptor) => descriptor.id === "agent_platform.ui.projects")).toBe(true);
+    expect(resolved.some((descriptor) => descriptor.id === "agent_platform.ui.ticket_detail")).toBe(true);
+    expect(new Set(resolved.map((descriptor) => descriptor.route.path)).size).toBe(resolved.length);
+    expect(resolved.some((descriptor) => descriptor.route.path === "/kanban")).toBe(false);
+    expect(mergeProductNavigation(
+      [{ path: "/kanban", label: "Kanban", icon: Icon }],
+      resolved,
+    ).map((item) => item.path)).toEqual([
+      "/kanban",
+      "/agent-platform/overview",
+      "/agent-platform/projects",
+      "/agent-platform/approvals",
+      "/agent-platform/executions",
+      "/agent-platform/settings",
     ]);
-    expect(resolveRegisteredProductExtensions(committed, ["/sessions"])).toEqual([]);
     expect(getProductExtensionPosture(committed)).toEqual({
+      compiledDescriptorCount: 9,
+      selectedModuleCount: 9,
+      resolvedDescriptorCount: 9,
+      registeredRouteCount: 9,
+      registeredNavigationCount: 5,
+    });
+  });
+
+  it("declares product UI ownership and experimental opt-in for every activated descriptor", () => {
+    expect(AGENT_PLATFORM_EXTENSIONS.every((descriptor) =>
+      descriptor.owner === "AGENT_PLATFORM" &&
+      descriptor.featureId === "agent_platform.product_ui" &&
+      descriptor.visibleWhenExperimental,
+    )).toBe(true);
+    expect(AGENT_PLATFORM_EXTENSIONS.map((descriptor) => descriptor.route.path))
+      .not.toContain("/kanban");
+  });
+
+  it("keeps activated detail routes out of product navigation", () => {
+    const navigationEntries = AGENT_PLATFORM_EXTENSIONS
+      .filter((descriptor) => descriptor.navigation)
+      .map((descriptor) => [descriptor.id, descriptor.route.path, descriptor.navigation?.label]);
+
+    expect(navigationEntries).toEqual([
+      ["agent_platform.ui.overview", "/agent-platform/overview", "Overview"],
+      ["agent_platform.ui.projects", "/agent-platform/projects", "Projects"],
+      ["agent_platform.ui.approvals", "/agent-platform/approvals", "Approvals"],
+      ["agent_platform.ui.executions", "/agent-platform/executions", "Executions"],
+      ["agent_platform.ui.settings", "/agent-platform/settings", "Settings"],
+    ]);
+  });
+
+  it("resolves the accepted descriptors while the product UI feature is experimental", () => {
+    const experimental = configuration(
+      [...ACTIVATED_PRODUCT_EXTENSION_IDS],
+      { "agent_platform.product_ui": "experimental" },
+    );
+
+    expect(resolveRegisteredProductExtensions(experimental, ["/sessions"]).map((entry) => entry.id))
+      .toEqual(ACTIVATED_PRODUCT_EXTENSION_IDS);
+  });
+
+  it("returns no registered descriptors when product configuration is unavailable", () => {
+    expect(resolveRegisteredProductExtensions(null, ["/sessions", "/kanban"])).toEqual([]);
+    expect(getProductExtensionPosture(null)).toEqual({
       compiledDescriptorCount: 9,
       selectedModuleCount: 0,
       resolvedDescriptorCount: 0,
@@ -243,4 +310,5 @@ describe("Pepper frontend extensions", () => {
       ["/agent-platform/second", "agent-platform"],
     ]);
   });
+
 });

@@ -20,7 +20,9 @@ import {
   TICKET_DETAIL_DESCRIPTOR,
 } from "./descriptors";
 import {
+  buildKanbanSourcePath,
   buildProjectPath,
+  buildProjectsPath,
   buildTicketPath,
   getProjectSource,
   getTicketSource,
@@ -350,6 +352,28 @@ describe("GET-only Kanban client boundary", () => {
     expect(buildTicketPath("alpha-board", "../escape", "default")).toBeNull();
   });
 
+  it("builds activated Projects and Ticket routes without calling Kanban source APIs", () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(buildProjectsPath("review-profile")).toBe("/agent-platform/projects?profile=review-profile");
+    expect(buildProjectPath("alpha-board", "review-profile")).toBe(
+      "/agent-platform/projects/alpha-board?profile=review-profile",
+    );
+    expect(buildTicketPath("alpha-board", "t_alpha01", "review-profile")).toBe(
+      "/agent-platform/projects/alpha-board/tickets/t_alpha01?profile=review-profile",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("builds the legacy Kanban source path only as outbound navigation", () => {
+    expect(buildKanbanSourcePath("alpha-board", "review-profile")).toBe(
+      "/kanban?board=alpha-board&profile=review-profile",
+    );
+    expect(buildKanbanSourcePath("../escape", "review-profile")).toBeNull();
+    expect(buildKanbanSourcePath("alpha-board", "../escape")).toBeNull();
+  });
+
   it("keeps a missing board unavailable without process-current fallback", async () => {
     vi.stubGlobal("window", {});
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -380,6 +404,7 @@ describe("GET-only Kanban client boundary", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(String(fetchMock.mock.calls[1][0])).toContain("tasks/t_missing?board=alpha-board");
   });
+
 });
 
 describe("workspace polling and identity freshness", () => {
