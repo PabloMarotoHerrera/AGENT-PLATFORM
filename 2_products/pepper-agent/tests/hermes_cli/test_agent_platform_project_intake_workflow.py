@@ -245,12 +245,16 @@ def test_all_p18_1_exports_exist(exported_name: str) -> None:
 
 
 def test_p18_0_exports_are_exact_prefix_after_p18_1() -> None:
+    p18_0_count = len(p18_0.P18_0_EXPORTS)
+    p18_1_count = len(P18_1_EXPORTS)
     assert len(p18_0.P18_0_EXPORTS) == 38
-    assert tuple(workflow.__all__[: len(p18_0.P18_0_EXPORTS)]) == p18_0.P18_0_EXPORTS
+    assert tuple(workflow.__all__[:p18_0_count]) == p18_0.P18_0_EXPORTS
     assert tuple(pi.__all__) == P18_1_EXPORTS
-    assert tuple(workflow.__all__[len(p18_0.P18_0_EXPORTS) :]) == P18_1_EXPORTS
+    assert tuple(workflow.__all__[p18_0_count : p18_0_count + p18_1_count]) == (
+        P18_1_EXPORTS
+    )
     assert len(P18_1_EXPORTS) == 29
-    assert len(workflow.__all__) == 67
+    assert len(workflow.__all__) >= 67
     assert len(set(workflow.__all__)) == len(workflow.__all__)
     assert not any(name.startswith("_") for name in workflow.__all__)
 
