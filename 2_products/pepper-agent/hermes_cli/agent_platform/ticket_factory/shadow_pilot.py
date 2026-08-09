@@ -78,6 +78,7 @@ from hermes_cli.agent_platform.ticket_factory.specs import (
     AuthorityReferenceKind,
     ProjectSpec,
     TicketSpec,
+    _ticket_id_matches_project,
 )
 from hermes_cli.agent_platform.ticket_factory.ticket_policy import (
     TicketLintDisposition,
@@ -312,8 +313,8 @@ class TicketFactoryShadowPilotRequest(_ShadowPilotModel):
             raise ValueError(
                 "project_spec and seed_ticket project identifiers must match"
             )
-        if not self.seed_ticket.ticket_id.startswith(
-            f"{self.project_spec.project_id}."
+        if not _ticket_id_matches_project(
+            self.project_spec.project_id, self.seed_ticket.ticket_id
         ):
             raise ValueError("seed_ticket must use the project_id prefix")
         source_ids = tuple(source.source_id for source in self.context_sources)

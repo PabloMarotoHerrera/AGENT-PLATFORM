@@ -13,6 +13,7 @@ The workflow transition stops at `awaiting_ticket_approval` through P18.0 transi
 P18.2 requires:
 
 - Accepted P18.1 `ProjectIntakeResult`.
+- Canonical identity preserved as `project_id: PEPPER`, `macroproject_id: P18`, and `ticket_id: P18.2`.
 - Resulting P18.1 workflow snapshot in `intake_ready`.
 - `P18_2_ready: true` from the P18.1 summary.
 - Committed P18.UI-A parent commit `f55b8a2cc62c9ba0620a14f51b968107b75a78f1`.
@@ -25,8 +26,8 @@ P18.2 uses the existing P16 Ticket Factory contracts rather than adding a second
 
 | Evidence | Existing Owner | P18.2 Use |
 | --- | --- | --- |
-| `ProjectSpec` | P16.0 | Project-level P18 migration identity and constraints. |
-| `TicketSpec` | P16.0 | Canonical P18.2 ticket candidate. |
+| `ProjectSpec` | P16.0 | Product-level `PEPPER` project identity and P18 migration constraints. |
+| `TicketSpec` | P16.0 | Canonical `P18.2` ticket candidate under the governed P18 macroproject namespace. |
 | `ContextPack` | P16.1 | Bounded intake and activation context pointers. |
 | `TicketDependencyPlan` | P16.3 | Single-ticket dependency-ready wave for P18.2. |
 | `TicketLintReport` | P16.4 | Governed-standard policy pass evidence. |

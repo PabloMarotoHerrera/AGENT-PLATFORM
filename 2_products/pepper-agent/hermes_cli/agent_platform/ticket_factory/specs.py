@@ -8,6 +8,7 @@ or execute validation commands.
 from __future__ import annotations
 
 from enum import Enum
+import re
 from typing import Annotated, Literal, TypeAlias
 
 from pydantic import (
@@ -24,6 +25,14 @@ from pydantic import (
 
 PROJECT_SPEC_SCHEMA_VERSION = 1
 TICKET_SPEC_SCHEMA_VERSION = 1
+_NUMERIC_PROJECT_IDENTIFIER_PATTERN = r"P[1-9][0-9]{0,3}"
+_P_NUMERIC_SHAPED_IDENTIFIER_PATTERN = r"P[0-9]+"
+_PRODUCT_PROJECT_IDENTIFIER_PATTERN = r"[A-Z][A-Z0-9_]{1,31}"
+_PROJECT_IDENTIFIER_PATTERN = rf"^(?:{_NUMERIC_PROJECT_IDENTIFIER_PATTERN}|{_PRODUCT_PROJECT_IDENTIFIER_PATTERN})$"
+_NUMERIC_PROJECT_IDENTIFIER_RE = re.compile(rf"^{_NUMERIC_PROJECT_IDENTIFIER_PATTERN}$")
+_P_NUMERIC_SHAPED_IDENTIFIER_RE = re.compile(
+    rf"^{_P_NUMERIC_SHAPED_IDENTIFIER_PATTERN}$"
+)
 
 
 def _reject_nul(value: str) -> str:
@@ -42,6 +51,35 @@ def _reject_identifier_whitespace(value: object) -> object:
     if isinstance(value, str) and any(character.isspace() for character in value):
         raise ValueError("identifier must not contain whitespace")
     return value
+
+
+def _validate_project_identifier(value: str) -> str:
+    if _P_NUMERIC_SHAPED_IDENTIFIER_RE.fullmatch(
+        value
+    ) and not _NUMERIC_PROJECT_IDENTIFIER_RE.fullmatch(value):
+        raise ValueError("numeric project identifier must be P1 through P9999")
+    return value
+
+
+def _ticket_namespace(ticket_id: str) -> str:
+    return ticket_id.split(".", 1)[0]
+
+
+def _ticket_id_matches_project(project_id: str, ticket_id: str) -> bool:
+    ticket_namespace = _ticket_namespace(ticket_id)
+    if ticket_namespace == project_id:
+        return True
+    if _NUMERIC_PROJECT_IDENTIFIER_RE.fullmatch(project_id):
+        return False
+    return _NUMERIC_PROJECT_IDENTIFIER_RE.fullmatch(ticket_namespace) is not None
+
+
+def _ticket_ids_share_project_namespace(
+    project_id: str, ticket_id: str, dependency_ticket_id: str
+) -> bool:
+    if _NUMERIC_PROJECT_IDENTIFIER_RE.fullmatch(project_id):
+        return _ticket_namespace(dependency_ticket_id) == project_id
+    return _ticket_namespace(dependency_ticket_id) == _ticket_namespace(ticket_id)
 
 
 def _validate_repository_path_pattern(value: str) -> str:
@@ -93,7 +131,8 @@ ValidationIdentifier: TypeAlias = Annotated[
 ProjectIdentifier: TypeAlias = Annotated[
     str,
     BeforeValidator(_reject_identifier_whitespace),
-    StringConstraints(min_length=2, max_length=5, pattern=r"^P[1-9][0-9]{0,3}$"),
+    StringConstraints(min_length=2, max_length=32, pattern=_PROJECT_IDENTIFIER_PATTERN),
+    AfterValidator(_validate_project_identifier),
 ]
 TicketIdentifier: TypeAlias = Annotated[
     str,
@@ -274,7 +313,7 @@ class TicketSpec(_TicketFactoryModel):
 
     @model_validator(mode="after")
     def _validate_ticket_spec(self) -> TicketSpec:
-        if not self.ticket_id.startswith(f"{self.project_id}."):
+        if not _ticket_id_matches_project(self.project_id, self.ticket_id):
             raise ValueError("ticket_id must use the project_id prefix")
         dependency_ids = tuple(dependency.ticket_id for dependency in self.dependencies)
         if self.ticket_id in dependency_ids:

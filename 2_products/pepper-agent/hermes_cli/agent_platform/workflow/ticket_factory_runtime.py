@@ -124,7 +124,8 @@ TICKET_FACTORY_RUNTIME_ID_DIGEST_ALGORITHM = (
 )
 
 _CANONICAL_P18_UI_A_COMMIT = "f55b8a2cc62c9ba0620a14f51b968107b75a78f1"
-_CANONICAL_PROJECT_ID = "P18"
+_CANONICAL_PROJECT_ID = "PEPPER"
+_CANONICAL_MACROPROJECT_ID = "P18"
 _CANONICAL_TICKET_ID = "P18.2"
 _CANONICAL_PREREQUISITE_TICKET_ID = "P18.1"
 _CANONICAL_PROJECT_TITLE = "Manual-to-Hermes Workflow Migration"
@@ -351,7 +352,8 @@ class TicketFactoryRuntimeBinding(_TicketFactoryRuntimeModel):
     project_intake_result_SHA256: DigestText
     source_workflow_snapshot_SHA256: DigestText
     P18_UI_A_parent_commit: CommitText
-    ticket_factory_project_id: Literal["P18"] = _CANONICAL_PROJECT_ID
+    ticket_factory_project_id: Literal["PEPPER"] = _CANONICAL_PROJECT_ID
+    ticket_factory_macroproject_id: Literal["P18"] = _CANONICAL_MACROPROJECT_ID
     ticket_factory_ticket_id: Literal["P18.2"] = _CANONICAL_TICKET_ID
     ticket_factory_runtime_owner: Literal["pepper_governed_runtime"] = (
         "pepper_governed_runtime"
@@ -868,6 +870,7 @@ def _build_runtime_binding(
         source_workflow_snapshot_SHA256=intake.resulting_workflow_snapshot.workflow_SHA256,
         P18_UI_A_parent_commit=request.P18_UI_A_parent_commit,
         ticket_factory_project_id=_CANONICAL_PROJECT_ID,
+        ticket_factory_macroproject_id=_CANONICAL_MACROPROJECT_ID,
         ticket_factory_ticket_id=_CANONICAL_TICKET_ID,
         ticket_factory_runtime_owner="pepper_governed_runtime",
         provider_dispatch_authorized=False,
@@ -1093,7 +1096,7 @@ def _assemble_context_pack(
 
 def _validate_ready_dependency_plan(plan: TicketDependencyPlan) -> None:
     if plan.project_id != _CANONICAL_PROJECT_ID:
-        raise TicketFactoryRuntimePolicyError("dependency plan must bind P18")
+        raise TicketFactoryRuntimePolicyError("dependency plan must bind PEPPER")
     if plan.ticket_ids != (_CANONICAL_TICKET_ID,):
         raise TicketFactoryRuntimePolicyError("dependency plan must contain only P18.2")
     if plan.blocked_ticket_ids:
@@ -1111,7 +1114,7 @@ def _validate_ready_dependency_plan(plan: TicketDependencyPlan) -> None:
 
 def _validate_lint_report(report: TicketLintReport) -> None:
     if report.project_id != _CANONICAL_PROJECT_ID:
-        raise TicketFactoryRuntimePolicyError("lint report must bind P18")
+        raise TicketFactoryRuntimePolicyError("lint report must bind PEPPER")
     if report.ticket_ids != (_CANONICAL_TICKET_ID,):
         raise TicketFactoryRuntimePolicyError("lint report must contain only P18.2")
     if report.disposition is not TicketLintDisposition.PASS:
@@ -1458,7 +1461,7 @@ def _derive_summary(
 
 def _validate_result_bindings(result: TicketFactoryRuntimeIntegrationResult) -> None:
     if result.project_spec.project_id != _CANONICAL_PROJECT_ID:
-        raise ValueError("project_spec must bind P18")
+        raise ValueError("project_spec must bind PEPPER")
     if result.ticket_spec.project_id != result.project_spec.project_id:
         raise ValueError("ticket_spec project_id must match project_spec")
     if result.ticket_spec.ticket_id != _CANONICAL_TICKET_ID:

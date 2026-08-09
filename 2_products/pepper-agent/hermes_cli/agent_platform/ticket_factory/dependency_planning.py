@@ -23,9 +23,12 @@ from hermes_cli.agent_platform.ticket_factory.specs import (
     DependencyKind,
     DependencyScope,
     ParallelizationHint,
+    ProjectIdentifier as _ProjectIdentifier,
     ProjectSpec,
     RepositoryPathPattern,
     TicketSpec,
+    _ticket_id_matches_project,
+    _ticket_ids_share_project_namespace,
 )
 
 DEPENDENCY_PLAN_SCHEMA_VERSION = 1
@@ -92,11 +95,7 @@ ShortText: TypeAlias = Annotated[
     StringConstraints(strip_whitespace=True, min_length=1, max_length=512),
     AfterValidator(_reject_nul),
 ]
-ProjectIdentifier: TypeAlias = Annotated[
-    str,
-    BeforeValidator(_reject_identifier_whitespace),
-    StringConstraints(min_length=2, max_length=5, pattern=r"^P[1-9][0-9]{0,3}$"),
-]
+ProjectIdentifier: TypeAlias = _ProjectIdentifier
 TicketIdentifier: TypeAlias = Annotated[
     str,
     BeforeValidator(_reject_identifier_whitespace),
@@ -500,13 +499,13 @@ def _validate_collection(
             raise error_type(
                 f"ticket project_id must match project: ticket_id={ticket.ticket_id}"
             )
-        if not ticket.ticket_id.startswith(f"{project_id}."):
+        if not _ticket_id_matches_project(project_id, ticket.ticket_id):
             raise error_type(
                 f"ticket_id must use project prefix: ticket_id={ticket.ticket_id}"
             )
         for dependency in ticket.dependencies:
-            dependency_is_current_project = dependency.ticket_id.startswith(
-                f"{project_id}."
+            dependency_is_current_project = _ticket_ids_share_project_namespace(
+                project_id, ticket.ticket_id, dependency.ticket_id
             )
             if dependency.scope is DependencyScope.INTERNAL_PROJECT:
                 if not dependency_is_current_project:

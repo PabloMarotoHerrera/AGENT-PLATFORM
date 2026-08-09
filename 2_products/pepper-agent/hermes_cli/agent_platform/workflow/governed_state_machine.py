@@ -1352,6 +1352,16 @@ _TRANSITION_ROWS: tuple[
         (),
         False,
     ),
+    (
+        "GWT-025",
+        GovernedWorkflowState.AWAITING_TICKET_APPROVAL,
+        GovernedWorkflowState.AWAITING_CORRECTION,
+        WorkflowTransitionTrigger.HUMAN_REJECTED,
+        WorkflowTransitionAuthority.HUMAN,
+        ("human_ticket_rejection",),
+        (),
+        False,
+    ),
 )
 
 

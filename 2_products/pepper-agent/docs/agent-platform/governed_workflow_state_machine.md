@@ -53,7 +53,7 @@ P18.0 defines 21 governed states. They are intentionally broader than the existi
 | 20 | `retry_pending` | Human | Retry is authorized but not automatically executed |
 | 21 | `rollback_required` | Human | Rollback is represented but not executed |
 
-The transition table contains 24 deterministic transitions. Human-only triggers remain human-authorized and non-automatic. Terminal states do not transition in P18.0.
+The transition table contains 25 deterministic transitions. Human-only triggers remain human-authorized and non-automatic. Terminal states do not transition in P18.0.
 
 ## Runtime Mapping
 
@@ -87,7 +87,7 @@ Replacement is not used in P18.0 because no assessed capability requires a paral
 
 ## Authority Boundary
 
-P18.0 preserves the human authority boundary inherited from P17. Git handoff remains human-only. Ticket approval, human approval, human rejection, retry authorization, rollback authorization, and Git completion cannot be performed by the governed runtime.
+P18.0 preserves the human authority boundary inherited from P17. Git handoff remains human-only. Ticket approval, ticket rejection through `GWT-025`, human approval, human rejection, retry authorization, rollback authorization, and Git completion cannot be performed by the governed runtime.
 
 P18.0 does not authorize provider-backed execution, model-backed execution, production execution, critical-ticket execution, automatic retry, automatic fallback, automatic cleanup, automatic rollback, automatic staging, automatic commit, automatic push, or multi-agent execution.
 

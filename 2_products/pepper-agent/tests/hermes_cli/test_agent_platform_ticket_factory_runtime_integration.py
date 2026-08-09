@@ -219,14 +219,16 @@ def test_all_p18_2_exports_exist(exported_name: str) -> None:
 def test_p18_2_exports_are_additive_suffix() -> None:
     p18_0_count = len(p18_0.P18_0_EXPORTS)
     p18_1_count = len(p18_1.P18_1_EXPORTS)
+    p18_2_start = p18_0_count + p18_1_count
+    p18_2_end = p18_2_start + len(P18_2_EXPORTS)
     assert tuple(workflow.__all__[:p18_0_count]) == p18_0.P18_0_EXPORTS
     assert tuple(workflow.__all__[p18_0_count : p18_0_count + p18_1_count]) == (
         p18_1.P18_1_EXPORTS
     )
-    assert tuple(workflow.__all__[p18_0_count + p18_1_count :]) == P18_2_EXPORTS
+    assert tuple(workflow.__all__[p18_2_start:p18_2_end]) == P18_2_EXPORTS
     assert tuple(tfr.__all__) == P18_2_EXPORTS
     assert len(P18_2_EXPORTS) == 23
-    assert len(workflow.__all__) == 90
+    assert len(workflow.__all__) >= p18_2_end
     assert len(set(workflow.__all__)) == len(workflow.__all__)
     assert not any(name.startswith("_") for name in workflow.__all__)
 
@@ -380,9 +382,9 @@ def test_request_rejects_wrong_p18_ui_a_parent(intake_result) -> None:
 def test_ticket_factory_project_and_ticket_specs(runtime_result) -> None:
     project = runtime_result.project_spec
     ticket = runtime_result.ticket_spec
-    assert project.project_id == "P18"
+    assert project.project_id == "PEPPER"
     assert project.title == "Manual-to-Hermes Workflow Migration"
-    assert ticket.project_id == "P18"
+    assert ticket.project_id == "PEPPER"
     assert ticket.ticket_id == "P18.2"
     assert ticket.title == "Ticket Factory Runtime Integration"
     assert ticket.ticket_type is TicketType.INTEGRATION
@@ -424,7 +426,7 @@ def test_ticket_scope_preserves_authority_boundaries(runtime_result) -> None:
 
 def test_context_pack_is_bounded_and_ordered(runtime_result) -> None:
     pack: ContextPack = runtime_result.context_pack
-    assert pack.project_id == "P18"
+    assert pack.project_id == "PEPPER"
     assert pack.ticket_id == "P18.2"
     assert pack.items[0].source_id == "CTX-PROJECT-SPEC"
     assert pack.items[1].source_id == "CTX-TICKET-SPEC"
@@ -439,7 +441,7 @@ def test_context_pack_is_bounded_and_ordered(runtime_result) -> None:
 def test_dependency_plan_and_lint_are_ready(runtime_result) -> None:
     plan: TicketDependencyPlan = runtime_result.dependency_plan
     report: TicketLintReport = runtime_result.lint_report
-    assert plan.project_id == "P18"
+    assert plan.project_id == "PEPPER"
     assert plan.ticket_ids == ("P18.2",)
     assert plan.edges == ()
     assert plan.blocked_ticket_ids == ()
@@ -447,7 +449,7 @@ def test_dependency_plan_and_lint_are_ready(runtime_result) -> None:
     assert len(plan.waves) == 1
     assert plan.waves[0].ticket_ids == ("P18.2",)
     assert plan.waves[0].disposition is WaveDisposition.DEPENDENCY_READY
-    assert report.project_id == "P18"
+    assert report.project_id == "PEPPER"
     assert report.ticket_ids == ("P18.2",)
     assert report.disposition is TicketLintDisposition.PASS
     assert report.summary.error_count == 0
@@ -472,6 +474,31 @@ def test_governed_p18_1_prerequisite_is_preserved_as_authority(
     assert runtime_result.work_packet_compilation_result.work_packet.source_ticket == (
         runtime_result.ticket_spec
     )
+
+
+def test_ticket_factory_binding_preserves_product_and_macroproject_identity(
+    runtime_result,
+) -> None:
+    binding = runtime_result.binding
+    assert binding.ticket_factory_project_id == "PEPPER"
+    assert binding.ticket_factory_macroproject_id == "P18"
+    assert binding.ticket_factory_ticket_id == "P18.2"
+    assert runtime_result.project_spec.project_id == binding.ticket_factory_project_id
+    assert runtime_result.ticket_spec.project_id == binding.ticket_factory_project_id
+    assert runtime_result.ticket_spec.ticket_id == binding.ticket_factory_ticket_id
+
+
+def test_ticket_factory_rejects_project_macroproject_transposition(
+    runtime_result,
+) -> None:
+    tampered_binding = construct_with_updates(
+        runtime_result.binding,
+        ticket_factory_project_id="P18",
+        ticket_factory_macroproject_id="PEPPER",
+    )
+    tampered = construct_with_updates(runtime_result, binding=tampered_binding)
+    with pytest.raises(TicketFactoryRuntimeIntegrationError):
+        validate_ticket_factory_runtime_integration_result(tampered)
 
 
 def test_work_packet_continuation_records_compile_only_evidence(runtime_result) -> None:

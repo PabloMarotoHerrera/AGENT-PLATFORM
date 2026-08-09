@@ -19,9 +19,11 @@ from pydantic import (
 
 from hermes_cli.agent_platform.ticket_factory.context_packs import ContextPack
 from hermes_cli.agent_platform.ticket_factory.specs import (
+    ProjectIdentifier as _ProjectIdentifier,
     ProjectSpec,
     TicketSpec,
     TicketType,
+    _ticket_id_matches_project,
 )
 
 TICKET_GENERATOR_ROLE_SCHEMA_VERSION = 1
@@ -66,11 +68,7 @@ LongText: TypeAlias = Annotated[
     StringConstraints(strip_whitespace=True, min_length=1, max_length=8192),
     AfterValidator(_reject_nul),
 ]
-ProjectIdentifier: TypeAlias = Annotated[
-    str,
-    BeforeValidator(_reject_identifier_whitespace),
-    StringConstraints(min_length=2, max_length=5, pattern=r"^P[1-9][0-9]{0,3}$"),
-]
+ProjectIdentifier: TypeAlias = _ProjectIdentifier
 TicketIdentifier: TypeAlias = Annotated[
     str,
     BeforeValidator(_reject_identifier_whitespace),
@@ -201,7 +199,7 @@ class GeneratorAssignment(_TicketGeneratorModel):
 
     @model_validator(mode="after")
     def _validate_assignment(self) -> GeneratorAssignment:
-        if not self.ticket_id.startswith(f"{self.project_id}."):
+        if not _ticket_id_matches_project(self.project_id, self.ticket_id):
             raise ValueError("ticket_id must use the project_id prefix")
         if self.assignment_id != _assignment_id(self.ticket_id, self.role):
             raise ValueError("assignment_id must match ticket_id and role")
@@ -240,7 +238,7 @@ class TicketProposal(_TicketGeneratorModel):
 
     @model_validator(mode="after")
     def _validate_proposal(self) -> TicketProposal:
-        if not self.ticket_id.startswith(f"{self.project_id}."):
+        if not _ticket_id_matches_project(self.project_id, self.ticket_id):
             raise ValueError("ticket_id must use the project_id prefix")
         if self.proposed_ticket.project_id != self.project_id:
             raise ValueError(

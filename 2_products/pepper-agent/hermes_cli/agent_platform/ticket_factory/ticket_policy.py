@@ -32,6 +32,7 @@ from hermes_cli.agent_platform.ticket_factory.specs import (
     TicketIdentifier,
     TicketSpec,
     TicketType,
+    _ticket_id_matches_project,
 )
 
 TICKET_POLICY_SCHEMA_VERSION = 1
@@ -540,7 +541,7 @@ def _validate_request_collection(
             raise error_type(
                 f"ticket project_id must match project: ticket_id={ticket.ticket_id}"
             )
-        if not ticket.ticket_id.startswith(f"{project_id}."):
+        if not _ticket_id_matches_project(project_id, ticket.ticket_id):
             raise error_type(
                 f"ticket_id must use project prefix: ticket_id={ticket.ticket_id}"
             )

@@ -243,7 +243,7 @@ def test_alternative_schema_versions_are_rejected() -> None:
     assert_validation_fails(lambda: ticket(schema_version=2))
 
 
-@pytest.mark.parametrize("project_id", ["P1", "P16", "P999"])
+@pytest.mark.parametrize("project_id", ["P1", "P16", "P999", "PEPPER"])
 def test_accepted_project_identifiers_pass(project_id: str) -> None:
     assert project(project_id=project_id).project_id == project_id
 
@@ -271,6 +271,14 @@ def test_rejected_ticket_identifiers_fail(ticket_id: str) -> None:
 
 def test_project_ticket_prefix_mismatch_fails() -> None:
     assert_validation_fails(lambda: ticket(project_id="P15", ticket_id="P16.0"))
+
+
+def test_product_project_accepts_governed_macroproject_ticket_namespace() -> None:
+    assert ticket(project_id="PEPPER", ticket_id="P18.2").ticket_id == "P18.2"
+
+
+def test_product_project_rejects_product_id_as_ticket_namespace() -> None:
+    assert_validation_fails(lambda: ticket(project_id="PEPPER", ticket_id="PEPPER.2"))
 
 
 def test_whitespace_identifier_is_rejected_without_rewrite() -> None:

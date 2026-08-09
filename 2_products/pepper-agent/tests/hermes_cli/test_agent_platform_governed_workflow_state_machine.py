@@ -1032,6 +1032,30 @@ def test_dependency_block_and_unblock_flow(identity, p17_binding) -> None:
     assert unblocked.active_blocker_codes == ()
 
 
+def test_ticket_approval_rejection_uses_governed_transition(
+    identity, p17_binding
+) -> None:
+    awaiting_approval = make_snapshot(
+        GovernedWorkflowState.AWAITING_TICKET_APPROVAL, identity, p17_binding
+    )
+    transition = next(
+        item for item in gsm._TRANSITIONS if item.transition_id == "GWT-025"
+    )
+    result = build_governed_workflow_transition(
+        transition_request(awaiting_approval, transition)
+    )
+    assert result.accepted is True
+    assert transition.trigger is WorkflowTransitionTrigger.HUMAN_REJECTED
+    assert transition.authority is WorkflowTransitionAuthority.HUMAN
+    assert transition.automatic is False
+    assert (
+        result.resulting_snapshot.current_state
+        is GovernedWorkflowState.AWAITING_CORRECTION
+    )
+    assert result.resulting_snapshot.active_blocker_codes == ("correction_required",)
+    assert result.resulting_snapshot.pending_human_action == "correction"
+
+
 def test_identity_is_deterministic() -> None:
     first = build_governed_workflow_identity(
         project_id="P18",

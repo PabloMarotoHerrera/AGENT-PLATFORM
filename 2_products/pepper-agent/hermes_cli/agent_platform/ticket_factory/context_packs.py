@@ -21,8 +21,10 @@ from pydantic import (
 
 from hermes_cli.agent_platform.ticket_factory.specs import (
     AuthorityReferenceSpec,
+    ProjectIdentifier,
     ProjectSpec,
     TicketSpec,
+    _ticket_id_matches_project,
 )
 
 CONTEXT_PACK_SCHEMA_VERSION = 1
@@ -110,11 +112,7 @@ ContextDigest: TypeAlias = Annotated[
     str,
     StringConstraints(min_length=64, max_length=64, pattern=r"^[a-f0-9]{64}$"),
 ]
-_ProjectIdentifier: TypeAlias = Annotated[
-    str,
-    BeforeValidator(_reject_identifier_whitespace),
-    StringConstraints(min_length=2, max_length=5, pattern=r"^P[1-9][0-9]{0,3}$"),
-]
+_ProjectIdentifier: TypeAlias = ProjectIdentifier
 _TicketIdentifier: TypeAlias = Annotated[
     str,
     BeforeValidator(_reject_identifier_whitespace),
@@ -307,7 +305,7 @@ class ContextPack(_ContextPackModel):
 
     @model_validator(mode="after")
     def _validate_pack(self) -> ContextPack:
-        if not self.ticket_id.startswith(f"{self.project_id}."):
+        if not _ticket_id_matches_project(self.project_id, self.ticket_id):
             raise ValueError("ticket_id must use the project_id prefix")
         if self.items[0].source_id != PROJECT_SPEC_SOURCE_ID:
             raise ValueError("first context pack item must be CTX-PROJECT-SPEC")
