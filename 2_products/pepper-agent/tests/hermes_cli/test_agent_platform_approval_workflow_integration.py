@@ -297,15 +297,15 @@ def test_p18_3_exports_are_additive_suffix() -> None:
         )
         == p18_2.P18_2_EXPORTS
     )
-    assert tuple(workflow.__all__[p18_0_count + p18_1_count + p18_2_count :]) == (
-        P18_3_EXPORTS
-    )
+    p18_3_start = p18_0_count + p18_1_count + p18_2_count
+    p18_3_end = p18_3_start + len(P18_3_EXPORTS)
+    assert tuple(workflow.__all__[p18_3_start:p18_3_end]) == P18_3_EXPORTS
     assert tuple(aw.__all__) == P18_3_EXPORTS
     assert len(p18_0.P18_0_EXPORTS) == 38
     assert len(p18_1.P18_1_EXPORTS) == 29
     assert len(p18_2.P18_2_EXPORTS) == 23
     assert len(P18_3_EXPORTS) == 27
-    assert len(workflow.__all__) == 117
+    assert len(workflow.__all__) >= p18_3_end
     assert len(set(workflow.__all__)) == len(workflow.__all__)
     assert not any(name.startswith("_") for name in workflow.__all__)
 

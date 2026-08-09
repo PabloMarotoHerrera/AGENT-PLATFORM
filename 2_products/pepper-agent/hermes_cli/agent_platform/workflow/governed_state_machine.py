@@ -1362,6 +1362,16 @@ _TRANSITION_ROWS: tuple[
         (),
         False,
     ),
+    (
+        "GWT-026",
+        GovernedWorkflowState.WORK_PACKET_READY,
+        GovernedWorkflowState.BLOCKED,
+        WorkflowTransitionTrigger.DEPENDENCIES_BLOCKED,
+        WorkflowTransitionAuthority.POLICY,
+        ("dependency_blocker",),
+        (),
+        True,
+    ),
 )
 
 

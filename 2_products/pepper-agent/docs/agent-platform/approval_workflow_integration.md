@@ -105,7 +105,7 @@ Rejected P18.3 results are not queue-eligible and must remain in `awaiting_corre
 
 - Approval UI backend routing remains deferred; existing approval UI client code is display/provisional evidence only.
 - Durable approval persistence remains deferred; P18.3 emits deterministic in-memory result evidence.
-- Dependency-aware queue integration remains deferred to P18.4.
+- Dependency-aware queue integration is implemented by P18.4 and consumes approved handoffs only.
 - Validation and review loop integration remains deferred to P18.5.
 - Retry, incident and rollback workflow remain deferred to P18.6.
 - Manual-versus-Hermes shadow run remains deferred to P18.7.

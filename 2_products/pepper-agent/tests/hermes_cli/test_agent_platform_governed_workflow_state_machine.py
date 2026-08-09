@@ -1032,6 +1032,31 @@ def test_dependency_block_and_unblock_flow(identity, p17_binding) -> None:
     assert unblocked.active_blocker_codes == ()
 
 
+def test_work_packet_ready_can_block_before_queue_admission(
+    identity, p17_binding
+) -> None:
+    work_packet_ready = make_snapshot(
+        GovernedWorkflowState.WORK_PACKET_READY,
+        identity,
+        p17_binding,
+    )
+    transition = next(
+        item for item in gsm._TRANSITIONS if item.transition_id == "GWT-026"
+    )
+    result = build_governed_workflow_transition(
+        transition_request(work_packet_ready, transition)
+    )
+    assert result.accepted is True
+    assert transition.from_state is GovernedWorkflowState.WORK_PACKET_READY
+    assert transition.to_state is GovernedWorkflowState.BLOCKED
+    assert transition.trigger is WorkflowTransitionTrigger.DEPENDENCIES_BLOCKED
+    assert transition.authority is WorkflowTransitionAuthority.POLICY
+    assert transition.required_evidence == ("dependency_blocker",)
+    assert transition.automatic is True
+    assert result.resulting_snapshot.current_state is GovernedWorkflowState.BLOCKED
+    assert result.resulting_snapshot.active_blocker_codes == ("dependency_blocked",)
+
+
 def test_ticket_approval_rejection_uses_governed_transition(
     identity, p17_binding
 ) -> None:

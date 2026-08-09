@@ -53,7 +53,7 @@ P18.0 defines 21 governed states. They are intentionally broader than the existi
 | 20 | `retry_pending` | Human | Retry is authorized but not automatically executed |
 | 21 | `rollback_required` | Human | Rollback is represented but not executed |
 
-The transition table contains 25 deterministic transitions. Human-only triggers remain human-authorized and non-automatic. Terminal states do not transition in P18.0.
+The transition table contains 26 deterministic transitions after the additive P18.4 dependency-blocked queue gate. Human-only triggers remain human-authorized and non-automatic. Terminal states do not transition in P18.0.
 
 ## Runtime Mapping
 
