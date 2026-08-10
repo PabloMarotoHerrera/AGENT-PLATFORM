@@ -599,7 +599,33 @@ If a future P7 peer contradicts this contract, create an explicit reconciliation
 | `.gitignore`, `.graphifyignore`, README.md, P6/P5/P4/P3/P2/P1/P0 docs | Not modified by P7.0.B. |
 | Source tracking, staging, commit, push, force-add, publication | Not performed or approved. |
 
-## 31. Invariants And Final Verdict
+## 31. P18.R Roadmap Sequencing Freeze
+
+P18.R records the post-migration roadmap sequence after the accepted P18.8 controlled default-mode cutover. This section updates roadmap sequencing only; it does not start P18.9, P19, P20, P21, runtime automation, provider/auth work, product implementation, source loading, Graphify, Docker, staging, commit or push.
+
+| Field | Value |
+| --- | --- |
+| roadmap_update_owner | `P18.R` |
+| closed_macroproject | `P18 Manual-to-Hermes Workflow Migration` |
+| completed_P18_tickets_renumbered | `false` |
+| P18_5_title_preserved | `Review and Validation Loop` |
+| prohibited_title | `P18.5 - Hermes Personalization` |
+| inserted_project | `P18.9 - Pepper Product Personalization` |
+| P18_9_ready | `true` |
+
+Accepted sequence after P18.R:
+
+| Order | Phase | Purpose |
+| --- | --- | --- |
+| 1 | `P18.R - Workflow Migration Closure` | Close P18 after committed P18.8 cutover evidence. |
+| 2 | `P18.9 - Pepper Product Personalization` | Transform the current hybrid Hermes/Pepper dashboard into a coherent Pepper product control plane. |
+| 3 | `P19 - GBrain Knowledge Integration` | Add durable semantic project memory, cross-session knowledge and provenance-aware retrieval. |
+| 4 | `P20 - Paperclip Work Control Plane Integration` | Add durable canonical project/task/work authority and migrate beyond provisional Kanban authority. |
+| 5 | `P21 - Governed Multi-Agent Automation` | Add broad autonomous multi-agent coordination and durable delegated planning/execution loops. |
+
+P18.9 is not a reopening of P18 workflow migration. It is product/control-plane personalization for the already migrated Pepper workflow.
+
+## 32. Invariants And Final Verdict
 
 | ID | Invariant |
 | --- | --- |
