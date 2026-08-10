@@ -146,8 +146,20 @@ export function useRuntimeOverview(): RuntimeOverviewState & { readonly refresh:
   const pollerRef = useRef<{ profile: string; poller: RuntimeOverviewPoller } | null>(null);
 
   useEffect(() => {
+    const workflowPath = profile
+      ? `/api/agent-platform/workflow-control?${new URLSearchParams({ profile })}`
+      : "/api/agent-platform/workflow-control";
     const poller = createRuntimeOverviewPoller(
-      () => fetchJSON<unknown>("/api/status"),
+      async () => {
+        const [status, workflowControl] = await Promise.all([
+          fetchJSON<unknown>("/api/status"),
+          fetchJSON<unknown>(workflowPath),
+        ]);
+        return {
+          ...(status && typeof status === "object" && !Array.isArray(status) ? status : {}),
+          agent_platform_workflow_control: workflowControl,
+        };
+      },
       (state) => setStored({ profile, state }),
     );
     pollerRef.current = { profile, poller };

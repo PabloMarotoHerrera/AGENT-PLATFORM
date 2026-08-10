@@ -6,9 +6,9 @@ import {
   APPROVAL_LIVE_SOURCE_CLASSIFICATION,
   buildApprovalDetailPath,
   buildApprovalInboxPath,
+  decideApproval,
   getApproval,
   listApprovals,
-  loadApprovalInboxRequest,
 } from "./approval-client";
 import { ApprovalDetailView } from "./approval-detail-page";
 import { ApprovalInboxView } from "./approval-inbox-page";
@@ -255,11 +255,12 @@ describe("safe approval projection", () => {
   });
 });
 
-describe("unavailable read-only approval client", () => {
-  it("classifies the audited source as partial but production-unavailable", () => {
+describe("controlled approval client", () => {
+  it("classifies the audited source as controlled and production-available", () => {
     expect(APPROVAL_LIVE_SOURCE_CLASSIFICATION).toEqual(expect.objectContaining({
-      classification: "safe_partial_read_source",
-      productionAvailability: "unavailable",
+      classification: "safe_controlled_product_source",
+      productionAvailability: "available",
+      decisionAuthority: "explicit-human-dashboard-action",
     }));
   });
 
@@ -271,15 +272,24 @@ describe("unavailable read-only approval client", () => {
     expect(buildApprovalInboxPath("../escape")).toBeNull();
   });
 
-  it("makes no network or mutation request when no safe HTTP source exists", async () => {
-    const fetchMock = vi.fn();
+  it("uses authenticated product approval list, detail, and decision endpoints", async () => {
+    vi.stubGlobal("window", { __HERMES_SESSION_TOKEN__: "synthetic-session" });
+    const fetchMock = vi
+      .fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>()
+      .mockResolvedValueOnce(new Response(JSON.stringify(inboxWire()), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(detailWire()), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ applied: true }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
-    await expect(listApprovals("default")).resolves.toBeNull();
-    await expect(getApproval("a1b2c3d4", "default")).resolves.toBeNull();
-    await expect(loadApprovalInboxRequest({ kind: "inbox" }, "default")).resolves.toBeNull();
-    await expect(loadApprovalInboxRequest({ kind: "detail", approvalId: "a1b2c3d4" }, "default"))
-      .resolves.toBeNull();
-    expect(fetchMock).not.toHaveBeenCalled();
+
+    await expect(listApprovals("default")).resolves.toMatchObject({ source_system: "hermes-write-approval" });
+    await expect(getApproval("a1b2c3d4", "default")).resolves.toMatchObject({ source_system: "hermes-write-approval" });
+    await expect(decideApproval("a1b2c3d4", "approve", "default")).resolves.toMatchObject({ applied: true });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(String(fetchMock.mock.calls[0][0])).toBe("/api/agent-platform/approvals?profile=default");
+    expect(String(fetchMock.mock.calls[1][0])).toBe("/api/agent-platform/approvals/a1b2c3d4?profile=default");
+    expect(String(fetchMock.mock.calls[2][0])).toBe("/api/agent-platform/approvals/a1b2c3d4/decision?profile=default");
+    expect(fetchMock.mock.calls[2][1]?.method).toBe("POST");
+    expect(new Headers(fetchMock.mock.calls[2][1]?.headers).get("X-Hermes-Session-Token")).toBe("synthetic-session");
   });
 });
 
@@ -362,20 +372,19 @@ describe("approval polling and identity freshness", () => {
   });
 });
 
-describe("read-only Approval Inbox pages", () => {
-  it("renders provisional source facts, local filters, counts, and profile-preserving detail links", () => {
+describe("controlled Approval Inbox pages", () => {
+  it("renders controlled source facts, local filters, counts, and profile-preserving detail links", () => {
     const markup = renderToStaticMarkup(
       <MemoryRouter><ApprovalInboxView state={state(inboxView())} profile="review-profile" refresh={() => {}} /></MemoryRouter>,
     );
     expect(markup).toContain("Approval Inbox");
-    expect(markup).toContain("Provisional source");
-    expect(markup).toContain("No governed AGENT PLATFORM approval authority is active");
-    expect(markup).toContain("Source pending is not governed pending approval");
+    expect(markup).toContain("Controlled source");
+    expect(markup).toContain("explicit human dashboard action");
     expect(markup).toContain("Pending in source");
     expect(markup).toContain("Historical source states");
     expect(markup).toContain("a1b2c3d4?profile=review-profile");
     expect(markup).toContain("Filter by title, source ID, target, or summary");
-    for (const control of ["Approve", "Reject", "Allow", "Deny", "Confirm", "Execute", "Retry", "Assign", "Escalate"]) {
+    for (const control of ["Allow", "Deny", "Confirm", "Execute", "Retry", "Assign", "Escalate"]) {
       expect(markup).not.toContain(`>${control}<`);
     }
   });
@@ -392,7 +401,7 @@ describe("read-only Approval Inbox pages", () => {
     expect(unavailable).toContain("Kanban, Chat, logs, providers, workers, OAuth and transient prompts are not used as fallbacks");
   });
 
-  it("renders safe detail and source-qualified optional sections without action controls", () => {
+  it("renders safe detail, controlled decision actions, and source-qualified optional sections", () => {
     const markup = renderToStaticMarkup(
       <MemoryRouter><ApprovalDetailView state={state(detailView())} profile="review-profile" refresh={() => {}} /></MemoryRouter>,
     );
@@ -402,12 +411,14 @@ describe("read-only Approval Inbox pages", () => {
     expect(markup).toContain("Safe reason");
     expect(markup).toContain("Evidence summaries");
     expect(markup).toContain("Source decision history");
-    expect(markup).toContain("No approval or rejection action is available in P15.C3A");
-    expect(markup).toContain("not a canonical ApprovalRequest");
+    expect(markup).toContain("Controlled human decision");
+    expect(markup).toContain(">Approve<");
+    expect(markup).toContain(">Reject<");
+    expect(markup).toContain("Git staging, commit, and push remain outside this decision path");
     expect(markup).toContain("/agent-platform/approvals?profile=review-profile");
     expect(markup).not.toContain("private-provider");
     expect(markup).not.toContain("rm -rf");
-    for (const control of ["Approve", "Reject", "Allow", "Deny", "Confirm", "Cancel", "Retry", "Execute", "Open terminal", "Edit policy"]) {
+    for (const control of ["Allow", "Deny", "Confirm", "Cancel", "Retry", "Execute", "Open terminal", "Edit policy"]) {
       expect(markup).not.toContain(`>${control}<`);
     }
   });

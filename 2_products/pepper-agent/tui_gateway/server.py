@@ -2397,17 +2397,43 @@ def resolve_skin() -> dict:
 
         init_skin_from_config(_load_cfg())
         skin = get_active_skin()
+        branding = dict(skin.branding or {})
+        try:
+            from hermes_cli.agent_platform.lead_agent import pepper_lead_agent_branding
+
+            if _pepper_lead_agent_mode():
+                branding.update(pepper_lead_agent_branding())
+        except Exception:
+            pass
         return {
             "name": skin.name,
             "colors": skin.colors,
-            "branding": skin.branding,
+            "branding": branding,
             "banner_logo": skin.banner_logo,
             "banner_hero": skin.banner_hero,
             "tool_prefix": skin.tool_prefix,
-            "help_header": (skin.branding or {}).get("help_header", ""),
+            "help_header": branding.get("help_header", ""),
         }
     except Exception:
         return {}
+
+
+def _pepper_lead_agent_mode() -> bool:
+    try:
+        from hermes_cli.agent_platform.lead_agent import pepper_lead_agent_enabled
+
+        return pepper_lead_agent_enabled()
+    except Exception:
+        return False
+
+
+def _pepper_lead_agent_model_info() -> dict[str, str]:
+    from hermes_cli.agent_platform.lead_agent import (
+        PEPPER_LEAD_AGENT_MODEL,
+        PEPPER_LEAD_AGENT_PROVIDER,
+    )
+
+    return {"model": PEPPER_LEAD_AGENT_MODEL, "provider": PEPPER_LEAD_AGENT_PROVIDER}
 
 
 def _resolve_model() -> str:
@@ -2452,6 +2478,9 @@ def _resolve_session_platform() -> str:
       * neither set → "tui"
         (standalone ``hermes --tui``.)
     """
+    if _pepper_lead_agent_mode():
+        return "pepper-dashboard"
+
     if is_truthy_value(os.environ.get("HERMES_DESKTOP")) and not is_truthy_value(
         os.environ.get("HERMES_DESKTOP_TERMINAL")
     ):
@@ -2509,6 +2538,10 @@ def _config_model_target() -> tuple[str, str]:
 
 
 def _resolve_startup_runtime() -> tuple[str, str | None]:
+    if _pepper_lead_agent_mode():
+        info = _pepper_lead_agent_model_info()
+        return info["model"], info["provider"]
+
     model = _resolve_model()
     explicit_provider = os.environ.get("HERMES_TUI_PROVIDER", "").strip()
     if explicit_provider:
@@ -2961,6 +2994,11 @@ def _load_tool_progress_mode() -> str:
 
 
 def _load_enabled_toolsets() -> list[str] | None:
+    if _pepper_lead_agent_mode():
+        from hermes_cli.agent_platform.lead_agent import PEPPER_LEAD_AGENT_TOOLSETS
+
+        return list(PEPPER_LEAD_AGENT_TOOLSETS)
+
     explicit = [
         item.strip()
         for item in os.environ.get("HERMES_TUI_TOOLSETS", "").split(",")
@@ -4928,6 +4966,12 @@ def _resolve_runtime_with_fallback(
     into a different runtime. ``used_fallback`` remains explicit rather than
     overloading a nullable model as control flow.
     """
+    if _pepper_lead_agent_mode():
+        from hermes_cli.agent_platform.lead_agent import resolve_pepper_lead_agent_runtime
+
+        runtime = resolve_pepper_lead_agent_runtime()
+        return _RuntimeFallbackResolution(runtime, runtime["model"], False)
+
     from hermes_cli.auth import AuthError
     from hermes_cli.runtime_provider import resolve_runtime_provider
 
@@ -5018,7 +5062,14 @@ def _make_agent(
     cfg = _load_cfg()
     agent_cfg = cfg.get("agent") or {}
     system_prompt = _prompt_text(agent_cfg.get("system_prompt", ""))
-    startup_skills = _parse_tui_skills_env()
+    pepper_mode = _pepper_lead_agent_mode()
+    if pepper_mode:
+        from hermes_cli.agent_platform.lead_agent import pepper_lead_agent_system_prompt
+
+        system_prompt = "\n\n".join(
+            part for part in (system_prompt, pepper_lead_agent_system_prompt()) if part
+        ).strip()
+    startup_skills = [] if pepper_mode else _parse_tui_skills_env()
     if startup_skills:
         from agent.skill_commands import build_preloaded_skills_prompt
 
@@ -5048,7 +5099,15 @@ def _make_agent(
     # Prefer a per-session model override (set by a prior in-session /model
     # switch) over global config/env resolution. Resume-time stored sessions may
     # also pass scalar model/provider/runtime knobs from the persisted DB row.
-    if isinstance(model_override, dict) and model_override.get("model"):
+    if pepper_mode:
+        model, requested_provider = _resolve_startup_runtime()
+        resolution = _resolve_runtime_with_fallback(
+            {"requested": requested_provider, "target_model": model or None}
+        )
+        runtime = resolution.runtime
+        if resolution.selected_model:
+            model = resolution.selected_model
+    elif isinstance(model_override, dict) and model_override.get("model"):
         model = str(model_override.get("model") or "")
         requested_provider = model_override.get("provider") or provider_override or None
         override_base_url = model_override.get("base_url")
@@ -5146,7 +5205,9 @@ def _make_agent(
         provider_sort=_pr.get("sort"),
         provider_require_parameters=_pr.get("require_parameters", False),
         provider_data_collection=_pr.get("data_collection"),
-        platform=_resolve_agent_platform(platform_override),
+        platform=(
+            "pepper-dashboard" if pepper_mode else _resolve_agent_platform(platform_override)
+        ),
         session_id=session_id or key,
         session_db=session_db if session_db is not None else _get_db(),
         ephemeral_system_prompt=system_prompt or None,
@@ -5154,7 +5215,7 @@ def _make_agent(
         pass_session_id=is_truthy_value(os.environ.get("HERMES_TUI_PASS_SESSION_ID")),
         skip_context_files=is_truthy_value(os.environ.get("HERMES_IGNORE_RULES")),
         skip_memory=is_truthy_value(os.environ.get("HERMES_IGNORE_RULES")),
-        fallback_model=_load_fallback_model(),
+        fallback_model=None if pepper_mode else _load_fallback_model(),
         **_agent_cbs(sid),
     )
 
@@ -5783,7 +5844,12 @@ def _(rid, params: dict) -> dict:
     except Exception:
         explicit_cwd = False
     resolved_cwd = _completion_cwd(params)
-    source = _resolve_session_source(str(params.get("source") or "").strip() or None)
+    pepper_mode = _pepper_lead_agent_mode()
+    source = (
+        "pepper-dashboard"
+        if pepper_mode
+        else _resolve_session_source(str(params.get("source") or "").strip() or None)
+    )
     _enable_gateway_prompts()
 
     # ``profile`` (app-global remote mode): a new chat started under a non-launch
@@ -5798,14 +5864,14 @@ def _(rid, params: dict) -> dict:
     # the agent below) — never a global config write, so picking a model/effort
     # for a new chat can't mutate the profile default. provider is optional
     # (resolved at build).
-    create_model = str(params.get("model") or "").strip()
+    create_model = "" if pepper_mode else str(params.get("model") or "").strip()
     session_model_override = (
         {"model": create_model, "provider": str(params.get("provider") or "").strip() or None}
         if create_model
         else None
     )
     create_reasoning_override = None
-    if effort := str(params.get("reasoning_effort") or "").strip():
+    if not pepper_mode and (effort := str(params.get("reasoning_effort") or "").strip()):
         try:
             from hermes_constants import parse_reasoning_effort
 
@@ -5816,7 +5882,7 @@ def _(rid, params: dict) -> dict:
     # true pins priority, and false pins normal. Empty string is the internal
     # explicit-normal sentinel because _make_agent uses None for inheritance.
     create_service_tier_override = None
-    if "fast" in params:
+    if not pepper_mode and "fast" in params:
         create_service_tier_override = (
             "priority" if is_truthy_value(params.get("fast")) else ""
         )
@@ -5892,13 +5958,22 @@ def _(rid, params: dict) -> dict:
                 # its sticky pick with the global default before the deferred
                 # build's session.info lands.
                 "model": (
-                    session_model_override.get("model")
-                    if session_model_override
-                    else _resolve_model()
+                    _pepper_lead_agent_model_info()["model"]
+                    if pepper_mode
+                    else (
+                        session_model_override.get("model")
+                        if session_model_override
+                        else _resolve_model()
+                    )
                 ),
                 **(
                     {"provider": session_model_override["provider"]}
                     if session_model_override and session_model_override.get("provider")
+                    else {}
+                ),
+                **(
+                    {"provider": _pepper_lead_agent_model_info()["provider"]}
+                    if pepper_mode
                     else {}
                 ),
                 "tools": {},
@@ -12511,6 +12586,23 @@ def _(rid, params: dict) -> dict:
 
 @method("setup.status")
 def _(rid, params: dict) -> dict:
+    if _pepper_lead_agent_mode():
+        from hermes_cli.agent_platform.lead_agent import (
+            PEPPER_LEAD_AGENT_MODEL,
+            PEPPER_LEAD_AGENT_PROVIDER,
+        )
+
+        status = _methods["setup.runtime_check"]("pepper-runtime-check", {})
+        result = status.get("result") if isinstance(status, dict) else None
+        return _ok(
+            rid,
+            {
+                "provider_configured": bool(isinstance(result, dict) and result.get("ok")),
+                "provider": PEPPER_LEAD_AGENT_PROVIDER,
+                "model": PEPPER_LEAD_AGENT_MODEL,
+                "mode": "pepper-lead-agent",
+            },
+        )
     try:
         from hermes_cli.main import _has_any_provider_configured
 
@@ -12530,6 +12622,11 @@ def _(rid, params: dict) -> dict:
     when the user's configured model cannot actually be served, so UIs can
     surface onboarding before the user submits a doomed prompt.
     """
+    if _pepper_lead_agent_mode():
+        from hermes_cli.agent_platform.lead_agent import pepper_lead_agent_runtime_status
+
+        return _ok(rid, pepper_lead_agent_runtime_status())
+
     try:
         from hermes_cli.runtime_provider import resolve_runtime_provider
         from hermes_cli.auth import has_usable_secret

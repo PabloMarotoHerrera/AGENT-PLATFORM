@@ -77,6 +77,153 @@ def test_integrated_route_uses_existing_dashboard_authentication(dashboard_clien
     assert response.json()["extension_modules"] == list(PRODUCT_UI_EXTENSION_MODULE_IDS)
 
 
+def test_controlled_approval_routes_list_detail_and_reject(dashboard_client):
+    from tools import write_approval as wa
+
+    record = wa.stage_write(
+        wa.MEMORY,
+        {"action": "add", "target": "user", "content": "Remember bounded fact"},
+        summary="Remember bounded fact",
+        origin="foreground",
+    )
+
+    list_response = dashboard_client.get(
+        "/api/agent-platform/approvals",
+        headers=_auth_headers(),
+    )
+    assert list_response.status_code == 200
+    body = list_response.json()
+    assert body["source_system"] == "hermes-write-approval"
+    assert [item["id"] for item in body["approvals"]] == [record["id"]]
+    assert "payload" not in json.dumps(body).lower()
+
+    detail_response = dashboard_client.get(
+        f"/api/agent-platform/approvals/{record['id']}",
+        headers=_auth_headers(),
+    )
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["approval"]["id"] == record["id"]
+    assert detail["evidence"]
+
+    decision_response = dashboard_client.post(
+        f"/api/agent-platform/approvals/{record['id']}/decision",
+        headers=_auth_headers(),
+        json={"decision": "reject"},
+    )
+    assert decision_response.status_code == 200
+    assert decision_response.json()["status"] == "rejected"
+    assert wa.get_pending(wa.MEMORY, record["id"]) is None
+
+
+def test_controlled_execution_routes_project_universal_and_exact_sources(dashboard_client):
+    from hermes_cli import kanban_db
+
+    kanban_db.init_db()
+    conn = kanban_db.connect()
+    try:
+        task_id = kanban_db.create_task(
+            conn,
+            title="Controlled execution route smoke",
+            body="Bounded task body",
+            created_by="test",
+        )
+        conn.execute(
+            """
+            INSERT INTO task_runs (
+                task_id, profile, step_key, status, claim_lock, claim_expires,
+                worker_pid, max_runtime_seconds, last_heartbeat_at, started_at,
+                ended_at, outcome, summary, metadata, error
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                task_id,
+                "review-profile",
+                None,
+                "done",
+                "private-claim",
+                None,
+                12345,
+                None,
+                None,
+                1_700_000_000,
+                1_700_000_010,
+                "completed",
+                "private summary",
+                json.dumps({"provider": "private"}),
+                None,
+            ),
+        )
+        conn.commit()
+        run_id = conn.execute("SELECT id FROM task_runs WHERE task_id = ?", (task_id,)).fetchone()["id"]
+    finally:
+        conn.close()
+
+    collection_response = dashboard_client.get(
+        "/api/agent-platform/executions",
+        headers=_auth_headers(),
+    )
+    assert collection_response.status_code == 200
+    collection = collection_response.json()
+    assert collection["source_system"] == "pepper-controlled-execution"
+    assert collection["manual_opencode_copy_required"] is False
+    assert collection["human_git_authority"] == "preserved"
+    assert any(item["task_id"] == task_id and item["id"] == run_id for item in collection["executions"])
+    assert "private-claim" not in json.dumps(collection)
+
+    detail_response = dashboard_client.get(
+        f"/api/agent-platform/executions/{run_id}?board=default&task={task_id}",
+        headers=_auth_headers(),
+    )
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["task"]["id"] == task_id
+    assert detail["runs"][0]["id"] == run_id
+    assert detail["control"]["git_handoff_state"] == "human_git_authority_preserved"
+    assert detail["runs"][0]["claim_lock"] is None
+
+    start_response = dashboard_client.post(
+        "/api/agent-platform/executions/start",
+        headers=_auth_headers(),
+        json={"board_slug": "default", "task_id": task_id},
+    )
+    assert start_response.status_code == 200
+    start = start_response.json()
+    assert start["dispatch_performed"] is False
+    assert start["manual_opencode_ticket_copy_required"] is False
+    assert start["human_git_authority"] == "preserved"
+
+
+def test_workflow_control_route_closes_p18_7_gaps_and_records_human_smoke(dashboard_client):
+    response = dashboard_client.get(
+        "/api/agent-platform/workflow-control",
+        headers=_auth_headers(),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["mode"] == "controlled_default"
+    assert body["manual_chat_control_required"] is False
+    assert body["manual_opencode_ticket_copy_required"] is False
+    assert body["manual_opencode_result_copy_required"] is False
+    assert body["automatic_git_add"] is False
+    assert body["automatic_git_commit"] is False
+    assert body["automatic_git_push"] is False
+    assert {gap["id"] for gap in body["closed_gaps"]} == {
+        "P18-8-GAP-001",
+        "P18-8-GAP-002",
+        "P18-8-GAP-003",
+        "P18-8-GAP-004",
+        "P18-8-GAP-005",
+    }
+    assert body["remaining_blockers"] == []
+    assert body["blocker_count"] == 0
+    assert body["ready_requires_human_smoke"] is False
+    assert body["human_cutover_smoke"] == "HUMAN_P18_8_CUTOVER_SMOKE_PASS"
+    assert body["P18_R_ready"] is True
+    assert body["next_action"]["id"] == "P18_R_READY_FOR_HUMAN_AUTHORIZATION"
+
+
 @pytest.mark.parametrize("method", ["post", "put", "patch", "delete"])
 def test_product_configuration_boundary_is_read_only(dashboard_client, method):
     response = getattr(dashboard_client, method)(

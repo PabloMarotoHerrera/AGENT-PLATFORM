@@ -76,6 +76,8 @@ Examples:
     hermes dashboard              Start web UI dashboard (port 9119)
     hermes dashboard --stop       Stop running dashboard processes
     hermes dashboard --status     List running dashboard processes
+    hermes agent-platform auth add openai-codex.primary
+                                  Provision Pepper's governed Codex credential
 
 For more help on a command:
     hermes <command> --help

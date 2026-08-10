@@ -1,10 +1,11 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ArrowLeft, FileCheck2, History, ShieldCheck, Target } from "lucide-react";
 import { Badge } from "@nous-research/ui/ui/components/badge";
+import { Button } from "@nous-research/ui/ui/components/button";
 import { Card, CardContent } from "@nous-research/ui/ui/components/card";
 
-import { buildApprovalInboxPath, type ApprovalInboxLoader } from "./approval-client";
+import { buildApprovalInboxPath, decideApproval, type ApprovalInboxLoader } from "./approval-client";
 import type { ApprovalSectionState } from "./contract";
 import {
   ApprovalAuthorityNote,
@@ -54,6 +55,19 @@ function SectionCard<T>({
 export function ApprovalDetailView({ state, profile, refresh }: ApprovalWorkspaceViewProps) {
   const approval = state.snapshot?.kind === "detail" ? state.snapshot.approval : null;
   const inboxPath = buildApprovalInboxPath(profile) ?? "/agent-platform/approvals";
+  const [decisionState, setDecisionState] = useState<"idle" | "approving" | "rejecting" | "done" | "error">("idle");
+  const canDecide = approval?.visualStatus === "pending" && !["approving", "rejecting"].includes(decisionState);
+  const submitDecision = async (decision: "approve" | "reject") => {
+    if (!approval || !canDecide) return;
+    setDecisionState(decision === "approve" ? "approving" : "rejecting");
+    try {
+      await decideApproval(approval.sourceLocalApprovalId, decision, profile);
+      setDecisionState("done");
+      refresh();
+    } catch {
+      setDecisionState("error");
+    }
+  };
   return (
     <div className="h-full overflow-y-auto bg-[var(--agent-platform-surface-canvas)] text-[var(--agent-platform-text-primary)]" style={{ fontFamily: "var(--agent-platform-font-body)" }}>
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
@@ -70,7 +84,7 @@ export function ApprovalDetailView({ state, profile, refresh }: ApprovalWorkspac
         >
           {approval && (
             <div className="flex flex-wrap gap-2">
-              <Badge tone="warning">Provisional source</Badge>
+              <Badge tone="success">Controlled source</Badge>
               <Badge tone="secondary">Source status: {approval.originalSourceStatus}</Badge>
               <span className="break-all font-mono text-xs text-[var(--agent-platform-text-muted)]">Source-local ID: {approval.sourceLocalApprovalId}</span>
             </div>
@@ -82,6 +96,26 @@ export function ApprovalDetailView({ state, profile, refresh }: ApprovalWorkspac
         {approval && (
           <>
             <ApprovalAuthorityNote />
+            <Card className="border-[var(--agent-platform-border-strong)] bg-[var(--agent-platform-surface-elevated)]">
+              <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+                <div className="space-y-1">
+                  <h2 className="font-semibold text-[var(--agent-platform-text-primary)]">Controlled human decision</h2>
+                  <p className="text-sm leading-relaxed text-[var(--agent-platform-text-secondary)]">
+                    Approve applies the staged write through Hermes' existing write-approval handler. Reject discards only this pending record.
+                  </p>
+                  {decisionState === "error" && <p className="text-sm text-[var(--agent-platform-status-danger)]">Decision failed. Refresh and retry from the current source state.</p>}
+                  {decisionState === "done" && <p className="text-sm text-[var(--agent-platform-status-success)]">Decision submitted. Refreshing source state.</p>}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button onClick={() => void submitDecision("approve")} disabled={!canDecide}>
+                    {decisionState === "approving" ? "Approving" : "Approve"}
+                  </Button>
+                  <Button outlined onClick={() => void submitDecision("reject")} disabled={!canDecide}>
+                    {decisionState === "rejecting" ? "Rejecting" : "Reject"}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
             <section className="grid gap-4 lg:grid-cols-[1.5fr_1fr]" aria-label="Approval source summary">
               <Card className="border-[var(--agent-platform-border-default)] bg-[var(--agent-platform-surface-panel)]">
                 <CardContent className="space-y-4 p-5">
@@ -137,8 +171,8 @@ export function ApprovalDetailView({ state, profile, refresh }: ApprovalWorkspac
             <Card className="border-[var(--agent-platform-border-strong)] bg-[var(--agent-platform-surface-subtle)]">
               <CardContent className="space-y-3 p-5 text-sm leading-relaxed text-[var(--agent-platform-text-secondary)]">
                 <h2 className="font-semibold text-[var(--agent-platform-text-primary)]">Authority limitations</h2>
-                <p>No approval or rejection action is available in P15.C3A.</p>
-                <p>This presentation is not a canonical ApprovalRequest. The source requester is not a governed Agent, the source target is not a WorkPacket, source risk is not an AGENT PLATFORM assessment, evidence is not a canonical EvidenceRef, and history is not a canonical audit log.</p>
+                <p>Approval and rejection are explicit human dashboard actions; no automatic approval path exists.</p>
+                <p>The source requester is not a governed Agent, source risk is not an AGENT PLATFORM assessment, and Git staging, commit, and push remain outside this decision path.</p>
               </CardContent>
             </Card>
           </>

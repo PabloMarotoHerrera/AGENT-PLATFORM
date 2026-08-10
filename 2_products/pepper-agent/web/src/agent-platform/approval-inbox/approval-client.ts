@@ -1,3 +1,5 @@
+import { fetchJSON } from "@/lib/api";
+
 import {
   parseApprovalDetailSource,
   parseApprovalInboxSource,
@@ -7,10 +9,13 @@ import {
   type ApprovalInboxView,
 } from "./contract";
 
+const APPROVAL_API_ROOT = "/api/agent-platform/approvals";
+
 export const APPROVAL_LIVE_SOURCE_CLASSIFICATION = Object.freeze({
-  classification: "safe_partial_read_source" as const,
-  productionAvailability: "unavailable" as const,
-  reason: "Hermes staged writes have durable Python reads but no safe authenticated dashboard list/detail endpoint.",
+  classification: "safe_controlled_product_source" as const,
+  productionAvailability: "available" as const,
+  reason: "Hermes staged writes are exposed through authenticated Pepper list/detail/decision endpoints.",
+  decisionAuthority: "explicit-human-dashboard-action" as const,
 });
 
 function safeProfile(profile: string): string | null {
@@ -35,17 +40,33 @@ export function buildApprovalDetailPath(approvalId: string, profile: string): st
   return `/agent-platform/approvals/${encodeURIComponent(id)}${suffix}`;
 }
 
-/**
- * Production deliberately has no HTTP call here. The audited durable source
- * exposes only raw local Python reads, so inventing a dashboard endpoint or
- * scraping another surface would cross the P15.C3A authority boundary.
- */
 export async function listApprovals(profile: string): Promise<unknown> {
-  return safeProfile(profile) === null ? null : null;
+  const suffix = profileSuffix(profile);
+  return suffix === null ? null : fetchJSON<unknown>(`${APPROVAL_API_ROOT}${suffix}`);
 }
 
 export async function getApproval(approvalId: string, profile: string): Promise<unknown> {
-  return validateApprovalId(approvalId) && safeProfile(profile) !== null ? null : null;
+  const id = validateApprovalId(approvalId);
+  const suffix = profileSuffix(profile);
+  return id && suffix !== null ? fetchJSON<unknown>(`${APPROVAL_API_ROOT}/${encodeURIComponent(id)}${suffix}`) : null;
+}
+
+export async function decideApproval(
+  approvalId: string,
+  decision: "approve" | "reject",
+  profile: string,
+): Promise<unknown> {
+  const id = validateApprovalId(approvalId);
+  const suffix = profileSuffix(profile);
+  if (!id || suffix === null) return null;
+  return fetchJSON<unknown>(
+    `${APPROVAL_API_ROOT}/${encodeURIComponent(id)}/decision${suffix}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision }),
+    },
+  );
 }
 
 export type ApprovalInboxLoader = (

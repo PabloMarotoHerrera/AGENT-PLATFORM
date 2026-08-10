@@ -230,6 +230,21 @@ TOOLSETS = {
         "tools": ["project_list", "project_create", "project_switch"],
         "includes": []
     },
+
+    "pepper_workflow": {
+        "description": "Pepper Lead Agent read-only governed workflow context",
+        "tools": [
+            "get_current_project",
+            "get_current_ticket",
+            "get_workflow_control",
+            "get_pending_approvals",
+            "inspect_pending_approval",
+            "get_execution_status",
+            "get_review_status",
+            "get_next_action",
+        ],
+        "includes": []
+    },
     
     "clarify": {
         "description": "Ask the user clarifying questions (multiple-choice or open-ended)",

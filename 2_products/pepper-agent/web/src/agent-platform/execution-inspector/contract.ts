@@ -7,16 +7,21 @@ import {
 export const EXECUTION_SOURCE = Object.freeze({
   sourceType: "hermes-kanban-task-run" as const,
   sourceSystem: "hermes-kanban" as const,
-  sourceAuthority: "source-local-evidence" as const,
-  futureAuthority: "P14/P17-governed-execution-event-adapter" as const,
-  retentionLimitation: "Run rows remain only while their task and board remain; linked events may be pruned and are not a complete history.",
+  sourceAuthority: "pepper-controlled-product-evidence" as const,
+  futureAuthority: "P15/P17-controlled-worker-adapter" as const,
+  retentionLimitation: "Run rows remain bounded source evidence; linked events may be pruned and are not a complete history. Human Git authority is preserved outside execution records.",
 });
 
 export const EXECUTION_SOURCE_POSTURES = Object.freeze([
   Object.freeze({
+    sourceType: "Pepper controlled execution collection",
+    availability: "controlled source" as const,
+    boundary: "Authenticated product API lists bounded execution records across boards without raw logs, PIDs, paths, or provider payloads.",
+  }),
+  Object.freeze({
     sourceType: "Hermes Kanban task run",
-    availability: "qualified source" as const,
-    boundary: "Requires exact board and task qualifiers; source-local run facts only.",
+    availability: "qualified detail source" as const,
+    boundary: "Exact board and task qualifiers expose source-local run facts plus controlled workflow handoff metadata.",
   }),
   Object.freeze({
     sourceType: "Hermes API-server run",
@@ -42,8 +47,8 @@ export type ExecutionEvidenceSectionPhase = "ready" | "empty" | "unavailable";
 export interface ExecutionInspectorSource {
   readonly sourceType: "hermes-kanban-task-run";
   readonly sourceSystem: "hermes-kanban";
-  readonly sourceAuthority: "source-local-evidence";
-  readonly futureAuthority: "P14/P17-governed-execution-event-adapter";
+  readonly sourceAuthority: "pepper-controlled-product-evidence";
+  readonly futureAuthority: "P15/P17-controlled-worker-adapter";
   readonly retentionLimitation: string;
 }
 
@@ -57,12 +62,19 @@ export interface ExecutionSourceProvenance {
 }
 
 export interface ExecutionSummary extends ExecutionSourceProvenance {
+  readonly sourceExecutionIdentity: string;
   readonly sourceLocalExecutionId: number;
   readonly taskTitle: string;
   readonly originalSourceStatus: string;
   readonly originalSourceOutcome: string | null;
   readonly startedAt: number;
   readonly endedAt: number | null;
+  readonly workflowState: string | null;
+  readonly workPacketId: string | null;
+  readonly validationState: string | null;
+  readonly reviewState: string | null;
+  readonly gitHandoffState: string | null;
+  readonly nextAction: string | null;
 }
 
 export interface ExecutionEventEvidence extends ExecutionSourceProvenance {
@@ -297,6 +309,7 @@ function executionSummary(
   ) return null;
   return {
     source: EXECUTION_SOURCE,
+    sourceExecutionIdentity: `${context.boardSlug}:${context.taskId}:${sourceLocalExecutionId}`,
     boardSlug: context.boardSlug,
     taskId: context.taskId,
     sourceProfile: profile,
@@ -308,7 +321,84 @@ function executionSummary(
     originalSourceOutcome,
     startedAt,
     endedAt,
+    workflowState: null,
+    workPacketId: null,
+    validationState: null,
+    reviewState: null,
+    gitHandoffState: null,
+    nextAction: null,
   };
+}
+
+function controlledExecutionSummary(value: unknown, observedAt: number): ExecutionSummary | null {
+  const record = asRecord(value);
+  const boardSlug = validateBoardSlug(record?.board_slug);
+  const taskId = validateTaskId(record?.task_id);
+  const taskTitle = plainText(record?.task_title, 300);
+  const sourceLocalExecutionId = safeInteger(record?.id);
+  const profile = sourceProfile(record?.profile);
+  const originalSourceStatus = sourceToken(record?.status);
+  const originalSourceOutcome = optionalSourceToken(record?.outcome);
+  const startedAt = timestamp(record?.started_at);
+  const endedAt = optionalTimestamp(record?.ended_at);
+  const workflowState = optionalSourceToken(record?.workflow_state, 128);
+  const workPacketId = optionalSourceToken(record?.work_packet_id, 128);
+  const validationState = optionalSourceToken(record?.validation_state, 128);
+  const reviewState = optionalSourceToken(record?.review_state, 128);
+  const gitHandoffState = optionalSourceToken(record?.git_handoff_state, 128);
+  const nextAction = optionalSourceToken(record?.next_action, 128);
+  if (
+    !record || !boardSlug || !taskId || !taskTitle || sourceLocalExecutionId === null ||
+    profile === undefined || !originalSourceStatus || startedAt === null ||
+    originalSourceOutcome === null && record.outcome !== null && record.outcome !== undefined && record.outcome !== "" ||
+    endedAt === null && record.ended_at !== null && record.ended_at !== undefined ||
+    workflowState === undefined || workPacketId === undefined || validationState === undefined ||
+    reviewState === undefined || gitHandoffState === undefined || nextAction === undefined
+  ) return null;
+  return {
+    source: EXECUTION_SOURCE,
+    sourceExecutionIdentity: `${boardSlug}:${taskId}:${sourceLocalExecutionId}`,
+    boardSlug,
+    taskId,
+    sourceProfile: profile,
+    observedAt,
+    freshnessBasis: "adapter-fetch-time",
+    sourceLocalExecutionId,
+    taskTitle,
+    originalSourceStatus,
+    originalSourceOutcome,
+    startedAt,
+    endedAt,
+    workflowState,
+    workPacketId,
+    validationState,
+    reviewState,
+    gitHandoffState,
+    nextAction,
+  };
+}
+
+function controlledExecutionCollection(value: Record<string, unknown>, observedAt: number): ExecutionCollection | null {
+  if (value.source_system !== "pepper-controlled-execution") return null;
+  const rawExecutions = asArray(value.executions, MAX_RUNS);
+  if (!rawExecutions) return null;
+  const executions = rawExecutions.map((item) => controlledExecutionSummary(item, observedAt));
+  if (executions.some((execution) => execution === null)) return null;
+  const safeExecutions = executions as ExecutionSummary[];
+  if (new Set(safeExecutions.map((execution) => execution.sourceExecutionIdentity)).size !== safeExecutions.length) {
+    return null;
+  }
+  safeExecutions.sort((left, right) =>
+    right.startedAt - left.startedAt || right.sourceLocalExecutionId - left.sourceLocalExecutionId ||
+    left.sourceExecutionIdentity.localeCompare(right.sourceExecutionIdentity));
+  return deepFreeze({
+    source: EXECUTION_SOURCE,
+    boardSlug: "all",
+    taskId: "all",
+    taskTitle: "All controlled execution records",
+    observedAt,
+    executions: safeExecutions,
+  });
 }
 
 export function parseExecutionCollectionSource(
@@ -319,6 +409,9 @@ export function parseExecutionCollectionSource(
 ): ExecutionCollection | null {
   const context = projectionContext(boardSlug, taskId, observedAt);
   const record = asRecord(value);
+  if (record?.source_system === "pepper-controlled-execution") {
+    return controlledExecutionCollection(record, observedAt);
+  }
   const task = asRecord(record?.task);
   const responseTaskId = validateTaskId(task?.id);
   const taskTitle = hasBoundedText(task?.title, 300) ? WITHHELD_TASK_TITLE : null;
@@ -521,9 +614,16 @@ export function parseExecutionDetailSource(
   const rawRun = rawRuns?.find((value) => safeInteger(asRecord(value)?.id) === execution.sourceLocalExecutionId);
   const rawRunRecord = asRecord(rawRun);
   const taskRecord = asRecord(record.task);
+  const controlRecord = asRecord(record.control);
   if (!rawRunRecord || !taskRecord) return null;
   return deepFreeze({
     ...execution,
+    workflowState: optionalSourceToken(controlRecord?.workflow_state, 128) ?? execution.workflowState,
+    workPacketId: optionalSourceToken(controlRecord?.work_packet_id, 128) ?? execution.workPacketId,
+    validationState: optionalSourceToken(controlRecord?.validation_state, 128) ?? execution.validationState,
+    reviewState: optionalSourceToken(controlRecord?.review_state, 128) ?? execution.reviewState,
+    gitHandoffState: optionalSourceToken(controlRecord?.git_handoff_state, 128) ?? execution.gitHandoffState,
+    nextAction: optionalSourceToken(controlRecord?.next_action, 128) ?? execution.nextAction,
     safeActionCategory: "Hermes Kanban task attempt",
     executableContent: "excluded",
     validationSummaries: [

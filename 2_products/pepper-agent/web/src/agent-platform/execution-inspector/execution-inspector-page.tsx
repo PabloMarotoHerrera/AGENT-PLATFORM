@@ -13,6 +13,7 @@ import {
 } from "./contract";
 import {
   buildExecutionDetailPath,
+  prepareControlledExecution,
   type ExecutionInspectorLoader,
 } from "./execution-client";
 import { useExecutionInspector } from "./use-execution-inspector";
@@ -35,7 +36,7 @@ export function ExecutionAuthorityNote() {
   return (
     <aside className="border border-[var(--agent-platform-border-default)] bg-[var(--agent-platform-surface-subtle)] p-4 text-sm leading-relaxed text-[var(--agent-platform-text-secondary)]">
       <strong className="text-[var(--agent-platform-text-primary)]">Execution boundary.</strong>{" "}
-      These are provisional source-local Hermes Kanban run facts. Governed execution authority is not active, and a source run is not a governed WorkPacket execution. No universal execution status or durable event history is inferred.
+      These are Pepper controlled execution records backed by Hermes Kanban run facts and P15/P17 handoff metadata. Worker dispatch is explicit, review and validation remain visible, and Git staging, commit, and push stay human-only.
     </aside>
   );
 }
@@ -79,8 +80,8 @@ export function ExecutionInspectorHeader({
         </Button>
       </div>
       <div className="flex flex-wrap items-center gap-2 text-xs">
-        <Badge tone="secondary">Source: Hermes Kanban task runs</Badge>
-        <Badge tone="warning">Provisional source</Badge>
+        <Badge tone="secondary">Source: Pepper controlled executions</Badge>
+        <Badge tone="success">Controlled source</Badge>
         <Badge tone={tone}>{state.phase}</Badge>
         <span className="font-mono text-[var(--agent-platform-text-muted)]">Profile context: {profile}</span>
         <span className="font-mono text-[var(--agent-platform-text-muted)]">Last success: {formatRefreshTime(state.lastSuccessAt)}</span>
@@ -110,8 +111,8 @@ export function ExecutionBlockingState({
           <h2 className="text-xl font-semibold">{title}</h2>
           <p className="text-sm leading-relaxed text-[var(--agent-platform-text-secondary)]">
             {loading
-              ? "Waiting for an exact board, task, and source-run response."
-              : "Hermes has no safe universal execution collection. Select an exact Kanban board and task; API runs, cron sessions, general sessions, logs, PIDs and process telemetry are not used as fallbacks."}
+              ? "Waiting for an authenticated product execution response."
+              : "Pepper could not load the controlled execution source. Logs, PIDs, process telemetry, raw provider payloads, and Chat transcripts are not used as fallbacks."}
           </p>
         </div>
         {!loading && <Button outlined onClick={refresh}>Try again</Button>}
@@ -131,6 +132,7 @@ export function ExecutionStaleNotice({ state }: Pick<ExecutionInspectorViewProps
 
 export function ExecutionInspectorView({ state, profile, refresh }: ExecutionInspectorViewProps) {
   const collection = state.snapshot?.kind === "executions" ? state.snapshot.collection : null;
+  const [startState, setStartState] = useState<"idle" | "preparing" | "prepared" | "error">("idle");
   const filterIdentity = `${profile}\0${collection?.boardSlug ?? ""}\0${collection?.taskId ?? ""}`;
   const [storedFilter, setStoredFilter] = useState({ identity: filterIdentity, value: "" });
   const [storedStatus, setStoredStatus] = useState({ identity: filterIdentity, value: "all" });
@@ -143,6 +145,18 @@ export function ExecutionInspectorView({ state, profile, refresh }: ExecutionIns
     const matchesText = !deferredFilter || `${execution.sourceLocalExecutionId} ${execution.sourceProfile ?? ""} ${execution.originalSourceOutcome ?? ""}`.toLowerCase().includes(deferredFilter);
     return matchesText && (status === "all" || execution.originalSourceStatus === status);
   });
+  const canPrepare = collection !== null && collection.boardSlug !== "all" && collection.taskId !== "all" && startState !== "preparing";
+  const prepareWorker = async () => {
+    if (!collection || !canPrepare) return;
+    setStartState("preparing");
+    try {
+      await prepareControlledExecution(collection.boardSlug, collection.taskId, profile);
+      setStartState("prepared");
+      refresh();
+    } catch {
+      setStartState("error");
+    }
+  };
 
   return (
     <div className="h-full overflow-y-auto bg-[var(--agent-platform-surface-canvas)] text-[var(--agent-platform-text-primary)]" style={{ fontFamily: "var(--agent-platform-font-body)" }}>
@@ -150,7 +164,7 @@ export function ExecutionInspectorView({ state, profile, refresh }: ExecutionIns
         <ExecutionInspectorHeader
           eyebrow="AGENT PLATFORM / Source evidence"
           title="Execution Inspector"
-          description="Read-only inspection of one exact Hermes Kanban task's source-local run records."
+          description="Live controlled execution collection with exact board, task, run, validation, review, and Git handoff posture."
           state={state}
           profile={profile}
           refresh={refresh}
@@ -163,7 +177,7 @@ export function ExecutionInspectorView({ state, profile, refresh }: ExecutionIns
               <CardContent className="space-y-3 p-4">
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <h2 className="text-sm font-semibold">{source.sourceType}</h2>
-                  <Badge tone={source.availability === "qualified source" ? "warning" : "secondary"}>{source.availability}</Badge>
+                  <Badge tone={source.availability === "controlled source" ? "success" : source.availability === "qualified detail source" ? "warning" : "secondary"}>{source.availability}</Badge>
                 </div>
                 <p className="text-xs leading-relaxed text-[var(--agent-platform-text-secondary)]">{source.boundary}</p>
               </CardContent>
@@ -176,10 +190,20 @@ export function ExecutionInspectorView({ state, profile, refresh }: ExecutionIns
             <ExecutionAuthorityNote />
             <Card className="border-[var(--agent-platform-border-default)] bg-[var(--agent-platform-surface-panel)]">
               <CardContent className="grid gap-4 p-5 sm:grid-cols-3">
-                <div><p className="text-xs uppercase tracking-wide text-[var(--agent-platform-text-muted)]">Board</p><p className="break-all font-mono text-sm">{collection.boardSlug}</p></div>
-                <div><p className="text-xs uppercase tracking-wide text-[var(--agent-platform-text-muted)]">Task</p><p className="break-all font-mono text-sm">{collection.taskId}</p></div>
+                <div><p className="text-xs uppercase tracking-wide text-[var(--agent-platform-text-muted)]">Board scope</p><p className="break-all font-mono text-sm">{collection.boardSlug}</p></div>
+                <div><p className="text-xs uppercase tracking-wide text-[var(--agent-platform-text-muted)]">Task scope</p><p className="break-all font-mono text-sm">{collection.taskId}</p></div>
                 <div><p className="text-xs uppercase tracking-wide text-[var(--agent-platform-text-muted)]">Source records</p><p className="text-2xl font-semibold">{executions.length}</p></div>
                 <div className="sm:col-span-3"><p className="text-xs uppercase tracking-wide text-[var(--agent-platform-text-muted)]">Task title posture</p><p className="break-words text-sm">{collection.taskTitle}</p></div>
+                <div className="space-y-3 border-t border-[var(--agent-platform-border-default)] pt-4 sm:col-span-3">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-sm text-[var(--agent-platform-text-secondary)]">Prepare uses the accepted P15/P17 worker handoff and does not run Git commands.</p>
+                    <Button outlined onClick={() => void prepareWorker()} disabled={!canPrepare}>
+                      {startState === "preparing" ? "Preparing handoff" : "Prepare controlled worker handoff"}
+                    </Button>
+                  </div>
+                  {startState === "prepared" && <p className="text-sm text-[var(--agent-platform-status-success)]">Controlled worker handoff prepared.</p>}
+                  {startState === "error" && <p className="text-sm text-[var(--agent-platform-status-danger)]">Worker handoff preparation failed. Refresh and retry.</p>}
+                </div>
               </CardContent>
             </Card>
             <section className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_14rem]" aria-label="Execution filters">
@@ -213,7 +237,7 @@ export function ExecutionInspectorView({ state, profile, refresh }: ExecutionIns
                     profile,
                   );
                   return (
-                    <Card key={execution.sourceLocalExecutionId} className="border-[var(--agent-platform-border-default)] bg-[var(--agent-platform-surface-panel)]">
+                    <Card key={execution.sourceExecutionIdentity} className="border-[var(--agent-platform-border-default)] bg-[var(--agent-platform-surface-panel)]">
                       <CardContent className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_auto]">
                         <div className="min-w-0 space-y-3">
                           <div className="flex flex-wrap items-start gap-2">
@@ -223,9 +247,11 @@ export function ExecutionInspectorView({ state, profile, refresh }: ExecutionIns
                           </div>
                           <div className="flex flex-wrap gap-x-5 gap-y-2 text-xs text-[var(--agent-platform-text-muted)]">
                             <span className="font-mono">Source-local ID: {execution.sourceLocalExecutionId}</span>
+                            <span className="font-mono">Board/task: {execution.boardSlug}/{execution.taskId}</span>
                             <span>Source profile: {execution.sourceProfile ?? "not supplied"}</span>
                             <span>Started: {formatExecutionTimestamp(execution.startedAt)}</span>
                             <span>Ended: {formatExecutionTimestamp(execution.endedAt)}</span>
+                            <span>Next action: {execution.nextAction ?? "inspect_detail"}</span>
                           </div>
                         </div>
                         {detailPath && (

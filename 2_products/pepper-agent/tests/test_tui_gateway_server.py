@@ -4500,6 +4500,156 @@ def test_setup_status_reports_provider_config(monkeypatch):
     assert resp["result"]["provider_configured"] is False
 
 
+def test_pepper_lead_agent_resolve_skin_overrides_branding(monkeypatch):
+    monkeypatch.setenv("HERMES_AGENT_PLATFORM_CHAT_MODE", "pepper-lead-agent")
+    monkeypatch.setattr(server, "_load_cfg", lambda: {})
+
+    import hermes_cli.skin_engine as skin_engine
+
+    monkeypatch.setattr(skin_engine, "init_skin_from_config", lambda cfg: None)
+    monkeypatch.setattr(
+        skin_engine,
+        "get_active_skin",
+        lambda: types.SimpleNamespace(
+            name="default",
+            colors={},
+            branding={"agent_name": "Hermes Agent", "help_header": "Hermes"},
+            banner_logo=None,
+            banner_hero=None,
+            tool_prefix="┊",
+        ),
+    )
+
+    skin = server.resolve_skin()
+
+    assert skin["branding"]["agent_name"] == "Pepper Lead Agent"
+    assert skin["branding"]["response_label"] == " Pepper "
+    assert skin["help_header"] == "Pepper controlled commands"
+
+
+def test_pepper_lead_agent_setup_status_uses_governed_codex(monkeypatch):
+    monkeypatch.setenv("HERMES_AGENT_PLATFORM_CHAT_MODE", "pepper-lead-agent")
+
+    from hermes_cli.agent_platform import lead_agent
+
+    monkeypatch.setattr(
+        lead_agent,
+        "resolve_pepper_lead_agent_runtime",
+        lambda: {
+            "provider": "openai-codex",
+            "model": "gpt-5.5",
+            "base_url": "https://chatgpt.com/backend-api/codex",
+            "api_key": "token",
+            "api_mode": "codex_responses",
+            "source": "pepper-governed-openai-codex-oauth",
+            "credential_profile_id": "openai-codex.primary",
+            "provider_runtime_profile_id": "provider.openai-codex.chatgpt-oauth.gpt-5.5.v1",
+            "worker_profile_id": "worker.openai-codex.chatgpt-oauth.gpt-5.5.single-request.v1",
+        },
+    )
+
+    status = server.handle_request({"id": "1", "method": "setup.status", "params": {}})
+    runtime = server.handle_request({"id": "2", "method": "setup.runtime_check", "params": {}})
+
+    assert status["result"] == {
+        "provider_configured": True,
+        "provider": "openai-codex",
+        "model": "gpt-5.5",
+        "mode": "pepper-lead-agent",
+    }
+    assert runtime["result"]["ok"] is True
+    assert runtime["result"]["source"] == "pepper-governed-openai-codex-oauth"
+    assert runtime["result"]["credential_profile_id"] == "openai-codex.primary"
+    assert "api_key" not in runtime["result"]
+    assert runtime["result"]["provider_runtime_profile_id"] == (
+        "provider.openai-codex.chatgpt-oauth.gpt-5.5.v1"
+    )
+
+
+def test_pepper_lead_agent_make_agent_uses_governed_runtime(monkeypatch):
+    monkeypatch.setenv("HERMES_AGENT_PLATFORM_CHAT_MODE", "pepper-lead-agent")
+    monkeypatch.setattr(server, "_load_cfg", lambda: {"agent": {"system_prompt": "Base"}})
+    monkeypatch.setattr(server, "_load_provider_routing", lambda: {})
+    monkeypatch.setattr(server, "_get_db", lambda: None)
+    monkeypatch.setattr(
+        server,
+        "_load_fallback_model",
+        lambda: pytest.fail("Pepper Lead Agent must not load model fallback"),
+    )
+
+    from hermes_cli.agent_platform import lead_agent
+
+    monkeypatch.setattr(
+        lead_agent,
+        "resolve_pepper_lead_agent_runtime",
+        lambda: {
+            "provider": "openai-codex",
+            "model": "gpt-5.5",
+            "base_url": "https://chatgpt.com/backend-api/codex",
+            "api_key": "token",
+            "api_mode": "codex_responses",
+            "source": "pepper-governed-openai-codex-oauth",
+        },
+    )
+
+    import run_agent
+
+    captured = {}
+
+    class FakeAgent:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            self.model = kwargs["model"]
+            self.enabled_toolsets = kwargs["enabled_toolsets"]
+
+    monkeypatch.setattr(run_agent, "AIAgent", FakeAgent)
+
+    agent = server._make_agent(
+        "sid",
+        "stored-session",
+        model_override={"model": "anthropic/claude-opus-4.5", "provider": "anthropic"},
+        provider_override="anthropic",
+        platform_override="tui",
+    )
+
+    assert agent.model == "gpt-5.5"
+    assert captured["model"] == "gpt-5.5"
+    assert captured["provider"] == "openai-codex"
+    assert captured["api_mode"] == "codex_responses"
+    assert captured["enabled_toolsets"] == ["pepper_workflow"]
+    assert captured["platform"] == "pepper-dashboard"
+    assert captured["fallback_model"] is None
+    assert "Pepper Lead Agent" in captured["ephemeral_system_prompt"]
+
+
+def test_pepper_lead_agent_session_create_ignores_model_params(monkeypatch, tmp_path):
+    monkeypatch.setenv("HERMES_AGENT_PLATFORM_CHAT_MODE", "pepper-lead-agent")
+    monkeypatch.setattr(server, "_completion_cwd", lambda params=None: str(tmp_path))
+
+    resp = server._methods["session.create"](
+        "1",
+        {
+            "cols": 80,
+            "model": "anthropic/claude-opus-4.5",
+            "provider": "anthropic",
+            "reasoning_effort": "high",
+            "fast": True,
+            "source": "tui",
+        },
+    )
+    sid = resp["result"]["session_id"]
+
+    try:
+        assert resp["result"]["info"]["model"] == "gpt-5.5"
+        assert resp["result"]["info"]["provider"] == "openai-codex"
+        assert server._sessions[sid]["source"] == "pepper-dashboard"
+        assert server._sessions[sid]["model_override"] is None
+        assert server._sessions[sid]["create_reasoning_override"] is None
+        assert server._sessions[sid]["create_service_tier_override"] is None
+    finally:
+        server._methods["session.close"]("2", {"session_id": sid})
+
+
 def test_setup_runtime_check_rejects_empty_runtime_key(monkeypatch):
     monkeypatch.setattr("hermes_cli.main._has_any_provider_configured", lambda: True)
     monkeypatch.setattr(

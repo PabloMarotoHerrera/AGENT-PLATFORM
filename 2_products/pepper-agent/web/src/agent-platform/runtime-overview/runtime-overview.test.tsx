@@ -59,6 +59,7 @@ describe("Runtime Overview contract", () => {
       gateway: { state: "off", running: false, busy: false, drainable: false },
       activity: { activeSessions: 0, activeAgents: 0 },
       access: { authRequired: false },
+      workflowControl: null,
     });
     const retained = JSON.stringify(parsed);
     expect(retained).not.toContain("private");
@@ -175,5 +176,60 @@ describe("Runtime Overview surface and descriptor", () => {
     expect(ready).toContain("Recent sessions");
     expect(ready).toContain("not governed AGENT PLATFORM Agents");
     expect(ready).not.toContain("private");
+  });
+
+  it("renders controlled default-mode workflow control when present", () => {
+    const snapshot = parseRuntimeOverviewSnapshot(statusResponse({
+      agent_platform_workflow_control: {
+        product_id: "pepper",
+        project_id: "PEPPER",
+        project_name: "Pepper",
+        macroproject_id: "P18",
+        current_ticket_id: "P18.8",
+        current_ticket_title: "Controlled Default-Mode Cutover",
+        mode: "controlled_default",
+        readiness: "ready_for_P18_R",
+        workflow_state: "P18.8-PEPPER-CHAT-WORKFLOW-CONTEXT-READY-FOR-HUMAN-SMOKE",
+        workflow_status: "ready_for_P18_R",
+        approval_state: "no_pending_approvals",
+        pending_approval_count: 0,
+        queue_state: "ready_for_P18_R_handoff",
+        execution_state: "no_active_executions",
+        active_execution_count: 0,
+        validation_state: "human_cutover_smoke_passed",
+        review_state: "human_cutover_smoke_passed",
+        recovery_state: "not_required",
+        git_handoff_state: "human_git_authority_preserved",
+        default_mode_enabled: true,
+        manual_chat_control_required: false,
+        manual_opencode_ticket_copy_required: false,
+        manual_opencode_result_copy_required: false,
+        human_git_authority: "preserved_manual_git_add_commit_push_only",
+        ready_requires_human_smoke: false,
+        closed_gaps: [
+          { id: "P18-8-GAP-001" },
+          { id: "P18-8-GAP-002" },
+          { id: "P18-8-GAP-003" },
+          { id: "P18-8-GAP-004" },
+          { id: "P18-8-GAP-005" },
+        ],
+        remaining_blockers: [],
+        next_action: { label: "P18.8 cutover is complete; await explicit human authorization before beginning P18.R" },
+      },
+    }))!;
+    const ready = renderToStaticMarkup(
+      <RuntimeOverviewView
+        state={{ phase: "ready", snapshot, lastSuccessAt: 1234, refreshing: false }}
+        refresh={() => {}}
+      />,
+    );
+    expect(ready).toContain("Pepper Workflow Control");
+    expect(ready).toContain("PEPPER");
+    expect(ready).toContain("P18.8");
+    expect(ready).toContain("Pending approvals");
+    expect(ready).toContain("Active executions");
+    expect(ready).toContain("P18.8 cutover is complete");
+    expect(ready).toContain("Manual OpenCode copy");
+    expect(ready).toContain("Remaining blockers");
   });
 });

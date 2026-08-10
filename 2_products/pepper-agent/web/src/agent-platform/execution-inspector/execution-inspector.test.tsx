@@ -31,18 +31,6 @@ import {
   INITIAL_EXECUTION_INSPECTOR_STATE,
 } from "./use-execution-inspector";
 
-function board(overrides: Record<string, unknown> = {}) {
-  return {
-    slug: "alpha-board",
-    name: "Alpha Project",
-    description: "Source-qualified project",
-    counts: { running: 1 },
-    db_path: "C:\\private\\kanban.db",
-    default_workdir: "/home/private/repository",
-    ...overrides,
-  };
-}
-
 function run(overrides: Record<string, unknown> = {}) {
   return {
     id: 4,
@@ -169,8 +157,8 @@ describe("safe source-qualified execution projection", () => {
       source: {
         sourceType: "hermes-kanban-task-run",
         sourceSystem: "hermes-kanban",
-        sourceAuthority: "source-local-evidence",
-        futureAuthority: "P14/P17-governed-execution-event-adapter",
+        sourceAuthority: "pepper-controlled-product-evidence",
+        futureAuthority: "P15/P17-controlled-worker-adapter",
       },
       boardSlug: "alpha-board",
       taskId: "t_alpha01",
@@ -181,7 +169,7 @@ describe("safe source-qualified execution projection", () => {
       originalSourceOutcome: "completed",
       taskTitle: "Source task title withheld by the execution projection",
     });
-    expect(parsed?.source.retentionLimitation).toContain("linked events may be pruned");
+    expect(parsed?.source.retentionLimitation).toContain("Human Git authority is preserved");
   });
 
   it("does not infer status or outcome from recency, task state, errors, summaries, or event text", () => {
@@ -367,14 +355,14 @@ describe("safe source-qualified execution projection", () => {
   });
 });
 
-describe("qualified GET-only execution client", () => {
-  it("classifies the source as nested and partial rather than universal", () => {
+describe("controlled execution client", () => {
+  it("classifies the source as controlled and production-available", () => {
     expect(EXECUTION_LIVE_SOURCE_CLASSIFICATION).toEqual(expect.objectContaining({
-      classification: "safe_nested_partial_source",
-      productionAvailability: "qualified-only",
-      source: "hermes-kanban-task-run",
-      profileBehavior: expect.stringContaining("run.profile is the source fact"),
-      rawTransportExposure: expect.stringContaining("broad task response"),
+      classification: "safe_controlled_product_source",
+      productionAvailability: "available",
+      source: "pepper-controlled-execution",
+      profileBehavior: expect.stringContaining("run.profile remains a source fact"),
+      rawTransportExposure: expect.stringContaining("product response"),
     }));
   });
 
@@ -388,11 +376,10 @@ describe("qualified GET-only execution client", () => {
     expect(buildExecutionsPath("review-profile", "alpha-board", "../escape")).toBeNull();
   });
 
-  it("preflights board membership and reads only the exact task through authenticated GETs", async () => {
+  it("reads one exact run through the authenticated product detail endpoint", async () => {
     vi.stubGlobal("window", { __HERMES_SESSION_TOKEN__: "synthetic-session" });
     const fetchMock = vi
       .fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ boards: [board()], current: "default" }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify(taskWire()), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -401,20 +388,18 @@ describe("qualified GET-only execution client", () => {
       "review-profile",
     );
     expect(loaded?.kind).toBe("detail");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(String(fetchMock.mock.calls[0][0])).toBe("/api/plugins/kanban/boards?include_archived=false&profile=review-profile");
-    expect(String(fetchMock.mock.calls[1][0])).toBe("/api/plugins/kanban/tasks/t_alpha01?board=alpha-board&profile=review-profile");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toBe("/api/agent-platform/executions/4?board=alpha-board&task=t_alpha01&profile=review-profile");
     for (const call of fetchMock.mock.calls) {
       expect(call[1]?.method).toBeUndefined();
       expect(new Headers(call[1]?.headers).get("X-Hermes-Session-Token")).toBe("synthetic-session");
     }
   });
 
-  it("propagates one abort signal through board preflight and the exact task GET", async () => {
+  it("propagates one abort signal through the exact product GET", async () => {
     vi.stubGlobal("window", { __HERMES_SESSION_TOKEN__: "synthetic-session" });
     const fetchMock = vi
       .fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ boards: [board()] }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify(taskWire()), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     const controller = new AbortController();
@@ -425,23 +410,20 @@ describe("qualified GET-only execution client", () => {
       controller.signal,
     );
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls.every((call) => call[1]?.signal === controller.signal)).toBe(true);
   });
 
   it("does not request a missing or invalid source context and never falls back to another board", async () => {
     vi.stubGlobal("window", {});
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      expect(String(input)).toContain("/boards?");
-      return new Response(JSON.stringify({ boards: [board()], current: "default" }), { status: 200 });
-    });
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(async () => new Response(JSON.stringify({ detail: "not found" }), { status: 404 }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(getQualifiedExecutionSource("../escape", "t_alpha01", "default")).resolves.toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
     await expect(getQualifiedExecutionSource("missing-board", "t_alpha01", "default")).resolves.toBeNull();
     expect(fetchMock).toHaveBeenCalledOnce();
-    expect(String(fetchMock.mock.calls[0][0])).toContain("/boards?");
+    expect(String(fetchMock.mock.calls[0][0])).toBe("/api/agent-platform/executions?board=missing-board&task=t_alpha01&profile=default");
   });
 
   it("rejects an invalid detail run ID before any source request", async () => {
@@ -557,18 +539,19 @@ describe("execution polling and identity freshness", () => {
   });
 });
 
-describe("read-only Execution Inspector pages", () => {
+describe("controlled Execution Inspector pages", () => {
   it("renders exact source facts, local filters, retention limits, and qualified detail links", () => {
     const markup = renderToStaticMarkup(
       <MemoryRouter><ExecutionInspectorView state={state(collectionView())} profile="review-profile" refresh={() => {}} /></MemoryRouter>,
     );
     expect(markup).toContain("Execution Inspector");
-    expect(markup).toContain("source-local Hermes Kanban run facts");
-    expect(markup).toContain("not a governed WorkPacket execution");
+    expect(markup).toContain("Pepper controlled execution records");
+    expect(markup).toContain("Git staging, commit, and push stay human-only");
     expect(markup).toContain("Hermes API-server run");
     expect(markup).toContain("Hermes cron agent session");
-    expect(markup).toContain("Governed execution authority is not active");
+    expect(markup).toContain("Prepare controlled worker handoff");
     expect(markup).toContain("Source-local ID: 4");
+    expect(markup).toContain("Board/task: alpha-board/t_alpha01");
     expect(markup).toContain("Source profile: worker-profile");
     expect(markup).toContain("Filter by run ID, profile, or outcome");
     expect(markup).toContain("Source task title withheld by the execution projection");
@@ -591,17 +574,19 @@ describe("read-only Execution Inspector pages", () => {
     expect(stale).toContain("last validated source-local projection");
     expect(error).toContain("Execution source could not be reached");
     expect(unavailable).toContain("Qualified execution source unavailable");
-    expect(unavailable).toContain("no safe universal execution collection");
-    expect(unavailable).toContain("cron sessions, general sessions, logs, PIDs and process telemetry are not used as fallbacks");
+    expect(unavailable).toContain("controlled execution source");
+    expect(unavailable).toContain("raw provider payloads");
   });
 
-  it("renders only safe detail facts and explicitly linked event evidence without controls", () => {
+  it("renders safe detail facts, controlled handoff metadata, and explicitly linked event evidence", () => {
     const markup = renderToStaticMarkup(
       <MemoryRouter><ExecutionDetailView state={state(detailView())} profile="review-profile" refresh={() => {}} /></MemoryRouter>,
     );
     expect(markup).toContain("Run 4");
     expect(markup).toContain("Source timing and state");
     expect(markup).toContain("Retention and redaction");
+    expect(markup).toContain("Workflow");
+    expect(markup).toContain("Git handoff");
     expect(markup).toContain("Explicitly linked source events");
     expect(markup).toContain("Safe action category");
     expect(markup).toContain("Validation summaries");
@@ -613,8 +598,8 @@ describe("read-only Execution Inspector pages", () => {
     expect(markup).toContain("Display timeline ordering is source-local presentation, not authoritative causality");
     expect(markup).toContain("run_started");
     expect(markup).toContain("Source event ID: 10");
-    expect(markup).toContain("No stop, retry, rollback or execution action is available in P15.C3A");
-    expect(markup).toContain("not a canonical execution, governed WorkPacket execution or durable audit timeline");
+    expect(markup).toContain("Worker handoff preparation is explicit and bounded to the accepted P15/P17 substrate");
+    expect(markup).toContain("not a durable audit timeline");
     expect(markup).toContain("/agent-platform/executions?board=alpha-board&amp;task=t_alpha01&amp;profile=review-profile");
     expect(markup).not.toContain("private-event-token");
     expect(markup).not.toContain("private raw run error");

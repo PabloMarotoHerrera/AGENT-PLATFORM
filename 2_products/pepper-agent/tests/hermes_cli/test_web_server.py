@@ -8335,6 +8335,10 @@ class TestPtyWebSocket:
     def test_resolve_chat_argv_uses_dashboard_scroll_env(self, monkeypatch):
         """Dashboard chat runs the TUI in browser-scrollback mode."""
         import hermes_cli.main as main_mod
+        from hermes_cli.agent_platform.lead_agent import (
+            PEPPER_LEAD_AGENT_ENV,
+            PEPPER_LEAD_AGENT_MODE,
+        )
 
         monkeypatch.setattr(
             main_mod,
@@ -8344,9 +8348,14 @@ class TestPtyWebSocket:
 
         _argv, _cwd, env = self.ws_module._resolve_chat_argv()
 
+        from hermes_constants import get_hermes_home
+
         assert env["HERMES_TUI_DASHBOARD"] == "1"
         assert env["HERMES_TUI_INLINE"] == "1"
         assert env["HERMES_TUI_DISABLE_MOUSE"] == "1"
+        assert env[PEPPER_LEAD_AGENT_ENV] == PEPPER_LEAD_AGENT_MODE
+        assert env["HERMES_HOME"] == str(get_hermes_home())
+        assert "HERMES_TUI_GATEWAY_URL" not in env
 
     def test_resolve_chat_argv_backfills_colorterm_truecolor(self, monkeypatch):
         """Headless servers (cloud/systemd) have no COLORTERM, which made
@@ -8891,6 +8900,33 @@ class TestPtyWebSocket:
 def test_resolve_chat_argv_injects_gateway_ws_url(monkeypatch):
     import hermes_cli.main as cli_main
     import hermes_cli.web_server as ws
+    from hermes_cli.agent_platform import lead_agent
+
+    monkeypatch.setattr(
+        cli_main,
+        "_make_tui_argv",
+        lambda *_args, **_kwargs: (["node", "fake-tui.js"], Path("/tmp")),
+    )
+    monkeypatch.setattr(lead_agent, "pepper_lead_agent_env", lambda: {})
+    monkeypatch.setattr(ws.app.state, "bound_host", "127.0.0.1", raising=False)
+    monkeypatch.setattr(ws.app.state, "bound_port", 9119, raising=False)
+
+    _argv, _cwd, env = ws._resolve_chat_argv()
+
+    assert env is not None
+    gateway_url = env.get("HERMES_TUI_GATEWAY_URL", "")
+    assert gateway_url.startswith("ws://127.0.0.1:9119/api/ws?")
+    assert "token=" in gateway_url
+
+
+def test_resolve_chat_argv_skips_gateway_ws_url_for_pepper(monkeypatch):
+    import hermes_cli.main as cli_main
+    import hermes_cli.web_server as ws
+    from hermes_cli.agent_platform.lead_agent import (
+        PEPPER_LEAD_AGENT_ENV,
+        PEPPER_LEAD_AGENT_MODE,
+    )
+    from hermes_constants import get_hermes_home
 
     monkeypatch.setattr(
         cli_main,
@@ -8903,9 +8939,9 @@ def test_resolve_chat_argv_injects_gateway_ws_url(monkeypatch):
     _argv, _cwd, env = ws._resolve_chat_argv()
 
     assert env is not None
-    gateway_url = env.get("HERMES_TUI_GATEWAY_URL", "")
-    assert gateway_url.startswith("ws://127.0.0.1:9119/api/ws?")
-    assert "token=" in gateway_url
+    assert env[PEPPER_LEAD_AGENT_ENV] == PEPPER_LEAD_AGENT_MODE
+    assert env["HERMES_HOME"] == str(get_hermes_home())
+    assert "HERMES_TUI_GATEWAY_URL" not in env
 
 
 class TestDashboardPluginStaticAssetAllowlist:

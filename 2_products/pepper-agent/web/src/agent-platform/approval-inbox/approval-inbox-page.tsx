@@ -37,8 +37,8 @@ export function ApprovalAuthorityNote() {
   return (
     <aside className="border border-[var(--agent-platform-border-default)] bg-[var(--agent-platform-surface-subtle)] p-4 text-sm leading-relaxed text-[var(--agent-platform-text-secondary)]">
       <strong className="text-[var(--agent-platform-text-primary)]">Authority boundary.</strong>{" "}
-      These are provisional source approval presentations. No governed AGENT PLATFORM approval authority is active.
-      Source pending is not governed pending approval, and source decisions are not governed decisions.
+      These are live Hermes staged-write approval records exposed through Pepper's authenticated product API.
+      Decisions require explicit human dashboard action and never grant Git staging, commit, or push authority.
     </aside>
   );
 }
@@ -83,7 +83,7 @@ export function ApprovalWorkspaceHeader({
       </div>
       <div className="flex flex-wrap items-center gap-2 text-xs">
         <Badge tone="secondary">Source: Hermes staged write approvals</Badge>
-        <Badge tone="warning">Provisional source</Badge>
+        <Badge tone="success">Controlled source</Badge>
         <Badge tone={tone}>{state.phase}</Badge>
         <span className="font-mono text-[var(--agent-platform-text-muted)]">Profile: {profile}</span>
         <span className="font-mono text-[var(--agent-platform-text-muted)]">Last success: {formatSourceTime(state.lastSuccessAt)}</span>
@@ -153,7 +153,7 @@ export function ApprovalInboxView({ state, profile, refresh }: ApprovalWorkspace
         <ApprovalWorkspaceHeader
           eyebrow="AGENT PLATFORM / Decision source"
           title="Approval Inbox"
-          description="Read-only presentations of explicit Hermes source requests when a safe source read is available."
+          description="Live review of explicit Hermes staged-write requests with human approve and reject actions."
           state={state}
           profile={profile}
           refresh={refresh}

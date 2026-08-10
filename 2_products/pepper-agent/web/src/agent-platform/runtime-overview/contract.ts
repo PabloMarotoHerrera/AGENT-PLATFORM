@@ -27,6 +27,38 @@ export interface RuntimeOverviewSnapshot {
   readonly access: Readonly<{
     authRequired: boolean;
   }>;
+  readonly workflowControl: RuntimeWorkflowControl | null;
+}
+
+export interface RuntimeWorkflowControl {
+  readonly productId: string;
+  readonly projectId: string;
+  readonly projectName: string;
+  readonly macroprojectId: string;
+  readonly currentTicketId: string;
+  readonly currentTicketTitle: string;
+  readonly mode: string;
+  readonly readiness: string;
+  readonly workflowState: string;
+  readonly workflowStatus: string;
+  readonly approvalState: string;
+  readonly pendingApprovalCount: number;
+  readonly queueState: string;
+  readonly executionState: string;
+  readonly activeExecutionCount: number;
+  readonly validationState: string;
+  readonly reviewState: string;
+  readonly recoveryState: string;
+  readonly gitHandoffState: string;
+  readonly defaultModeEnabled: boolean;
+  readonly manualChatControlRequired: boolean;
+  readonly manualOpenCodeTicketCopyRequired: boolean;
+  readonly manualOpenCodeResultCopyRequired: boolean;
+  readonly humanGitAuthority: string;
+  readonly readyRequiresHumanSmoke: boolean;
+  readonly closedGapCount: number;
+  readonly remainingBlockerCount: number;
+  readonly nextActionLabel: string;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -49,6 +81,83 @@ function asNonNegativeInteger(value: unknown): number | null {
 
 function asBoolean(value: unknown): boolean | null {
   return typeof value === "boolean" ? value : null;
+}
+
+function parseWorkflowControl(value: unknown): RuntimeWorkflowControl | null {
+  const source = asRecord(value);
+  const nextAction = asRecord(source?.next_action);
+  if (!source || !nextAction) return null;
+  const productId = asBoundedString(source.product_id, 128);
+  const projectId = asBoundedString(source.project_id, 128);
+  const projectName = asBoundedString(source.project_name, 128);
+  const macroprojectId = asBoundedString(source.macroproject_id, 128);
+  const currentTicketId = asBoundedString(source.current_ticket_id, 128);
+  const currentTicketTitle = asBoundedString(source.current_ticket_title, 240);
+  const mode = asBoundedString(source.mode, 128);
+  const readiness = asBoundedString(source.readiness, 128);
+  const workflowState = asBoundedString(source.workflow_state, 160);
+  const workflowStatus = asBoundedString(source.workflow_status, 160);
+  const approvalState = asBoundedString(source.approval_state, 160);
+  const pendingApprovalCount = asNonNegativeInteger(source.pending_approval_count);
+  const queueState = asBoundedString(source.queue_state, 160);
+  const executionState = asBoundedString(source.execution_state, 160);
+  const activeExecutionCount = asNonNegativeInteger(source.active_execution_count);
+  const validationState = asBoundedString(source.validation_state, 160);
+  const reviewState = asBoundedString(source.review_state, 160);
+  const recoveryState = asBoundedString(source.recovery_state, 160);
+  const gitHandoffState = asBoundedString(source.git_handoff_state, 160);
+  const defaultModeEnabled = asBoolean(source.default_mode_enabled);
+  const manualChatControlRequired = asBoolean(source.manual_chat_control_required);
+  const manualOpenCodeTicketCopyRequired = asBoolean(source.manual_opencode_ticket_copy_required);
+  const manualOpenCodeResultCopyRequired = asBoolean(source.manual_opencode_result_copy_required);
+  const humanGitAuthority = asBoundedString(source.human_git_authority, 160);
+  const readyRequiresHumanSmoke = asBoolean(source.ready_requires_human_smoke);
+  const closedGaps = Array.isArray(source.closed_gaps) ? source.closed_gaps.length : null;
+  const remainingBlockers = Array.isArray(source.remaining_blockers) ? source.remaining_blockers.length : null;
+  const nextActionLabel = asBoundedString(nextAction.label, 240);
+  if (
+    productId === null || projectId === null || projectName === null ||
+    macroprojectId === null || currentTicketId === null || currentTicketTitle === null ||
+    mode === null || readiness === null || defaultModeEnabled === null ||
+    workflowState === null || workflowStatus === null || approvalState === null ||
+    pendingApprovalCount === null || queueState === null || executionState === null ||
+    activeExecutionCount === null || validationState === null || reviewState === null ||
+    recoveryState === null || gitHandoffState === null ||
+    manualChatControlRequired === null || manualOpenCodeTicketCopyRequired === null ||
+    manualOpenCodeResultCopyRequired === null || humanGitAuthority === null ||
+    readyRequiresHumanSmoke === null || closedGaps === null || remainingBlockers === null ||
+    nextActionLabel === null
+  ) return null;
+  return Object.freeze({
+    productId,
+    projectId,
+    projectName,
+    macroprojectId,
+    currentTicketId,
+    currentTicketTitle,
+    mode,
+    readiness,
+    workflowState,
+    workflowStatus,
+    approvalState,
+    pendingApprovalCount,
+    queueState,
+    executionState,
+    activeExecutionCount,
+    validationState,
+    reviewState,
+    recoveryState,
+    gitHandoffState,
+    defaultModeEnabled,
+    manualChatControlRequired,
+    manualOpenCodeTicketCopyRequired,
+    manualOpenCodeResultCopyRequired,
+    humanGitAuthority,
+    readyRequiresHumanSmoke,
+    closedGapCount: closedGaps,
+    remainingBlockerCount: remainingBlockers,
+    nextActionLabel,
+  });
 }
 
 function normalizeGatewayState(value: unknown, running: boolean): RuntimeGatewayState {
@@ -109,5 +218,6 @@ export function parseRuntimeOverviewSnapshot(value: unknown): RuntimeOverviewSna
     }),
     activity: Object.freeze({ activeSessions, activeAgents }),
     access: Object.freeze({ authRequired }),
+    workflowControl: parseWorkflowControl(source.agent_platform_workflow_control),
   });
 }

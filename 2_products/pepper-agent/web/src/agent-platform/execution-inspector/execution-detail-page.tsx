@@ -87,7 +87,7 @@ export function ExecutionDetailView({
         >
           {execution && (
             <div className="flex flex-wrap gap-2">
-              <Badge tone="warning">Provisional source</Badge>
+              <Badge tone="success">Controlled source</Badge>
               <Badge tone="secondary">Source status: {execution.originalSourceStatus}</Badge>
               <span className="break-all font-mono text-xs text-[var(--agent-platform-text-muted)]">Board / task / run: {execution.boardSlug} / {execution.taskId} / {execution.sourceLocalExecutionId}</span>
             </div>
@@ -106,6 +106,8 @@ export function ExecutionDetailView({
                   <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-2 text-sm text-[var(--agent-platform-text-secondary)]">
                     <dt>Status</dt><dd>{execution.originalSourceStatus}</dd>
                     <dt>Outcome</dt><dd>{execution.originalSourceOutcome ?? "not supplied"}</dd>
+                    <dt>Workflow</dt><dd>{execution.workflowState ?? "not supplied"}</dd>
+                    <dt>Next action</dt><dd>{execution.nextAction ?? "inspect_detail"}</dd>
                     <dt>Started</dt><dd>{formatExecutionTimestamp(execution.startedAt)}</dd>
                     <dt>Ended</dt><dd>{formatExecutionTimestamp(execution.endedAt)}</dd>
                     <dt>Source profile</dt><dd>{execution.sourceProfile ?? "not supplied"}</dd>
@@ -117,6 +119,7 @@ export function ExecutionDetailView({
                   <h2 className="inline-flex items-center gap-2 font-semibold"><FileWarning className="h-4 w-4" /> Retention and redaction</h2>
                   <p className="text-sm leading-relaxed text-[var(--agent-platform-text-secondary)]">{execution.source.retentionLimitation}</p>
                   <p className="text-sm leading-relaxed text-[var(--agent-platform-text-secondary)]">Executable content is excluded. Result and failure presence is shown without raw narrative detail; metadata, event payloads, logs, claims, PIDs, paths and process inspection are not displayed.</p>
+                  <p className="text-sm leading-relaxed text-[var(--agent-platform-text-secondary)]">Git handoff: {execution.gitHandoffState ?? "human_git_authority_preserved"}. WorkPacket: {execution.workPacketId ?? "not supplied"}.</p>
                 </CardContent>
               </Card>
             </section>
@@ -189,8 +192,8 @@ export function ExecutionDetailView({
             <Card className="border-[var(--agent-platform-border-strong)] bg-[var(--agent-platform-surface-subtle)]">
               <CardContent className="space-y-3 p-5 text-sm leading-relaxed text-[var(--agent-platform-text-secondary)]">
                 <h2 className="font-semibold text-[var(--agent-platform-text-primary)]">Inspector limitations</h2>
-                <p>No stop, retry, rollback or execution action is available in P15.C3A. Approval, worker, assignment and dispatch controls are also absent.</p>
-                <p>Governed execution authority is not active. Task status is not substituted for run status, missing events are not evidence of inactivity, and this source-local run is not a canonical execution, governed WorkPacket execution or durable audit timeline.</p>
+                <p>Stop, retry, rollback, assignment, and Git actions are not automated here. Worker handoff preparation is explicit and bounded to the accepted P15/P17 substrate.</p>
+                <p>Task status is not substituted for run status, missing events are not evidence of inactivity, and this source-local run is not a durable audit timeline.</p>
               </CardContent>
             </Card>
           </>

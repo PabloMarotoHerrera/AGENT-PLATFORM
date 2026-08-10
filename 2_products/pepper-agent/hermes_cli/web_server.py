@@ -271,6 +271,21 @@ from hermes_cli.agent_platform.product_config import (  # noqa: E402
     ProductConfiguration,
     load_product_configuration,
 )
+from hermes_cli.agent_platform.product_runtime import (  # noqa: E402
+    ApprovalDecisionRequest,
+    ControlledExecutionStartRequest,
+    ProductRuntimeConflict,
+    ProductRuntimeDecisionFailed,
+    ProductRuntimeNotFound,
+    apply_approval_decision,
+    build_approval_detail_source,
+    build_approval_inbox_source,
+    build_execution_collection_source,
+    build_task_execution_source,
+    build_workflow_control_snapshot,
+    ensure_execution_exists,
+    prepare_controlled_execution,
+)
 
 app.include_router(_memory_oauth_router)
 
@@ -285,6 +300,142 @@ def get_agent_platform_product_configuration() -> ProductConfiguration:
     """Return deterministic metadata without consulting user or provider state."""
 
     return load_product_configuration()
+
+
+def _product_runtime_http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, HTTPException):
+        return exc
+    if isinstance(exc, ProductRuntimeNotFound):
+        return HTTPException(status_code=404, detail=str(exc) or "not found")
+    if isinstance(exc, ProductRuntimeConflict):
+        return HTTPException(status_code=409, detail=str(exc) or "conflict")
+    if isinstance(exc, ProductRuntimeDecisionFailed):
+        return HTTPException(status_code=422, detail=str(exc) or "decision failed")
+    return HTTPException(status_code=400, detail=str(exc) or "invalid product runtime request")
+
+
+@app.get(
+    "/api/agent-platform/approvals",
+    summary="List Pepper controlled approval requests",
+    tags=["agent-platform"],
+)
+def list_agent_platform_approvals(profile: Optional[str] = None) -> dict[str, Any]:
+    """Return durable staged-write approvals through the product auth boundary."""
+
+    with _profile_scope(profile):
+        return build_approval_inbox_source()
+
+
+@app.get(
+    "/api/agent-platform/approvals/{approval_id}",
+    summary="Get one Pepper controlled approval request",
+    tags=["agent-platform"],
+)
+def get_agent_platform_approval(
+    approval_id: str,
+    profile: Optional[str] = None,
+) -> dict[str, Any]:
+    """Return one exact durable approval identity without raw payload fields."""
+
+    try:
+        with _profile_scope(profile):
+            return build_approval_detail_source(approval_id)
+    except Exception as exc:
+        raise _product_runtime_http_error(exc) from exc
+
+
+@app.post(
+    "/api/agent-platform/approvals/{approval_id}/decision",
+    summary="Apply a Pepper controlled approval decision",
+    tags=["agent-platform"],
+)
+def decide_agent_platform_approval(
+    approval_id: str,
+    body: ApprovalDecisionRequest,
+    profile: Optional[str] = None,
+) -> dict[str, Any]:
+    """Apply approve/reject through existing memory/skill write-approval code."""
+
+    try:
+        with _profile_scope(profile):
+            return apply_approval_decision(approval_id, body)
+    except Exception as exc:
+        raise _product_runtime_http_error(exc) from exc
+
+
+@app.get(
+    "/api/agent-platform/executions",
+    summary="List Pepper controlled execution records",
+    tags=["agent-platform"],
+)
+def list_agent_platform_executions(
+    board: Optional[str] = None,
+    task: Optional[str] = None,
+    profile: Optional[str] = None,
+) -> dict[str, Any]:
+    """Return universal execution records or one exact board/task projection."""
+
+    if (board is None) ^ (task is None):
+        raise HTTPException(status_code=400, detail="board and task must be passed together")
+    try:
+        with _profile_scope(profile):
+            if board is not None and task is not None:
+                return build_task_execution_source(board, task)
+            return build_execution_collection_source()
+    except Exception as exc:
+        raise _product_runtime_http_error(exc) from exc
+
+
+@app.get(
+    "/api/agent-platform/executions/{execution_id}",
+    summary="Get one Pepper controlled execution record",
+    tags=["agent-platform"],
+)
+def get_agent_platform_execution(
+    execution_id: str,
+    board: str,
+    task: str,
+    profile: Optional[str] = None,
+) -> dict[str, Any]:
+    """Return one exact board/task/run source without process fallback."""
+
+    try:
+        with _profile_scope(profile):
+            return ensure_execution_exists(board, task, execution_id)
+    except Exception as exc:
+        raise _product_runtime_http_error(exc) from exc
+
+
+@app.post(
+    "/api/agent-platform/executions/start",
+    summary="Prepare a Pepper controlled worker handoff",
+    tags=["agent-platform"],
+)
+def start_agent_platform_execution(
+    body: ControlledExecutionStartRequest,
+    profile: Optional[str] = None,
+) -> dict[str, Any]:
+    """Prepare the accepted P15/P17 worker handoff without automating Git."""
+
+    try:
+        with _profile_scope(body.profile or profile):
+            return prepare_controlled_execution(body)
+    except Exception as exc:
+        raise _product_runtime_http_error(exc) from exc
+
+
+@app.get(
+    "/api/agent-platform/workflow-control",
+    summary="Get Pepper controlled default-mode workflow control state",
+    tags=["agent-platform"],
+)
+def get_agent_platform_workflow_control(
+    profile: Optional[str] = None,
+) -> dict[str, Any]:
+    """Return the default-mode control projection and remaining human smoke gate."""
+
+    with _profile_scope(profile):
+        return build_workflow_control_snapshot()
 
 # ---------------------------------------------------------------------------
 # Session token for protecting sensitive endpoints (reveal).
@@ -5220,6 +5371,9 @@ def _trim_setup_output(value: Optional[str], limit: int = 4000) -> str:
 
 def _memory_provider_setup_env() -> Dict[str, str]:
     env = os.environ.copy()
+    from hermes_constants import get_hermes_home
+
+    env["HERMES_HOME"] = str(get_hermes_home())
     home = Path.home()
     extra_bins = [
         home / ".brv-cli" / "bin",
@@ -16643,9 +16797,9 @@ def _resolve_chat_argv(
     Appending ``--resume <id>`` to argv doesn't work because ``ui-tui`` does
     not parse its argv.
 
-    ``HERMES_TUI_GATEWAY_URL`` is injected so the PTY child can attach to
-    this process's in-memory ``tui_gateway`` instance instead of spawning
-    its own Python gateway subprocess.
+    ``HERMES_TUI_GATEWAY_URL`` is injected for non-Pepper default chats so
+    the PTY child can attach to this process's in-memory ``tui_gateway``
+    instance instead of spawning its own Python gateway subprocess.
 
     `sidecar_url` (when set) is forwarded as ``HERMES_TUI_SIDECAR_URL`` so
     the spawned ``tui_gateway.entry`` can mirror dispatcher emits to the
@@ -16676,6 +16830,9 @@ def _resolve_chat_argv(
 
     argv, cwd = _make_tui_argv(PROJECT_ROOT / "ui-tui", tui_dev=False)
     env = os.environ.copy()
+    from hermes_constants import get_hermes_home
+
+    env["HERMES_HOME"] = str(get_hermes_home())
     try:
         from hermes_cli.config import apply_terminal_config_to_env
         apply_terminal_config_to_env(env=env)
@@ -16703,6 +16860,15 @@ def _resolve_chat_argv(
     # setdefault so an explicit operator value still wins.
     env.setdefault("COLORTERM", "truecolor")
     env["HERMES_TUI_DASHBOARD"] = "1"
+    pepper_chat_mode = False
+    try:
+        from hermes_cli.agent_platform.lead_agent import pepper_lead_agent_env
+
+        pepper_env = pepper_lead_agent_env()
+        env.update(pepper_env)
+        pepper_chat_mode = bool(pepper_env)
+    except Exception:
+        _log.debug("Failed to apply Pepper Lead Agent env bridge", exc_info=True)
 
     if profile_dir is not None:
         env["HERMES_HOME"] = str(profile_dir)
@@ -16725,11 +16891,11 @@ def _resolve_chat_argv(
     if active_session_file:
         env["HERMES_TUI_ACTIVE_SESSION_FILE"] = active_session_file
 
-    # Profile-scoped chats must NOT attach to the dashboard's in-memory
-    # gateway — it runs under the dashboard's own profile. Without the
-    # attach URL, gatewayClient spawns its own `tui_gateway.entry`, which
-    # inherits the profile HERMES_HOME set above.
-    if profile_dir is None:
+    # Profile-scoped and Pepper chats must NOT attach to the dashboard's
+    # in-memory gateway — it runs under the dashboard process environment.
+    # Without the attach URL, gatewayClient spawns `tui_gateway.entry`, which
+    # inherits the profile/credential authority set above.
+    if profile_dir is None and not pepper_chat_mode:
         if gateway_ws_url := _build_gateway_ws_url():
             env["HERMES_TUI_GATEWAY_URL"] = gateway_ws_url
 

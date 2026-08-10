@@ -4424,6 +4424,8 @@ class AIAgent:
     def _try_refresh_codex_client_credentials(self, *, force: bool = True) -> bool:
         if self.api_mode != "codex_responses" or self.provider not in {"openai-codex", "xai-oauth"}:
             return False
+        if getattr(self, "platform", None) == "pepper-dashboard":
+            return False
 
         # Guard against silent account swap.
         #
