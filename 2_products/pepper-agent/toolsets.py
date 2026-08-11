@@ -245,6 +245,18 @@ TOOLSETS = {
         ],
         "includes": []
     },
+
+    "pepper_repository": {
+        "description": "Pepper Lead Agent bounded read-only AGENT PLATFORM repository context",
+        "tools": [
+            "get_repository_context",
+            "list_repository_tree",
+            "read_repository_file",
+            "search_repository",
+            "resolve_repository_authority",
+        ],
+        "includes": []
+    },
     
     "clarify": {
         "description": "Ask the user clarifying questions (multiple-choice or open-ended)",

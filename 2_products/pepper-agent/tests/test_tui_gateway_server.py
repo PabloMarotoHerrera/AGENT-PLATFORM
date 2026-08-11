@@ -4616,7 +4616,7 @@ def test_pepper_lead_agent_make_agent_uses_governed_runtime(monkeypatch):
     assert captured["model"] == "gpt-5.5"
     assert captured["provider"] == "openai-codex"
     assert captured["api_mode"] == "codex_responses"
-    assert captured["enabled_toolsets"] == ["pepper_workflow"]
+    assert captured["enabled_toolsets"] == ["pepper_workflow", "pepper_repository"]
     assert captured["platform"] == "pepper-dashboard"
     assert captured["fallback_model"] is None
     assert "Pepper Lead Agent" in captured["ephemeral_system_prompt"]

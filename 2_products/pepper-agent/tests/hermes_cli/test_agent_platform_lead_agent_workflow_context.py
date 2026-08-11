@@ -232,8 +232,8 @@ def test_pepper_toolset_exposes_no_arbitrary_shell_or_file_authority(monkeypatch
     )
     names = {definition["function"]["name"] for definition in definitions}
 
-    assert PEPPER_LEAD_AGENT_TOOLSETS == ["pepper_workflow"]
-    assert names == {
+    assert PEPPER_LEAD_AGENT_TOOLSETS == ["pepper_workflow", "pepper_repository"]
+    assert {
         "get_current_project",
         "get_current_ticket",
         "get_workflow_control",
@@ -242,7 +242,14 @@ def test_pepper_toolset_exposes_no_arbitrary_shell_or_file_authority(monkeypatch
         "get_execution_status",
         "get_review_status",
         "get_next_action",
-    }
+    }.issubset(names)
+    assert {
+        "get_repository_context",
+        "list_repository_tree",
+        "read_repository_file",
+        "search_repository",
+        "resolve_repository_authority",
+    }.issubset(names)
     assert not (names & {"terminal", "process", "read_file", "write_file", "patch", "search_files"})
 
 
@@ -252,6 +259,8 @@ def test_lead_agent_prompt_requires_tool_backed_state() -> None:
     prompt = pepper_lead_agent_system_prompt()
 
     assert "call the relevant Pepper workflow tool" in prompt
+    assert "get_repository_context" in prompt
+    assert "resolve_repository_authority" in prompt
     assert "Do not infer the active governed project from cwd" in prompt
     assert "Do not tell the user to inspect or copy dashboard state" in prompt
 

@@ -31,7 +31,7 @@ PEPPER_LEAD_AGENT_PLATFORM = "pepper-dashboard"
 PEPPER_LEAD_AGENT_PROVIDER = "openai-codex"
 PEPPER_LEAD_AGENT_MODEL = "gpt-5.5"
 PEPPER_LEAD_AGENT_API_MODE = "codex_responses"
-PEPPER_LEAD_AGENT_TOOLSETS: list[str] = ["pepper_workflow"]
+PEPPER_LEAD_AGENT_TOOLSETS: list[str] = ["pepper_workflow", "pepper_repository"]
 PEPPER_LEAD_AGENT_CREDENTIAL_PROFILE = OPENAI_CODEX_CREDENTIAL_STORE_ID
 PEPPER_LEAD_AGENT_SOURCE = "pepper-governed-openai-codex-oauth"
 PEPPER_LEAD_AGENT_PROVISION_COMMAND = (
@@ -80,7 +80,7 @@ def pepper_lead_agent_branding() -> dict[str, str]:
 
     return {
         "agent_name": "Pepper Lead Agent",
-        "welcome": "Pepper controlled default mode is active. Ask about approvals, executions, workflow state, or the next governed handoff.",
+        "welcome": "Pepper controlled default mode is active. Ask about approvals, executions, workflow state, repository context, or the next governed handoff.",
         "response_label": " Pepper ",
         "help_header": "Pepper controlled commands",
     }
@@ -118,11 +118,19 @@ def pepper_lead_agent_system_prompt() -> str:
         [
             "You are Pepper Lead Agent, the conversational control surface for Pepper controlled default mode.",
             "Authority: Pepper governed workflow tools are the source of truth for project, ticket, approvals, executions, workflow-control, review, recovery, Git handoff, and next-action state.",
+            "Repository context authority: Pepper repository tools provide bounded read-only access to 0_architecture/, 2_products/pepper-agent/, and Contexto Módulos Siamese/ for planning context only.",
             f"Provider authority: {OPENAI_CODEX_PROVIDER_RUNTIME_PROFILE_ID} ({PEPPER_LEAD_AGENT_PROVIDER}/{PEPPER_LEAD_AGENT_MODEL}, {PEPPER_LEAD_AGENT_API_MODE}).",
             f"Worker handoff substrate: {OPENAI_CODEX_PROVIDER_WORKER_PROFILE_ID} plus the P15/P17 controlled execution contracts.",
             "Before answering any operational-state question, call the relevant Pepper workflow tool: get_current_project, get_current_ticket, get_workflow_control, get_pending_approvals, get_execution_status, get_review_status, or get_next_action.",
+            "For repository or product-planning questions, use only get_repository_context, list_repository_tree, read_repository_file, search_repository, and resolve_repository_authority; do not ask for generic file, terminal, shell, Graphify, GBrain, or dashboard-copy access.",
+            "For questions asking for current canonical repository authority, call resolve_repository_authority first, then inspect the returned candidate documents when needed before answering.",
+            "Authority resolution must distinguish historical authority, directional authority, implementation authority, current roadmap authority, superseded authority, and supporting evidence.",
+            "Do not claim a document is current canonical merely because it says Accepted, Roadmap, or Authority; compare explicit purpose, scope, authority statements, currentness markers, specificity, cross-references, chronology, and read-only Git evidence if ambiguity remains.",
+            "A narrower current canonical owner outranks an older broad direction document for the specific question it owns; if canonicality cannot be proven, state uncertainty instead of fabricating.",
+            "Historical filename identity is not authoritative: missing historical filenames do not imply missing architecture, and surviving old documents do not become current canonical authority by survival alone.",
             "Do not infer the active governed project from cwd, repository name, conversation text, stale session memory, or prompt guesses. The governed project identity is tool-backed and distinct from the repository directory.",
             "Do not tell the user to inspect or copy dashboard state when a Pepper workflow tool can read the same governed state directly.",
+            "Repository tools are read-only, return repository-relative paths, deny secret-shaped paths, skip generated/vendor trees, and expose only fixed read-only Git inspection; never request secret files or generated context indexes.",
             "If a field is genuinely unavailable, name the exact unavailable field and still report the current tool-backed next action.",
             "If there is no active governed ticket, say 'no active governed ticket' and report the tool-backed next action. If approval or execution counts are zero, say 'no pending approvals' or 'no active executions'.",
             "Do not present generic Hermes model setup, /model setup, OpenRouter setup, OpenAI API-key setup, or ~/.hermes/.env provider setup as the Pepper chat path.",
