@@ -14,37 +14,49 @@ def _workflow(**overrides):
         "product_id": "pepper",
         "project_id": "PEPPER",
         "project_name": "Pepper",
-        "macroproject_id": "P18",
-        "macroproject_title": "Manual-to-Hermes Workflow Migration",
-        "current_ticket_id": "P18.8",
-        "current_ticket_title": "Controlled Default-Mode Cutover",
-        "current_gap_id": "P18.8-GAP-005",
-        "current_gap_title": "Lead Agent Live Governed Workflow Context Bridge",
+        "macroproject_id": "P18.9",
+        "macroproject_title": "Pepper Product Personalization",
+        "completed_macroproject_id": "P18",
+        "completed_macroproject_state": "closed",
+        "current_ticket_id": None,
+        "current_ticket_title": None,
+        "current_gap_id": None,
+        "current_gap_title": None,
+        "next_ticket_id": "P18.9.0",
+        "next_ticket_title": "Product UX / IA Baseline",
         "mode": "controlled_default",
-        "readiness": "blocked_pending_human_ui_smoke",
-        "workflow_state": "P18.8-PEPPER-CHAT-WORKFLOW-CONTEXT-READY-FOR-HUMAN-SMOKE",
-        "workflow_status": "blocked_pending_human_ui_smoke",
+        "readiness": "planning_approved_or_intake_ready",
+        "workflow_state": "P18.9-PEPPER-PRODUCT-PERSONALIZATION-INTAKE-READY",
+        "workflow_status": "planning_approved_or_intake_ready",
         "approval_state": "no_pending_approvals",
         "pending_approval_count": 0,
-        "queue_state": "human_smoke_required",
+        "queue_state": "ready_to_generate_P18_9_0",
         "execution_state": "no_active_executions",
         "active_execution_count": 0,
-        "validation_state": "pending_human_cutover_smoke",
-        "review_state": "pending_human_cutover_smoke",
+        "validation_state": "not_started_no_ticket_generated",
+        "review_state": "not_started_no_ticket_generated",
         "recovery_state": "not_required",
         "git_handoff_state": "human_git_authority_preserved",
         "warning_count": 0,
         "closed_gaps": [{"id": "P18-8-GAP-001"}],
-        "remaining_blockers": [{"id": "HUMAN_P18_8_CUTOVER_SMOKE_PASS"}],
+        "historical_evidence": [{"id": "P18.R", "state": "closed", "decision": "accepted"}],
+        "remaining_blockers": [],
         "default_mode_enabled": True,
         "manual_chat_control_required": False,
         "manual_opencode_ticket_copy_required": False,
         "manual_opencode_result_copy_required": False,
         "human_git_authority": "preserved_manual_git_add_commit_push_only",
-        "ready_requires_human_smoke": True,
+        "ready_requires_human_smoke": False,
+        "workflow_migration_complete": True,
+        "P18_closed": True,
+        "P18_R_closed": True,
+        "P18_R_pending": False,
+        "P18_9_ready": True,
+        "P18_9_ticket_generated": False,
         "next_action": {
-            "id": "HUMAN_P18_8_CUTOVER_SMOKE_PASS",
-            "label": "Run real Pepper dashboard cutover smoke and record the pass token",
+            "id": "GENERATE_P18_9_0",
+            "label": "Generate governed P18.9.0 Product UX / IA Baseline before execution.",
+            "target_ticket_id": "P18.9.0",
         },
         "evidence_timestamp": "2026-08-10T00:00:00Z",
         "evidence_version": 1,
@@ -103,8 +115,12 @@ def test_lead_agent_context_uses_governed_project_not_cwd(
     assert context["project_id"] == "PEPPER"
     assert context["project_name"] == "Pepper"
     assert context["project_id"] != Path.cwd().name
-    assert context["current_ticket_id"] == "P18.8"
-    assert context["current_gap_id"] == "P18.8-GAP-005"
+    assert context["macroproject_id"] == "P18.9"
+    assert context["macroproject_title"] == "Pepper Product Personalization"
+    assert context["available"] is False
+    assert context["message"] == "no active governed ticket"
+    assert context["current_ticket_id"] is None
+    assert context["current_gap_id"] is None
 
 
 def test_lead_agent_context_contract_and_ui_workflow_consistency(monkeypatch) -> None:
@@ -182,7 +198,54 @@ def test_current_ticket_unavailable_reports_no_active_governed_ticket(monkeypatc
     assert result["available"] is False
     assert result["message"] == "no active governed ticket"
     assert result["current_ticket_id"] is None
-    assert result["next_action"]["id"] == "HUMAN_P18_8_CUTOVER_SMOKE_PASS"
+    assert result["next_action"]["id"] == "GENERATE_P18_9_0"
+
+
+def test_workflow_projection_closes_p18r_and_prepares_p18_9_without_ticket(monkeypatch) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    monkeypatch.setattr(
+        pr,
+        "_approval_operational_summary",
+        lambda: {
+            "approval_state": "no_pending_approvals",
+            "pending_approval_count": 0,
+            "source_system": pr.APPROVAL_SOURCE_SYSTEM,
+        },
+    )
+    monkeypatch.setattr(
+        pr,
+        "_execution_operational_summary",
+        lambda: {
+            "execution_state": "no_active_executions",
+            "execution_count": 0,
+            "active_execution_count": 0,
+            "source_system": pr.CONTROLLED_EXECUTION_SOURCE_SYSTEM,
+        },
+    )
+
+    snapshot = pr.build_workflow_control_snapshot()
+    serialized = json.dumps(snapshot, ensure_ascii=False)
+
+    assert snapshot["completed_macroproject_id"] == "P18"
+    assert snapshot["completed_macroproject_state"] == "closed"
+    assert snapshot["P18_closed"] is True
+    assert snapshot["P18_R_closed"] is True
+    assert snapshot["P18_R_pending"] is False
+    assert snapshot["workflow_migration_complete"] is True
+    assert snapshot["macroproject_id"] == "P18.9"
+    assert snapshot["macroproject_title"] == "Pepper Product Personalization"
+    assert snapshot["readiness"] == "planning_approved_or_intake_ready"
+    assert snapshot["current_ticket_id"] is None
+    assert snapshot["current_gap_id"] is None
+    assert snapshot["P18_9_ready"] is True
+    assert snapshot["P18_9_ticket_generated"] is False
+    assert snapshot["next_ticket_id"] == "P18.9.0"
+    assert snapshot["next_action"]["id"] == "GENERATE_P18_9_0"
+    assert {item["id"] for item in snapshot["historical_evidence"]} == {"P18.8", "P18.R"}
+    assert "HUMAN_P18_8_CUTOVER_SMOKE_PASS" in serialized
+    assert "P18_R_READY_FOR_HUMAN_AUTHORIZATION" not in serialized
+    assert "ready_for_P18_R" not in serialized
 
 
 def test_zero_approval_and_execution_states_are_grounded(monkeypatch) -> None:

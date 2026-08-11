@@ -35,8 +35,8 @@ export interface RuntimeWorkflowControl {
   readonly projectId: string;
   readonly projectName: string;
   readonly macroprojectId: string;
-  readonly currentTicketId: string;
-  readonly currentTicketTitle: string;
+  readonly currentTicketId: string | null;
+  readonly currentTicketTitle: string | null;
   readonly mode: string;
   readonly readiness: string;
   readonly workflowState: string;
@@ -73,6 +73,11 @@ function asBoundedString(value: unknown, maxLength: number): string | null {
   return normalized.length > 0 && normalized.length <= maxLength ? normalized : null;
 }
 
+function asOptionalBoundedString(value: unknown, maxLength: number): string | null | undefined {
+  if (value === null || value === undefined) return null;
+  return asBoundedString(value, maxLength) ?? undefined;
+}
+
 function asNonNegativeInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
     ? value
@@ -91,8 +96,8 @@ function parseWorkflowControl(value: unknown): RuntimeWorkflowControl | null {
   const projectId = asBoundedString(source.project_id, 128);
   const projectName = asBoundedString(source.project_name, 128);
   const macroprojectId = asBoundedString(source.macroproject_id, 128);
-  const currentTicketId = asBoundedString(source.current_ticket_id, 128);
-  const currentTicketTitle = asBoundedString(source.current_ticket_title, 240);
+  const currentTicketId = asOptionalBoundedString(source.current_ticket_id, 128);
+  const currentTicketTitle = asOptionalBoundedString(source.current_ticket_title, 240);
   const mode = asBoundedString(source.mode, 128);
   const readiness = asBoundedString(source.readiness, 128);
   const workflowState = asBoundedString(source.workflow_state, 160);
@@ -117,7 +122,8 @@ function parseWorkflowControl(value: unknown): RuntimeWorkflowControl | null {
   const nextActionLabel = asBoundedString(nextAction.label, 240);
   if (
     productId === null || projectId === null || projectName === null ||
-    macroprojectId === null || currentTicketId === null || currentTicketTitle === null ||
+    macroprojectId === null ||
+    currentTicketId === undefined || currentTicketTitle === undefined ||
     mode === null || readiness === null || defaultModeEnabled === null ||
     workflowState === null || workflowStatus === null || approvalState === null ||
     pendingApprovalCount === null || queueState === null || executionState === null ||

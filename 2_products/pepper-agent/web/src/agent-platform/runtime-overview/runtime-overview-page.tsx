@@ -94,6 +94,7 @@ function EmptyState({ phase, refresh }: Pick<RuntimeOverviewViewProps, "refresh"
 
 export function RuntimeOverviewView({ state, refresh }: RuntimeOverviewViewProps) {
   const { snapshot } = state;
+  const workflowControl = snapshot?.workflowControl ?? null;
 
   return (
     <div
@@ -218,28 +219,28 @@ export function RuntimeOverviewView({ state, refresh }: RuntimeOverviewViewProps
               />
             </section>
 
-            {snapshot.workflowControl && (
+            {workflowControl && (
               <Card className="border-[var(--agent-platform-border-strong)] bg-[var(--agent-platform-surface-elevated)]">
                 <CardContent className="space-y-5 p-5 sm:p-6">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div>
                       <p className="font-mono text-xs uppercase tracking-[0.16em] text-[var(--agent-platform-text-muted)]">Controlled default mode</p>
                       <h2 className="mt-2 text-xl font-semibold">Pepper Workflow Control</h2>
-                      <p className="mt-2 text-sm leading-relaxed text-[var(--agent-platform-text-secondary)]">{snapshot.workflowControl.nextActionLabel}</p>
+                      <p className="mt-2 text-sm leading-relaxed text-[var(--agent-platform-text-secondary)]">{workflowControl.nextActionLabel}</p>
                     </div>
-                    <Badge tone={snapshot.workflowControl.readyRequiresHumanSmoke ? "warning" : "success"}>{snapshot.workflowControl.readiness}</Badge>
+                    <Badge tone={workflowControl.readyRequiresHumanSmoke ? "warning" : "success"}>{workflowControl.readiness}</Badge>
                   </div>
                   <dl className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
-                    <div className="border-l-2 border-[var(--agent-platform-border-default)] pl-3"><dt className="text-xs text-[var(--agent-platform-text-muted)]">Governed project</dt><dd className="font-mono">{snapshot.workflowControl.projectId}</dd></div>
-                    <div className="border-l-2 border-[var(--agent-platform-border-default)] pl-3"><dt className="text-xs text-[var(--agent-platform-text-muted)]">Current ticket</dt><dd className="font-mono">{snapshot.workflowControl.currentTicketId}</dd></div>
-                    <div className="border-l-2 border-[var(--agent-platform-border-default)] pl-3"><dt className="text-xs text-[var(--agent-platform-text-muted)]">Pending approvals</dt><dd className="font-mono">{snapshot.workflowControl.pendingApprovalCount}</dd></div>
-                    <div className="border-l-2 border-[var(--agent-platform-border-default)] pl-3"><dt className="text-xs text-[var(--agent-platform-text-muted)]">Active executions</dt><dd className="font-mono">{snapshot.workflowControl.activeExecutionCount}</dd></div>
-                    <div className="border-l-2 border-[var(--agent-platform-border-default)] pl-3"><dt className="text-xs text-[var(--agent-platform-text-muted)]">Default mode</dt><dd className="font-mono">{snapshot.workflowControl.defaultModeEnabled ? "Enabled" : "Disabled"}</dd></div>
-                    <div className="border-l-2 border-[var(--agent-platform-border-default)] pl-3"><dt className="text-xs text-[var(--agent-platform-text-muted)]">Manual OpenCode copy</dt><dd className="font-mono">{snapshot.workflowControl.manualOpenCodeTicketCopyRequired || snapshot.workflowControl.manualOpenCodeResultCopyRequired ? "Required" : "Not required"}</dd></div>
-                    <div className="border-l-2 border-[var(--agent-platform-border-default)] pl-3"><dt className="text-xs text-[var(--agent-platform-text-muted)]">Closed P18.8 gaps</dt><dd className="font-mono">{snapshot.workflowControl.closedGapCount}</dd></div>
-                    <div className="border-l-2 border-[var(--agent-platform-border-default)] pl-3"><dt className="text-xs text-[var(--agent-platform-text-muted)]">Remaining blockers</dt><dd className="font-mono">{snapshot.workflowControl.remainingBlockerCount}</dd></div>
+                    <div className="border-l-2 border-[var(--agent-platform-border-default)] pl-3"><dt className="text-xs text-[var(--agent-platform-text-muted)]">Governed project</dt><dd className="font-mono">{workflowControl.projectId}</dd></div>
+                    <div className="border-l-2 border-[var(--agent-platform-border-default)] pl-3"><dt className="text-xs text-[var(--agent-platform-text-muted)]">Current ticket</dt><dd className="font-mono">{workflowControl.currentTicketId ?? "None generated"}</dd></div>
+                    <div className="border-l-2 border-[var(--agent-platform-border-default)] pl-3"><dt className="text-xs text-[var(--agent-platform-text-muted)]">Pending approvals</dt><dd className="font-mono">{workflowControl.pendingApprovalCount}</dd></div>
+                    <div className="border-l-2 border-[var(--agent-platform-border-default)] pl-3"><dt className="text-xs text-[var(--agent-platform-text-muted)]">Active executions</dt><dd className="font-mono">{workflowControl.activeExecutionCount}</dd></div>
+                    <div className="border-l-2 border-[var(--agent-platform-border-default)] pl-3"><dt className="text-xs text-[var(--agent-platform-text-muted)]">Default mode</dt><dd className="font-mono">{workflowControl.defaultModeEnabled ? "Enabled" : "Disabled"}</dd></div>
+                    <div className="border-l-2 border-[var(--agent-platform-border-default)] pl-3"><dt className="text-xs text-[var(--agent-platform-text-muted)]">Manual OpenCode copy</dt><dd className="font-mono">{workflowControl.manualOpenCodeTicketCopyRequired || workflowControl.manualOpenCodeResultCopyRequired ? "Required" : "Not required"}</dd></div>
+                    <div className="border-l-2 border-[var(--agent-platform-border-default)] pl-3"><dt className="text-xs text-[var(--agent-platform-text-muted)]">Closed P18.8 gaps</dt><dd className="font-mono">{workflowControl.closedGapCount}</dd></div>
+                    <div className="border-l-2 border-[var(--agent-platform-border-default)] pl-3"><dt className="text-xs text-[var(--agent-platform-text-muted)]">Remaining blockers</dt><dd className="font-mono">{workflowControl.remainingBlockerCount}</dd></div>
                   </dl>
-                  <p className="text-xs leading-relaxed text-[var(--agent-platform-text-muted)]">Ticket title: {snapshot.workflowControl.currentTicketTitle}. Workflow status: {snapshot.workflowControl.workflowStatus}. Git authority: {snapshot.workflowControl.humanGitAuthority}. Chat control required: {snapshot.workflowControl.manualChatControlRequired ? "yes" : "no"}.</p>
+                  <p className="text-xs leading-relaxed text-[var(--agent-platform-text-muted)]">Ticket title: {workflowControl.currentTicketTitle ?? "No active governed ticket"}. Workflow status: {workflowControl.workflowStatus}. Git authority: {workflowControl.humanGitAuthority}. Chat control required: {workflowControl.manualChatControlRequired ? "yes" : "no"}.</p>
                 </CardContent>
               </Card>
             )}

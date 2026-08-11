@@ -32,12 +32,16 @@ P18_7_MIGRATION_GAP_DIGEST = (
 PEPPER_GOVERNED_PRODUCT_ID = "pepper"
 PEPPER_GOVERNED_PROJECT_ID = "PEPPER"
 PEPPER_GOVERNED_PROJECT_NAME = "Pepper"
-PEPPER_GOVERNED_MACROPROJECT_ID = "P18"
-PEPPER_GOVERNED_MACROPROJECT_TITLE = "Manual-to-Hermes Workflow Migration"
-PEPPER_CURRENT_TICKET_ID = "P18.8"
-PEPPER_CURRENT_TICKET_TITLE = "Controlled Default-Mode Cutover"
-PEPPER_CURRENT_GAP_ID = "P18.8-GAP-005"
-PEPPER_CURRENT_GAP_TITLE = "Lead Agent Live Governed Workflow Context Bridge"
+PEPPER_COMPLETED_MACROPROJECT_ID = "P18"
+PEPPER_COMPLETED_MACROPROJECT_TITLE = "Manual-to-Hermes Workflow Migration"
+PEPPER_GOVERNED_MACROPROJECT_ID = "P18.9"
+PEPPER_GOVERNED_MACROPROJECT_TITLE = "Pepper Product Personalization"
+PEPPER_CURRENT_TICKET_ID = None
+PEPPER_CURRENT_TICKET_TITLE = None
+PEPPER_CURRENT_GAP_ID = None
+PEPPER_CURRENT_GAP_TITLE = None
+PEPPER_NEXT_TICKET_ID = "P18.9.0"
+PEPPER_NEXT_TICKET_TITLE = "Product UX / IA Baseline"
 PEPPER_WORKFLOW_CONTEXT_SOURCE_SYSTEM = "pepper-lead-agent-governed-context"
 
 _ACTIVE_EXECUTION_STATUSES = frozenset({"running"})
@@ -624,9 +628,26 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
         },
     ]
     remaining_blockers: list[dict[str, Any]] = []
+    historical_evidence = [
+        {
+            "id": "P18.8",
+            "title": "Controlled Default-Mode Cutover",
+            "state": "completed",
+            "evidence": "HUMAN_P18_8_CUTOVER_SMOKE_PASS",
+        },
+        {
+            "id": "P18.R",
+            "title": "Workflow Migration Closure",
+            "state": "closed",
+            "decision": "accepted",
+            "evidence": "docs/agent-platform/workflow_migration_closure.md",
+        },
+    ]
     next_action = {
-        "id": "P18_R_READY_FOR_HUMAN_AUTHORIZATION",
-        "label": "P18.8 cutover is complete; await explicit human authorization before beginning P18.R",
+        "id": "GENERATE_P18_9_0",
+        "label": "Generate governed P18.9.0 Product UX / IA Baseline before execution.",
+        "target_ticket_id": PEPPER_NEXT_TICKET_ID,
+        "target_ticket_title": PEPPER_NEXT_TICKET_TITLE,
     }
     observed_at = _utc_now_iso()
     return {
@@ -637,28 +658,34 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
         "project_name": PEPPER_GOVERNED_PROJECT_NAME,
         "macroproject_id": PEPPER_GOVERNED_MACROPROJECT_ID,
         "macroproject_title": PEPPER_GOVERNED_MACROPROJECT_TITLE,
+        "completed_macroproject_id": PEPPER_COMPLETED_MACROPROJECT_ID,
+        "completed_macroproject_title": PEPPER_COMPLETED_MACROPROJECT_TITLE,
+        "completed_macroproject_state": "closed",
+        "completed_macroproject_decision": "accepted",
         "current_ticket_id": PEPPER_CURRENT_TICKET_ID,
         "current_ticket_title": PEPPER_CURRENT_TICKET_TITLE,
         "current_gap_id": PEPPER_CURRENT_GAP_ID,
         "current_gap_title": PEPPER_CURRENT_GAP_TITLE,
+        "next_ticket_id": PEPPER_NEXT_TICKET_ID,
+        "next_ticket_title": PEPPER_NEXT_TICKET_TITLE,
         "mode": "controlled_default",
-        "readiness": "ready_for_P18_R",
-        "workflow_state": "P18.8-PEPPER-CHAT-WORKFLOW-CONTEXT-READY-FOR-HUMAN-SMOKE",
-        "workflow_status": "ready_for_P18_R",
+        "readiness": "planning_approved_or_intake_ready",
+        "workflow_state": "P18.9-PEPPER-PRODUCT-PERSONALIZATION-INTAKE-READY",
+        "workflow_status": "planning_approved_or_intake_ready",
         "approval_state": approval_summary["approval_state"],
         "pending_approval_count": approval_summary["pending_approval_count"],
-        "queue_state": "ready_for_P18_R_handoff",
+        "queue_state": "ready_to_generate_P18_9_0",
         "execution_state": execution_summary["execution_state"],
         "active_execution_count": execution_summary["active_execution_count"],
-        "validation_state": "human_cutover_smoke_passed",
-        "review_state": "human_cutover_smoke_passed",
+        "validation_state": "not_started_no_ticket_generated",
+        "review_state": "not_started_no_ticket_generated",
         "recovery_state": "not_required",
         "git_handoff_state": "human_git_authority_preserved",
         "blocker_count": len(remaining_blockers),
         "warning_count": 0,
         "ready_verdict": (
-            "hermes_0_19_pepper_controlled_default_mode_cutover_ready_with_operational_"
-            "product_workflow_zero_manual_executor_copy_and_preserved_human_git_authority"
+            "p18_closed_and_p18_9_personalization_intake_ready_with_no_active_ticket_"
+            "and_preserved_human_git_authority"
         ),
         "p18_7_commit": P18_7_COMMIT,
         "p18_7_result_sha256": P18_7_RESULT_SHA256,
@@ -672,11 +699,21 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
         "automatic_git_commit": False,
         "automatic_git_push": False,
         "closed_gaps": closed_gaps,
+        "historical_evidence": historical_evidence,
         "remaining_blockers": remaining_blockers,
         "default_mode_enabled": True,
         "ready_requires_human_smoke": False,
         "human_cutover_smoke": "HUMAN_P18_8_CUTOVER_SMOKE_PASS",
-        "P18_R_ready": True,
+        "workflow_migration_complete": True,
+        "P18_closed": True,
+        "P18_state": "closed",
+        "P18_decision": "accepted",
+        "P18_R_closed": True,
+        "P18_R_state": "closed",
+        "P18_R_decision": "accepted",
+        "P18_R_pending": False,
+        "P18_9_ready": True,
+        "P18_9_ticket_generated": False,
         "next_action": next_action,
         "next_action_label": _next_action_label(next_action),
         "evidence_timestamp": observed_at,

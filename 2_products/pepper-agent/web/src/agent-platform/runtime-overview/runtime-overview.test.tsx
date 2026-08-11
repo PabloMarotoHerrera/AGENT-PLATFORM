@@ -184,20 +184,20 @@ describe("Runtime Overview surface and descriptor", () => {
         product_id: "pepper",
         project_id: "PEPPER",
         project_name: "Pepper",
-        macroproject_id: "P18",
-        current_ticket_id: "P18.8",
-        current_ticket_title: "Controlled Default-Mode Cutover",
+        macroproject_id: "P18.9",
+        current_ticket_id: null,
+        current_ticket_title: null,
         mode: "controlled_default",
-        readiness: "ready_for_P18_R",
-        workflow_state: "P18.8-PEPPER-CHAT-WORKFLOW-CONTEXT-READY-FOR-HUMAN-SMOKE",
-        workflow_status: "ready_for_P18_R",
+        readiness: "planning_approved_or_intake_ready",
+        workflow_state: "P18.9-PEPPER-PRODUCT-PERSONALIZATION-INTAKE-READY",
+        workflow_status: "planning_approved_or_intake_ready",
         approval_state: "no_pending_approvals",
         pending_approval_count: 0,
-        queue_state: "ready_for_P18_R_handoff",
+        queue_state: "ready_to_generate_P18_9_0",
         execution_state: "no_active_executions",
         active_execution_count: 0,
-        validation_state: "human_cutover_smoke_passed",
-        review_state: "human_cutover_smoke_passed",
+        validation_state: "not_started_no_ticket_generated",
+        review_state: "not_started_no_ticket_generated",
         recovery_state: "not_required",
         git_handoff_state: "human_git_authority_preserved",
         default_mode_enabled: true,
@@ -214,7 +214,7 @@ describe("Runtime Overview surface and descriptor", () => {
           { id: "P18-8-GAP-005" },
         ],
         remaining_blockers: [],
-        next_action: { label: "P18.8 cutover is complete; await explicit human authorization before beginning P18.R" },
+        next_action: { label: "Generate governed P18.9.0 Product UX / IA Baseline before execution." },
       },
     }))!;
     const ready = renderToStaticMarkup(
@@ -225,10 +225,10 @@ describe("Runtime Overview surface and descriptor", () => {
     );
     expect(ready).toContain("Pepper Workflow Control");
     expect(ready).toContain("PEPPER");
-    expect(ready).toContain("P18.8");
+    expect(ready).toContain("None generated");
     expect(ready).toContain("Pending approvals");
     expect(ready).toContain("Active executions");
-    expect(ready).toContain("P18.8 cutover is complete");
+    expect(ready).toContain("Generate governed P18.9.0");
     expect(ready).toContain("Manual OpenCode copy");
     expect(ready).toContain("Remaining blockers");
   });

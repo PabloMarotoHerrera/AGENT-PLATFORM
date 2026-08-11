@@ -194,7 +194,7 @@ def test_controlled_execution_routes_project_universal_and_exact_sources(dashboa
     assert start["human_git_authority"] == "preserved"
 
 
-def test_workflow_control_route_closes_p18_7_gaps_and_records_human_smoke(dashboard_client):
+def test_workflow_control_route_preserves_p18_history_and_prepares_p18_9(dashboard_client):
     response = dashboard_client.get(
         "/api/agent-platform/workflow-control",
         headers=_auth_headers(),
@@ -203,6 +203,16 @@ def test_workflow_control_route_closes_p18_7_gaps_and_records_human_smoke(dashbo
     assert response.status_code == 200
     body = response.json()
     assert body["mode"] == "controlled_default"
+    assert body["completed_macroproject_id"] == "P18"
+    assert body["completed_macroproject_state"] == "closed"
+    assert body["completed_macroproject_decision"] == "accepted"
+    assert body["macroproject_id"] == "P18.9"
+    assert body["macroproject_title"] == "Pepper Product Personalization"
+    assert body["current_ticket_id"] is None
+    assert body["current_gap_id"] is None
+    assert body["readiness"] == "planning_approved_or_intake_ready"
+    assert body["workflow_status"] == "planning_approved_or_intake_ready"
+    assert body["queue_state"] == "ready_to_generate_P18_9_0"
     assert body["manual_chat_control_required"] is False
     assert body["manual_opencode_ticket_copy_required"] is False
     assert body["manual_opencode_result_copy_required"] is False
@@ -220,8 +230,18 @@ def test_workflow_control_route_closes_p18_7_gaps_and_records_human_smoke(dashbo
     assert body["blocker_count"] == 0
     assert body["ready_requires_human_smoke"] is False
     assert body["human_cutover_smoke"] == "HUMAN_P18_8_CUTOVER_SMOKE_PASS"
-    assert body["P18_R_ready"] is True
-    assert body["next_action"]["id"] == "P18_R_READY_FOR_HUMAN_AUTHORIZATION"
+    assert body["workflow_migration_complete"] is True
+    assert body["P18_closed"] is True
+    assert body["P18_R_closed"] is True
+    assert body["P18_R_pending"] is False
+    assert body["P18_9_ready"] is True
+    assert body["P18_9_ticket_generated"] is False
+    assert body["next_ticket_id"] == "P18.9.0"
+    assert body["next_action"]["id"] == "GENERATE_P18_9_0"
+    assert {item["id"] for item in body["historical_evidence"]} == {"P18.8", "P18.R"}
+    serialized = json.dumps(body)
+    assert "P18_R_READY_FOR_HUMAN_AUTHORIZATION" not in serialized
+    assert "ready_for_P18_R" not in serialized
 
 
 @pytest.mark.parametrize("method", ["post", "put", "patch", "delete"])
