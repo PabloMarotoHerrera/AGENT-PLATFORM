@@ -9,6 +9,9 @@ from hermes_cli.agent_platform.ticket_factory import TicketLintDisposition
 from hermes_cli.agent_platform.workflow.governed_state_machine import GovernedWorkflowState
 
 
+P18_9_1_IMPLEMENTATION_TITLE = "Pepper Shell, Routing, and Compact Navigation"
+
+
 def _workflow(**overrides):
     data = {
         "schema_version": 1,
@@ -75,6 +78,7 @@ def _synthetic_roadmap_items() -> tuple[dict[str, object], ...]:
             "authority_section": "Synthetic roadmap",
             "authority_type": "synthetic_test_roadmap",
             "next_action_id": "GENERATE_TEST_1_REQUIRES_SEPARATE_HUMAN_ACTION",
+            "dependency_ticket_ids": (),
         },
         {
             "ticket_id": "TEST.2",
@@ -83,6 +87,7 @@ def _synthetic_roadmap_items() -> tuple[dict[str, object], ...]:
             "authority_section": "Synthetic roadmap",
             "authority_type": "synthetic_test_roadmap",
             "next_action_id": "GENERATE_TEST_2_REQUIRES_SEPARATE_HUMAN_ACTION",
+            "dependency_ticket_ids": ("TEST.1",),
         },
         {
             "ticket_id": "TEST.3",
@@ -91,6 +96,7 @@ def _synthetic_roadmap_items() -> tuple[dict[str, object], ...]:
             "authority_section": "Synthetic roadmap",
             "authority_type": "synthetic_test_roadmap",
             "next_action_id": "GENERATE_TEST_3_REQUIRES_SEPARATE_HUMAN_ACTION",
+            "dependency_ticket_ids": ("TEST.2",),
         },
     )
 
@@ -218,8 +224,10 @@ def test_generic_generation_resolves_canonical_next_ticket_from_roadmap(bridge_h
 
     assert result["idempotent_replay"] is False
     assert result["ticket_id"] == "P18.9.1"
-    assert result["ticket_title"] == "Pepper Design System"
-    assert result["roadmap_authority_path"] == "2_products/pepper-agent/docs/agent-platform/workflow_migration_closure.md"
+    assert result["ticket_title"] == P18_9_1_IMPLEMENTATION_TITLE
+    assert result["roadmap_authority_path"] == bridge.CANONICAL_IMPLEMENTATION_ROADMAP_AUTHORITY_PATH
+    assert result["roadmap_authority_section"] == "P18.9 Implementation Roadmap Authority"
+    assert result["roadmap_dependency_ticket_ids"] == ["P18.9.0"]
     assert result["workflow_status"] == "awaiting_ticket_approval"
     assert result["next_action"]["id"] == "APPROVE_P18_9_1"
     assert result["human_ticket_approval_required"] is True
@@ -231,9 +239,14 @@ def test_generic_generation_resolves_canonical_next_ticket_from_roadmap(bridge_h
     assert record is not None
     assert record["predecessor_ticket_id"] == "P18.9.0"
     assert record["canonical_next_ticket_authority"] == authority.asdict()
+    assert record["canonical_roadmap_authority"] == bridge.CANONICAL_IMPLEMENTATION_ROADMAP_AUTHORITY
+    assert record["roadmap_dependency_ticket_ids"] == ["P18.9.0"]
+    assert record["canonical_next_ticket_authority"]["dependency_ticket_ids"] == ["P18.9.0"]
     assert record["ticket_spec"]["ticket_id"] == "P18.9.1"
-    assert record["ticket_spec"]["title"] == "Pepper Design System"
+    assert record["ticket_spec"]["title"] == P18_9_1_IMPLEMENTATION_TITLE
+    assert record["ticket_spec"]["dependencies"] == []
     assert record["dependency_plan"]["ticket_ids"] == ["P18.9.1"]
+    assert record["dependency_plan"]["edges"] == []
     assert record["lint_report"]["disposition"] == TicketLintDisposition.PASS.value
     assert record["work_packet_compilation_result"]["work_packet"]["execution_ready"] is False
     assert record["WorkPacket_compilation_count"] == 1
@@ -257,7 +270,7 @@ def test_future_generation_rejects_stale_roadmap_authority_record(bridge_home) -
     with pytest.raises(bridge.TicketArchitectBridgeConflict, match="roadmap_authority_path"):
         bridge.generate_current_ticket(workflow=_next_ticket_workflow())
 
-    record["roadmap_authority_path"] = bridge.CANONICAL_ROADMAP_AUTHORITY_PATH
+    record["roadmap_authority_path"] = bridge.CANONICAL_IMPLEMENTATION_ROADMAP_AUTHORITY_PATH
     record["canonical_next_ticket_authority"]["roadmap_authority_path"] = (
         "2_products/pepper-agent/docs/agent-platform/stale_roadmap.md"
     )
@@ -297,14 +310,41 @@ def test_stale_future_authority_can_be_reconciled_without_generation(bridge_home
     assert before["classification"] == "unaccepted_partial_failed_future_ticket_authority"
     assert before["reconcilable"] is True
     assert before["actual_roadmap_authority_path"].endswith("stale_roadmap.md")
-    assert before["expected_roadmap_authority_path"] == bridge.CANONICAL_ROADMAP_AUTHORITY_PATH
+    assert before["expected_roadmap_authority_path"] == bridge.CANONICAL_IMPLEMENTATION_ROADMAP_AUTHORITY_PATH
     assert before["ticket_spec_SHA256"] == stale["ticket_spec_SHA256"]
     assert before["work_packet_id"] == stale["work_packet_id"]
     assert before["generation_completed_structurally"] is True
 
     result = bridge.reconcile_invalid_future_ticket_authority(ticket_id="P18.9.1")
-    workflow = _next_ticket_workflow()
-    monkeypatch.setattr(pr, "build_workflow_control_snapshot", lambda: workflow)
+    real_snapshot = pr.build_workflow_control_snapshot
+    monkeypatch.setattr(
+        pr,
+        "_p18_9_0_generation_overlay",
+        lambda: (
+            {
+                "current_ticket_id": None,
+                "current_ticket_title": None,
+                "next_ticket_id": "P18.9.1",
+                "next_ticket_title": "Pepper Design System",
+                "workflow_state": "P18.9.0-COMPLETED",
+                "workflow_status": "completed",
+                "validation_state": "review_accepted",
+                "review_state": "accepted",
+                "review_acceptance_authority": {"ticket_closed": True},
+                "P18_9_0_closed": True,
+                "P18_9_0_completed": True,
+                "next_ticket_ready": True,
+                "next_ticket_generated": False,
+                "next_action": {
+                    "id": "GENERATE_P18_9_1_REQUIRES_SEPARATE_HUMAN_ACTION",
+                    "target_ticket_id": "P18.9.1",
+                    "target_ticket_title": "Pepper Design System",
+                },
+            },
+            None,
+        ),
+    )
+    monkeypatch.setattr(pr, "build_workflow_control_snapshot", real_snapshot)
     workflow_tool = _chat_tool_result("get_workflow_control")
     next_action_tool = _chat_tool_result("get_next_action")
 
@@ -328,7 +368,7 @@ def test_stale_future_authority_can_be_reconciled_without_generation(bridge_home
     assert history["bridge_SHA256"] == stale["bridge_SHA256"]
     assert history["actual_roadmap_authority_path"].endswith("stale_roadmap.md")
     assert workflow_tool["next_ticket_id"] == "P18.9.1"
-    assert workflow_tool["next_ticket_title"] == "Pepper Design System"
+    assert workflow_tool["next_ticket_title"] == P18_9_1_IMPLEMENTATION_TITLE
     assert workflow_tool["current_ticket_id"] is None
     assert next_action_tool["next_action"]["id"] == "GENERATE_P18_9_1_REQUIRES_SEPARATE_HUMAN_ACTION"
     assert next_action_tool["next_ticket_id"] == "P18.9.1"
@@ -341,8 +381,35 @@ def test_runtime_and_chat_tool_reconcile_stale_current_generation_authority(
     from hermes_cli.agent_platform import product_runtime as pr
 
     stale = _make_stale_future_generation_record()
-    workflow = _next_ticket_workflow()
-    monkeypatch.setattr(pr, "build_workflow_control_snapshot", lambda: workflow)
+    real_snapshot = pr.build_workflow_control_snapshot
+    monkeypatch.setattr(
+        pr,
+        "_p18_9_0_generation_overlay",
+        lambda: (
+            {
+                "current_ticket_id": None,
+                "current_ticket_title": None,
+                "next_ticket_id": "P18.9.1",
+                "next_ticket_title": "Pepper Design System",
+                "workflow_state": "P18.9.0-COMPLETED",
+                "workflow_status": "completed",
+                "validation_state": "review_accepted",
+                "review_state": "accepted",
+                "review_acceptance_authority": {"ticket_closed": True},
+                "P18_9_0_closed": True,
+                "P18_9_0_completed": True,
+                "next_ticket_ready": True,
+                "next_ticket_generated": False,
+                "next_action": {
+                    "id": "GENERATE_P18_9_1_REQUIRES_SEPARATE_HUMAN_ACTION",
+                    "target_ticket_id": "P18.9.1",
+                    "target_ticket_title": "Pepper Design System",
+                },
+            },
+            None,
+        ),
+    )
+    monkeypatch.setattr(pr, "build_workflow_control_snapshot", real_snapshot)
 
     result = _chat_tool_result(
         "reconcile_invalid_current_generation_authority",
@@ -360,7 +427,7 @@ def test_runtime_and_chat_tool_reconcile_stale_current_generation_authority(
     assert result["ticket_generated"] is False
     assert result["current_ticket_id"] is None
     assert result["next_ticket_id"] == "P18.9.1"
-    assert result["next_ticket_title"] == "Pepper Design System"
+    assert result["next_ticket_title"] == P18_9_1_IMPLEMENTATION_TITLE
     assert result["next_action"]["id"] == "GENERATE_P18_9_1_REQUIRES_SEPARATE_HUMAN_ACTION"
     assert bridge.load_generation_record(ticket_id="P18.9.1") is None
 
@@ -489,7 +556,7 @@ def test_closed_p18_9_0_resolves_p18_9_1_across_runtime_and_generation(
     )
 
     assert workflow["next_ticket_id"] == "P18.9.1"
-    assert workflow["next_ticket_title"] == "Pepper Design System"
+    assert workflow["next_ticket_title"] == P18_9_1_IMPLEMENTATION_TITLE
     assert workflow["next_action"]["id"] == "GENERATE_P18_9_1_REQUIRES_SEPARATE_HUMAN_ACTION"
     assert workflow_tool["workflow_control"]["next_ticket_id"] == workflow["next_ticket_id"]
     assert workflow_tool["workflow_control"]["next_ticket_title"] == workflow["next_ticket_title"]
@@ -535,7 +602,7 @@ def test_stale_bootstrap_p18_9_0_cannot_override_closed_workflow_state(bridge_ho
     )
 
     assert authority.ticket_id == "P18.9.1"
-    assert authority.ticket_title == "Pepper Design System"
+    assert authority.ticket_title == P18_9_1_IMPLEMENTATION_TITLE
     assert authority.next_action_id == "GENERATE_P18_9_1_REQUIRES_SEPARATE_HUMAN_ACTION"
     assert authority.predecessor_ticket_id == "P18.9.0"
     assert accepted["ticket_id"] == "P18.9.1"

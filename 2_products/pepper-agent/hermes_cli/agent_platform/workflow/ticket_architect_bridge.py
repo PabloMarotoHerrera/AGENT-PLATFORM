@@ -30,6 +30,8 @@ from hermes_cli.agent_platform.ticket_factory import (
     ContextSensitivity,
     ContextSourceKind,
     ContextSourceSpec,
+    DependencyKind,
+    DependencyScope,
     FreshDependencyPlanningEvidence,
     HumanApprovalDecision,
     HumanApprovalEvidence,
@@ -112,6 +114,13 @@ CANONICAL_TICKET_ID = "P18.9.0"
 CANONICAL_TICKET_TITLE = "Product Inventory, IA Decision, and Acceptance Contract"
 CANONICAL_NEXT_ACTION_ID = "GENERATE_P18_9_0"
 CANONICAL_ROADMAP_AUTHORITY = "human-approved-p18.9-roadmap"
+CANONICAL_IMPLEMENTATION_ROADMAP_AUTHORITY = "accepted-p18.9-implementation-roadmap"
+CANONICAL_IMPLEMENTATION_ROADMAP_AUTHORITY_PATH = (
+    "0_architecture/governance/agent_platform_roadmap_generation_work_breakdown_contract.md"
+)
+CANONICAL_IMPLEMENTATION_ROADMAP_AUTHORITY_SECTION = (
+    "P18.9 Implementation Roadmap Authority"
+)
 CANONICAL_ROADMAP_AUTHORITY_PATH = (
     "2_products/pepper-agent/docs/agent-platform/workflow_migration_closure.md"
 )
@@ -174,6 +183,7 @@ class GovernedTicketGenerationTarget:
     canonical_roadmap_authority: str
     roadmap_authority_path: str
     roadmap_authority_section: str
+    dependency_ticket_ids: tuple[str, ...] = ()
     predecessor_ticket_id: str | None = None
     readiness_state: str | None = None
     authority_source: str | None = None
@@ -201,6 +211,7 @@ class CanonicalNextTicketAuthority:
     canonical_roadmap_authority: str
     roadmap_authority_path: str
     roadmap_authority_section: str
+    dependency_ticket_ids: tuple[str, ...]
     predecessor_ticket_id: str | None
     readiness_state: str
     authority_source: str
@@ -220,6 +231,7 @@ class CanonicalNextTicketAuthority:
             canonical_roadmap_authority=self.canonical_roadmap_authority,
             roadmap_authority_path=canonical_roadmap_authority_path(self.roadmap_authority_path),
             roadmap_authority_section=self.roadmap_authority_section,
+            dependency_ticket_ids=self.dependency_ticket_ids,
             predecessor_ticket_id=self.predecessor_ticket_id,
             readiness_state=self.readiness_state,
             authority_source=self.authority_source,
@@ -237,6 +249,7 @@ class CanonicalNextTicketAuthority:
             "canonical_roadmap_authority": self.canonical_roadmap_authority,
             "roadmap_authority_path": self.roadmap_authority_path,
             "roadmap_authority_section": self.roadmap_authority_section,
+            "dependency_ticket_ids": list(self.dependency_ticket_ids),
             "predecessor_ticket_id": self.predecessor_ticket_id,
             "readiness_state": self.readiness_state,
             "authority_source": self.authority_source,
@@ -301,6 +314,7 @@ def p18_9_0_generation_target() -> GovernedTicketGenerationTarget:
         canonical_roadmap_authority=CANONICAL_ROADMAP_AUTHORITY,
         roadmap_authority_path=CANONICAL_ROADMAP_AUTHORITY_PATH,
         roadmap_authority_section=CANONICAL_ROADMAP_AUTHORITY_SECTION,
+        dependency_ticket_ids=(),
     )
 
 
@@ -329,6 +343,7 @@ def _target_from_record(record: dict[str, Any]) -> GovernedTicketGenerationTarge
         canonical_roadmap_authority=str(authority["authority_type"]),
         roadmap_authority_path=canonical_roadmap_authority_path(authority["authority_path"]),
         roadmap_authority_section=str(authority["authority_section"]),
+        dependency_ticket_ids=tuple(authority.get("dependency_ticket_ids") or ()),
         predecessor_ticket_id=str(record.get("predecessor_ticket_id") or "") or None,
         readiness_state=str(canonical_authority.get("readiness_state") or "") or None,
         authority_source=str(canonical_authority.get("authority_source") or "") or None,
@@ -412,6 +427,7 @@ def resolve_canonical_next_ticket(
         canonical_roadmap_authority=str(authority["authority_type"]),
         roadmap_authority_path=canonical_roadmap_authority_path(authority["authority_path"]),
         roadmap_authority_section=str(authority["authority_section"]),
+        dependency_ticket_ids=tuple(authority.get("dependency_ticket_ids") or ()),
         predecessor_ticket_id=predecessor_ticket_id,
         readiness_state=readiness_state,
         authority_source=authority_source,
@@ -543,7 +559,68 @@ def resolve_roadmap_ticket_authority(ticket_id: str) -> dict[str, Any]:
 def resolve_roadmap_ticket_authorities() -> tuple[dict[str, Any], ...]:
     """Return the canonical ordered P18.9 roadmap ticket authorities."""
 
-    path = Path(__file__).resolve().parents[3] / "docs" / "agent-platform" / "workflow_migration_closure.md"
+    implementation_items = _resolve_implementation_roadmap_ticket_authorities()
+    if implementation_items:
+        return implementation_items
+    return _resolve_advisory_roadmap_ticket_authorities()
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[5]
+
+
+def _resolve_implementation_roadmap_ticket_authorities() -> tuple[dict[str, Any], ...]:
+    path = _repo_root() / CANONICAL_IMPLEMENTATION_ROADMAP_AUTHORITY_PATH
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return ()
+    in_section = False
+    section_seen = False
+    items: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if re.fullmatch(
+            rf"##\s+[0-9]+\.\s+{re.escape(CANONICAL_IMPLEMENTATION_ROADMAP_AUTHORITY_SECTION)}",
+            stripped,
+        ):
+            in_section = True
+            section_seen = True
+            continue
+        if in_section and stripped.startswith("## "):
+            break
+        if not in_section or "|" not in stripped:
+            continue
+        cells = [cell.strip().strip("`") for cell in stripped.strip("|").split("|")]
+        if len(cells) >= 3 and _is_safe_ticket_id(cells[0]):
+            ticket_id = _safe_ticket_id(cells[0])
+            ticket_title = str(cells[1]).strip()
+            dependency_ticket_ids = _parse_roadmap_dependency_ticket_ids(cells[2])
+            authority_path = CANONICAL_IMPLEMENTATION_ROADMAP_AUTHORITY_PATH
+            authority_section = CANONICAL_IMPLEMENTATION_ROADMAP_AUTHORITY_SECTION
+            authority_type = CANONICAL_IMPLEMENTATION_ROADMAP_AUTHORITY
+            if ticket_id == CANONICAL_TICKET_ID:
+                ticket_title = CANONICAL_TICKET_TITLE
+                authority_path = CANONICAL_ROADMAP_AUTHORITY_PATH
+                authority_section = CANONICAL_ROADMAP_AUTHORITY_SECTION
+                authority_type = CANONICAL_ROADMAP_AUTHORITY
+            items.append({
+                "ticket_id": ticket_id,
+                "ticket_title": ticket_title,
+                "authority_path": authority_path,
+                "authority_section": authority_section,
+                "authority_type": authority_type,
+                "next_action_id": _roadmap_generation_action_id(ticket_id),
+                "dependency_ticket_ids": dependency_ticket_ids,
+            })
+    if not section_seen:
+        return ()
+    _validate_roadmap_ticket_items(items)
+    return tuple(items)
+
+
+def _resolve_advisory_roadmap_ticket_authorities() -> tuple[dict[str, Any], ...]:
+    path = _repo_root() / CANONICAL_ROADMAP_AUTHORITY_PATH
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
@@ -563,21 +640,77 @@ def resolve_roadmap_ticket_authorities() -> tuple[dict[str, Any], ...]:
         if len(cells) >= 2 and _is_safe_ticket_id(cells[0]):
             ticket_id = _safe_ticket_id(cells[0])
             ticket_title = cells[1]
-            next_action_id = canonical_generation_action_id(ticket_id)
             if ticket_id == CANONICAL_TICKET_ID:
                 ticket_title = CANONICAL_TICKET_TITLE
-                next_action_id = CANONICAL_NEXT_ACTION_ID
             items.append({
                 "ticket_id": ticket_id,
                 "ticket_title": ticket_title,
                 "authority_path": CANONICAL_ROADMAP_AUTHORITY_PATH,
                 "authority_section": CANONICAL_ROADMAP_AUTHORITY_SECTION,
                 "authority_type": CANONICAL_ROADMAP_AUTHORITY,
-                "next_action_id": next_action_id,
+                "next_action_id": _roadmap_generation_action_id(ticket_id),
+                "dependency_ticket_ids": (),
             })
+    _validate_roadmap_ticket_items(items)
+    return tuple(items)
+
+
+def _roadmap_generation_action_id(ticket_id: str) -> str:
+    if ticket_id == CANONICAL_TICKET_ID:
+        return CANONICAL_NEXT_ACTION_ID
+    return canonical_generation_action_id(ticket_id)
+
+
+def _parse_roadmap_dependency_ticket_ids(value: object) -> tuple[str, ...]:
+    text = str(value or "").strip().strip("`")
+    if not text or text.lower() == "none":
+        return ()
+    dependencies: list[str] = []
+    for raw_dependency in re.split(r"[;,]", text):
+        dependency = raw_dependency.strip().strip("`")
+        if not dependency:
+            continue
+        dependencies.append(_safe_ticket_id(dependency))
+    if len(dependencies) != len(frozenset(dependencies)):
+        raise TicketArchitectBridgeInputError("roadmap authority contains duplicate dependencies")
+    return tuple(dependencies)
+
+
+def _roadmap_dependency_metadata(
+    target: GovernedTicketGenerationTarget,
+) -> tuple[dict[str, str], ...]:
+    return tuple(
+        {
+            "ticket_id": dependency_ticket_id,
+            "kind": DependencyKind.HARD_PREREQUISITE.value,
+            "scope": DependencyScope.INTERNAL_PROJECT.value,
+            "rationale": (
+                f"{dependency_ticket_id} must be accepted before roadmap generation of "
+                f"{target.ticket_id}. This is implementation-roadmap metadata, not a "
+                "compile-only dependency-plan edge."
+            ),
+        }
+        for dependency_ticket_id in target.dependency_ticket_ids
+    )
+
+
+def _validate_roadmap_ticket_items(items: list[dict[str, Any]]) -> None:
     if not items:
         raise TicketArchitectBridgeInputError("roadmap authority cannot resolve target")
-    return tuple(items)
+    ticket_ids = tuple(str(item["ticket_id"]) for item in items)
+    if len(ticket_ids) != len(frozenset(ticket_ids)):
+        raise TicketArchitectBridgeInputError("roadmap authority contains duplicate tickets")
+    if ticket_ids[0] != CANONICAL_TICKET_ID:
+        raise TicketArchitectBridgeInputError("roadmap authority must start at P18.9.0")
+    seen: set[str] = set()
+    for item in items:
+        ticket_id = str(item["ticket_id"])
+        for dependency_ticket_id in item.get("dependency_ticket_ids") or ():
+            if dependency_ticket_id not in seen:
+                raise TicketArchitectBridgeInputError(
+                    "roadmap authority dependency must reference an earlier ticket"
+                )
+        seen.add(ticket_id)
 
 
 def _safe_ticket_id(value: object) -> str:
@@ -1333,6 +1466,8 @@ def _build_generation_record(
         "canonical_roadmap_authority": target.canonical_roadmap_authority,
         "roadmap_authority_path": canonical_roadmap_authority_path(target.roadmap_authority_path),
         "roadmap_authority_section": target.roadmap_authority_section,
+        "roadmap_dependency_ticket_ids": list(target.dependency_ticket_ids),
+        "roadmap_dependency_metadata": list(_roadmap_dependency_metadata(target)),
         "idempotency_key": target.idempotency_key,
         "project_spec": project_spec.model_dump(mode="json"),
         "ticket_spec": ticket_spec.model_dump(mode="json"),
@@ -1540,6 +1675,11 @@ def _assemble_context_pack(
     target: GovernedTicketGenerationTarget,
 ) -> ContextPack:
     authority_refs = _authority_references(target)
+    dependency_text = (
+        "Roadmap dependencies: " + ", ".join(target.dependency_ticket_ids) + "."
+        if target.dependency_ticket_ids
+        else "Roadmap dependencies: none."
+    )
     sources = (
         ContextSourceSpec(
             source_id="CTX-P18-9-ROADMAP",
@@ -1548,7 +1688,7 @@ def _assemble_context_pack(
             source_reference=target.roadmap_authority_path,
             content=(
                 f"{target.ticket_id} is {target.ticket_title}. This identity comes from "
-                f"{target.roadmap_authority_section}."
+                f"{target.roadmap_authority_section}. {dependency_text}"
             ),
             authority_references=(authority_refs[0],),
             sensitivity=ContextSensitivity.INTERNAL,
@@ -2319,6 +2459,8 @@ def _operational_result(record: dict[str, Any], *, idempotent_replay: bool) -> d
         "canonical_roadmap_authority": target.canonical_roadmap_authority,
         "roadmap_authority_path": target.roadmap_authority_path,
         "roadmap_authority_section": target.roadmap_authority_section,
+        "roadmap_dependency_ticket_ids": list(target.dependency_ticket_ids),
+        "roadmap_dependency_metadata": list(_roadmap_dependency_metadata(target)),
         "workflow_status": "awaiting_ticket_approval",
         "workflow_transition_id": "GWT-002",
         "human_ticket_approval_required": True,
@@ -2403,6 +2545,7 @@ def _canonical_next_ticket_authority_projection(
         "canonical_roadmap_authority": target.canonical_roadmap_authority,
         "roadmap_authority_path": canonical_roadmap_authority_path(target.roadmap_authority_path),
         "roadmap_authority_section": target.roadmap_authority_section,
+        "dependency_ticket_ids": list(target.dependency_ticket_ids),
         "predecessor_ticket_id": target.predecessor_ticket_id,
         "readiness_state": target.readiness_state,
         "authority_source": target.authority_source,
@@ -2451,6 +2594,8 @@ def _require_identity(
     else:
         expected["roadmap_authority_path"] = canonical_roadmap_authority_path(target.roadmap_authority_path)
         expected["roadmap_authority_section"] = target.roadmap_authority_section
+        expected["roadmap_dependency_ticket_ids"] = list(target.dependency_ticket_ids)
+        expected["roadmap_dependency_metadata"] = list(_roadmap_dependency_metadata(target))
         expected["predecessor_ticket_id"] = target.predecessor_ticket_id
         expected["canonical_next_ticket_authority"] = _canonical_next_ticket_authority_projection(
             target

@@ -2440,7 +2440,7 @@ def test_accept_current_ticket_review_closes_p18_9_0_and_exposes_next_ticket(
     assert result["git_handoff_required"] is False
     assert result["git_handoff_state"] == "not_required_for_ticket_result"
     assert result["next_ticket_id"] == "P18.9.1"
-    assert result["next_ticket_title"] == "Pepper Design System"
+    assert result["next_ticket_title"] == "Pepper Shell, Routing, and Compact Navigation"
     assert result["next_action"]["id"] == "GENERATE_P18_9_1_REQUIRES_SEPARATE_HUMAN_ACTION"
     assert result["dispatch_performed"] is False
     assert result["execution_started"] is False
@@ -2460,7 +2460,7 @@ def test_accept_current_ticket_review_closes_p18_9_0_and_exposes_next_ticket(
     assert workflow["workflow_status"] == "completed"
     assert workflow["current_ticket_id"] is None
     assert workflow["next_ticket_id"] == "P18.9.1"
-    assert workflow["next_ticket_title"] == "Pepper Design System"
+    assert workflow["next_ticket_title"] == "Pepper Shell, Routing, and Compact Navigation"
     assert workflow["human_acceptance_required"] is False
     assert workflow["human_acceptance_recorded"] is True
     assert workflow["P18_9_0_closed"] is True
@@ -2481,6 +2481,66 @@ def test_accept_current_ticket_review_closes_p18_9_0_and_exposes_next_ticket(
     assert replay["review_acceptance_action_SHA256"] == result["review_acceptance_action_SHA256"]
     assert replay["current_invocation_side_effects"]["dispatch_performed"] is False
     assert replay["current_invocation_side_effects"]["Git_mutation"] is False
+
+
+def test_historical_review_acceptance_recomputes_current_next_ticket(
+    projection_home,
+    monkeypatch,
+) -> None:
+    _install_execution_profile(monkeypatch, projection_home)
+    _generation, _projected, _started, _review = _prepare_completed_review_package(monkeypatch)
+
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    pr.accept_current_ticket_review(
+        human_acceptance_text=pr.PEPPER_CURRENT_REVIEW_ACCEPTANCE_TEXT,
+        project_id="PEPPER",
+        ticket_id="P18.9.0",
+        next_action_id="AWAIT_HUMAN_P18_9_0_REVIEW_ACCEPTANCE",
+    )
+    record = pr.load_p18_9_0_review_acceptance_record()
+    assert record is not None
+
+    legacy_next_ticket = {
+        "authority_path": "2_products/pepper-agent/docs/agent-platform/workflow_migration_closure.md",
+        "authority_section": "Advisory decomposition only, not implementation tickets",
+        "authority_type": "current_repository_roadmap_authority",
+        "auto_generated": False,
+        "execution_authorized": False,
+        "next_action_id": "GENERATE_P18_9_1_REQUIRES_SEPARATE_HUMAN_ACTION",
+        "ticket_id": "P18.9.1",
+        "ticket_title": "Pepper Design System",
+    }
+    record["next_ticket_authority"] = legacy_next_ticket
+    record["next_ticket_id"] = legacy_next_ticket["ticket_id"]
+    record["next_ticket_title"] = legacy_next_ticket["ticket_title"]
+    record["next_ticket_authority_path"] = legacy_next_ticket["authority_path"]
+    record["next_action"] = {
+        "id": legacy_next_ticket["next_action_id"],
+        "label": (
+            "P18.9.0 is accepted and closed; P18.9.1 Pepper Design System "
+            "may be generated only by a separate governed action."
+        ),
+        "required_human_action": "separate_next_ticket_generation",
+        "target_ticket_id": legacy_next_ticket["ticket_id"],
+        "target_ticket_title": legacy_next_ticket["ticket_title"],
+    }
+    record["review_acceptance_action_SHA256"] = pr._review_acceptance_record_digest(record)
+    pr.p18_9_0_review_acceptance_record_path().write_text(
+        json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    validated = pr.load_p18_9_0_review_acceptance_record()
+    workflow = pr.build_workflow_control_snapshot()
+
+    assert validated is not None
+    assert validated["next_ticket_title"] == "Pepper Design System"
+    assert workflow["next_ticket_id"] == "P18.9.1"
+    assert workflow["next_ticket_title"] == "Pepper Shell, Routing, and Compact Navigation"
+    assert workflow["next_action"]["target_ticket_title"] == (
+        "Pepper Shell, Routing, and Compact Navigation"
+    )
 
 
 def test_accept_current_ticket_review_requires_prepared_review_authority(

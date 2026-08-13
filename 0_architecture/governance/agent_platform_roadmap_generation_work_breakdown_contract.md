@@ -625,7 +625,40 @@ Accepted sequence after P18.R:
 
 P18.9 is not a reopening of P18 workflow migration. It is product/control-plane personalization for the already migrated Pepper workflow.
 
-## 32. Invariants And Final Verdict
+## 32. P18.9 Implementation Roadmap Authority
+
+This section is the accepted implementation-roadmap authority for P18.9 ticket generation after the P18.9.0 inventory, IA decision, and acceptance contract. It supersedes any P18.9 advisory decomposition in `2_products/pepper-agent/docs/agent-platform/workflow_migration_closure.md` for generated Ticket Architect targets. It does not generate, approve, project, dispatch, execute, run Docker, run Graphify, stage, commit, or push any ticket.
+
+| Field | Value |
+| --- | --- |
+| authority_owner | `PEPPER-P18_9-IMPLEMENTATION-ROADMAP-AUTHORITY-01P` |
+| authority_status | `accepted_implementation_roadmap` |
+| supersedes_for_generation | `workflow_migration_closure.md#Advisory decomposition only, not implementation tickets` |
+| macroproject | `P18.9 - Pepper Product Personalization` |
+| generation_boundary | `Ticket generation only; human approval remains required before execution.` |
+
+Accepted P18.9 implementation sequence:
+
+| Ticket | Title | Dependencies | Purpose |
+| --- | --- | --- | --- |
+| `P18.9.0` | `Product Inventory, IA Decision, and Acceptance Contract` | `none` | Inventory Pepper product surfaces, make the first information-architecture decision, and define the acceptance contract for P18.9 personalization. |
+| `P18.9.1` | `Pepper Shell, Routing, and Compact Navigation` | `P18.9.0` | Implement the first coherent Pepper control-plane shell and compact workflow-first navigation under `/agent-platform`, without a permanent `Legacy Hermes Tools` product domain. |
+| `P18.9.2` | `Projects, Tickets, and Workflow State Workspace` | `P18.9.1` | Consolidate project, ticket, workflow-control, and next-action state into a Pepper-owned workspace. |
+| `P18.9.3` | `Approvals and Human Gates Workspace` | `P18.9.2` | Personalize governed approval, review, and human gate surfaces while preserving explicit human authority. |
+| `P18.9.4` | `Execution and Recovery Workspace` | `P18.9.3` | Rationalize execution, retry, recovery, and validation visibility without adding worker or dispatch authority. |
+| `P18.9.5` | `Repository Evidence and Planning Workspace` | `P18.9.2` | Present bounded repository-context and planning evidence as read-only Pepper product capability. |
+| `P18.9.6` | `Lead Agent Chat Personalization` | `P18.9.3` | Align Pepper Lead Agent chat prompts, affordances, and status copy with the governed control-plane workflow. |
+| `P18.9.7` | `Legacy Hermes Surface Rationalization` | `P18.9.1` | Classify and consolidate legacy Hermes tool surfaces so they appear as governed capabilities, not as a permanent top-level product domain. |
+| `P18.9.8` | `Safe Settings and Product Configuration UX` | `P18.9.1` | Refine safe settings and product configuration presentation while preserving deterministic, credential-free configuration boundaries. |
+| `P18.9.9` | `Operational Overview Personalization` | `P18.9.4` | Improve the Pepper operational overview around current status, blockers, and next governed action. |
+| `P18.9.10` | `Cross-Surface Empty, Blocked, and Recovery States` | `P18.9.4` | Normalize empty, blocked, failed, retry, and recovery-state UX across Pepper control-plane surfaces. |
+| `P18.9.11` | `Product-Wide Personalization Smoke` | `P18.9.2; P18.9.3; P18.9.4; P18.9.5; P18.9.6; P18.9.7; P18.9.8; P18.9.9; P18.9.10` | Validate the personalized Pepper control plane end to end without adding Git, Docker, Graphify, provider, or worker authority. |
+| `P18.9.12` | `Pepper Visual Identity and Design System` | `P18.9.1` | Resolve Pepper visual identity and design-system refinements separately from the first shell/navigation ticket. |
+| `P18.9.R` | `Personalization Closure` | `P18.9.11; P18.9.12` | Close P18.9 with evidence, residual risks, and next-roadmap handoff while preserving human Git authority. |
+
+P18.9.1 is therefore `Pepper Shell, Routing, and Compact Navigation`. `Pepper Design System` is not the P18.9.1 implementation ticket; visual identity and design-system work resolves as P18.9.12 unless a later accepted authority supersedes this sequence.
+
+## 33. Invariants And Final Verdict
 
 | ID | Invariant |
 | --- | --- |

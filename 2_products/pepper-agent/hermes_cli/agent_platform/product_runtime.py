@@ -2154,9 +2154,6 @@ def validate_p18_9_0_review_acceptance_record(
         "P18_9_0_completed": True,
         "git_handoff_required": False,
         "git_handoff_state": "not_required_for_ticket_result",
-        "next_ticket_id": next_ticket["ticket_id"],
-        "next_ticket_title": next_ticket["ticket_title"],
-        "next_ticket_authority_path": next_ticket["authority_path"],
         "dispatch_performed": False,
         "execution_started": False,
         "worker_execution": False,
@@ -2184,7 +2181,7 @@ def validate_p18_9_0_review_acceptance_record(
         raise ProductRuntimeConflict("review-acceptance record acceptor_id mismatch")
     if record.get("review_prepare_authority") != _review_prepare_authority_projection(review_prepare):
         raise ProductRuntimeConflict("review-acceptance review-preparation authority mismatch")
-    if record.get("next_ticket_authority") != next_ticket:
+    if not _review_acceptance_next_ticket_snapshot_matches(record, next_ticket):
         raise ProductRuntimeConflict("review-acceptance next ticket authority mismatch")
     invariants = record.get("pre_acceptance_invariants")
     if not isinstance(invariants, dict):
@@ -2208,6 +2205,78 @@ def validate_p18_9_0_review_acceptance_record(
         if invariants.get(key) != value:
             raise ProductRuntimeConflict(f"review-acceptance invariant {key} mismatch")
     return record
+
+
+def _review_acceptance_next_ticket_snapshot_matches(
+    record: dict[str, Any],
+    current_next_ticket: dict[str, Any],
+) -> bool:
+    snapshot = record.get("next_ticket_authority")
+    if not isinstance(snapshot, dict):
+        return False
+    action = record.get("next_action")
+    if not isinstance(action, dict):
+        return False
+    if _review_acceptance_next_ticket_fields_match(
+        record,
+        action=action,
+        expected=current_next_ticket,
+    ):
+        return True
+    legacy_next_ticket = {
+        "ticket_id": "P18.9.1",
+        "ticket_title": "Pepper Design System",
+        "authority_path": "2_products/pepper-agent/docs/agent-platform/workflow_migration_closure.md",
+        "authority_section": "Advisory decomposition only, not implementation tickets",
+        "authority_type": "current_repository_roadmap_authority",
+        "auto_generated": False,
+        "execution_authorized": False,
+        "next_action_id": "GENERATE_P18_9_1_REQUIRES_SEPARATE_HUMAN_ACTION",
+    }
+    return _review_acceptance_next_ticket_fields_match(
+        record,
+        action=action,
+        expected=legacy_next_ticket,
+    )
+
+
+def _review_acceptance_next_ticket_fields_match(
+    record: dict[str, Any],
+    *,
+    action: dict[str, Any],
+    expected: dict[str, Any],
+) -> bool:
+    snapshot = record.get("next_ticket_authority")
+    if not isinstance(snapshot, dict):
+        return False
+    required_snapshot = {
+        "ticket_id": expected.get("ticket_id"),
+        "ticket_title": expected.get("ticket_title"),
+        "authority_path": expected.get("authority_path"),
+        "authority_section": expected.get("authority_section"),
+        "authority_type": expected.get("authority_type"),
+        "auto_generated": expected.get("auto_generated"),
+        "execution_authorized": expected.get("execution_authorized"),
+        "next_action_id": expected.get("next_action_id"),
+    }
+    for key, value in required_snapshot.items():
+        if snapshot.get(key) != value:
+            return False
+    if record.get("next_ticket_id") != expected.get("ticket_id"):
+        return False
+    if record.get("next_ticket_title") != expected.get("ticket_title"):
+        return False
+    if record.get("next_ticket_authority_path") != expected.get("authority_path"):
+        return False
+    if action.get("id") != expected.get("next_action_id"):
+        return False
+    if action.get("target_ticket_id") != expected.get("ticket_id"):
+        return False
+    if action.get("target_ticket_title") != expected.get("ticket_title"):
+        return False
+    if action.get("required_human_action") != "separate_next_ticket_generation":
+        return False
+    return True
 
 
 def prepare_current_ticket_review(
@@ -5036,6 +5105,7 @@ def _p18_9_next_ticket_authority() -> dict[str, Any]:
         "auto_generated": False,
         "execution_authorized": False,
         "next_action_id": authority.next_action_id,
+        "dependency_ticket_ids": list(authority.dependency_ticket_ids),
     }
 
 
@@ -5066,6 +5136,7 @@ def _current_next_ticket_generation_target(workflow: dict[str, Any]) -> dict[str
         "roadmap_authority_path": target.roadmap_authority_path,
         "roadmap_authority_section": target.roadmap_authority_section,
         "canonical_roadmap_authority": target.canonical_roadmap_authority,
+        "dependency_ticket_ids": list(target.dependency_ticket_ids),
     }
 
 
@@ -5920,11 +5991,12 @@ def _p18_9_0_review_acceptance_overlay(
         }
     if record is None:
         return None, None
+    next_ticket = _p18_9_next_ticket_authority()
     return {
         "current_ticket_id": None,
         "current_ticket_title": None,
-        "next_ticket_id": record["next_ticket_id"],
-        "next_ticket_title": record["next_ticket_title"],
+        "next_ticket_id": next_ticket["ticket_id"],
+        "next_ticket_title": next_ticket["ticket_title"],
         "readiness": "p18_9_0_completed_next_ticket_ready",
         "workflow_state": record["workflow_state"],
         "workflow_status": record["workflow_status"],
@@ -5967,7 +6039,16 @@ def _p18_9_0_review_acceptance_overlay(
         "Git_mutation": False,
         "auto_retry": False,
         "auto_rollback": False,
-        "next_action": record["next_action"],
+        "next_action": {
+            "id": next_ticket["next_action_id"],
+            "label": (
+                f"P18.9.0 is accepted and closed; {next_ticket['ticket_id']} "
+                f"{next_ticket['ticket_title']} may be generated only by a separate governed action."
+            ),
+            "target_ticket_id": next_ticket["ticket_id"],
+            "target_ticket_title": next_ticket["ticket_title"],
+            "required_human_action": "separate_next_ticket_generation",
+        },
     }, None
 
 
