@@ -1,4 +1,4 @@
-"""Governed P18.9.0 Ticket Architect bridge.
+"""Governed Pepper Ticket Architect bridge.
 
 This module turns the current Pepper next action into canonical P16/P17/P18
 evidence. It does not call providers, dispatch workers, create Kanban tasks,
@@ -7,6 +7,7 @@ run commands, mutate Git, invoke Docker, or invoke Graphify.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 import hashlib
@@ -108,13 +109,18 @@ CANONICAL_TICKET_ID = "P18.9.0"
 CANONICAL_TICKET_TITLE = "Product Inventory, IA Decision, and Acceptance Contract"
 CANONICAL_NEXT_ACTION_ID = "GENERATE_P18_9_0"
 CANONICAL_ROADMAP_AUTHORITY = "human-approved-p18.9-roadmap"
+CANONICAL_ROADMAP_AUTHORITY_PATH = (
+    "2_products/pepper-agent/docs/agent-platform/workflow_migration_closure.md"
+)
+CANONICAL_ROADMAP_AUTHORITY_SECTION = (
+    "Advisory decomposition only, not implementation tickets"
+)
 CANONICAL_WORKFLOW_PROJECT_ID = "P18.9"
 CANONICAL_WORKFLOW_TICKET_ID = "P18.9"
 HUMAN_APPROVAL_NEXT_ACTION_ID = "APPROVE_P18_9_0"
 CANONICAL_APPROVAL_ID = "P18.9.0"
 
 _STORE_DIR = Path("agent-platform") / "pepper-ticket-architect-bridge"
-_STORE_FILE = "P18.9.0.json"
 _APPROVAL_DECISION_STORE_FILE = "P18.9.0.approval-decision.json"
 _STORE_LOCK = threading.Lock()
 _P17_ACCEPTED_CLOSURE_SHA256 = hashlib.sha256(
@@ -147,8 +153,199 @@ _REQUIRED_FORBIDDEN_ACTIONS = (
 )
 
 
+@dataclass(frozen=True)
+class GovernedTicketGenerationTarget:
+    """Single canonical next governed ticket resolved from workflow authority."""
+
+    project_id: str
+    project_name: str
+    macroproject_id: str
+    macroproject_title: str
+    ticket_id: str
+    ticket_title: str
+    next_action_id: str
+    approval_next_action_id: str
+    approved_no_execution_next_action_id: str
+    revise_next_action_id: str
+    canonical_roadmap_authority: str
+    roadmap_authority_path: str
+    roadmap_authority_section: str
+
+    @property
+    def action_token(self) -> str:
+        return _ticket_action_token(self.ticket_id)
+
+    @property
+    def idempotency_key(self) -> str:
+        return f"{self.project_id}:{self.macroproject_id}:{self.ticket_id}:{self.next_action_id}"
+
+
+def generation_action_id(ticket_id: str) -> str:
+    """Return the governed generation action id for a ticket id."""
+
+    return f"GENERATE_{_ticket_action_token(ticket_id)}"
+
+
+def is_generation_action_id_for_ticket(action_id: str, ticket_id: str) -> bool:
+    """Return true when an action id is the canonical generation vocabulary."""
+
+    prefix = generation_action_id(ticket_id)
+    candidate = str(action_id or "").strip()
+    return candidate == prefix or candidate.startswith(prefix + "_")
+
+
+def approval_action_id(ticket_id: str) -> str:
+    return f"APPROVE_{_ticket_action_token(ticket_id)}"
+
+
+def approved_no_execution_action_id(ticket_id: str) -> str:
+    return f"{_ticket_action_token(ticket_id)}_APPROVED_NO_EXECUTION"
+
+
+def revise_action_id(ticket_id: str) -> str:
+    return f"REVISE_{_ticket_action_token(ticket_id)}"
+
+
+def p18_9_0_generation_target() -> GovernedTicketGenerationTarget:
+    """Return the historical P18.9.0 target used by compatibility wrappers."""
+
+    return GovernedTicketGenerationTarget(
+        project_id=CANONICAL_PROJECT_ID,
+        project_name=CANONICAL_PROJECT_NAME,
+        macroproject_id=CANONICAL_MACROPROJECT_ID,
+        macroproject_title=CANONICAL_MACROPROJECT_TITLE,
+        ticket_id=CANONICAL_TICKET_ID,
+        ticket_title=CANONICAL_TICKET_TITLE,
+        next_action_id=CANONICAL_NEXT_ACTION_ID,
+        approval_next_action_id=HUMAN_APPROVAL_NEXT_ACTION_ID,
+        approved_no_execution_next_action_id=approved_no_execution_action_id(CANONICAL_TICKET_ID),
+        revise_next_action_id=revise_action_id(CANONICAL_TICKET_ID),
+        canonical_roadmap_authority=CANONICAL_ROADMAP_AUTHORITY,
+        roadmap_authority_path=CANONICAL_ROADMAP_AUTHORITY_PATH,
+        roadmap_authority_section=CANONICAL_ROADMAP_AUTHORITY_SECTION,
+    )
+
+
+def _target_from_record(record: dict[str, Any]) -> GovernedTicketGenerationTarget:
+    ticket_id = _safe_ticket_id(record.get("ticket_id"))
+    if ticket_id == CANONICAL_TICKET_ID:
+        return p18_9_0_generation_target()
+    return GovernedTicketGenerationTarget(
+        project_id=str(record.get("project_id") or CANONICAL_PROJECT_ID),
+        project_name=str(record.get("project_name") or CANONICAL_PROJECT_NAME),
+        macroproject_id=str(record.get("macroproject_id") or CANONICAL_MACROPROJECT_ID),
+        macroproject_title=str(record.get("macroproject_title") or CANONICAL_MACROPROJECT_TITLE),
+        ticket_id=ticket_id,
+        ticket_title=str(record.get("ticket_title") or ""),
+        next_action_id=str(record.get("source_next_action_id") or generation_action_id(ticket_id)),
+        approval_next_action_id=approval_action_id(ticket_id),
+        approved_no_execution_next_action_id=approved_no_execution_action_id(ticket_id),
+        revise_next_action_id=revise_action_id(ticket_id),
+        canonical_roadmap_authority=str(record.get("canonical_roadmap_authority") or CANONICAL_ROADMAP_AUTHORITY),
+        roadmap_authority_path=str(record.get("roadmap_authority_path") or CANONICAL_ROADMAP_AUTHORITY_PATH),
+        roadmap_authority_section=str(record.get("roadmap_authority_section") or CANONICAL_ROADMAP_AUTHORITY_SECTION),
+    )
+
+
+def resolve_generation_target_from_workflow(
+    workflow: dict[str, Any],
+) -> GovernedTicketGenerationTarget:
+    """Resolve the canonical next-ticket generation target from workflow state."""
+
+    if not isinstance(workflow, dict):
+        raise TicketArchitectBridgeInputError("workflow state is unavailable")
+    next_ticket_id = str(workflow.get("next_ticket_id") or "").strip()
+    if not next_ticket_id:
+        raise TicketArchitectBridgeInputError("no next governed ticket is available")
+    if next_ticket_id == CANONICAL_TICKET_ID:
+        return p18_9_0_generation_target()
+    next_action = workflow.get("next_action")
+    if not isinstance(next_action, dict):
+        raise TicketArchitectBridgeInputError("next action is unavailable")
+    authority = resolve_roadmap_ticket_authority(next_ticket_id)
+    expected_action_id = str(next_action.get("id") or "").strip()
+    if not is_generation_action_id_for_ticket(expected_action_id, next_ticket_id):
+        raise TicketArchitectBridgeInputError("next action is not the canonical generation action")
+    return GovernedTicketGenerationTarget(
+        project_id=CANONICAL_PROJECT_ID,
+        project_name=CANONICAL_PROJECT_NAME,
+        macroproject_id=str(workflow.get("macroproject_id") or CANONICAL_MACROPROJECT_ID),
+        macroproject_title=str(workflow.get("macroproject_title") or CANONICAL_MACROPROJECT_TITLE),
+        ticket_id=next_ticket_id,
+        ticket_title=str(authority["ticket_title"]),
+        next_action_id=expected_action_id,
+        approval_next_action_id=approval_action_id(next_ticket_id),
+        approved_no_execution_next_action_id=approved_no_execution_action_id(next_ticket_id),
+        revise_next_action_id=revise_action_id(next_ticket_id),
+        canonical_roadmap_authority=str(authority["authority_type"]),
+        roadmap_authority_path=str(authority["authority_path"]),
+        roadmap_authority_section=str(authority["authority_section"]),
+    )
+
+
+def resolve_roadmap_ticket_authority(ticket_id: str) -> dict[str, Any]:
+    """Resolve one ticket id from canonical P18.9 roadmap authority."""
+
+    requested = _safe_ticket_id(ticket_id)
+    if requested == CANONICAL_TICKET_ID:
+        return {
+            "ticket_id": CANONICAL_TICKET_ID,
+            "ticket_title": CANONICAL_TICKET_TITLE,
+            "authority_path": CANONICAL_ROADMAP_AUTHORITY_PATH,
+            "authority_section": CANONICAL_ROADMAP_AUTHORITY_SECTION,
+            "authority_type": CANONICAL_ROADMAP_AUTHORITY,
+            "next_action_id": CANONICAL_NEXT_ACTION_ID,
+        }
+    path = Path(__file__).resolve().parents[3] / "docs" / "agent-platform" / "workflow_migration_closure.md"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise TicketArchitectBridgeInputError("roadmap authority cannot resolve target") from exc
+    in_section = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped == CANONICAL_ROADMAP_AUTHORITY_SECTION + ":":
+            in_section = True
+            continue
+        if in_section and stripped.startswith("## "):
+            break
+        if not in_section or "|" not in stripped:
+            continue
+        cells = [cell.strip().strip("`") for cell in stripped.strip("|").split("|")]
+        if len(cells) >= 2 and cells[0] == requested:
+            return {
+                "ticket_id": requested,
+                "ticket_title": cells[1],
+                "authority_path": CANONICAL_ROADMAP_AUTHORITY_PATH,
+                "authority_section": CANONICAL_ROADMAP_AUTHORITY_SECTION,
+                "authority_type": CANONICAL_ROADMAP_AUTHORITY,
+    }
+    raise TicketArchitectBridgeInputError("roadmap authority cannot resolve target")
+
+
+def _safe_ticket_id(value: object) -> str:
+    candidate = str(value or "").strip()
+    if not re.fullmatch(r"P[1-9][0-9]{0,3}(?:\.[A-Z0-9]+)+", candidate):
+        raise TicketArchitectBridgeInputError("governed ticket id is invalid")
+    return candidate
+
+
+def _ticket_action_token(ticket_id: str) -> str:
+    return _safe_ticket_id(ticket_id).replace(".", "_")
+
+
+def _ticket_verdict_token(ticket_id: str, suffix: str) -> str:
+    token = re.sub(r"[^a-z0-9]+", "_", ticket_id.lower()).strip("_")
+    suffix_token = re.sub(r"[^a-z0-9]+", "_", suffix.lower()).strip("_")
+    return f"{token}_{suffix_token}"[:256]
+
+
+def _ticket_commit_slug(ticket_id: str) -> str:
+    return ticket_id.replace(".", " ")
+
+
 class TicketArchitectBridgeError(ValueError):
-    """Base error for P18.9.0 bridge failures."""
+    """Base error for governed Ticket Architect bridge failures."""
 
 
 class TicketArchitectBridgeInputError(TicketArchitectBridgeError):
@@ -156,7 +353,7 @@ class TicketArchitectBridgeInputError(TicketArchitectBridgeError):
 
 
 class TicketArchitectBridgeConflict(TicketArchitectBridgeError):
-    """Raised when persisted generated authority conflicts with P18.9.0."""
+    """Raised when persisted generated authority conflicts with the ticket."""
 
 
 class TicketArchitectBridgeGenerationError(TicketArchitectBridgeError):
@@ -166,7 +363,14 @@ class TicketArchitectBridgeGenerationError(TicketArchitectBridgeError):
 def generation_record_path() -> Path:
     """Return the profile-scoped P18.9.0 generation authority path."""
 
-    return get_hermes_home() / _STORE_DIR / _STORE_FILE
+    return generation_record_path_for_ticket(CANONICAL_TICKET_ID)
+
+
+def generation_record_path_for_ticket(ticket_id: str) -> Path:
+    """Return the profile-scoped generation authority path for one ticket."""
+
+    safe_ticket_id = _safe_ticket_id(ticket_id)
+    return get_hermes_home() / _STORE_DIR / f"{safe_ticket_id}.json"
 
 
 def approval_decision_record_path() -> Path:
@@ -178,16 +382,23 @@ def approval_decision_record_path() -> Path:
 def load_p18_9_0_generation_record() -> dict[str, Any] | None:
     """Load and validate the persisted P18.9.0 authority record, if present."""
 
-    path = generation_record_path()
+    return load_generation_record(ticket_id=CANONICAL_TICKET_ID)
+
+
+def load_generation_record(*, ticket_id: str) -> dict[str, Any] | None:
+    """Load and validate one persisted ticket-generation authority record."""
+
+    target = p18_9_0_generation_target() if ticket_id == CANONICAL_TICKET_ID else None
+    path = generation_record_path_for_ticket(ticket_id)
     if not path.exists():
         return None
     try:
         record = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise TicketArchitectBridgeConflict(
-            "P18.9.0 generated authority record is unreadable"
+            f"{ticket_id} generated authority record is unreadable"
         ) from exc
-    return validate_p18_9_0_generation_record(record)
+    return validate_generation_record(record, target=target)
 
 
 def load_p18_9_0_approval_decision_record(
@@ -214,11 +425,22 @@ def load_p18_9_0_approval_decision_record(
 def validate_p18_9_0_generation_record(record: dict[str, Any]) -> dict[str, Any]:
     """Validate persisted bridge evidence without regenerating any contracts."""
 
+    return validate_generation_record(record, target=p18_9_0_generation_target())
+
+
+def validate_generation_record(
+    record: dict[str, Any],
+    *,
+    target: GovernedTicketGenerationTarget | None = None,
+) -> dict[str, Any]:
+    """Validate persisted bridge evidence without regenerating any contracts."""
+
     if not isinstance(record, dict):
         raise TicketArchitectBridgeConflict("generated authority record must be an object")
     if record.get("bridge_SHA256") != _record_digest(record):
         raise TicketArchitectBridgeConflict("generated authority record digest mismatch")
-    _require_identity(record)
+    resolved_target = target or _target_from_record(record)
+    _require_identity(record, target=resolved_target)
 
     try:
         project_spec = ProjectSpec.model_validate(record["project_spec"])
@@ -239,26 +461,30 @@ def validate_p18_9_0_generation_record(record: dict[str, Any]) -> dict[str, Any]
             "generated authority record contains invalid contract evidence"
         ) from exc
 
-    if project_spec.project_id != CANONICAL_PROJECT_ID:
-        raise TicketArchitectBridgeConflict("ProjectSpec must bind PEPPER")
-    if ticket_spec.project_id != CANONICAL_PROJECT_ID:
-        raise TicketArchitectBridgeConflict("TicketSpec must bind PEPPER")
-    if ticket_spec.ticket_id != CANONICAL_TICKET_ID:
-        raise TicketArchitectBridgeConflict("TicketSpec must bind P18.9.0")
-    if ticket_spec.title != CANONICAL_TICKET_TITLE:
+    if project_spec.project_id != resolved_target.project_id:
+        raise TicketArchitectBridgeConflict(f"ProjectSpec must bind {resolved_target.project_id}")
+    if ticket_spec.project_id != resolved_target.project_id:
+        raise TicketArchitectBridgeConflict(f"TicketSpec must bind {resolved_target.project_id}")
+    if ticket_spec.ticket_id != resolved_target.ticket_id:
+        raise TicketArchitectBridgeConflict(f"TicketSpec must bind {resolved_target.ticket_id}")
+    if ticket_spec.title != resolved_target.ticket_title:
         raise TicketArchitectBridgeConflict("TicketSpec title conflicts with roadmap")
-    if context_pack.ticket_id != CANONICAL_TICKET_ID:
-        raise TicketArchitectBridgeConflict("ContextPack must bind P18.9.0")
-    if dependency_plan.ticket_ids != (CANONICAL_TICKET_ID,):
-        raise TicketArchitectBridgeConflict("dependency plan must contain only P18.9.0")
+    if context_pack.ticket_id != resolved_target.ticket_id:
+        raise TicketArchitectBridgeConflict(f"ContextPack must bind {resolved_target.ticket_id}")
+    if dependency_plan.ticket_ids != (resolved_target.ticket_id,):
+        raise TicketArchitectBridgeConflict(
+            f"dependency plan must contain only {resolved_target.ticket_id}"
+        )
     if dependency_plan.blocked_ticket_ids:
-        raise TicketArchitectBridgeConflict("P18.9.0 dependency plan must be unblocked")
-    if lint_report.ticket_ids != (CANONICAL_TICKET_ID,):
-        raise TicketArchitectBridgeConflict("lint report must bind P18.9.0")
+        raise TicketArchitectBridgeConflict(
+            f"{resolved_target.ticket_id} dependency plan must be unblocked"
+        )
+    if lint_report.ticket_ids != (resolved_target.ticket_id,):
+        raise TicketArchitectBridgeConflict(f"lint report must bind {resolved_target.ticket_id}")
     if lint_report.disposition is not TicketLintDisposition.PASS:
-        raise TicketArchitectBridgeConflict("P18.9.0 lint report must pass")
-    if compilation.work_packet.ticket_id != CANONICAL_TICKET_ID:
-        raise TicketArchitectBridgeConflict("WorkPacket must bind P18.9.0")
+        raise TicketArchitectBridgeConflict(f"{resolved_target.ticket_id} lint report must pass")
+    if compilation.work_packet.ticket_id != resolved_target.ticket_id:
+        raise TicketArchitectBridgeConflict(f"WorkPacket must bind {resolved_target.ticket_id}")
     if compilation.work_packet.execution_ready is not False:
         raise TicketArchitectBridgeConflict("WorkPacket must remain compile-only")
     if compilation.dependency_plan != dependency_plan:
@@ -428,26 +654,47 @@ def generate_p18_9_0_ticket(
 ) -> dict[str, Any]:
     """Generate or replay the canonical P18.9.0 TicketSpec authority."""
 
+    return generate_current_ticket(
+        workflow=workflow,
+        requested_project_id=requested_project_id,
+        requested_ticket_id=requested_ticket_id,
+        requested_next_action_id=requested_next_action_id,
+        target=p18_9_0_generation_target(),
+    )
+
+
+def generate_current_ticket(
+    *,
+    workflow: dict[str, Any],
+    requested_project_id: str | None = None,
+    requested_ticket_id: str | None = None,
+    requested_next_action_id: str | None = None,
+    target: GovernedTicketGenerationTarget | None = None,
+) -> dict[str, Any]:
+    """Generate or replay the single canonical next governed ticket."""
+
+    resolved_target = target or resolve_generation_target_from_workflow(workflow)
     _validate_requested_identity(
         requested_project_id=requested_project_id,
         requested_ticket_id=requested_ticket_id,
         requested_next_action_id=requested_next_action_id,
+        target=resolved_target,
     )
     with _STORE_LOCK:
-        existing = load_p18_9_0_generation_record()
+        existing = load_generation_record(ticket_id=resolved_target.ticket_id)
         if existing is not None:
             return _operational_result(existing, idempotent_replay=True)
 
-        _validate_workflow_eligibility(workflow)
+        _validate_workflow_eligibility(workflow, target=resolved_target)
         try:
-            record = _build_generation_record(workflow)
-            validate_p18_9_0_generation_record(record)
+            record = _build_generation_record(workflow, target=resolved_target)
+            validate_generation_record(record, target=resolved_target)
             _persist_generation_record(record)
         except TicketArchitectBridgeError:
             raise
         except Exception as exc:
             raise TicketArchitectBridgeGenerationError(
-                "P18.9.0 Ticket Architect bridge generation failed"
+                f"{resolved_target.ticket_id} Ticket Architect bridge generation failed"
             ) from exc
     return _operational_result(record, idempotent_replay=False)
 
@@ -455,17 +702,22 @@ def generate_p18_9_0_ticket(
 def generated_record_to_workflow_overlay(record: dict[str, Any]) -> dict[str, Any]:
     """Return workflow-control fields implied by a validated generated record."""
 
-    validated = validate_p18_9_0_generation_record(record)
-    decision = load_p18_9_0_approval_decision_record(generation_record=validated)
+    target = _target_from_record(record)
+    validated = validate_generation_record(record, target=target)
+    decision = (
+        load_p18_9_0_approval_decision_record(generation_record=validated)
+        if target.ticket_id == CANONICAL_TICKET_ID
+        else None
+    )
     if decision is not None:
         return _decided_record_to_workflow_overlay(validated, decision)
     return {
-        "current_ticket_id": CANONICAL_TICKET_ID,
-        "current_ticket_title": CANONICAL_TICKET_TITLE,
+        "current_ticket_id": target.ticket_id,
+        "current_ticket_title": target.ticket_title,
         "next_ticket_id": None,
         "next_ticket_title": None,
         "readiness": "awaiting_ticket_approval",
-        "workflow_state": "P18.9.0-AWAITING-TICKET-APPROVAL",
+        "workflow_state": f"{target.ticket_id}-AWAITING-TICKET-APPROVAL",
         "workflow_status": "awaiting_ticket_approval",
         "approval_state": "pending_ticket_approval",
         "pending_ticket_approval_count": 1,
@@ -479,13 +731,13 @@ def generated_record_to_workflow_overlay(record: dict[str, Any]) -> dict[str, An
         "P18_9_work_packet_compiled": True,
         "generated_ticket_authority": _authority_projection(validated),
         "next_action": {
-            "id": HUMAN_APPROVAL_NEXT_ACTION_ID,
+            "id": target.approval_next_action_id,
             "label": (
-                "Review and approve governed P18.9.0 Product Inventory, IA Decision, "
-                "and Acceptance Contract before execution."
+                f"Review and approve governed {target.ticket_id} {target.ticket_title} "
+                "before execution."
             ),
-            "target_ticket_id": CANONICAL_TICKET_ID,
-            "target_ticket_title": CANONICAL_TICKET_TITLE,
+            "target_ticket_id": target.ticket_id,
+            "target_ticket_title": target.ticket_title,
             "required_human_action": "ticket_approval",
         },
         "ticket_execution_authorized": False,
@@ -500,37 +752,40 @@ def _decided_record_to_workflow_overlay(
     generation_record: dict[str, Any],
     decision_record: dict[str, Any],
 ) -> dict[str, Any]:
+    target = _target_from_record(generation_record)
     approved = decision_record["decision"] == HumanApprovalDecision.APPROVE.value
     workflow_state = (
-        "P18.9.0-TICKET-APPROVED" if approved else "P18.9.0-AWAITING-CORRECTION"
+        f"{target.ticket_id}-TICKET-APPROVED"
+        if approved
+        else f"{target.ticket_id}-AWAITING-CORRECTION"
     )
     workflow_status = "ticket_approved" if approved else "awaiting_correction"
     next_action = (
         {
-            "id": "P18_9_0_APPROVED_NO_EXECUTION",
+            "id": target.approved_no_execution_next_action_id,
             "label": (
-                "Human ticket approval is recorded for P18.9.0; execution remains "
+                f"Human ticket approval is recorded for {target.ticket_id}; execution remains "
                 "blocked until a separate governed action is authorized."
             ),
-            "target_ticket_id": CANONICAL_TICKET_ID,
-            "target_ticket_title": CANONICAL_TICKET_TITLE,
+            "target_ticket_id": target.ticket_id,
+            "target_ticket_title": target.ticket_title,
             "required_human_action": "governed_followup",
         }
         if approved
         else {
-            "id": "REVISE_P18_9_0",
+            "id": target.revise_next_action_id,
             "label": (
-                "Human rejection is recorded for P18.9.0; correction is required "
+                f"Human rejection is recorded for {target.ticket_id}; correction is required "
                 "before any downstream work."
             ),
-            "target_ticket_id": CANONICAL_TICKET_ID,
-            "target_ticket_title": CANONICAL_TICKET_TITLE,
+            "target_ticket_id": target.ticket_id,
+            "target_ticket_title": target.ticket_title,
             "required_human_action": "ticket_correction",
         }
     )
     return {
-        "current_ticket_id": CANONICAL_TICKET_ID,
-        "current_ticket_title": CANONICAL_TICKET_TITLE,
+        "current_ticket_id": target.ticket_id,
+        "current_ticket_title": target.ticket_title,
         "next_ticket_id": None,
         "next_ticket_title": None,
         "readiness": workflow_status,
@@ -563,10 +818,14 @@ def _decided_record_to_workflow_overlay(
     }
 
 
-def _build_generation_record(workflow: dict[str, Any]) -> dict[str, Any]:
-    project_spec = _build_project_spec()
-    ticket_spec = _build_ticket_spec()
-    context_pack = _assemble_context_pack(project_spec, ticket_spec)
+def _build_generation_record(
+    workflow: dict[str, Any],
+    *,
+    target: GovernedTicketGenerationTarget,
+) -> dict[str, Any]:
+    project_spec = _build_project_spec(target)
+    ticket_spec = _build_ticket_spec(target)
+    context_pack = _assemble_context_pack(project_spec, ticket_spec, target=target)
     planning_request = TicketPlanningRequest(
         project_spec=project_spec,
         tickets=(ticket_spec,),
@@ -574,7 +833,7 @@ def _build_generation_record(workflow: dict[str, Any]) -> dict[str, Any]:
         policy=ParallelPlanningPolicy(),
     )
     dependency_plan = build_ticket_dependency_plan(planning_request)
-    _validate_dependency_plan(dependency_plan)
+    _validate_dependency_plan(dependency_plan, target=target)
     lint_report = lint_ticket_collection(
         TicketLintRequest(
             project_spec=project_spec,
@@ -583,7 +842,7 @@ def _build_generation_record(workflow: dict[str, Any]) -> dict[str, Any]:
             collection_complete=False,
         )
     )
-    _validate_lint_report(lint_report)
+    _validate_lint_report(lint_report, target=target)
     approval_record, publication_result, compilation_result = _compile_work_packet(
         project_spec=project_spec,
         ticket_spec=ticket_spec,
@@ -591,24 +850,27 @@ def _build_generation_record(workflow: dict[str, Any]) -> dict[str, Any]:
         planning_request=planning_request,
         dependency_plan=dependency_plan,
         lint_report=lint_report,
+        target=target,
     )
-    transition_result = _build_workflow_transition(compilation_result)
+    transition_result = _build_workflow_transition(compilation_result, target=target)
     observed_at = _utc_now_iso()
     record = {
         "schema_version": TICKET_ARCHITECT_BRIDGE_SCHEMA_VERSION,
         "policy_id": TICKET_ARCHITECT_BRIDGE_POLICY_ID,
         "created_at": observed_at,
-        "source_next_action_id": CANONICAL_NEXT_ACTION_ID,
+        "source_next_action_id": target.next_action_id,
         "source_workflow_status": str(workflow.get("workflow_status") or ""),
         "generation_status": "awaiting_ticket_approval",
-        "project_id": CANONICAL_PROJECT_ID,
-        "project_name": CANONICAL_PROJECT_NAME,
-        "macroproject_id": CANONICAL_MACROPROJECT_ID,
-        "macroproject_title": CANONICAL_MACROPROJECT_TITLE,
-        "ticket_id": CANONICAL_TICKET_ID,
-        "ticket_title": CANONICAL_TICKET_TITLE,
-        "canonical_roadmap_authority": CANONICAL_ROADMAP_AUTHORITY,
-        "idempotency_key": _idempotency_key(),
+        "project_id": target.project_id,
+        "project_name": target.project_name,
+        "macroproject_id": target.macroproject_id,
+        "macroproject_title": target.macroproject_title,
+        "ticket_id": target.ticket_id,
+        "ticket_title": target.ticket_title,
+        "canonical_roadmap_authority": target.canonical_roadmap_authority,
+        "roadmap_authority_path": target.roadmap_authority_path,
+        "roadmap_authority_section": target.roadmap_authority_section,
+        "idempotency_key": target.idempotency_key,
         "project_spec": project_spec.model_dump(mode="json"),
         "ticket_spec": ticket_spec.model_dump(mode="json"),
         "context_pack": context_pack.model_dump(mode="json"),
@@ -643,13 +905,13 @@ def _build_generation_record(workflow: dict[str, Any]) -> dict[str, Any]:
     return record
 
 
-def _build_project_spec() -> ProjectSpec:
+def _build_project_spec(target: GovernedTicketGenerationTarget) -> ProjectSpec:
     return ProjectSpec(
-        project_id=CANONICAL_PROJECT_ID,
-        title=CANONICAL_MACROPROJECT_TITLE,
+        project_id=target.project_id,
+        title=target.macroproject_title,
         objective=(
-            "Personalize Pepper's product experience from governed product inventory, "
-            "information architecture, and explicit acceptance contracts."
+            "Personalize Pepper's product experience through canonical governed tickets, "
+            "explicit human approvals, and preserved execution boundaries."
         ),
         summary=(
             "P18.9 starts from the accepted P18 workflow migration and produces "
@@ -657,10 +919,10 @@ def _build_project_spec() -> ProjectSpec:
         ),
         context=(
             "P18 and P18.R are closed and P18.9 is the active governed macroproject.",
-            "The human-approved P18.9 roadmap identifies P18.9.0 as the first item.",
-            "P18.9.0 must define inventory, IA decisions, and acceptance contracts before execution.",
+            f"The canonical roadmap identifies {target.ticket_id} as {target.ticket_title}.",
+            f"{target.ticket_id} must remain compile-only until explicit human ticket approval.",
         ),
-        authority_references=_authority_references(),
+        authority_references=_authority_references(target),
         scope=_scope(),
         constraints=(
             "Use the existing P16 TicketSpec, ContextPack, dependency plan, lint, approval, and publication contracts.",
@@ -669,75 +931,77 @@ def _build_project_spec() -> ProjectSpec:
             "Provider dispatch, model inference, Kanban dispatch, worker execution, Docker, Graphify, and Git mutation are not authorized.",
         ),
         non_goals=(
-            "Do not execute P18.9.0.",
+            f"Do not execute {target.ticket_id}.",
             "Do not create a Kanban planning task or worker dispatch.",
-            "Do not auto-approve the P18.9.0 ticket.",
+            f"Do not auto-approve the {target.ticket_id} ticket.",
             "Do not stage, commit, push, or otherwise mutate Git.",
         ),
         acceptance_criteria=(
-            "P18.9.0 is represented as a canonical P16 TicketSpec with the approved title.",
+            f"{target.ticket_id} is represented as a canonical P16 TicketSpec with the approved title.",
             "A P17 WorkPacket is compiled exactly once and remains execution_ready=false.",
             "The governed workflow reaches awaiting_ticket_approval with human approval still required.",
         ),
-        completion_verdict="p18_9_0_ticket_architect_bridge_ready",
+        completion_verdict=_ticket_verdict_token(target.ticket_id, "ticket_architect_bridge_ready"),
     )
 
 
-def _build_ticket_spec() -> TicketSpec:
+def _build_ticket_spec(target: GovernedTicketGenerationTarget) -> TicketSpec:
     return TicketSpec(
-        project_id=CANONICAL_PROJECT_ID,
-        ticket_id=CANONICAL_TICKET_ID,
-        title=CANONICAL_TICKET_TITLE,
+        project_id=target.project_id,
+        ticket_id=target.ticket_id,
+        title=target.ticket_title,
         ticket_type=TicketType.ARCHITECTURE,
         objective=(
-            "Inventory Pepper product surfaces, make the first information-architecture "
-            "decision, and define the acceptance contract for P18.9 personalization."
+            f"Define the governed product architecture and acceptance contract for {target.ticket_title}."
         ),
         context=(
             "The active governed project is PEPPER, while P18.9 is the macroproject identifier.",
-            "P18.9.0 is the first governed ticket after P18/P18.R closure.",
-            "The stale Product UX / IA Baseline label is non-authoritative and must not override the approved roadmap title.",
+            f"{target.ticket_id} is resolved from canonical roadmap authority, not user-supplied arbitrary ticket text.",
             "Execution remains blocked until the generated ticket is explicitly approved by a human.",
         ),
-        authority_references=_authority_references(),
+        authority_references=_authority_references(target),
         dependencies=(),
         parallelization_hint=ParallelizationHint.UNSPECIFIED,
         scope=_scope(),
         constraints=(
             "Separate product identity PEPPER from repository and macroproject identifiers.",
-            "Inventory and IA decisions must cite bounded repository or governance evidence.",
-            "Acceptance criteria must be testable before any implementation ticket executes.",
-            "Rollback posture: remove only the P18.9.0 inventory, IA, and acceptance-contract changes if superseded.",
+            "Architecture and design decisions must cite bounded repository or governance evidence.",
+            "Acceptance criteria must be testable before any implementation or design work executes.",
+            f"Rollback posture: remove only {target.ticket_id} changes if superseded.",
             "No provider dispatch, model inference, Kanban dispatch, worker execution, Docker, Graphify, or Git mutation is authorized.",
         ),
         tasks=(
-            "Inventory Pepper product surfaces relevant to product personalization and identify the authority for each surface.",
-            "Decide the initial information architecture boundary for P18.9 personalization work.",
-            "Define acceptance criteria for the product inventory, IA decision, and downstream implementation handoff.",
+            f"Inventory repository and product surfaces relevant to {target.ticket_title}.",
+            f"Define the design-system or product-architecture boundary for {target.ticket_id}.",
+            "Define acceptance criteria and downstream implementation handoff constraints.",
             "Record unresolved product questions without dispatching workers or creating Kanban tasks.",
         ),
         acceptance_criteria=(
-            "The product inventory distinguishes current product runtime, dashboard, repository-context, and workflow-control surfaces.",
-            "The IA decision names the first personalization boundary and the evidence that supports it.",
-            "The acceptance contract states what must be true before any downstream P18.9 implementation ticket executes.",
+            f"The result names the canonical roadmap target {target.ticket_id} and title {target.ticket_title}.",
+            "The design or architecture decision cites repository and governance evidence.",
+            "The acceptance contract states what must be true before downstream P18.9 work executes.",
             "The result explicitly reports no worker execution, no Kanban dispatch, no Docker, no Graphify, and no Git mutation.",
         ),
         validation_steps=(
             TicketValidationStepSpec(
                 validation_id="V1",
-                description="Human review confirms P18.9.0 inventory, IA decision, and acceptance contract are present.",
+                description=f"Human review confirms {target.ticket_id} governed TicketSpec and acceptance contract are present.",
                 command=None,
                 expected_result=(
-                    "The reviewer can identify the inventory, IA decision, acceptance contract, "
-                    "and preserved execution boundary in the P18.9.0 result."
+                    "The reviewer can identify the roadmap-derived title, acceptance contract, "
+                    f"and preserved execution boundary in the {target.ticket_id} result."
                 ),
             ),
         ),
         response_contract=TicketResponseContractSpec(
             required_sections=_REQUIRED_RESPONSE_SECTIONS,
-            completion_verdict="p18_9_0_inventory_ia_acceptance_contract_ready",
+            completion_verdict=(
+                "p18_9_0_inventory_ia_acceptance_contract_ready"
+                if target.ticket_id == CANONICAL_TICKET_ID
+                else _ticket_verdict_token(target.ticket_id, "acceptance_contract_ready")
+            ),
         ),
-        recommended_commit_message="P18.9.0 Define product inventory IA acceptance contract",
+        recommended_commit_message=f"{_ticket_commit_slug(target.ticket_id)} Define {target.ticket_title}",
     )
 
 
@@ -771,12 +1035,17 @@ def _scope() -> RepositoryScopeSpec:
     )
 
 
-def _authority_references() -> tuple[AuthorityReferenceSpec, ...]:
+def _authority_references(
+    target: GovernedTicketGenerationTarget,
+) -> tuple[AuthorityReferenceSpec, ...]:
     return (
         AuthorityReferenceSpec(
             kind=AuthorityReferenceKind.EXTERNAL_SOURCE,
-            value=CANONICAL_ROADMAP_AUTHORITY,
-            rationale="Human instruction identifies the approved P18.9.0 roadmap title.",
+            value=target.roadmap_authority_path,
+            rationale=(
+                f"Canonical roadmap authority identifies {target.ticket_id} as "
+                f"{target.ticket_title}."
+            ),
         ),
         AuthorityReferenceSpec(
             kind=AuthorityReferenceKind.TICKET,
@@ -796,18 +1065,24 @@ def _authority_references() -> tuple[AuthorityReferenceSpec, ...]:
     )
 
 
-def _assemble_context_pack(project_spec: ProjectSpec, ticket_spec: TicketSpec) -> ContextPack:
+def _assemble_context_pack(
+    project_spec: ProjectSpec,
+    ticket_spec: TicketSpec,
+    *,
+    target: GovernedTicketGenerationTarget,
+) -> ContextPack:
+    authority_refs = _authority_references(target)
     sources = (
         ContextSourceSpec(
             source_id="CTX-P18-9-ROADMAP",
             kind=ContextSourceKind.HUMAN_INSTRUCTION,
-            title="Human-approved P18.9.0 roadmap item",
-            source_reference=CANONICAL_ROADMAP_AUTHORITY,
+            title=f"Human-approved {target.ticket_id} roadmap item",
+            source_reference=target.roadmap_authority_path,
             content=(
-                "P18.9.0 is Product Inventory, IA Decision, and Acceptance Contract. "
-                "This title supersedes stale Product UX / IA Baseline labels."
+                f"{target.ticket_id} is {target.ticket_title}. This identity comes from "
+                f"{target.roadmap_authority_section}."
             ),
-            authority_references=(_authority_references()[0],),
+            authority_references=(authority_refs[0],),
             sensitivity=ContextSensitivity.INTERNAL,
             priority=ContextPriority.CRITICAL,
             required=True,
@@ -818,7 +1093,7 @@ def _assemble_context_pack(project_spec: ProjectSpec, ticket_spec: TicketSpec) -
             title="P18.8 controlled default-mode smoke",
             source_reference="HUMAN_P18_8_CUTOVER_SMOKE_PASS",
             content="P18.8 controlled default-mode human smoke passed before P18.9 intake.",
-            authority_references=(_authority_references()[1], _authority_references()[3]),
+            authority_references=(authority_refs[1], authority_refs[3]),
             sensitivity=ContextSensitivity.INTERNAL,
             priority=ContextPriority.HIGH,
             required=True,
@@ -832,7 +1107,7 @@ def _assemble_context_pack(project_spec: ProjectSpec, ticket_spec: TicketSpec) -
                 "P18.R is accepted and closed; P18.9 is the next governed "
                 "Pepper Product Personalization macroproject."
             ),
-            authority_references=(_authority_references()[2],),
+            authority_references=(authority_refs[2],),
             sensitivity=ContextSensitivity.INTERNAL,
             priority=ContextPriority.HIGH,
             required=True,
@@ -848,24 +1123,36 @@ def _assemble_context_pack(project_spec: ProjectSpec, ticket_spec: TicketSpec) -
     )
 
 
-def _validate_dependency_plan(plan: TicketDependencyPlan) -> None:
-    if plan.project_id != CANONICAL_PROJECT_ID:
-        raise TicketArchitectBridgeGenerationError("dependency plan must bind PEPPER")
-    if plan.ticket_ids != (CANONICAL_TICKET_ID,):
-        raise TicketArchitectBridgeGenerationError("dependency plan must contain P18.9.0")
+def _validate_dependency_plan(
+    plan: TicketDependencyPlan,
+    *,
+    target: GovernedTicketGenerationTarget,
+) -> None:
+    if plan.project_id != target.project_id:
+        raise TicketArchitectBridgeGenerationError(f"dependency plan must bind {target.project_id}")
+    if plan.ticket_ids != (target.ticket_id,):
+        raise TicketArchitectBridgeGenerationError(
+            f"dependency plan must contain {target.ticket_id}"
+        )
     if plan.blocked_ticket_ids:
-        raise TicketArchitectBridgeGenerationError("P18.9.0 dependency plan is blocked")
+        raise TicketArchitectBridgeGenerationError(f"{target.ticket_id} dependency plan is blocked")
     if len(plan.waves) != 1 or plan.waves[0].disposition.value != "dependency_ready":
-        raise TicketArchitectBridgeGenerationError("P18.9.0 dependency plan must be dependency-ready")
+        raise TicketArchitectBridgeGenerationError(
+            f"{target.ticket_id} dependency plan must be dependency-ready"
+        )
 
 
-def _validate_lint_report(report: TicketLintReport) -> None:
-    if report.project_id != CANONICAL_PROJECT_ID:
-        raise TicketArchitectBridgeGenerationError("lint report must bind PEPPER")
-    if report.ticket_ids != (CANONICAL_TICKET_ID,):
-        raise TicketArchitectBridgeGenerationError("lint report must contain P18.9.0")
+def _validate_lint_report(
+    report: TicketLintReport,
+    *,
+    target: GovernedTicketGenerationTarget,
+) -> None:
+    if report.project_id != target.project_id:
+        raise TicketArchitectBridgeGenerationError(f"lint report must bind {target.project_id}")
+    if report.ticket_ids != (target.ticket_id,):
+        raise TicketArchitectBridgeGenerationError(f"lint report must contain {target.ticket_id}")
     if report.disposition is not TicketLintDisposition.PASS:
-        raise TicketArchitectBridgeGenerationError("P18.9.0 TicketSpec lint must pass")
+        raise TicketArchitectBridgeGenerationError(f"{target.ticket_id} TicketSpec lint must pass")
 
 
 def _compile_work_packet(
@@ -876,6 +1163,7 @@ def _compile_work_packet(
     planning_request: TicketPlanningRequest,
     dependency_plan: TicketDependencyPlan,
     lint_report: TicketLintReport,
+    target: GovernedTicketGenerationTarget,
 ) -> tuple[TicketApprovalRecord, TicketPublicationResult, WorkPacketCompilationResult]:
     generation_request = TicketGenerationRequest(
         project_spec=project_spec,
@@ -889,8 +1177,8 @@ def _compile_work_packet(
             assignment=assignment,
             proposed_ticket=ticket_spec,
             rationale=(
-                "P18.9.0 TicketSpec is generated deterministically from the approved "
-                "P18.9 roadmap item and bounded Pepper workflow evidence."
+                f"{target.ticket_id} TicketSpec is generated deterministically from the "
+                "approved P18.9 roadmap item and bounded Pepper workflow evidence."
             ),
             evidence_source_ids=tuple(item.source_id for item in context_pack.items),
             assumptions=(),
@@ -911,7 +1199,9 @@ def _compile_work_packet(
     planning_evidence = FreshDependencyPlanningEvidence(
         planning_request=planning_request,
         dependency_plan=dependency_plan,
-        evidence_reference="P18.9.0 dependency plan before compile-only WorkPacket creation.",
+        evidence_reference=(
+            f"{target.ticket_id} dependency plan before compile-only WorkPacket creation."
+        ),
         rationale="The P17 compiler requires fresh deterministic dependency evidence.",
     )
     approval_record = build_ticket_approval_record(
@@ -923,7 +1213,7 @@ def _compile_work_packet(
             conflict_resolutions=(),
             approval_evidence=HumanApprovalEvidence(
                 reviewer_id="pepper-governed-runtime",
-                decision_reference="P18.9.0 compile-only TicketSpec acceptance evidence.",
+                decision_reference=f"{target.ticket_id} compile-only TicketSpec acceptance evidence.",
                 rationale=(
                     "Accept deterministic P16 TicketSpec for compile-only P17 WorkPacket "
                     "creation; P18 human ticket approval remains pending."
@@ -938,7 +1228,9 @@ def _compile_work_packet(
             approval_record=approval_record,
             publication_evidence=TicketPublicationEvidence(
                 publisher_id="pepper-governed-runtime",
-                publication_reference="P18.9.0 compile-only canonical TicketSpec publication.",
+                publication_reference=(
+                    f"{target.ticket_id} compile-only canonical TicketSpec publication."
+                ),
                 rationale=(
                     "Logical P16 publication is required by the existing P17 compiler "
                     "and grants no P18 execution authority."
@@ -950,7 +1242,7 @@ def _compile_work_packet(
     )
     authorization = build_work_packet_compilation_authorization(
         authorizer_id="pepper-governed-runtime",
-        authorization_reference="P18.9.0 deterministic compile-only authorization.",
+        authorization_reference=f"{target.ticket_id} deterministic compile-only authorization.",
         rationale=(
             "Invoke the accepted P17 compiler once to create a compile-only WorkPacket "
             "while preserving zero execution authority."
@@ -972,6 +1264,8 @@ def _compile_work_packet(
 
 def _build_workflow_transition(
     compilation_result: WorkPacketCompilationResult,
+    *,
+    target: GovernedTicketGenerationTarget,
 ) -> GovernedWorkflowTransitionResult:
     p17_binding = gsm._make_model(
         gsm.P17WorkflowBinding,
@@ -985,8 +1279,8 @@ def _build_workflow_transition(
         production_readiness_claimed=False,
     )
     identity = build_governed_workflow_identity(
-        project_id=CANONICAL_WORKFLOW_PROJECT_ID,
-        ticket_id=CANONICAL_WORKFLOW_TICKET_ID,
+        project_id=target.macroproject_id,
+        ticket_id=target.macroproject_id,
         ticket_revision=1,
         work_packet_id=compilation_result.work_packet.work_packet_id,
         work_packet_SHA256=compilation_result.work_packet.work_packet_SHA256,
@@ -1014,7 +1308,7 @@ def _build_workflow_transition(
         current_snapshot=current_snapshot,
         trigger=WorkflowTransitionTrigger.TICKET_GENERATED,
         authority=WorkflowTransitionAuthority.GOVERNED_RUNTIME,
-        evidence_refs=("ticket_factory_candidate", CANONICAL_TICKET_ID),
+        evidence_refs=("ticket_factory_candidate", target.ticket_id),
         runtime_projection=build_hermes_workflow_projection(
             runtime_kind=HermesWorkflowRuntimeKind.GOVERNANCE_ONLY,
             runtime_state="pepper:ticket_approval",
@@ -1247,44 +1541,74 @@ def _validate_requested_identity(
     requested_project_id: str | None,
     requested_ticket_id: str | None,
     requested_next_action_id: str | None,
+    target: GovernedTicketGenerationTarget,
 ) -> None:
-    if requested_project_id not in {None, "", CANONICAL_PROJECT_ID}:
-        raise TicketArchitectBridgeInputError("requested project is not PEPPER")
-    if requested_ticket_id not in {None, "", CANONICAL_TICKET_ID}:
-        raise TicketArchitectBridgeInputError("requested ticket is not P18.9.0")
-    if requested_next_action_id not in {None, "", CANONICAL_NEXT_ACTION_ID}:
-        raise TicketArchitectBridgeInputError("requested next action is not GENERATE_P18_9_0")
+    if requested_project_id not in {None, "", target.project_id}:
+        raise TicketArchitectBridgeInputError(f"requested project is not {target.project_id}")
+    if requested_ticket_id not in {None, "", target.ticket_id}:
+        raise TicketArchitectBridgeInputError(
+            f"requested ticket is not canonical next ticket {target.ticket_id}"
+        )
+    if requested_next_action_id not in {None, "", target.next_action_id}:
+        raise TicketArchitectBridgeInputError(
+            f"requested next action is not {target.next_action_id}"
+        )
 
 
-def _validate_workflow_eligibility(workflow: dict[str, Any]) -> None:
+def _validate_workflow_eligibility(
+    workflow: dict[str, Any],
+    *,
+    target: GovernedTicketGenerationTarget,
+) -> None:
     if not isinstance(workflow, dict):
         raise TicketArchitectBridgeInputError("workflow state is unavailable")
-    if workflow.get("project_id") != CANONICAL_PROJECT_ID:
-        raise TicketArchitectBridgeInputError("active governed project is not PEPPER")
-    if workflow.get("macroproject_id") != CANONICAL_MACROPROJECT_ID:
-        raise TicketArchitectBridgeInputError("active macroproject is not P18.9")
+    if workflow.get("project_id") != target.project_id:
+        raise TicketArchitectBridgeInputError(f"active governed project is not {target.project_id}")
+    if workflow.get("macroproject_id") != target.macroproject_id:
+        raise TicketArchitectBridgeInputError(
+            f"active macroproject is not {target.macroproject_id}"
+        )
     if workflow.get("current_ticket_id") not in {None, ""}:
-        raise TicketArchitectBridgeInputError("P18.9.0 generation requires no active ticket")
+        raise TicketArchitectBridgeInputError(
+            f"{target.ticket_id} generation requires no active ticket"
+        )
     if workflow.get("P18_9_ready") is not True:
         raise TicketArchitectBridgeInputError("P18.9 roadmap is not intake-ready")
-    if workflow.get("P18_9_ticket_generated") is True:
-        raise TicketArchitectBridgeConflict("workflow says P18.9.0 is generated but no authority record exists")
+    if target.ticket_id == CANONICAL_TICKET_ID and workflow.get("P18_9_ticket_generated") is True:
+        raise TicketArchitectBridgeConflict(
+            f"workflow says {target.ticket_id} is generated but no authority record exists"
+        )
+    if target.ticket_id != CANONICAL_TICKET_ID and workflow.get("next_ticket_generated") is True:
+        raise TicketArchitectBridgeConflict(
+            f"workflow says {target.ticket_id} is generated but no authority record exists"
+        )
     next_action = workflow.get("next_action")
     if not isinstance(next_action, dict):
         raise TicketArchitectBridgeInputError("next action is unavailable")
-    if next_action.get("id") != CANONICAL_NEXT_ACTION_ID:
-        raise TicketArchitectBridgeInputError("next action is not GENERATE_P18_9_0")
-    if next_action.get("target_ticket_id") != CANONICAL_TICKET_ID:
-        raise TicketArchitectBridgeInputError("next action does not target P18.9.0")
-    if workflow.get("workflow_status") not in {"planning_approved_or_intake_ready", "intake_ready"}:
-        raise TicketArchitectBridgeInputError("workflow is not intake-ready for P18.9.0 generation")
+    if next_action.get("id") != target.next_action_id:
+        raise TicketArchitectBridgeInputError(
+            f"next action is not {target.next_action_id}"
+        )
+    if next_action.get("target_ticket_id") != target.ticket_id:
+        raise TicketArchitectBridgeInputError(
+            f"next action does not target {target.ticket_id}"
+        )
+    if workflow.get("workflow_status") not in {
+        "planning_approved_or_intake_ready",
+        "intake_ready",
+        "completed",
+    }:
+        raise TicketArchitectBridgeInputError(
+            f"workflow is not intake-ready for {target.ticket_id} generation"
+        )
 
 
 def _persist_generation_record(record: dict[str, Any]) -> None:
-    path = generation_record_path()
+    target = _target_from_record(record)
+    path = generation_record_path_for_ticket(target.ticket_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
-        existing = load_p18_9_0_generation_record()
+        existing = load_generation_record(ticket_id=target.ticket_id)
         if existing is not None:
             return
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -1307,6 +1631,7 @@ def _persist_approval_decision_record(record: dict[str, Any]) -> None:
 
 
 def _operational_result(record: dict[str, Any], *, idempotent_replay: bool) -> dict[str, Any]:
+    target = _target_from_record(record)
     authority = _authority_projection(record)
     return {
         "source_system": "pepper-ticket-architect-bridge",
@@ -1314,11 +1639,13 @@ def _operational_result(record: dict[str, Any], *, idempotent_replay: bool) -> d
         "policy_id": TICKET_ARCHITECT_BRIDGE_POLICY_ID,
         "idempotent_replay": idempotent_replay,
         "generation_status": "awaiting_ticket_approval",
-        "project_id": CANONICAL_PROJECT_ID,
-        "macroproject_id": CANONICAL_MACROPROJECT_ID,
-        "ticket_id": CANONICAL_TICKET_ID,
-        "ticket_title": CANONICAL_TICKET_TITLE,
-        "canonical_roadmap_authority": CANONICAL_ROADMAP_AUTHORITY,
+        "project_id": target.project_id,
+        "macroproject_id": target.macroproject_id,
+        "ticket_id": target.ticket_id,
+        "ticket_title": target.ticket_title,
+        "canonical_roadmap_authority": target.canonical_roadmap_authority,
+        "roadmap_authority_path": target.roadmap_authority_path,
+        "roadmap_authority_section": target.roadmap_authority_section,
         "workflow_status": "awaiting_ticket_approval",
         "workflow_transition_id": "GWT-002",
         "human_ticket_approval_required": True,
@@ -1333,9 +1660,10 @@ def _operational_result(record: dict[str, Any], *, idempotent_replay: bool) -> d
         "WorkPacket_compilation_count": 1,
         "authority": authority,
         "next_action": {
-            "id": HUMAN_APPROVAL_NEXT_ACTION_ID,
-            "label": "Human ticket approval required before P18.9.0 execution.",
-            "target_ticket_id": CANONICAL_TICKET_ID,
+            "id": target.approval_next_action_id,
+            "label": f"Human ticket approval required before {target.ticket_id} execution.",
+            "target_ticket_id": target.ticket_id,
+            "target_ticket_title": target.ticket_title,
             "required_human_action": "ticket_approval",
         },
     }
@@ -1375,8 +1703,9 @@ def _approval_decision_operational_result(
 
 
 def _authority_projection(record: dict[str, Any]) -> dict[str, Any]:
+    ticket_id = _safe_ticket_id(record.get("ticket_id"))
     return {
-        "authority_record": str(_STORE_DIR / _STORE_FILE).replace("\\", "/"),
+        "authority_record": str(_STORE_DIR / f"{ticket_id}.json").replace("\\", "/"),
         "bridge_SHA256": record["bridge_SHA256"],
         "ticket_spec_SHA256": record["ticket_spec_SHA256"],
         "dependency_plan_SHA256": record["dependency_plan_SHA256"],
@@ -1404,16 +1733,23 @@ def _approval_decision_projection(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _require_identity(record: dict[str, Any]) -> None:
+def _require_identity(
+    record: dict[str, Any],
+    *,
+    target: GovernedTicketGenerationTarget,
+) -> None:
     expected = {
         "schema_version": TICKET_ARCHITECT_BRIDGE_SCHEMA_VERSION,
         "policy_id": TICKET_ARCHITECT_BRIDGE_POLICY_ID,
-        "project_id": CANONICAL_PROJECT_ID,
-        "macroproject_id": CANONICAL_MACROPROJECT_ID,
-        "ticket_id": CANONICAL_TICKET_ID,
-        "ticket_title": CANONICAL_TICKET_TITLE,
-        "canonical_roadmap_authority": CANONICAL_ROADMAP_AUTHORITY,
-        "idempotency_key": _idempotency_key(),
+        "project_id": target.project_id,
+        "macroproject_id": target.macroproject_id,
+        "ticket_id": target.ticket_id,
+        "ticket_title": target.ticket_title,
+        "source_next_action_id": target.next_action_id,
+        "canonical_roadmap_authority": target.canonical_roadmap_authority,
+        "roadmap_authority_path": target.roadmap_authority_path,
+        "roadmap_authority_section": target.roadmap_authority_section,
+        "idempotency_key": target.idempotency_key,
         "generation_status": "awaiting_ticket_approval",
     }
     for key, value in expected.items():

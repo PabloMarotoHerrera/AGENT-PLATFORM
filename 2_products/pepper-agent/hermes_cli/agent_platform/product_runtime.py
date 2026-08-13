@@ -653,6 +653,7 @@ def _p18_9_0_generation_overlay() -> tuple[dict[str, Any] | None, dict[str, Any]
     try:
         from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
             generated_record_to_workflow_overlay,
+            load_generation_record,
             load_p18_9_0_generation_record,
         )
 
@@ -683,6 +684,11 @@ def _p18_9_0_generation_overlay() -> tuple[dict[str, Any] | None, dict[str, Any]
                         )
                         if review_overlay is not None:
                             overlay.update(review_overlay)
+                            next_ticket_id = overlay.get("next_ticket_id")
+                            if next_ticket_id:
+                                next_record = load_generation_record(ticket_id=str(next_ticket_id))
+                                if next_record is not None:
+                                    overlay.update(generated_record_to_workflow_overlay(next_record))
                         if review_blocker is not None:
                             return overlay, review_blocker
                     return overlay, retry_start_blocker
@@ -705,6 +711,11 @@ def _p18_9_0_generation_overlay() -> tuple[dict[str, Any] | None, dict[str, Any]
                     )
                     if review_overlay is not None:
                         overlay.update(review_overlay)
+                        next_ticket_id = overlay.get("next_ticket_id")
+                        if next_ticket_id:
+                            next_record = load_generation_record(ticket_id=str(next_ticket_id))
+                            if next_record is not None:
+                                overlay.update(generated_record_to_workflow_overlay(next_record))
                     if review_blocker is not None:
                         return overlay, review_blocker
             if start_blocker is not None:
@@ -762,7 +773,8 @@ def _subsystems() -> tuple[str, ...]:
     return (wa.MEMORY, wa.SKILLS)
 
 
-_P18_9_0_TICKET_APPROVAL_KIND = "ticket_approval"
+_TICKET_APPROVAL_KIND = "ticket_approval"
+_P18_9_0_TICKET_APPROVAL_KIND = _TICKET_APPROVAL_KIND
 
 
 def _approval_title(record: dict[str, Any]) -> str:
@@ -830,19 +842,46 @@ def _p18_9_0_pending_ticket_approval_record() -> dict[str, Any] | None:
     return None if decision is not None else record
 
 
-def _p18_9_0_ticket_approval_summary(record: dict[str, Any]) -> dict[str, Any]:
-    from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
-        CANONICAL_APPROVAL_ID,
-        CANONICAL_TICKET_ID,
-        CANONICAL_TICKET_TITLE,
-    )
+def _current_pending_ticket_approval_record() -> dict[str, Any] | None:
+    p18_9_0_pending = _p18_9_0_pending_ticket_approval_record()
+    if p18_9_0_pending is not None:
+        return p18_9_0_pending
+    try:
+        from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
+            CANONICAL_TICKET_ID,
+            generation_record_path_for_ticket,
+            load_generation_record,
+        )
 
+        store_dir = generation_record_path_for_ticket(CANONICAL_TICKET_ID).parent
+        records: list[dict[str, Any]] = []
+        for path in sorted(store_dir.glob("*.json")):
+            if path.name.endswith(".approval-decision.json") or path.stem == CANONICAL_TICKET_ID:
+                continue
+            try:
+                record = load_generation_record(ticket_id=path.stem)
+            except Exception:
+                continue
+            if record is not None and record.get("human_ticket_approval_present") is not True:
+                records.append(record)
+    except Exception:
+        return None
+    if not records:
+        return None
+    if len(records) > 1:
+        raise ProductRuntimeConflict("pending ticket approval authority is ambiguous")
+    return records[0]
+
+
+def _ticket_approval_summary(record: dict[str, Any]) -> dict[str, Any]:
+    ticket_id = _safe_id(record.get("ticket_id"))
+    ticket_title = _safe_text(record.get("ticket_title"), limit=300)
     return {
-        "id": CANONICAL_APPROVAL_ID,
+        "id": ticket_id,
         "semantics": "explicit_approval_request",
-        "title": f"Review governed ticket approval: {CANONICAL_TICKET_ID}",
+        "title": f"Review governed ticket approval: {ticket_id}",
         "summary": (
-            f"Generated {CANONICAL_TICKET_ID} {CANONICAL_TICKET_TITLE!r} is awaiting "
+            f"Generated {ticket_id} {ticket_title!r} is awaiting "
             "explicit human ticket approval. The existing TicketSpec, WorkPacket ID, "
             "WorkPacket digest and compile count are preserved."
         ),
@@ -854,7 +893,7 @@ def _p18_9_0_ticket_approval_summary(record: dict[str, Any]) -> dict[str, Any]:
         "risk_label": "medium",
         "target": {
             "type": "runtime_action",
-            "label": f"{CANONICAL_TICKET_ID} {CANONICAL_TICKET_TITLE}",
+            "label": f"{ticket_id} {ticket_title}",
         },
         "reason": (
             "Approve records a human ticket approval through the governed P18 approval "
@@ -863,6 +902,10 @@ def _p18_9_0_ticket_approval_summary(record: dict[str, Any]) -> dict[str, Any]:
             "Docker, or invokes Graphify."
         ),
     }
+
+
+def _p18_9_0_ticket_approval_summary(record: dict[str, Any]) -> dict[str, Any]:
+    return _ticket_approval_summary(record)
 
 
 def _p18_9_0_ticket_approval_evidence(record: dict[str, Any]) -> list[dict[str, str]]:
@@ -896,9 +939,9 @@ def build_approval_inbox_source() -> dict[str, Any]:
     from tools import write_approval as wa
 
     approvals: list[dict[str, Any]] = []
-    ticket_approval = _p18_9_0_pending_ticket_approval_record()
+    ticket_approval = _current_pending_ticket_approval_record()
     if ticket_approval is not None:
-        approvals.append(_p18_9_0_ticket_approval_summary(ticket_approval))
+        approvals.append(_ticket_approval_summary(ticket_approval))
     for subsystem in _subsystems():
         for record in wa.list_pending(subsystem):
             approvals.append(_approval_summary(record))
@@ -912,15 +955,12 @@ def build_approval_inbox_source() -> dict[str, Any]:
 
 def _find_pending(approval_id: str) -> tuple[str, dict[str, Any]]:
     from tools import write_approval as wa
-    from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
-        CANONICAL_APPROVAL_ID,
-    )
 
     approval_id = _safe_id(approval_id)
     matches: list[tuple[str, dict[str, Any]]] = []
-    ticket_approval = _p18_9_0_pending_ticket_approval_record()
-    if ticket_approval is not None and approval_id == CANONICAL_APPROVAL_ID:
-        matches.append((_P18_9_0_TICKET_APPROVAL_KIND, ticket_approval))
+    ticket_approval = _current_pending_ticket_approval_record()
+    if ticket_approval is not None and approval_id == _safe_id(ticket_approval.get("ticket_id")):
+        matches.append((_TICKET_APPROVAL_KIND, ticket_approval))
     for subsystem in _subsystems():
         record = wa.get_pending(subsystem, approval_id)
         if record:
@@ -936,8 +976,8 @@ def build_approval_detail_source(approval_id: str) -> dict[str, Any]:
     """Return one bounded approval detail source by source-local id."""
 
     subsystem, record = _find_pending(approval_id)
-    if subsystem == _P18_9_0_TICKET_APPROVAL_KIND:
-        summary = _p18_9_0_ticket_approval_summary(record)
+    if subsystem == _TICKET_APPROVAL_KIND:
+        summary = _ticket_approval_summary(record)
         return {
             "source_system": APPROVAL_SOURCE_SYSTEM,
             "source_authority": "pepper-ticket-architect-bridge-authority",
@@ -1032,6 +1072,8 @@ def apply_approval_decision(
 
     subsystem, record = _find_pending(approval_id)
     if subsystem == _P18_9_0_TICKET_APPROVAL_KIND:
+        if record.get("ticket_id") != "P18.9.0":
+            raise ProductRuntimeConflict("generic ticket approval requires separate human approval support")
         from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
             TicketArchitectBridgeConflict,
             apply_p18_9_0_approval_decision,
@@ -1419,11 +1461,12 @@ def generate_current_governed_ticket(
     """Generate the current governed Pepper ticket from the active next action."""
 
     from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
-        generate_p18_9_0_ticket,
+        generate_current_ticket,
     )
 
-    return generate_p18_9_0_ticket(
-        workflow=build_workflow_control_snapshot(),
+    workflow = build_workflow_control_snapshot()
+    return generate_current_ticket(
+        workflow=workflow,
         requested_project_id=project_id,
         requested_ticket_id=ticket_id,
         requested_next_action_id=next_action_id,
@@ -4970,6 +5013,25 @@ def _p18_9_next_ticket_authority() -> dict[str, Any]:
         "auto_generated": False,
         "execution_authorized": False,
         "next_action_id": PEPPER_REVIEW_ACCEPTANCE_NEXT_ACTION_ID,
+    }
+
+
+def _current_next_ticket_generation_target(workflow: dict[str, Any]) -> dict[str, Any]:
+    from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
+        resolve_generation_target_from_workflow,
+    )
+
+    target = resolve_generation_target_from_workflow(workflow)
+    return {
+        "project_id": target.project_id,
+        "macroproject_id": target.macroproject_id,
+        "macroproject_title": target.macroproject_title,
+        "ticket_id": target.ticket_id,
+        "ticket_title": target.ticket_title,
+        "next_action_id": target.next_action_id,
+        "roadmap_authority_path": target.roadmap_authority_path,
+        "roadmap_authority_section": target.roadmap_authority_section,
+        "canonical_roadmap_authority": target.canonical_roadmap_authority,
     }
 
 

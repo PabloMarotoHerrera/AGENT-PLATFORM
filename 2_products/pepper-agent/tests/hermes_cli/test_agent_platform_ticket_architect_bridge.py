@@ -39,6 +39,33 @@ def _workflow(**overrides):
     return data
 
 
+def _next_ticket_workflow(**overrides):
+    data = _workflow(
+        current_ticket_id=None,
+        current_ticket_title=None,
+        next_ticket_id="P18.9.1",
+        next_ticket_title="Pepper Design System",
+        workflow_state="P18.9.0-COMPLETED",
+        workflow_status="completed",
+        queue_state="p18_9_0_closed_next_ticket_ready",
+        validation_state="review_accepted",
+        review_state="accepted",
+        P18_9_ticket_generated=True,
+        P18_9_0_closed=True,
+        next_ticket_ready=True,
+        next_ticket_generated=False,
+        next_action={
+            "id": "GENERATE_P18_9_1_REQUIRES_SEPARATE_HUMAN_ACTION",
+            "label": "Generate governed P18.9.1 Pepper Design System.",
+            "target_ticket_id": "P18.9.1",
+            "target_ticket_title": "Pepper Design System",
+            "required_human_action": "ticket_generation",
+        },
+    )
+    data.update(overrides)
+    return data
+
+
 @pytest.fixture
 def bridge_home(tmp_path, monkeypatch):
     home = tmp_path / "hermes-home"
@@ -116,8 +143,149 @@ def test_stale_workflow_title_does_not_override_canonical_roadmap(bridge_home) -
     assert record is not None
     assert record["ticket_spec"]["title"] == bridge.CANONICAL_TICKET_TITLE
     serialized = json.dumps(record)
-    assert "Product UX / IA Baseline" in serialized
+    assert "Product UX / IA Baseline" not in serialized
     assert record["canonical_roadmap_authority"] == "human-approved-p18.9-roadmap"
+
+
+def test_generic_generation_resolves_canonical_next_ticket_from_roadmap(bridge_home) -> None:
+    result = bridge.generate_current_ticket(workflow=_next_ticket_workflow())
+    record = bridge.load_generation_record(ticket_id="P18.9.1")
+
+    assert result["idempotent_replay"] is False
+    assert result["ticket_id"] == "P18.9.1"
+    assert result["ticket_title"] == "Pepper Design System"
+    assert result["roadmap_authority_path"] == "2_products/pepper-agent/docs/agent-platform/workflow_migration_closure.md"
+    assert result["workflow_status"] == "awaiting_ticket_approval"
+    assert result["next_action"]["id"] == "APPROVE_P18_9_1"
+    assert result["human_ticket_approval_required"] is True
+    assert result["execution_ready"] is False
+    assert result["worker_execution"] is False
+    assert result["Kanban_dispatch"] is False
+    assert result["Git_mutation"] is False
+    assert bridge.generation_record_path_for_ticket("P18.9.1").exists()
+    assert record is not None
+    assert record["ticket_spec"]["ticket_id"] == "P18.9.1"
+    assert record["ticket_spec"]["title"] == "Pepper Design System"
+    assert record["dependency_plan"]["ticket_ids"] == ["P18.9.1"]
+    assert record["lint_report"]["disposition"] == TicketLintDisposition.PASS.value
+    assert record["work_packet_compilation_result"]["work_packet"]["execution_ready"] is False
+    assert record["WorkPacket_compilation_count"] == 1
+    assert record["workflow_transition_result"]["transition"]["transition_id"] == "GWT-002"
+
+
+def test_generic_generation_rejects_wrong_requested_ticket_and_wrong_next_action(bridge_home) -> None:
+    with pytest.raises(bridge.TicketArchitectBridgeInputError, match="requested ticket"):
+        bridge.generate_current_ticket(
+            workflow=_next_ticket_workflow(),
+            requested_ticket_id="P18.9.2",
+        )
+
+    with pytest.raises(bridge.TicketArchitectBridgeInputError, match="requested next action"):
+        bridge.generate_current_ticket(
+            workflow=_next_ticket_workflow(),
+            requested_next_action_id="GENERATE_P18_9_2",
+        )
+
+    assert bridge.load_generation_record(ticket_id="P18.9.1") is None
+
+
+@pytest.mark.parametrize(
+    "workflow, message",
+    [
+        (_next_ticket_workflow(next_ticket_id=None), "no next governed ticket"),
+        (_next_ticket_workflow(current_ticket_id="P18.9.1"), "requires no active ticket"),
+        (_next_ticket_workflow(next_action={"id": "APPROVE_P18_9_1", "target_ticket_id": "P18.9.1"}), "generation action"),
+        (_next_ticket_workflow(next_action={"id": "GENERATE_P18_9_1_REQUIRES_SEPARATE_HUMAN_ACTION", "target_ticket_id": "P18.9.2"}), "target"),
+    ],
+)
+def test_generic_generation_rejects_ineligible_workflow(bridge_home, workflow, message) -> None:
+    with pytest.raises(bridge.TicketArchitectBridgeError, match=message):
+        bridge.generate_current_ticket(workflow=workflow)
+
+    assert bridge.load_generation_record(ticket_id="P18.9.1") is None
+
+
+def test_generic_generation_is_idempotent_without_recompiling(bridge_home, monkeypatch) -> None:
+    calls = []
+    original = bridge.compile_ticket_spec_to_work_packet
+
+    def counting_compile(request):
+        calls.append(request)
+        return original(request)
+
+    monkeypatch.setattr(bridge, "compile_ticket_spec_to_work_packet", counting_compile)
+
+    first = bridge.generate_current_ticket(workflow=_next_ticket_workflow())
+    second = bridge.generate_current_ticket(workflow=_next_ticket_workflow())
+
+    assert first["idempotent_replay"] is False
+    assert second["idempotent_replay"] is True
+    assert first["authority"] == second["authority"]
+    assert len(calls) == 1
+
+
+def test_product_runtime_projects_generic_generation_to_pending_approval(bridge_home, monkeypatch) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    monkeypatch.setattr(
+        pr,
+        "_p18_9_0_generation_overlay",
+        lambda: (None, None),
+    )
+    monkeypatch.setattr(pr, "build_workflow_control_snapshot", lambda: _next_ticket_workflow())
+
+    generated = pr.generate_current_governed_ticket(
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+        next_action_id="GENERATE_P18_9_1_REQUIRES_SEPARATE_HUMAN_ACTION",
+    )
+    overlay = bridge.generated_record_to_workflow_overlay(
+        bridge.load_generation_record(ticket_id="P18.9.1")
+    )
+    inbox = pr.build_approval_inbox_source()
+
+    assert generated["ticket_id"] == "P18.9.1"
+    assert overlay["current_ticket_id"] == "P18.9.1"
+    assert overlay["workflow_status"] == "awaiting_ticket_approval"
+    assert overlay["approval_state"] == "pending_ticket_approval"
+    assert overlay["next_action"]["id"] == "APPROVE_P18_9_1"
+    assert overlay["WorkPacket_execution_authorized"] is False
+    assert overlay["worker_execution"] is False
+    assert overlay["Kanban_dispatch"] is False
+    assert overlay["Git_mutation"] is False
+    assert [item["id"] for item in inbox["approvals"]] == ["P18.9.1"]
+    assert inbox["approvals"][0]["request_type"] == "ticket_approval"
+
+
+def test_chat_tool_requires_explicit_generation_request_and_routes_generic_ticket(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    monkeypatch.setattr(pr, "build_workflow_control_snapshot", lambda: _next_ticket_workflow())
+
+    ambiguous = _chat_tool_result(
+        "generate_current_ticket",
+        {"human_request_text": "P18.9.1 parece correcto.", "ticket_id": "P18.9.1"},
+    )
+    accepted = _chat_tool_result(
+        "generate_current_ticket",
+        {
+            "human_request_text": "Genera el siguiente ticket gobernado P18.9.1.",
+            "ticket_id": "P18.9.1",
+            "next_action_id": "GENERATE_P18_9_1_REQUIRES_SEPARATE_HUMAN_ACTION",
+        },
+    )
+
+    assert "success" not in ambiguous
+    assert "ambiguous" in ambiguous["error"]
+    assert accepted["success"] is True
+    assert accepted["ticket_id"] == "P18.9.1"
+    assert accepted["human_request_text"] == "Genera el siguiente ticket gobernado P18.9.1."
+    assert accepted["worker_execution"] is False
+    assert accepted["Kanban_dispatch"] is False
+    assert accepted["Git_mutation"] is False
 
 
 @pytest.mark.parametrize(

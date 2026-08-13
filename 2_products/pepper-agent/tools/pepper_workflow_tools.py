@@ -182,6 +182,31 @@ def _validate_explicit_projection_request(value: object) -> str:
     return raw
 
 
+def _validate_explicit_generation_request(value: object) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        raise ValueError("human_request_text is required")
+    normalized = _normalize_intent_text(raw)
+    if "?" in raw or "¿" in raw:
+        raise ValueError("generation request text must not be a question")
+    if any(
+        phrase in normalized
+        for phrase in (
+            "parece correcto",
+            "parece bien",
+            "podemos continuar",
+            "can we continue",
+            "looks correct",
+            "looks good",
+            "seems right",
+        )
+    ):
+        raise ValueError("generation request text is ambiguous")
+    if not re.search(r"\b(generate|generar|genera|crear|crea|create)\b", normalized):
+        raise ValueError("explicit governed ticket generation request text is required")
+    return raw
+
+
 def _validate_explicit_start_request(value: object) -> str:
     raw = str(value or "").strip()
     if not raw:
@@ -322,6 +347,16 @@ def _review_acceptance_text_from_args_or_user_task(
     kwargs: dict[str, Any],
 ) -> object:
     value = args.get("human_acceptance_text")
+    if str(value or "").strip():
+        return value
+    return kwargs.get("user_task")
+
+
+def _generation_request_text_from_args_or_user_task(
+    args: dict[str, Any],
+    kwargs: dict[str, Any],
+) -> object:
+    value = args.get("human_request_text")
     if str(value or "").strip():
         return value
     return kwargs.get("user_task")
@@ -586,6 +621,9 @@ def _get_next_action(args: dict[str, Any], **_kwargs) -> str:
 def _generate_current_ticket(args: dict[str, Any], **_kwargs) -> str:
     pr = _runtime()
     try:
+        human_request_text = _validate_explicit_generation_request(
+            _generation_request_text_from_args_or_user_task(args, _kwargs)
+        )
         result = pr.generate_current_governed_ticket(
             project_id=str(args.get("project_id") or "").strip() or None,
             ticket_id=str(args.get("ticket_id") or "").strip() or None,
@@ -595,6 +633,7 @@ def _generate_current_ticket(args: dict[str, Any], **_kwargs) -> str:
         return tool_error(str(exc) or "current governed ticket generation failed")
     return _result({
         "source_tool": "generate_current_ticket",
+        "human_request_text": human_request_text,
         **result,
     })
 
@@ -823,11 +862,15 @@ _GENERATE_CURRENT_TICKET_SCHEMA = {
         },
         "ticket_id": {
             "type": "string",
-            "description": "Optional governed ticket guard. Must be P18.9.0 if supplied.",
+            "description": "Optional governed ticket guard. Must equal the canonical next ticket if supplied.",
         },
         "next_action_id": {
             "type": "string",
-            "description": "Optional next-action guard. Must be GENERATE_P18_9_0 if supplied.",
+            "description": "Optional next-action guard. Must equal the current canonical generation action if supplied.",
+        },
+        "human_request_text": {
+            "type": "string",
+            "description": "Exact user text that explicitly requests generation of the current canonical next governed ticket.",
         },
     },
     "additionalProperties": False,
@@ -1216,8 +1259,9 @@ registry.register(
     schema={
         "name": "generate_current_ticket",
         "description": (
-            "Generate only Pepper's current governed next ticket when the active next action "
-            "is GENERATE_P18_9_0. Stops at awaiting_ticket_approval; no execution or Git."
+            "Generate only Pepper's canonical current next governed ticket when the active "
+            "next action is a ticket-generation action. Stops at awaiting_ticket_approval; "
+            "no approval, execution, worker dispatch, Docker, Graphify, or Git."
         ),
         "parameters": _GENERATE_CURRENT_TICKET_SCHEMA,
     },

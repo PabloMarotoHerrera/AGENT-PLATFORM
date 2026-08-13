@@ -334,6 +334,8 @@ def test_lead_agent_prompt_requires_tool_backed_state() -> None:
 
     assert "call the relevant Pepper workflow tool" in prompt
     assert "generate_current_ticket" in prompt
+    assert "current canonical next governed ticket" in prompt
+    assert "P18.9.0 TicketSpec/WorkPacket bridge" not in prompt
     assert "decide_pending_approval" in prompt
     assert "start_current_ticket_execution" in prompt
     assert "recover_current_ticket_execution" in prompt
