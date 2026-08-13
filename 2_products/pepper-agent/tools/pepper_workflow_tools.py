@@ -1,8 +1,10 @@
-"""Pepper Lead Agent read-only governed workflow tools."""
+"""Pepper Lead Agent bounded governed workflow tools."""
 
 from __future__ import annotations
 
 import json
+import re
+import unicodedata
 from typing import Any
 
 from tools.registry import registry, tool_error
@@ -11,6 +13,26 @@ from tools.registry import registry, tool_error
 TOOLSET = "pepper_workflow"
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 100
+CURRENT_TICKET_APPROVAL_ID = "P18.9.0"
+CURRENT_TICKET_APPROVAL_NEXT_ACTION_ID = "APPROVE_P18_9_0"
+CURRENT_TICKET_PROJECTION_NEXT_ACTION_ID = "P18_9_0_APPROVED_NO_EXECUTION"
+CURRENT_TICKET_START_NEXT_ACTION_ID = "START_P18_9_0_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION"
+CURRENT_TICKET_RECOVERY_NEXT_ACTION_ID = "RECOVER_P18_9_0_EXECUTION"
+CURRENT_TICKET_RETRY_START_NEXT_ACTION_ID = "START_P18_9_0_RETRY_REQUIRES_HUMAN_AUTHORIZATION"
+CURRENT_TICKET_REVIEW_PREPARE_NEXT_ACTION_ID = "PREPARE_P18_9_0_REVIEW"
+CURRENT_TICKET_REVIEW_ACCEPTANCE_NEXT_ACTION_ID = "AWAIT_HUMAN_P18_9_0_REVIEW_ACCEPTANCE"
+CURRENT_TICKET_RECOVERY_AUTHORIZATION_TEXT = (
+    "Autorizo explícitamente la recuperación de la ejecución fallida de P18.9.0."
+)
+CURRENT_TICKET_REVIEW_ACCEPTANCE_TEXT = (
+    "Acepto explícitamente la review de P18.9.0 y el resultado preparado para aceptación humana."
+)
+CURRENT_TICKET_RETRY_START_AUTHORIZATION_TEXTS = frozenset({
+    "Autorizo explícitamente el retry de P18.9.0.",
+    "Reintenta P18.9.0.",
+    "Inicia el segundo intento de P18.9.0.",
+})
+CURRENT_PROJECT_ID = "PEPPER"
 
 
 def _limit(args: dict[str, Any], default: int = DEFAULT_LIMIT) -> int:
@@ -33,6 +55,276 @@ def _context() -> dict[str, Any]:
 
 def _result(payload: dict[str, Any]) -> str:
     return json.dumps({"success": True, **payload}, ensure_ascii=False)
+
+
+def _normalize_intent_text(value: object) -> str:
+    text = unicodedata.normalize("NFKD", str(value or "").strip())
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return text.lower()
+
+
+def _mentioned_ticket_ids(text: str) -> set[str]:
+    return {
+        match.group(0).replace("_", ".").replace("-", ".").upper()
+        for match in re.finditer(r"\bp\d+(?:[._-]\d+)+\b", text, flags=re.IGNORECASE)
+    }
+
+
+def _validate_explicit_human_decision(*, decision: str, human_decision_text: object) -> str:
+    raw = str(human_decision_text or "").strip()
+    if not raw:
+        raise ValueError("human_decision_text is required")
+    normalized = _normalize_intent_text(raw)
+    if "?" in raw or "¿" in raw:
+        raise ValueError("approval decision text must not be a question")
+    if any(
+        phrase in normalized
+        for phrase in (
+            "creo que",
+            "pienso que",
+            "tal vez",
+            "quizas",
+            "quiza",
+            "maybe",
+            "probably",
+            "what if",
+            "que pasa si",
+            "si lo apruebo",
+        )
+    ):
+        raise ValueError("approval decision text is ambiguous")
+
+    ticket_ids = _mentioned_ticket_ids(normalized)
+    if ticket_ids and CURRENT_TICKET_APPROVAL_ID not in ticket_ids:
+        raise ValueError("approval decision text targets a different ticket")
+
+    approval_intent = bool(
+        re.search(r"\b(apruebo|aprueba|apruebalo|aprobar|aprobado|approve|approved)\b", normalized)
+    )
+    rejection_intent = bool(
+        re.search(r"\b(rechazo|rechaza|rechazalo|rechazar|rechazado|reject|rejected|deny|denied)\b", normalized)
+    )
+    if approval_intent and rejection_intent:
+        raise ValueError("approval decision text contains conflicting decisions")
+    if decision == "approve" and not approval_intent:
+        raise ValueError("explicit human approval text is required")
+    if decision == "reject" and not rejection_intent:
+        raise ValueError("explicit human rejection text is required")
+    return raw
+
+
+def _validate_optional_current_approval_guards(args: dict[str, Any]) -> str:
+    approval_id = str(args.get("approval_id") or CURRENT_TICKET_APPROVAL_ID).strip()
+    if approval_id != CURRENT_TICKET_APPROVAL_ID:
+        raise ValueError("decide_pending_approval is bounded to approval P18.9.0")
+    if str(args.get("project_id") or CURRENT_PROJECT_ID).strip() != CURRENT_PROJECT_ID:
+        raise ValueError("active governed project must be PEPPER")
+    if str(args.get("ticket_id") or CURRENT_TICKET_APPROVAL_ID).strip() != CURRENT_TICKET_APPROVAL_ID:
+        raise ValueError("active governed ticket must be P18.9.0")
+    next_action_id = str(args.get("next_action_id") or CURRENT_TICKET_APPROVAL_NEXT_ACTION_ID).strip()
+    if next_action_id != CURRENT_TICKET_APPROVAL_NEXT_ACTION_ID:
+        raise ValueError("approval next action must be APPROVE_P18_9_0")
+    return approval_id
+
+
+def _validate_pending_current_ticket_approval(
+    *,
+    context: dict[str, Any],
+    approval: dict[str, Any],
+) -> None:
+    if context.get("project_id") != CURRENT_PROJECT_ID:
+        raise ValueError("current project is not PEPPER")
+    if context.get("macroproject_id") != "P18.9":
+        raise ValueError("current macroproject is not P18.9")
+    if context.get("current_ticket_id") != CURRENT_TICKET_APPROVAL_ID:
+        raise ValueError("current active ticket is not P18.9.0")
+    next_action = context.get("next_action")
+    if not isinstance(next_action, dict):
+        raise ValueError("current next action is unavailable")
+    if next_action.get("id") != CURRENT_TICKET_APPROVAL_NEXT_ACTION_ID:
+        raise ValueError("current next action is not APPROVE_P18_9_0")
+    if next_action.get("target_ticket_id") != CURRENT_TICKET_APPROVAL_ID:
+        raise ValueError("current next action does not target P18.9.0")
+    if approval.get("id") != CURRENT_TICKET_APPROVAL_ID:
+        raise ValueError("approval target mismatch")
+    if approval.get("status") != "pending":
+        raise ValueError("approval is not pending")
+    if approval.get("request_type") != "ticket_approval":
+        raise ValueError("approval is not a ticket approval")
+    target = approval.get("target")
+    if not isinstance(target, dict):
+        raise ValueError("approval target is unavailable")
+    if CURRENT_TICKET_APPROVAL_ID not in str(target.get("label") or ""):
+        raise ValueError("approval target does not match P18.9.0")
+
+
+def _validate_current_ticket_identity_context(context: dict[str, Any]) -> None:
+    if context.get("project_id") != CURRENT_PROJECT_ID:
+        raise ValueError("current project is not PEPPER")
+    if context.get("macroproject_id") != "P18.9":
+        raise ValueError("current macroproject is not P18.9")
+    if context.get("current_ticket_id") != CURRENT_TICKET_APPROVAL_ID:
+        raise ValueError("current active ticket is not P18.9.0")
+
+
+def _validate_explicit_projection_request(value: object) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        raise ValueError("human_request_text is required")
+    normalized = _normalize_intent_text(raw)
+    if "?" in raw or "¿" in raw:
+        raise ValueError("projection request text must not be a question")
+    ticket_ids = _mentioned_ticket_ids(normalized)
+    if ticket_ids and CURRENT_TICKET_APPROVAL_ID not in ticket_ids:
+        raise ValueError("projection request text targets a different ticket")
+    if not re.search(r"\b(prepara|preparar|prepare|project|proyecta|proyectar|kanban|ejecucion|execution)\b", normalized):
+        raise ValueError("explicit preparation/projection request text is required")
+    return raw
+
+
+def _validate_explicit_start_request(value: object) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        raise ValueError("human_authorization_text is required")
+    normalized = _normalize_intent_text(raw)
+    if "?" in raw or "¿" in raw:
+        raise ValueError("execution start authorization text must not be a question")
+    if any(
+        phrase in normalized
+        for phrase in (
+            "creo que",
+            "pienso que",
+            "tal vez",
+            "parece que",
+            "quizas",
+            "quiza",
+            "maybe",
+            "probably",
+            "looks like",
+            "what if",
+            "que pasa si",
+            "si lo ejecuto",
+            "if i start",
+        )
+    ):
+        raise ValueError("execution start authorization text is ambiguous")
+    ticket_ids = _mentioned_ticket_ids(normalized)
+    if ticket_ids and CURRENT_TICKET_APPROVAL_ID not in ticket_ids:
+        raise ValueError("execution start authorization targets a different ticket")
+    if "recuperacion" in normalized or "recuperar" in normalized or "recovery" in normalized:
+        raise ValueError("execution start authorization must not be recovery authorization")
+    retry_intent = bool(
+        re.search(r"\b(retry|reintenta|reintentar|reintento)\b", normalized)
+        or "segundo intento" in normalized
+        or "volver a ejecutar" in normalized
+    )
+    if retry_intent and raw not in CURRENT_TICKET_RETRY_START_AUTHORIZATION_TEXTS:
+        raise ValueError("exact explicit P18.9.0 retry-start authorization text is required")
+    if not re.search(
+        r"\b(start|execute|execution|dispatch|run|retry|authorize|authorized|authorization|inicia|iniciar|inicio|ejecuta|ejecutar|ejecucion|despacha|despachar|lanza|lanzar|arranca|arrancar|autoriza|autorizo|autorizar|autorizado|autorizacion|reintenta|reintentar|reintento)\b",
+        normalized,
+    ):
+        raise ValueError("explicit execution start authorization text is required")
+    return raw
+
+
+def _validate_explicit_recovery_request(value: object) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        raise ValueError("human_authorization_text is required")
+    if "?" in raw or "¿" in raw:
+        raise ValueError("execution recovery authorization text must not be a question")
+    if raw != CURRENT_TICKET_RECOVERY_AUTHORIZATION_TEXT:
+        raise ValueError(
+            "exact explicit P18.9.0 recovery authorization text is required"
+        )
+    return raw
+
+
+def _validate_explicit_review_prepare_request(value: object) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        raise ValueError("human_request_text is required")
+    normalized = _normalize_intent_text(raw)
+    if "?" in raw or "¿" in raw:
+        raise ValueError("review preparation request text must not be a question")
+    if any(
+        phrase in normalized
+        for phrase in (
+            "creo que",
+            "pienso que",
+            "tal vez",
+            "parece que",
+            "quizas",
+            "quiza",
+            "maybe",
+            "probably",
+            "looks like",
+            "what if",
+            "que pasa si",
+        )
+    ):
+        raise ValueError("review preparation request text is ambiguous")
+    ticket_ids = _mentioned_ticket_ids(normalized)
+    if ticket_ids and CURRENT_TICKET_APPROVAL_ID not in ticket_ids:
+        raise ValueError("review preparation request targets a different ticket")
+    if not re.search(
+        r"\b(prepare|prepara|preparar|review|revision|validacion|validation|validar|acceptance|aceptacion)\b",
+        normalized,
+    ):
+        raise ValueError("explicit P18.9.0 review preparation request text is required")
+    return raw
+
+
+def _validate_explicit_review_acceptance_request(value: object) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        raise ValueError("human_acceptance_text is required")
+    if "?" in raw or "¿" in raw:
+        raise ValueError("review acceptance text must not be a question")
+    if raw != CURRENT_TICKET_REVIEW_ACCEPTANCE_TEXT:
+        raise ValueError("exact explicit P18.9.0 review acceptance text is required")
+    return raw
+
+
+def _start_authorization_text_from_args_or_user_task(
+    args: dict[str, Any],
+    kwargs: dict[str, Any],
+) -> object:
+    value = args.get("human_authorization_text")
+    if str(value or "").strip():
+        return value
+    return kwargs.get("user_task")
+
+
+def _recovery_authorization_text_from_args_or_user_task(
+    args: dict[str, Any],
+    kwargs: dict[str, Any],
+) -> object:
+    value = args.get("human_authorization_text")
+    if str(value or "").strip():
+        return value
+    return kwargs.get("user_task")
+
+
+def _review_prepare_request_text_from_args_or_user_task(
+    args: dict[str, Any],
+    kwargs: dict[str, Any],
+) -> object:
+    value = args.get("human_request_text")
+    if str(value or "").strip():
+        return value
+    return kwargs.get("user_task")
+
+
+def _review_acceptance_text_from_args_or_user_task(
+    args: dict[str, Any],
+    kwargs: dict[str, Any],
+) -> object:
+    value = args.get("human_acceptance_text")
+    if str(value or "").strip():
+        return value
+    return kwargs.get("user_task")
 
 
 def _get_current_project(args: dict[str, Any], **_kwargs) -> str:
@@ -84,12 +376,15 @@ def _get_workflow_control(args: dict[str, Any], **_kwargs) -> str:
         "workflow_status": ctx["workflow_status"],
         "approval_state": ctx["approval_state"],
         "pending_approval_count": ctx["pending_approval_count"],
+        "pending_ticket_approval_count": ctx["pending_ticket_approval_count"],
         "queue_state": ctx["queue_state"],
         "execution_state": ctx["execution_state"],
         "active_execution_count": ctx["active_execution_count"],
         "validation_state": ctx["validation_state"],
         "review_state": ctx["review_state"],
         "recovery_state": ctx["recovery_state"],
+        "failure_category": ctx.get("failure_category"),
+        "failure_summary": ctx.get("failure_summary"),
         "git_handoff_state": ctx["git_handoff_state"],
         "blocker_count": ctx["blocker_count"],
         "warning_count": ctx["warning_count"],
@@ -150,6 +445,78 @@ def _inspect_pending_approval(args: dict[str, Any], **_kwargs) -> str:
     })
 
 
+def _decide_pending_approval(args: dict[str, Any], **_kwargs) -> str:
+    pr = _runtime()
+    decision = str(args.get("decision") or "").strip().lower()
+    if decision not in {"approve", "reject"}:
+        return tool_error("decision must be approve or reject", success=False)
+    try:
+        approval_id = _validate_optional_current_approval_guards(args)
+        human_decision_text = _validate_explicit_human_decision(
+            decision=decision,
+            human_decision_text=args.get("human_decision_text"),
+        )
+        context = pr.build_lead_agent_operational_context()
+        _validate_current_ticket_identity_context(context)
+        approvals = context.get("approvals", {}).get("items", [])
+        if not isinstance(approvals, list):
+            approvals = []
+        pending_match = next(
+            (
+                approval for approval in approvals
+                if isinstance(approval, dict) and approval.get("id") == approval_id
+            ),
+            None,
+        )
+        if pending_match is not None:
+            _validate_pending_current_ticket_approval(
+                context=context,
+                approval=pending_match,
+            )
+        result = pr.apply_approval_decision(
+            approval_id,
+            pr.ApprovalDecisionRequest(
+                decision=decision,
+                actor="pepper-chat-human",
+            ),
+        )
+        updated_context = pr.build_lead_agent_operational_context()
+    except Exception as exc:
+        return tool_error(str(exc) or "approval decision failed", success=False)
+
+    return _result({
+        "source_tool": "decide_pending_approval",
+        "source_system": result.get("source_system", pr.APPROVAL_SOURCE_SYSTEM),
+        "approval_id": approval_id,
+        "decision": result.get("decision", decision),
+        "status": result.get("status"),
+        "applied": result.get("applied", True),
+        "idempotent_replay": bool(result.get("idempotent_replay", False)),
+        "actor": result.get("actor"),
+        "human_decision_text": human_decision_text,
+        "current_ticket_id": updated_context.get("current_ticket_id"),
+        "workflow_state": updated_context.get("workflow_state"),
+        "workflow_status": updated_context.get("workflow_status"),
+        "approval_state": updated_context.get("approval_state"),
+        "pending_approval_count": updated_context.get("pending_approval_count"),
+        "pending_ticket_approval_count": updated_context.get("pending_ticket_approval_count"),
+        "next_action": updated_context.get("next_action"),
+        "workflow_transition_id": result.get("workflow_transition_id"),
+        "ticket_execution_authorized": False,
+        "WorkPacket_execution_authorized": False,
+        "runtime_execution_authorized": False,
+        "worker_execution": False,
+        "Kanban_dispatch": False,
+        "Git_mutation": False,
+        "WorkPacket_compilation_count": result.get("WorkPacket_compilation_count"),
+        "WorkPacket_recompile_required": result.get("WorkPacket_recompile_required"),
+        "auto_approval": False,
+        "auto_execution": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+    })
+
+
 def _get_execution_status(args: dict[str, Any], **_kwargs) -> str:
     pr = _runtime()
     source = pr.build_execution_collection_source()
@@ -181,6 +548,8 @@ def _get_review_status(args: dict[str, Any], **_kwargs) -> str:
         "validation_state": ctx["validation_state"],
         "review_state": ctx["review_state"],
         "recovery_state": ctx["recovery_state"],
+        "failure_category": ctx.get("failure_category"),
+        "failure_summary": ctx.get("failure_summary"),
         "git_handoff_state": ctx["git_handoff_state"],
         "blocker_count": ctx["blocker_count"],
         "warning_count": ctx["warning_count"],
@@ -198,6 +567,9 @@ def _get_next_action(args: dict[str, Any], **_kwargs) -> str:
         "project_id": ctx["project_id"],
         "current_ticket_id": ctx["current_ticket_id"],
         "workflow_status": ctx["workflow_status"],
+        "recovery_state": ctx["recovery_state"],
+        "failure_category": ctx.get("failure_category"),
+        "failure_summary": ctx.get("failure_summary"),
         "next_action": ctx["next_action"],
         "next_action_label": ctx["next_action_label"],
         "external_dashboard_state_copy_required": False,
@@ -208,6 +580,216 @@ def _get_next_action(args: dict[str, Any], **_kwargs) -> str:
         "Git_mutation": False,
         "evidence_timestamp": ctx["evidence_timestamp"],
         "evidence_version": ctx["evidence_version"],
+    })
+
+
+def _generate_current_ticket(args: dict[str, Any], **_kwargs) -> str:
+    pr = _runtime()
+    try:
+        result = pr.generate_current_governed_ticket(
+            project_id=str(args.get("project_id") or "").strip() or None,
+            ticket_id=str(args.get("ticket_id") or "").strip() or None,
+            next_action_id=str(args.get("next_action_id") or "").strip() or None,
+        )
+    except Exception as exc:
+        return tool_error(str(exc) or "current governed ticket generation failed")
+    return _result({
+        "source_tool": "generate_current_ticket",
+        **result,
+    })
+
+
+def _prepare_current_ticket_execution(args: dict[str, Any], **_kwargs) -> str:
+    pr = _runtime()
+    try:
+        human_request_text = _validate_explicit_projection_request(
+            args.get("human_request_text")
+        )
+        result = pr.project_current_approved_workpacket_to_kanban(
+            project_id=str(args.get("project_id") or "").strip() or None,
+            ticket_id=str(args.get("ticket_id") or "").strip() or None,
+            next_action_id=str(args.get("next_action_id") or "").strip() or None,
+        )
+        updated_context = pr.build_lead_agent_operational_context()
+    except Exception as exc:
+        return tool_error(str(exc) or "current approved WorkPacket projection failed", success=False)
+    return _result({
+        "source_tool": "prepare_current_ticket_execution",
+        "human_request_text": human_request_text,
+        **result,
+        "current_ticket_id": updated_context.get("current_ticket_id"),
+        "workflow_state": updated_context.get("workflow_state"),
+        "workflow_status": updated_context.get("workflow_status"),
+        "approval_state": updated_context.get("approval_state"),
+        "pending_approval_count": updated_context.get("pending_approval_count"),
+        "pending_ticket_approval_count": updated_context.get("pending_ticket_approval_count"),
+        "queue_state": updated_context.get("queue_state"),
+        "execution_state": updated_context.get("execution_state"),
+        "next_action": updated_context.get("next_action"),
+        "dispatch_performed": False,
+        "worker_execution": False,
+        "execution_started": False,
+        "Kanban_dispatch": False,
+        "Git_mutation": False,
+    })
+
+
+def _start_current_ticket_execution(args: dict[str, Any], **_kwargs) -> str:
+    pr = _runtime()
+    try:
+        human_authorization_text = _validate_explicit_start_request(
+            _start_authorization_text_from_args_or_user_task(args, _kwargs)
+        )
+        result = pr.start_current_ticket_execution(
+            human_authorization_text=human_authorization_text,
+            authorizer_id="pepper-chat-human",
+            project_id=str(args.get("project_id") or "").strip() or None,
+            ticket_id=str(args.get("ticket_id") or "").strip() or None,
+            next_action_id=str(args.get("next_action_id") or "").strip() or None,
+        )
+        updated_context = pr.build_lead_agent_operational_context()
+    except Exception as exc:
+        return tool_error(str(exc) or "current ticket execution start failed", success=False)
+    return _result({
+        "source_tool": "start_current_ticket_execution",
+        "human_authorization_text": human_authorization_text,
+        **result,
+        "current_ticket_id": updated_context.get("current_ticket_id"),
+        "workflow_state": updated_context.get("workflow_state"),
+        "workflow_status": updated_context.get("workflow_status"),
+        "approval_state": updated_context.get("approval_state"),
+        "pending_approval_count": updated_context.get("pending_approval_count"),
+        "pending_ticket_approval_count": updated_context.get("pending_ticket_approval_count"),
+        "queue_state": updated_context.get("queue_state"),
+        "execution_state": updated_context.get("execution_state"),
+        "next_action": updated_context.get("next_action"),
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+    })
+
+
+def _recover_current_ticket_execution(args: dict[str, Any], **_kwargs) -> str:
+    pr = _runtime()
+    try:
+        human_authorization_text = _validate_explicit_recovery_request(
+            _recovery_authorization_text_from_args_or_user_task(args, _kwargs)
+        )
+        result = pr.recover_current_ticket_execution(
+            human_authorization_text=human_authorization_text,
+            authorizer_id="pepper-chat-human",
+            project_id=str(args.get("project_id") or "").strip() or None,
+            ticket_id=str(args.get("ticket_id") or "").strip() or None,
+            next_action_id=str(args.get("next_action_id") or "").strip() or None,
+        )
+        updated_context = pr.build_lead_agent_operational_context()
+    except Exception as exc:
+        return tool_error(str(exc) or "current ticket execution recovery failed", success=False)
+    return _result({
+        "source_tool": "recover_current_ticket_execution",
+        "human_authorization_text": human_authorization_text,
+        **result,
+        "current_ticket_id": updated_context.get("current_ticket_id"),
+        "workflow_state": updated_context.get("workflow_state"),
+        "workflow_status": updated_context.get("workflow_status"),
+        "approval_state": updated_context.get("approval_state"),
+        "pending_approval_count": updated_context.get("pending_approval_count"),
+        "pending_ticket_approval_count": updated_context.get("pending_ticket_approval_count"),
+        "queue_state": updated_context.get("queue_state"),
+        "execution_state": updated_context.get("execution_state"),
+        "recovery_state": updated_context.get("recovery_state"),
+        "failure_category": updated_context.get("failure_category"),
+        "failure_summary": updated_context.get("failure_summary"),
+        "next_action": updated_context.get("next_action"),
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "Kanban_dispatch": False,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+    })
+
+
+def _prepare_current_ticket_review(args: dict[str, Any], **_kwargs) -> str:
+    pr = _runtime()
+    try:
+        human_request_text = _validate_explicit_review_prepare_request(
+            _review_prepare_request_text_from_args_or_user_task(args, _kwargs)
+        )
+        result = pr.prepare_current_ticket_review(
+            project_id=str(args.get("project_id") or "").strip() or None,
+            ticket_id=str(args.get("ticket_id") or "").strip() or None,
+            next_action_id=str(args.get("next_action_id") or "").strip() or None,
+        )
+        updated_context = pr.build_lead_agent_operational_context()
+    except Exception as exc:
+        return tool_error(str(exc) or "current ticket review preparation failed", success=False)
+    return _result({
+        "source_tool": "prepare_current_ticket_review",
+        "human_request_text": human_request_text,
+        **result,
+        "current_ticket_id": updated_context.get("current_ticket_id"),
+        "workflow_state": updated_context.get("workflow_state"),
+        "workflow_status": updated_context.get("workflow_status"),
+        "approval_state": updated_context.get("approval_state"),
+        "pending_approval_count": updated_context.get("pending_approval_count"),
+        "pending_ticket_approval_count": updated_context.get("pending_ticket_approval_count"),
+        "queue_state": updated_context.get("queue_state"),
+        "execution_state": updated_context.get("execution_state"),
+        "validation_state": updated_context.get("validation_state"),
+        "review_state": updated_context.get("review_state"),
+        "git_handoff_state": updated_context.get("git_handoff_state"),
+        "next_action": updated_context.get("next_action"),
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "Kanban_dispatch": False,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+    })
+
+
+def _accept_current_ticket_review(args: dict[str, Any], **_kwargs) -> str:
+    pr = _runtime()
+    try:
+        human_acceptance_text = _validate_explicit_review_acceptance_request(
+            _review_acceptance_text_from_args_or_user_task(args, _kwargs)
+        )
+        result = pr.accept_current_ticket_review(
+            human_acceptance_text=human_acceptance_text,
+            acceptor_id="pepper-chat-human",
+            project_id=str(args.get("project_id") or "").strip() or None,
+            ticket_id=str(args.get("ticket_id") or "").strip() or None,
+            next_action_id=str(args.get("next_action_id") or "").strip() or None,
+        )
+        updated_context = pr.build_lead_agent_operational_context()
+    except Exception as exc:
+        return tool_error(str(exc) or "current ticket review acceptance failed", success=False)
+    return _result({
+        "source_tool": "accept_current_ticket_review",
+        "human_acceptance_text": human_acceptance_text,
+        **result,
+        "current_ticket_id": updated_context.get("current_ticket_id"),
+        "workflow_state": updated_context.get("workflow_state"),
+        "workflow_status": updated_context.get("workflow_status"),
+        "approval_state": updated_context.get("approval_state"),
+        "pending_approval_count": updated_context.get("pending_approval_count"),
+        "pending_ticket_approval_count": updated_context.get("pending_ticket_approval_count"),
+        "queue_state": updated_context.get("queue_state"),
+        "execution_state": updated_context.get("execution_state"),
+        "validation_state": updated_context.get("validation_state"),
+        "review_state": updated_context.get("review_state"),
+        "git_handoff_state": updated_context.get("git_handoff_state"),
+        "next_action": updated_context.get("next_action"),
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "Kanban_dispatch": False,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
     })
 
 
@@ -228,6 +810,191 @@ _LIMIT_SCHEMA = {
             "description": "Maximum number of bounded records to return.",
         }
     },
+    "additionalProperties": False,
+}
+
+
+_GENERATE_CURRENT_TICKET_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "project_id": {
+            "type": "string",
+            "description": "Optional governed project guard. Must be PEPPER if supplied.",
+        },
+        "ticket_id": {
+            "type": "string",
+            "description": "Optional governed ticket guard. Must be P18.9.0 if supplied.",
+        },
+        "next_action_id": {
+            "type": "string",
+            "description": "Optional next-action guard. Must be GENERATE_P18_9_0 if supplied.",
+        },
+    },
+    "additionalProperties": False,
+}
+
+
+_DECIDE_PENDING_APPROVAL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "decision": {
+            "type": "string",
+            "enum": ["approve", "reject"],
+            "description": "Explicit human decision for the current P18.9.0 ticket approval.",
+        },
+        "human_decision_text": {
+            "type": "string",
+            "description": "Exact user phrase that explicitly approves or rejects the current ticket.",
+        },
+        "approval_id": {
+            "type": "string",
+            "description": "Optional approval guard. Must be P18.9.0 if supplied.",
+        },
+        "project_id": {
+            "type": "string",
+            "description": "Optional governed project guard. Must be PEPPER if supplied.",
+        },
+        "ticket_id": {
+            "type": "string",
+            "description": "Optional governed ticket guard. Must be P18.9.0 if supplied.",
+        },
+        "next_action_id": {
+            "type": "string",
+            "description": "Optional next-action guard. Must be APPROVE_P18_9_0 if supplied.",
+        },
+    },
+    "required": ["decision", "human_decision_text"],
+    "additionalProperties": False,
+}
+
+
+_PREPARE_CURRENT_TICKET_EXECUTION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "human_request_text": {
+            "type": "string",
+            "description": "Exact user phrase explicitly asking to prepare/project P18.9.0 for execution.",
+        },
+        "project_id": {
+            "type": "string",
+            "description": "Optional governed project guard. Must be PEPPER if supplied.",
+        },
+        "ticket_id": {
+            "type": "string",
+            "description": "Optional governed ticket guard. Must be P18.9.0 if supplied.",
+        },
+        "next_action_id": {
+            "type": "string",
+            "description": "Optional next-action guard. Must be P18_9_0_APPROVED_NO_EXECUTION if supplied.",
+        },
+    },
+    "required": ["human_request_text"],
+    "additionalProperties": False,
+}
+
+
+_START_CURRENT_TICKET_EXECUTION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "human_authorization_text": {
+            "type": "string",
+            "description": "Exact user phrase explicitly authorizing start/dispatch of P18.9.0 execution or the accepted retry-start phrase when retry is pending.",
+        },
+        "project_id": {
+            "type": "string",
+            "description": "Optional governed project guard. Must be PEPPER if supplied.",
+        },
+        "ticket_id": {
+            "type": "string",
+            "description": "Optional governed ticket guard. Must be P18.9.0 if supplied.",
+        },
+        "next_action_id": {
+            "type": "string",
+            "description": "Optional next-action guard. Must be START_P18_9_0_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION or START_P18_9_0_RETRY_REQUIRES_HUMAN_AUTHORIZATION if supplied.",
+        },
+    },
+    "required": ["human_authorization_text"],
+    "additionalProperties": False,
+}
+
+
+_RECOVER_CURRENT_TICKET_EXECUTION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "human_authorization_text": {
+            "type": "string",
+            "description": (
+                "Exact human phrase authorizing recovery: "
+                f"{CURRENT_TICKET_RECOVERY_AUTHORIZATION_TEXT}"
+            ),
+        },
+        "project_id": {
+            "type": "string",
+            "description": "Optional governed project guard. Must be PEPPER if supplied.",
+        },
+        "ticket_id": {
+            "type": "string",
+            "description": "Optional governed ticket guard. Must be P18.9.0 if supplied.",
+        },
+        "next_action_id": {
+            "type": "string",
+            "description": "Optional next-action guard. Must be RECOVER_P18_9_0_EXECUTION if supplied.",
+        },
+    },
+    "required": ["human_authorization_text"],
+    "additionalProperties": False,
+}
+
+
+_PREPARE_CURRENT_TICKET_REVIEW_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "human_request_text": {
+            "type": "string",
+            "description": "Exact user phrase explicitly asking to prepare P18.9.0 review validation.",
+        },
+        "project_id": {
+            "type": "string",
+            "description": "Optional governed project guard. Must be PEPPER if supplied.",
+        },
+        "ticket_id": {
+            "type": "string",
+            "description": "Optional governed ticket guard. Must be P18.9.0 if supplied.",
+        },
+        "next_action_id": {
+            "type": "string",
+            "description": "Optional next-action guard. Must be PREPARE_P18_9_0_REVIEW if supplied.",
+        },
+    },
+    "required": ["human_request_text"],
+    "additionalProperties": False,
+}
+
+
+_ACCEPT_CURRENT_TICKET_REVIEW_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "human_acceptance_text": {
+            "type": "string",
+            "description": (
+                "Exact human phrase accepting the prepared P18.9.0 review: "
+                f"{CURRENT_TICKET_REVIEW_ACCEPTANCE_TEXT}"
+            ),
+        },
+        "project_id": {
+            "type": "string",
+            "description": "Optional governed project guard. Must be PEPPER if supplied.",
+        },
+        "ticket_id": {
+            "type": "string",
+            "description": "Optional governed ticket guard. Must be P18.9.0 if supplied.",
+        },
+        "next_action_id": {
+            "type": "string",
+            "description": "Optional next-action guard. Must be AWAIT_HUMAN_P18_9_0_REVIEW_ACCEPTANCE if supplied.",
+        },
+    },
+    "required": ["human_acceptance_text"],
     "additionalProperties": False,
 }
 
@@ -316,6 +1083,110 @@ registry.register(
 )
 
 registry.register(
+    name="decide_pending_approval",
+    toolset=TOOLSET,
+    schema={
+        "name": "decide_pending_approval",
+        "description": (
+            "Apply the explicit human approve/reject decision for only the current "
+            "Pepper P18.9.0 pending ticket approval through the canonical approval backend. "
+            "No execution, Kanban dispatch, WorkPacket recompilation, or Git mutation."
+        ),
+        "parameters": _DECIDE_PENDING_APPROVAL_SCHEMA,
+    },
+    handler=_decide_pending_approval,
+    emoji="D",
+    max_result_size_chars=24000,
+)
+
+registry.register(
+    name="prepare_current_ticket_execution",
+    toolset=TOOLSET,
+    schema={
+        "name": "prepare_current_ticket_execution",
+        "description": (
+            "Project only the current approved P18.9.0 WorkPacket to a Hermes Kanban "
+            "task for future execution preparation. Does not dispatch, execute, create a "
+            "workspace, mutate Git, invoke Docker, or invoke Graphify."
+        ),
+        "parameters": _PREPARE_CURRENT_TICKET_EXECUTION_SCHEMA,
+    },
+    handler=_prepare_current_ticket_execution,
+    emoji="Q",
+    max_result_size_chars=24000,
+)
+
+registry.register(
+    name="start_current_ticket_execution",
+    toolset=TOOLSET,
+    schema={
+        "name": "start_current_ticket_execution",
+        "description": (
+            "Apply a separate explicit human authorization to start only the current "
+            "Pepper P18.9.0 Kanban worker or retry run 2 when retry is pending. Validates provider, profile, workspace, "
+            "dependency, and concurrency gates before dispatch; no Git, Docker, "
+            "Graphify, automatic retry, or rollback."
+        ),
+        "parameters": _START_CURRENT_TICKET_EXECUTION_SCHEMA,
+    },
+    handler=_start_current_ticket_execution,
+    emoji="S",
+    max_result_size_chars=24000,
+)
+
+registry.register(
+    name="recover_current_ticket_execution",
+    toolset=TOOLSET,
+    schema={
+        "name": "recover_current_ticket_execution",
+        "description": (
+            "Record the exact explicit human recovery authorization for failed Pepper "
+            "P18.9.0 and prepare retry-pending governance. Does not start run 2, "
+            "requeue or reclaim Kanban, create a new task, mutate Git, invoke Docker, "
+            "or invoke Graphify."
+        ),
+        "parameters": _RECOVER_CURRENT_TICKET_EXECUTION_SCHEMA,
+    },
+    handler=_recover_current_ticket_execution,
+    emoji="V",
+    max_result_size_chars=24000,
+)
+
+registry.register(
+    name="prepare_current_ticket_review",
+    toolset=TOOLSET,
+    schema={
+        "name": "prepare_current_ticket_review",
+        "description": (
+            "Prepare the completed current Pepper P18.9.0 run for governed review "
+            "validation by binding completion evidence to the ticket acceptance contract. "
+            "Does not accept, close, rerun, retry, mutate Git, invoke Docker, or invoke Graphify."
+        ),
+        "parameters": _PREPARE_CURRENT_TICKET_REVIEW_SCHEMA,
+    },
+    handler=_prepare_current_ticket_review,
+    emoji="P",
+    max_result_size_chars=24000,
+)
+
+registry.register(
+    name="accept_current_ticket_review",
+    toolset=TOOLSET,
+    schema={
+        "name": "accept_current_ticket_review",
+        "description": (
+            "Record exact explicit human acceptance for the prepared current Pepper P18.9.0 "
+            "review package and close P18.9.0. Does not generate P18.9.1, execute, rerun, "
+            "retry, mutate Git, invoke Docker, or invoke Graphify."
+        ),
+        "parameters": _ACCEPT_CURRENT_TICKET_REVIEW_SCHEMA,
+    },
+    handler=_accept_current_ticket_review,
+    emoji="A",
+    max_result_size_chars=24000,
+)
+
+registry.register(
     name="get_review_status",
     toolset=TOOLSET,
     schema={
@@ -337,4 +1208,20 @@ registry.register(
     },
     handler=_get_next_action,
     emoji="N",
+)
+
+registry.register(
+    name="generate_current_ticket",
+    toolset=TOOLSET,
+    schema={
+        "name": "generate_current_ticket",
+        "description": (
+            "Generate only Pepper's current governed next ticket when the active next action "
+            "is GENERATE_P18_9_0. Stops at awaiting_ticket_approval; no execution or Git."
+        ),
+        "parameters": _GENERATE_CURRENT_TICKET_SCHEMA,
+    },
+    handler=_generate_current_ticket,
+    emoji="G",
+    max_result_size_chars=24000,
 )

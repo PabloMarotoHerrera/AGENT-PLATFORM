@@ -23,7 +23,7 @@ def _workflow(**overrides):
         "current_gap_id": None,
         "current_gap_title": None,
         "next_ticket_id": "P18.9.0",
-        "next_ticket_title": "Product UX / IA Baseline",
+        "next_ticket_title": "Product Inventory, IA Decision, and Acceptance Contract",
         "mode": "controlled_default",
         "readiness": "planning_approved_or_intake_ready",
         "workflow_state": "P18.9-PEPPER-PRODUCT-PERSONALIZATION-INTAKE-READY",
@@ -55,8 +55,12 @@ def _workflow(**overrides):
         "P18_9_ticket_generated": False,
         "next_action": {
             "id": "GENERATE_P18_9_0",
-            "label": "Generate governed P18.9.0 Product UX / IA Baseline before execution.",
+            "label": (
+                "Generate governed P18.9.0 Product Inventory, IA Decision, and "
+                "Acceptance Contract before execution."
+            ),
             "target_ticket_id": "P18.9.0",
+            "target_ticket_title": "Product Inventory, IA Decision, and Acceptance Contract",
         },
         "evidence_timestamp": "2026-08-10T00:00:00Z",
         "evidence_version": 1,
@@ -302,9 +306,16 @@ def test_pepper_toolset_exposes_no_arbitrary_shell_or_file_authority(monkeypatch
         "get_workflow_control",
         "get_pending_approvals",
         "inspect_pending_approval",
+        "decide_pending_approval",
         "get_execution_status",
         "get_review_status",
         "get_next_action",
+        "generate_current_ticket",
+        "prepare_current_ticket_execution",
+        "start_current_ticket_execution",
+        "recover_current_ticket_execution",
+        "prepare_current_ticket_review",
+        "accept_current_ticket_review",
     }.issubset(names)
     assert {
         "get_repository_context",
@@ -322,6 +333,19 @@ def test_lead_agent_prompt_requires_tool_backed_state() -> None:
     prompt = pepper_lead_agent_system_prompt()
 
     assert "call the relevant Pepper workflow tool" in prompt
+    assert "generate_current_ticket" in prompt
+    assert "decide_pending_approval" in prompt
+    assert "start_current_ticket_execution" in prompt
+    assert "recover_current_ticket_execution" in prompt
+    assert "prepare_current_ticket_review" in prompt
+    assert "accept_current_ticket_review" in prompt
+    assert "PREPARE_P18_9_0_REVIEW" in prompt
+    assert "AWAIT_HUMAN_P18_9_0_REVIEW_ACCEPTANCE" in prompt
+    assert "Acepto explícitamente la review de P18.9.0" in prompt
+    assert "KANBAN_COMPLETION_RESULT_DETAIL_GAP" in prompt
+    assert "START_P18_9_0_RETRY_REQUIRES_HUMAN_AUTHORIZATION" in prompt
+    assert "Autorizo explícitamente el retry de P18.9.0." in prompt
+    assert "questions, hypotheticals, readiness checks, or ambiguous language" in prompt
     assert "get_repository_context" in prompt
     assert "resolve_repository_authority" in prompt
     assert "Do not infer the active governed project from cwd" in prompt

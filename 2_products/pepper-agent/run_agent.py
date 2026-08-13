@@ -4426,6 +4426,15 @@ class AIAgent:
             return False
         if getattr(self, "platform", None) == "pepper-dashboard":
             return False
+        try:
+            from hermes_cli.agent_platform.worker_credentials import (
+                pepper_governed_worker_enabled,
+            )
+
+            if pepper_governed_worker_enabled():
+                return False
+        except Exception:
+            pass
 
         # Guard against silent account swap.
         #

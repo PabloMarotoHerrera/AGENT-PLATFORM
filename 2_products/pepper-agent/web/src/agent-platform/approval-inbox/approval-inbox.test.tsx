@@ -423,6 +423,26 @@ describe("controlled Approval Inbox pages", () => {
     }
   });
 
+  it("renders governed ticket approval decision copy without staged-write wording", () => {
+    const raw = detailWire({
+      approval: approval({
+        id: "P18.9.0",
+        title: "Review governed ticket approval: P18.9.0",
+        request_type: "ticket_approval",
+        target: { type: "runtime_action", label: "P18.9.0 governed ticket" },
+      }),
+      evidence: [],
+      decisions: [],
+    });
+    const detail = parseApprovalDetailSource(raw, "P18.9.0")!;
+    const markup = renderToStaticMarkup(
+      <MemoryRouter><ApprovalDetailView state={state({ kind: "detail", approval: detail })} profile="default" refresh={() => {}} /></MemoryRouter>,
+    );
+    expect(markup).toContain("Approve records the governed human ticket approval");
+    expect(markup).toContain("Pepper governed approvals");
+    expect(markup).not.toContain("Approve applies the staged write");
+  });
+
   it("renders independently empty and unavailable detail sections", () => {
     const detail = parseApprovalDetailSource(detailWire({ evidence: [], decisions: "unsafe" }), "a1b2c3d4")!;
     const markup = renderToStaticMarkup(

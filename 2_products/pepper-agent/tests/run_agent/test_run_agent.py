@@ -3077,6 +3077,7 @@ class TestConcurrentToolExecution:
                 session_id=agent.session_id,
                 turn_id="",
                 api_request_id="",
+                user_task=None,
                 enabled_tools=list(agent.valid_tool_names),
                 skip_pre_tool_call_hook=True,
                 skip_tool_request_middleware=True,
@@ -3085,6 +3086,40 @@ class TestConcurrentToolExecution:
                 tool_request_middleware_trace=[],
             )
             assert result == "result"
+
+    def test_invoke_tool_forwards_latest_user_message_as_user_task(self, agent):
+        """Registry-dispatched tools receive the current clean user text."""
+        messages = [
+            {"role": "user", "content": "old request"},
+            {"role": "assistant", "content": "ok"},
+            {"role": "user", "content": "Autorizo explícitamente el inicio de ejecución de P18.9.0."},
+            {"role": "assistant", "content": "", "tool_calls": []},
+        ]
+        with patch("run_agent.handle_function_call", return_value="result") as mock_hfc:
+            result = agent._invoke_tool(
+                "web_search",
+                {"q": "test"},
+                "task-1",
+                messages=messages,
+            )
+
+        assert result == "result"
+        assert mock_hfc.call_args.kwargs["user_task"] == (
+            "Autorizo explícitamente el inicio de ejecución de P18.9.0."
+        )
+
+    def test_sequential_registry_tool_forwards_latest_user_message_as_user_task(self, agent):
+        tc = _mock_tool_call(name="web_search", arguments='{"q":"test"}', call_id="c1")
+        mock_msg = _mock_assistant_msg(content="", tool_calls=[tc])
+        messages = [
+            {"role": "user", "content": "Start P18.9.0 execution now"},
+            {"role": "assistant", "content": "", "tool_calls": []},
+        ]
+
+        with patch("run_agent.handle_function_call", return_value='{"success": true}') as mock_hfc:
+            agent._execute_tool_calls_sequential(mock_msg, messages, "task-1")
+
+        assert mock_hfc.call_args.kwargs["user_task"] == "Start P18.9.0 execution now"
 
     def test_sequential_tool_callbacks_fire_in_order(self, agent):
         tool_call = _mock_tool_call(name="web_search", arguments='{"query":"hello"}', call_id="c1")

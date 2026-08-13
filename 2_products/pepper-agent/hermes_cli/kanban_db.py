@@ -222,6 +222,8 @@ def _resolve_claim_ttl_seconds(ttl_seconds: Optional[int] = None) -> int:
 # catches genuinely-crashed workers; this only suppresses false positives
 # during the launch window.
 DEFAULT_CRASH_GRACE_SECONDS = 30
+DEFAULT_WORKER_BOOTSTRAP_PROBE_SECONDS = 1.0
+_WORKER_BOOTSTRAP_PROBE_INTERVAL_SECONDS = 0.05
 
 
 # Sentinel exit code a kanban worker uses to signal "I bailed because the
@@ -7019,6 +7021,169 @@ def detect_crashed_workers(conn: sqlite3.Connection) -> list[str]:
     return crashed
 
 
+def reconcile_orphaned_active_run(
+    conn: sqlite3.Connection,
+    task_id: str,
+    *,
+    failure_limit: int = DEFAULT_FAILURE_LIMIT,
+    force_trip: bool = False,
+    failure_category: str = "orphaned_active_run",
+    failure_summary: Optional[str] = None,
+) -> bool:
+    """Close a historical active run with no viable worker lifecycle evidence.
+
+    This is a bounded reconciliation primitive, not a scheduler. It is for
+    callers that already identified a specific running task/run and need to
+    apply the same terminal accounting used by crash handling. A healthy worker
+    stays running when a live PID or fresh heartbeat is present.
+    """
+    now = int(time.time())
+
+    def _epoch(value: Any) -> Optional[int]:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    row = conn.execute(
+        """
+        SELECT t.id, t.status, t.claim_lock, t.claim_expires,
+               t.worker_pid, t.last_heartbeat_at, t.started_at,
+               t.current_run_id, r.id AS run_id, r.status AS run_status,
+               r.claim_lock AS run_claim_lock,
+               r.claim_expires AS run_claim_expires,
+               r.worker_pid AS run_worker_pid,
+               r.last_heartbeat_at AS run_last_heartbeat_at,
+               r.started_at AS run_started_at,
+               r.ended_at AS run_ended_at
+          FROM tasks t
+          LEFT JOIN task_runs r ON r.id = t.current_run_id
+         WHERE t.id = ?
+        """,
+        (task_id,),
+    ).fetchone()
+    if row is None:
+        return False
+    if row["status"] != "running" or not row["current_run_id"]:
+        return False
+    if row["run_id"] is None or row["run_ended_at"] is not None:
+        return False
+    if str(row["run_status"] or "").lower() != "running":
+        return False
+
+    started_at = _epoch(row["run_started_at"]) or _epoch(row["started_at"])
+    if started_at is not None and now - started_at < _resolve_crash_grace_seconds():
+        return False
+
+    pid = _epoch(row["worker_pid"]) or _epoch(row["run_worker_pid"])
+    if pid is not None and _pid_alive(pid):
+        return False
+
+    heartbeat_candidates = [
+        value for value in (
+            _epoch(row["last_heartbeat_at"]),
+            _epoch(row["run_last_heartbeat_at"]),
+        )
+        if value is not None
+    ]
+    last_heartbeat_at = max(heartbeat_candidates) if heartbeat_candidates else None
+    heartbeat_age = now - last_heartbeat_at if last_heartbeat_at is not None else None
+    heartbeat_stale = (
+        heartbeat_age is None or heartbeat_age > _STALE_HEARTBEAT_GAP_SECONDS
+    )
+    if not heartbeat_stale:
+        return False
+
+    claim_candidates = [
+        value for value in (
+            _epoch(row["claim_expires"]),
+            _epoch(row["run_claim_expires"]),
+        )
+        if value is not None
+    ]
+    claim_expires = max(claim_candidates) if claim_candidates else None
+    claim_expired = claim_expires is None or claim_expires < now
+
+    claim_lock = row["claim_lock"] or row["run_claim_lock"] or ""
+    host_prefix = f"{_claimer_id().split(':', 1)[0]}:"
+    host_local = bool(claim_lock and str(claim_lock).startswith(host_prefix))
+    dead_recorded_pid = pid is not None
+    if not (
+        (dead_recorded_pid and (host_local or claim_expired or not claim_lock))
+        or (not dead_recorded_pid and claim_expired)
+    ):
+        return False
+
+    elapsed = now - started_at if started_at is not None else None
+    if failure_summary:
+        error = failure_summary
+    else:
+        worker_part = (
+            f"worker pid {pid} is not alive" if pid is not None
+            else "no worker pid recorded"
+        )
+        heartbeat_part = (
+            f"last heartbeat {int(heartbeat_age)}s ago"
+            if heartbeat_age is not None else "no heartbeat ever"
+        )
+        claim_part = (
+            "no claim expiry recorded" if claim_expires is None
+            else f"claim expired {max(0, now - claim_expires)}s ago"
+        )
+        error = f"orphaned active run: {worker_part}; {heartbeat_part}; {claim_part}"
+    error = str(error)[:500]
+    payload = {
+        "reconciliation": "orphaned_active_run",
+        "failure_category": str(failure_category or "orphaned_active_run")[:128],
+        "failure_summary": error[:300],
+        "pid": int(pid) if pid is not None else None,
+        "pid_alive": False,
+        "claim_lock": claim_lock or None,
+        "claim_expires": claim_expires,
+        "claim_expired": bool(claim_expired),
+        "host_local": bool(host_local),
+        "last_heartbeat_at": last_heartbeat_at,
+        "heartbeat_age_seconds": int(heartbeat_age) if heartbeat_age is not None else None,
+        "heartbeat_stale": bool(heartbeat_stale),
+        "started_at": started_at,
+        "elapsed_seconds": int(elapsed) if elapsed is not None else None,
+    }
+
+    with write_txn(conn):
+        cur = conn.execute(
+            "UPDATE tasks SET status = 'ready', claim_lock = NULL, "
+            "claim_expires = NULL, worker_pid = NULL, last_heartbeat_at = NULL "
+            "WHERE id = ? AND status = 'running' AND current_run_id = ?",
+            (task_id, int(row["current_run_id"])),
+        )
+        if cur.rowcount != 1:
+            return False
+        run_id = _end_run(
+            conn,
+            task_id,
+            outcome="crashed",
+            status="crashed",
+            error=error,
+            metadata=payload,
+        )
+        _append_event(conn, task_id, "crashed", payload, run_id=run_id)
+
+    _record_task_failure(
+        conn,
+        task_id,
+        error,
+        outcome="crashed",
+        failure_limit=failure_limit,
+        force_trip=force_trip,
+        release_claim=False,
+        end_run=False,
+        event_payload_extra=payload,
+    )
+    return True
+
+
 def _record_task_failure(
     conn: sqlite3.Connection,
     task_id: str,
@@ -8171,6 +8336,7 @@ def _default_spawn(
     workspace: str,
     *,
     board: Optional[str] = None,
+    env_overlay: Optional[dict[str, str]] = None,
 ) -> Optional[int]:
     """Fire-and-forget ``hermes -p <profile> chat -q ...`` subprocess.
 
@@ -8274,6 +8440,8 @@ def _default_spawn(
     # what the tool reads — set it explicitly here so comments are
     # attributed correctly regardless of how the child loads config.
     env["HERMES_PROFILE"] = profile_arg
+    if env_overlay:
+        _apply_worker_env_overlay(env, env_overlay)
 
     # A worker must NEVER boot the interactive TUI: an inherited HERMES_TUI=1
     # or a `display.interface: tui` in the profile's config would send the
@@ -8347,12 +8515,74 @@ def _default_spawn(
             "`hermes` executable not found on PATH. "
             "Install Hermes Agent or activate its venv before running the kanban dispatcher."
         )
+    _raise_if_worker_exited_during_bootstrap(proc, log_f, log_path)
     # NOTE: we intentionally do NOT close log_f here — we want Popen's
     # child process to keep writing after this function returns.  The
     # handle is kept alive by the child's inheritance.  The parent's
     # reference goes out of scope and is GC'd, but the OS-level FD stays
     # open in the child until the child exits.
     return proc.pid
+
+
+_WORKER_ENV_OVERLAY_ALLOWED_KEYS = frozenset(
+    {
+        "HERMES_AGENT_PLATFORM_GOVERNED_WORKER",
+        "HERMES_AGENT_PLATFORM_GOVERNED_PROJECT_ID",
+        "HERMES_AGENT_PLATFORM_GOVERNED_TICKET_ID",
+        "HERMES_AGENT_PLATFORM_EXECUTOR_PROFILE",
+        "HERMES_AGENT_PLATFORM_PROVIDER",
+        "HERMES_AGENT_PLATFORM_MODEL",
+        "HERMES_AGENT_PLATFORM_API_MODE",
+        "HERMES_AGENT_PLATFORM_CREDENTIAL_STORE_ID",
+        "HERMES_AGENT_PLATFORM_PROVIDER_RUNTIME_PROFILE_ID",
+        "HERMES_AGENT_PLATFORM_WORKER_PROFILE_ID",
+        "HERMES_AGENT_PLATFORM_PROVIDER_RUNTIME_ID",
+        "HERMES_AGENT_PLATFORM_PROVIDER_CORRELATION_ID",
+        "HERMES_AGENT_PLATFORM_PROVIDER_LEASE_ID",
+    }
+)
+
+
+def _apply_worker_env_overlay(env: dict[str, str], overlay: dict[str, str]) -> None:
+    """Apply a bounded internal worker env overlay without accepting secrets."""
+
+    for key, value in overlay.items():
+        key_text = str(key or "").strip()
+        value_text = str(value or "").strip()
+        if not key_text or any(ord(ch) < 32 or ord(ch) == 127 for ch in key_text):
+            raise ValueError("worker env overlay key contains control characters")
+        if key_text not in _WORKER_ENV_OVERLAY_ALLOWED_KEYS:
+            raise ValueError("worker env overlay contains unsupported key")
+        if any(ord(ch) < 32 or ord(ch) == 127 for ch in value_text):
+            raise ValueError("worker env overlay value contains control characters")
+        if len(value_text) > 512:
+            raise ValueError("worker env overlay value exceeds bounded length")
+        env[key_text] = value_text
+
+
+def _raise_if_worker_exited_during_bootstrap(
+    proc: Any,
+    log_f: Any,
+    log_path: Path,
+) -> None:
+    poll = getattr(proc, "poll", None)
+    if not callable(poll):
+        return
+    deadline = time.monotonic() + DEFAULT_WORKER_BOOTSTRAP_PROBE_SECONDS
+    while True:
+        return_code = poll()
+        if return_code is not None:
+            try:
+                log_f.close()
+            except Exception:
+                pass
+            raise RuntimeError(
+                "worker exited during bootstrap "
+                f"with code {return_code}; see log {log_path}"
+            )
+        if time.monotonic() >= deadline:
+            return
+        time.sleep(_WORKER_BOOTSTRAP_PROBE_INTERVAL_SECONDS)
 
 
 # ---------------------------------------------------------------------------

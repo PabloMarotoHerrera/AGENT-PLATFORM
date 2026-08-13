@@ -1408,10 +1408,12 @@ def _resolve_explicit_runtime(
         base_url = explicit_base_url or DEFAULT_CODEX_BASE_URL
         api_key = explicit_api_key
         last_refresh = None
+        source = "explicit"
         if not api_key:
             creds = resolve_codex_runtime_credentials()
             api_key = creds.get("api_key", "")
             last_refresh = creds.get("last_refresh")
+            source = creds.get("source") or source
             if not explicit_base_url:
                 base_url = creds.get("base_url", "").rstrip("/") or base_url
         return {
@@ -1419,7 +1421,7 @@ def _resolve_explicit_runtime(
             "api_mode": "codex_responses",
             "base_url": base_url,
             "api_key": api_key,
-            "source": "explicit",
+            "source": source,
             "last_refresh": last_refresh,
             "requested_provider": requested_provider,
         }

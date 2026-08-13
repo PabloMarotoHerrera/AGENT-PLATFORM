@@ -57,6 +57,7 @@ export function ApprovalDetailView({ state, profile, refresh }: ApprovalWorkspac
   const inboxPath = buildApprovalInboxPath(profile) ?? "/agent-platform/approvals";
   const [decisionState, setDecisionState] = useState<"idle" | "approving" | "rejecting" | "done" | "error">("idle");
   const canDecide = approval?.visualStatus === "pending" && !["approving", "rejecting"].includes(decisionState);
+  const isTicketApproval = approval?.originalSourceType === "ticket_approval";
   const submitDecision = async (decision: "approve" | "reject") => {
     if (!approval || !canDecide) return;
     setDecisionState(decision === "approve" ? "approving" : "rejecting");
@@ -101,7 +102,9 @@ export function ApprovalDetailView({ state, profile, refresh }: ApprovalWorkspac
                 <div className="space-y-1">
                   <h2 className="font-semibold text-[var(--agent-platform-text-primary)]">Controlled human decision</h2>
                   <p className="text-sm leading-relaxed text-[var(--agent-platform-text-secondary)]">
-                    Approve applies the staged write through Hermes' existing write-approval handler. Reject discards only this pending record.
+                    {isTicketApproval
+                      ? "Approve records the governed human ticket approval. Reject records the governed human rejection. Neither action starts execution."
+                      : "Approve applies the staged write through Hermes' existing write-approval handler. Reject discards only this pending record."}
                   </p>
                   {decisionState === "error" && <p className="text-sm text-[var(--agent-platform-status-danger)]">Decision failed. Refresh and retry from the current source state.</p>}
                   {decisionState === "done" && <p className="text-sm text-[var(--agent-platform-status-success)]">Decision submitted. Refreshing source state.</p>}
@@ -127,7 +130,7 @@ export function ApprovalDetailView({ state, profile, refresh }: ApprovalWorkspac
                 <CardContent className="space-y-3 p-5 text-sm">
                   <h2 className="font-semibold">Source request metadata</h2>
                   <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-2 text-[var(--agent-platform-text-secondary)]">
-                    <dt>Source system</dt><dd>Hermes staged write approvals</dd>
+                    <dt>Source system</dt><dd>{isTicketApproval ? "Pepper governed approvals" : "Hermes staged write approvals"}</dd>
                     <dt>Request type</dt><dd>{approval.originalSourceType}</dd>
                     <dt>Requester</dt><dd>{approval.sourceRequesterLabel ?? "not supplied"} <span className="text-xs text-[var(--agent-platform-text-muted)]">(not governed Agent identity)</span></dd>
                     <dt>Requested</dt><dd>{formatApprovalTimestamp(approval.requestedAt)}</dd>

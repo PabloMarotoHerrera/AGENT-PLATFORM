@@ -13,7 +13,7 @@ from enum import Enum
 import hashlib
 import json
 import re
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -661,6 +661,101 @@ def build_dependency_satisfaction_evidence(
         evidence_reference=evidence_reference,
         evidence_SHA256=evidence_SHA256,
     )
+
+
+def derive_dependency_queue_admission_for_ticket(
+    *,
+    dependency_plan: TicketDependencyPlan,
+    ticket_id: str,
+    dependency_satisfaction_evidence: tuple[DependencySatisfactionEvidence, ...] = (),
+) -> dict[str, Any]:
+    """Derive P18.4 queue admission semantics for an already-bound ticket.
+
+    This helper exposes the same dependency-plan readiness decision used by the
+    canonical P18.4 integration without requiring callers to fabricate the
+    original P18.2/P18.3 result types. It performs no enqueue, dispatch, claim,
+    workspace allocation, command execution, provider/model call, Git mutation,
+    Docker invocation, or Graphify invocation.
+    """
+
+    plan = TicketDependencyPlan.model_validate(
+        dependency_plan.model_dump(mode="python", warnings=False)
+        if isinstance(dependency_plan, BaseModel)
+        else dependency_plan
+    )
+    if ticket_id not in plan.ticket_ids:
+        raise DependencyAwareQueueInputError("ticket is not present in dependency plan")
+    allowed_dependency_ids = frozenset(
+        edge.prerequisite_ticket_id
+        for edge in plan.edges
+        if edge.dependent_ticket_id == ticket_id and edge.blocks_readiness
+    ) | frozenset(
+        blocker.blocked_by_ticket_id
+        for blocker in plan.blockers
+        if blocker.ticket_id == ticket_id
+    ) | frozenset(plan.unresolved_soft_external_dependency_ids)
+    blockers: list[dict[str, Any]] = []
+    for blocker in plan.blockers:
+        if blocker.ticket_id != ticket_id:
+            continue
+        blockers.append({
+            "dependency_ticket_id": blocker.blocked_by_ticket_id,
+            "required_relationship": blocker.kind.value,
+            "satisfaction_state": DependencySatisfactionState.UNSATISFIED.value,
+            "evidence_reference": blocker.rationale,
+            "evidence_SHA256": plan.plan_SHA256,
+        })
+    seen: set[str] = set()
+    for evidence in dependency_satisfaction_evidence:
+        validated = DependencySatisfactionEvidence.model_validate(
+            evidence.model_dump(mode="python", warnings=False)
+            if isinstance(evidence, BaseModel)
+            else evidence
+        )
+        if validated.dependency_ticket_id in seen:
+            raise DependencyAwareQueuePolicyError(
+                "dependency evidence must not duplicate tickets"
+            )
+        seen.add(validated.dependency_ticket_id)
+        if validated.dependency_ticket_id not in allowed_dependency_ids:
+            raise DependencyAwareQueuePolicyError("unknown dependency evidence")
+        if validated.satisfaction_state is not DependencySatisfactionState.SATISFIED:
+            blockers.append({
+                "dependency_ticket_id": validated.dependency_ticket_id,
+                "required_relationship": validated.required_relationship,
+                "satisfaction_state": validated.satisfaction_state.value,
+                "evidence_reference": validated.evidence_reference,
+                "evidence_SHA256": validated.evidence_SHA256,
+            })
+    dependencies_satisfied = not blockers and _plan_ready_for_ticket(plan, ticket_id)
+    decision = (
+        DependencyAwareQueueDecision.ADMIT
+        if dependencies_satisfied
+        else DependencyAwareQueueDecision.BLOCKED
+    )
+    return {
+        "schema_version": DEPENDENCY_AWARE_QUEUE_SCHEMA_VERSION,
+        "policy_id": DEPENDENCY_AWARE_QUEUE_POLICY_ID,
+        "ticket_id": ticket_id,
+        "dependency_plan_SHA256": plan.plan_SHA256,
+        "dependency_plan_reused": True,
+        "dependency_planner_reused": True,
+        "dependency_plan_recomputed_unnecessarily": False,
+        "decision": decision.value,
+        "dependencies_satisfied": dependencies_satisfied,
+        "queue_eligible": dependencies_satisfied,
+        "queue_admitted": decision is DependencyAwareQueueDecision.ADMIT,
+        "dependency_blockers": blockers,
+        "approval_bypass": False,
+        "dependency_bypass": False,
+        "dispatch_eligible": False,
+        "execution_started": False,
+        "worker_dispatch_count": 0,
+        "command_execution_count": 0,
+        "Git_commands_executed": 0,
+        "Docker_commands_executed": 0,
+        "Graphify_commands_executed": 0,
+    }
 
 
 def build_canonical_p18_dependency_queue_request(

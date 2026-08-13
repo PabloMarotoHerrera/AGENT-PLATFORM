@@ -3739,6 +3739,10 @@ def resolve_codex_runtime_credentials(
     HTTP 401 ``Missing Authentication header`` from the wire instead of a usable
     credential. See issue #32992.
     """
+    governed_worker = _resolve_agent_platform_governed_codex_credentials()
+    if governed_worker is not None:
+        return governed_worker
+
     read_error: Optional[AuthError] = None
     try:
         data = _read_codex_tokens()
@@ -3836,6 +3840,47 @@ def resolve_codex_runtime_credentials(
         "last_refresh": data.get("last_refresh"),
         "auth_mode": "chatgpt",
     }
+
+
+def _resolve_agent_platform_governed_codex_credentials() -> Optional[Dict[str, Any]]:
+    raw_binding = os.getenv("HERMES_AGENT_PLATFORM_GOVERNED_WORKER", "").strip()
+    if not raw_binding:
+        return None
+    try:
+        from hermes_cli.agent_platform.worker_credentials import (
+            PEPPER_GOVERNED_WORKER_AUTH_ERROR_CODE,
+            PEPPER_GOVERNED_WORKER_BLOCKER_CODE,
+            pepper_governed_worker_enabled,
+            resolve_pepper_governed_worker_runtime,
+        )
+    except Exception as exc:
+        raise AuthError(
+            "WORKER_CREDENTIAL_AUTHORITY_MISMATCH: governed worker credential "
+            "resolver unavailable (validation_category=resolver_import_failed).",
+            provider="openai-codex",
+            code="worker_credential_authority_mismatch",
+            relogin_required=False,
+        ) from exc
+    if not pepper_governed_worker_enabled():
+        raise AuthError(
+            "WORKER_CREDENTIAL_AUTHORITY_MISMATCH: governed worker credential "
+            "binding is invalid (validation_category=worker_binding_invalid).",
+            provider="openai-codex",
+            code=PEPPER_GOVERNED_WORKER_AUTH_ERROR_CODE,
+            relogin_required=False,
+        )
+    try:
+        return resolve_pepper_governed_worker_runtime()
+    except Exception as exc:
+        category = getattr(exc, "validation_category", exc.__class__.__name__)
+        raise AuthError(
+            f"{PEPPER_GOVERNED_WORKER_BLOCKER_CODE}: governed "
+            "openai-codex.primary credential resolution failed "
+            f"(validation_category={category}).",
+            provider="openai-codex",
+            code=PEPPER_GOVERNED_WORKER_AUTH_ERROR_CODE,
+            relogin_required=False,
+        ) from exc
 
 
 def _codex_pool_rate_limit_status() -> Optional[Dict[str, Any]]:

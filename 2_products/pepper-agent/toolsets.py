@@ -232,16 +232,23 @@ TOOLSETS = {
     },
 
     "pepper_workflow": {
-        "description": "Pepper Lead Agent read-only governed workflow context",
+        "description": "Pepper Lead Agent bounded governed workflow context, current-ticket generation, approval, Kanban projection, recovery, authorized worker start, review preparation, and human review acceptance",
         "tools": [
             "get_current_project",
             "get_current_ticket",
             "get_workflow_control",
             "get_pending_approvals",
             "inspect_pending_approval",
+            "decide_pending_approval",
             "get_execution_status",
             "get_review_status",
             "get_next_action",
+            "generate_current_ticket",
+            "prepare_current_ticket_execution",
+            "start_current_ticket_execution",
+            "recover_current_ticket_execution",
+            "prepare_current_ticket_review",
+            "accept_current_ticket_review",
         ],
         "includes": []
     },

@@ -9,11 +9,14 @@ engine, or Git authority path.
 from __future__ import annotations
 
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import os
 import re
 import time
+import unicodedata
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -41,8 +44,108 @@ PEPPER_CURRENT_TICKET_TITLE = None
 PEPPER_CURRENT_GAP_ID = None
 PEPPER_CURRENT_GAP_TITLE = None
 PEPPER_NEXT_TICKET_ID = "P18.9.0"
-PEPPER_NEXT_TICKET_TITLE = "Product UX / IA Baseline"
+PEPPER_NEXT_TICKET_TITLE = "Product Inventory, IA Decision, and Acceptance Contract"
 PEPPER_WORKFLOW_CONTEXT_SOURCE_SYSTEM = "pepper-lead-agent-governed-context"
+PEPPER_CURRENT_EXECUTION_START_NEXT_ACTION_ID = (
+    "START_P18_9_0_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION"
+)
+PEPPER_CURRENT_EXECUTION_RECOVERY_NEXT_ACTION_ID = "RECOVER_P18_9_0_EXECUTION"
+PEPPER_CURRENT_RETRY_START_NEXT_ACTION_ID = (
+    "START_P18_9_0_RETRY_REQUIRES_HUMAN_AUTHORIZATION"
+)
+PEPPER_CURRENT_EXECUTION_RECOVERY_AUTHORIZATION_TEXT = (
+    "Autorizo explícitamente la recuperación de la ejecución fallida de P18.9.0."
+)
+PEPPER_WORKER_START_ACTION_SOURCE_SYSTEM = "pepper-worker-start-action"
+PEPPER_WORKER_START_ACTION_SCHEMA_VERSION = 1
+PEPPER_WORKER_START_ACTION_POLICY_ID = "pepper-worker-start-action-v1"
+PEPPER_WORKER_START_AUTHORIZATION_DIGEST_ALGORITHM = (
+    "agent-platform-pepper-worker-start-authorization-sha256-v1"
+)
+PEPPER_RECOVERY_ACTION_SOURCE_SYSTEM = "pepper-recovery-action"
+PEPPER_RECOVERY_ACTION_SCHEMA_VERSION = 1
+PEPPER_RECOVERY_ACTION_POLICY_ID = "pepper-p18-9-0-recovery-action-v1"
+PEPPER_RECOVERY_ACTION_DIGEST_ALGORITHM = (
+    "agent-platform-pepper-p18-9-0-recovery-action-sha256-v1"
+)
+PEPPER_RETRY_START_ACTION_SOURCE_SYSTEM = "pepper-retry-start-action"
+PEPPER_RETRY_START_ACTION_SCHEMA_VERSION = 1
+PEPPER_RETRY_START_ACTION_POLICY_ID = "pepper-p18-9-0-retry-start-action-v1"
+PEPPER_RETRY_START_ACTION_DIGEST_ALGORITHM = (
+    "agent-platform-pepper-p18-9-0-retry-start-action-sha256-v1"
+)
+PEPPER_REVIEW_PREPARE_ACTION_SOURCE_SYSTEM = "pepper-review-prepare-action"
+PEPPER_REVIEW_PREPARE_ACTION_SCHEMA_VERSION = 1
+PEPPER_REVIEW_PREPARE_ACTION_POLICY_ID = "pepper-p18-9-0-review-prepare-action-v1"
+PEPPER_REVIEW_PREPARE_ACTION_DIGEST_ALGORITHM = (
+    "agent-platform-pepper-p18-9-0-review-prepare-action-sha256-v1"
+)
+PEPPER_REVIEW_PREPARE_PACKAGE_DIGEST_ALGORITHM = (
+    "agent-platform-pepper-p18-9-0-review-package-sha256-v1"
+)
+PEPPER_ACCEPTANCE_CONTRACT_DIGEST_ALGORITHM = (
+    "agent-platform-pepper-p18-9-0-acceptance-contract-sha256-v1"
+)
+PEPPER_KANBAN_COMPLETION_RESULT_DIGEST_ALGORITHM = (
+    "agent-platform-pepper-p18-9-0-kanban-completion-result-sha256-v1"
+)
+PEPPER_CURRENT_REVIEW_PREPARE_NEXT_ACTION_ID = "PREPARE_P18_9_0_REVIEW"
+PEPPER_CURRENT_REVIEW_ACCEPTANCE_NEXT_ACTION_ID = (
+    "AWAIT_HUMAN_P18_9_0_REVIEW_ACCEPTANCE"
+)
+PEPPER_REVIEW_HUMAN_ACCEPTANCE_ACTION_SOURCE_SYSTEM = (
+    "pepper-review-human-acceptance-action"
+)
+PEPPER_REVIEW_HUMAN_ACCEPTANCE_ACTION_SCHEMA_VERSION = 1
+PEPPER_REVIEW_HUMAN_ACCEPTANCE_ACTION_POLICY_ID = (
+    "pepper-p18-9-0-review-human-acceptance-action-v1"
+)
+PEPPER_REVIEW_HUMAN_ACCEPTANCE_ACTION_DIGEST_ALGORITHM = (
+    "agent-platform-pepper-p18-9-0-review-human-acceptance-action-sha256-v1"
+)
+PEPPER_REVIEW_HUMAN_ACCEPTANCE_TEXT_DIGEST_ALGORITHM = (
+    "agent-platform-pepper-p18-9-0-review-human-acceptance-text-sha256-v1"
+)
+PEPPER_REVIEW_HUMAN_ACCEPTANCE_READY_MARKER = (
+    "PEPPER-REVIEW-HUMAN-ACCEPTANCE-READY-FOR-HUMAN-SMOKE"
+)
+PEPPER_CURRENT_REVIEW_ACCEPTANCE_TEXT = (
+    "Acepto explícitamente la review de P18.9.0 y el resultado preparado para aceptación humana."
+)
+PEPPER_REVIEW_ACCEPTANCE_NEXT_TICKET_ID = "P18.9.1"
+PEPPER_REVIEW_ACCEPTANCE_NEXT_ACTION_ID = (
+    "GENERATE_P18_9_1_REQUIRES_SEPARATE_HUMAN_ACTION"
+)
+PEPPER_CURRENT_RETRY_START_AUTHORIZATION_TEXTS = frozenset({
+    "Autorizo explícitamente el retry de P18.9.0.",
+    "Reintenta P18.9.0.",
+    "Inicia el segundo intento de P18.9.0.",
+})
+
+_P18_9_0_TICKET_SPEC_SHA256 = (
+    "6594c3536c6b9a6f570baf0fdb3b83a2820fa0863f64f45735e8f15d6eb1eb8d"
+)
+_P18_9_0_WORK_PACKET_ID = "WP-P18-9-0-R0001-4864e660625e"
+_P18_9_0_WORK_PACKET_SHA256 = (
+    "3ab63fccee9e5018ac19d10a7543a43acb2db093450b7897ad1b8c0b74288302"
+)
+_P18_9_0_WORK_PACKET_COMPILATION_COUNT = 1
+_P18_9_0_START_STORE_DIR = Path("agent-platform") / "pepper-worker-start-action"
+_P18_9_0_START_STORE_FILE = "P18.9.0.execution-start.json"
+_P18_9_0_RETRY_START_STORE_FILE = "P18.9.0.retry-start.json"
+_P18_9_0_RECOVERY_STORE_DIR = Path("agent-platform") / "pepper-recovery-action"
+_P18_9_0_RECOVERY_STORE_FILE = "P18.9.0.recovery-action.json"
+_P18_9_0_RECOVERY_HISTORY_FILE = "P18.9.0.recovery-action.history.jsonl"
+_P18_9_0_RETRY_START_HISTORY_FILE = "P18.9.0.retry-start.history.jsonl"
+_P18_9_0_REVIEW_PREPARE_STORE_DIR = Path("agent-platform") / "pepper-review-prepare-action"
+_P18_9_0_REVIEW_PREPARE_STORE_FILE = "P18.9.0.review-prepare.json"
+_P18_9_0_REVIEW_PREPARE_HISTORY_FILE = "P18.9.0.review-prepare.history.jsonl"
+_P18_9_0_REVIEW_ACCEPTANCE_STORE_DIR = Path("agent-platform") / "pepper-review-human-acceptance-action"
+_P18_9_0_REVIEW_ACCEPTANCE_STORE_FILE = "P18.9.0.review-acceptance.json"
+_P18_9_0_REVIEW_ACCEPTANCE_HISTORY_FILE = "P18.9.0.review-acceptance.history.jsonl"
+_P18_9_0_EXECUTOR_PROVIDER = "openai-codex"
+_P18_9_0_EXECUTOR_MODEL = "gpt-5.5"
+_P18_9_0_EXECUTOR_API_MODE = "codex_responses"
 
 _ACTIVE_EXECUTION_STATUSES = frozenset({"running"})
 _TERMINAL_EXECUTION_STATUSES = frozenset({
@@ -52,6 +155,18 @@ _TERMINAL_EXECUTION_STATUSES = frozenset({
     "crashed",
     "done",
     "failed",
+    "gave_up",
+    "rate_limited",
+    "reclaimed",
+    "spawn_failed",
+    "timed_out",
+})
+_P18_9_0_FAILURE_OUTCOMES = frozenset({
+    "blocked",
+    "crashed",
+    "failed",
+    "gave_up",
+    "rate_limited",
     "reclaimed",
     "spawn_failed",
     "timed_out",
@@ -131,6 +246,136 @@ class ControlledExecutionStartRequest(BaseModel):
         return value
 
 
+class CurrentTicketExecutionStartRequest(BaseModel):
+    """Request body for the bounded P18.9.0 worker start action."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
+
+    human_authorization_text: str = Field(min_length=1, max_length=1024)
+    authorizer_id: str = Field(default="pepper-chat-human", min_length=1, max_length=128)
+    project_id: str | None = Field(default=None, max_length=128)
+    ticket_id: str | None = Field(default=None, max_length=128)
+    next_action_id: str | None = Field(default=None, max_length=128)
+
+    @field_validator("authorizer_id")
+    @classmethod
+    def authorizer_must_be_safe(cls, value: str) -> str:
+        if _CONTROL_CHARS.search(value):
+            raise ValueError("authorizer_id contains control characters")
+        if not _SAFE_ID.fullmatch(value):
+            raise ValueError("invalid authorizer_id")
+        return value
+
+    @field_validator("project_id", "ticket_id", "next_action_id")
+    @classmethod
+    def optional_guards_must_be_safe(cls, value: str | None) -> str | None:
+        if value in {None, ""}:
+            return None
+        if not _SAFE_ID.fullmatch(value):
+            raise ValueError("invalid guarded identifier")
+        return value
+
+    @field_validator("human_authorization_text")
+    @classmethod
+    def authorization_text_must_be_text(cls, value: str) -> str:
+        if _CONTROL_CHARS.search(value):
+            raise ValueError("human_authorization_text contains control characters")
+        return value
+
+
+class CurrentTicketExecutionRecoveryRequest(BaseModel):
+    """Request body for the bounded P18.9.0 failed-execution recovery action."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
+
+    human_authorization_text: str = Field(min_length=1, max_length=1024)
+    authorizer_id: str = Field(default="pepper-chat-human", min_length=1, max_length=128)
+    project_id: str | None = Field(default=None, max_length=128)
+    ticket_id: str | None = Field(default=None, max_length=128)
+    next_action_id: str | None = Field(default=None, max_length=128)
+
+    @field_validator("authorizer_id")
+    @classmethod
+    def authorizer_must_be_safe(cls, value: str) -> str:
+        if _CONTROL_CHARS.search(value):
+            raise ValueError("authorizer_id contains control characters")
+        if not _SAFE_ID.fullmatch(value):
+            raise ValueError("invalid authorizer_id")
+        return value
+
+    @field_validator("project_id", "ticket_id", "next_action_id")
+    @classmethod
+    def optional_guards_must_be_safe(cls, value: str | None) -> str | None:
+        if value in {None, ""}:
+            return None
+        if not _SAFE_ID.fullmatch(value):
+            raise ValueError("invalid guarded identifier")
+        return value
+
+    @field_validator("human_authorization_text")
+    @classmethod
+    def authorization_text_must_be_text(cls, value: str) -> str:
+        if _CONTROL_CHARS.search(value):
+            raise ValueError("human_authorization_text contains control characters")
+        return value
+
+
+class CurrentTicketReviewPrepareRequest(BaseModel):
+    """Request body for bounded P18.9.0 post-execution review preparation."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
+
+    project_id: str | None = Field(default=None, max_length=128)
+    ticket_id: str | None = Field(default=None, max_length=128)
+    next_action_id: str | None = Field(default=None, max_length=128)
+
+    @field_validator("project_id", "ticket_id", "next_action_id")
+    @classmethod
+    def optional_guards_must_be_safe(cls, value: str | None) -> str | None:
+        if value in {None, ""}:
+            return None
+        if not _SAFE_ID.fullmatch(value):
+            raise ValueError("invalid guarded identifier")
+        return value
+
+
+class CurrentTicketReviewAcceptanceRequest(BaseModel):
+    """Request body for bounded P18.9.0 human review acceptance."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
+
+    human_acceptance_text: str = Field(min_length=1, max_length=1024)
+    acceptor_id: str = Field(default="pepper-chat-human", min_length=1, max_length=128)
+    project_id: str | None = Field(default=None, max_length=128)
+    ticket_id: str | None = Field(default=None, max_length=128)
+    next_action_id: str | None = Field(default=None, max_length=128)
+
+    @field_validator("acceptor_id")
+    @classmethod
+    def acceptor_must_be_safe(cls, value: str) -> str:
+        if _CONTROL_CHARS.search(value):
+            raise ValueError("acceptor_id contains control characters")
+        if not _SAFE_ID.fullmatch(value):
+            raise ValueError("invalid acceptor_id")
+        return value
+
+    @field_validator("project_id", "ticket_id", "next_action_id")
+    @classmethod
+    def optional_guards_must_be_safe(cls, value: str | None) -> str | None:
+        if value in {None, ""}:
+            return None
+        if not _SAFE_ID.fullmatch(value):
+            raise ValueError("invalid guarded identifier")
+        return value
+
+    @field_validator("human_acceptance_text")
+    @classmethod
+    def acceptance_text_must_be_text(cls, value: str) -> str:
+        if _CONTROL_CHARS.search(value):
+            raise ValueError("human_acceptance_text contains control characters")
+        return unicodedata.normalize("NFC", value)
+
+
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -187,6 +432,75 @@ def _execution_state(active_count: int) -> str:
     return "active_executions" if active_count > 0 else "no_active_executions"
 
 
+def _p18_9_0_generation_overlay() -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    try:
+        from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
+            generated_record_to_workflow_overlay,
+            load_p18_9_0_generation_record,
+        )
+
+        record = load_p18_9_0_generation_record()
+        if record is None:
+            return None, None
+        overlay = generated_record_to_workflow_overlay(record)
+        from hermes_cli.agent_platform.workflow.work_packet_kanban_projection import (
+            kanban_projection_to_workflow_overlay,
+            load_p18_9_0_kanban_projection_record,
+        )
+
+        projection = load_p18_9_0_kanban_projection_record(generation_record=record)
+        if projection is not None:
+            overlay.update(kanban_projection_to_workflow_overlay(projection))
+            start_overlay, start_blocker = _p18_9_0_execution_start_overlay(projection)
+            if start_overlay is not None:
+                overlay.update(start_overlay)
+                retry_start_overlay, retry_start_blocker = _p18_9_0_retry_start_overlay(
+                    projection,
+                )
+                if retry_start_overlay is not None:
+                    overlay.update(retry_start_overlay)
+                    if overlay.get("workflow_status") == "execution_completed":
+                        review_overlay, review_blocker = _p18_9_0_review_prepare_overlay(
+                            projection,
+                            completed_overlay=overlay,
+                        )
+                        if review_overlay is not None:
+                            overlay.update(review_overlay)
+                        if review_blocker is not None:
+                            return overlay, review_blocker
+                    return overlay, retry_start_blocker
+                if retry_start_blocker is not None:
+                    return overlay, retry_start_blocker
+                recovery_overlay, recovery_blocker = _p18_9_0_recovery_overlay(
+                    projection,
+                    start_overlay=start_overlay,
+                )
+                if recovery_overlay is not None:
+                    overlay.update(recovery_overlay)
+                if recovery_blocker is not None:
+                    return overlay, recovery_blocker
+                if recovery_overlay is not None:
+                    return overlay, None
+                if overlay.get("workflow_status") == "execution_completed":
+                    review_overlay, review_blocker = _p18_9_0_review_prepare_overlay(
+                        projection,
+                        completed_overlay=overlay,
+                    )
+                    if review_overlay is not None:
+                        overlay.update(review_overlay)
+                    if review_blocker is not None:
+                        return overlay, review_blocker
+            if start_blocker is not None:
+                return overlay, start_blocker
+        return overlay, None
+    except Exception as exc:  # pragma: no cover - defensive live-state guard
+        return None, {
+            "id": "P18-9-0-GENERATION-AUTHORITY",
+            "status": "blocked_by_invalid_generated_ticket_authority",
+            "evidence": _safe_text(exc, limit=300),
+        }
+
+
 def _approval_operational_summary() -> dict[str, Any]:
     try:
         source = build_approval_inbox_source()
@@ -231,6 +545,9 @@ def _subsystems() -> tuple[str, ...]:
     return (wa.MEMORY, wa.SKILLS)
 
 
+_P18_9_0_TICKET_APPROVAL_KIND = "ticket_approval"
+
+
 def _approval_title(record: dict[str, Any]) -> str:
     subsystem = _safe_text(record.get("subsystem"), limit=32)
     action = _safe_text(record.get("action"), limit=64)
@@ -272,18 +589,105 @@ def _approval_summary(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _timestamp_from_source(value: Any) -> float:
+    if isinstance(value, (int, float)):
+        return max(0.0, float(value))
+    if isinstance(value, str):
+        try:
+            return max(0.0, datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp())
+        except ValueError:
+            return 0.0
+    return 0.0
+
+
+def _p18_9_0_pending_ticket_approval_record() -> dict[str, Any] | None:
+    from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
+        load_p18_9_0_approval_decision_record,
+        load_p18_9_0_generation_record,
+    )
+
+    record = load_p18_9_0_generation_record()
+    if record is None:
+        return None
+    decision = load_p18_9_0_approval_decision_record(generation_record=record)
+    return None if decision is not None else record
+
+
+def _p18_9_0_ticket_approval_summary(record: dict[str, Any]) -> dict[str, Any]:
+    from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
+        CANONICAL_APPROVAL_ID,
+        CANONICAL_TICKET_ID,
+        CANONICAL_TICKET_TITLE,
+    )
+
+    return {
+        "id": CANONICAL_APPROVAL_ID,
+        "semantics": "explicit_approval_request",
+        "title": f"Review governed ticket approval: {CANONICAL_TICKET_ID}",
+        "summary": (
+            f"Generated {CANONICAL_TICKET_ID} {CANONICAL_TICKET_TITLE!r} is awaiting "
+            "explicit human ticket approval. The existing TicketSpec, WorkPacket ID, "
+            "WorkPacket digest and compile count are preserved."
+        ),
+        "status": "pending",
+        "request_type": "ticket_approval",
+        "requested_at": _timestamp_from_source(record.get("created_at")),
+        "expires_at": None,
+        "requester": "pepper-ticket-architect-bridge",
+        "risk_label": "medium",
+        "target": {
+            "type": "runtime_action",
+            "label": f"{CANONICAL_TICKET_ID} {CANONICAL_TICKET_TITLE}",
+        },
+        "reason": (
+            "Approve records a human ticket approval through the governed P18 approval "
+            "transition; reject records the human rejection. Neither path executes a "
+            "worker, dispatches Kanban, recompiles the WorkPacket, mutates Git, invokes "
+            "Docker, or invokes Graphify."
+        ),
+    }
+
+
+def _p18_9_0_ticket_approval_evidence(record: dict[str, Any]) -> list[dict[str, str]]:
+    approval_id = _safe_id(record.get("ticket_id"))
+    return [
+        {
+            "id": f"{approval_id}:bridge",
+            "label": f"bridge authority SHA256: {record['bridge_SHA256']}",
+        },
+        {
+            "id": f"{approval_id}:ticket_spec",
+            "label": f"TicketSpec SHA256: {record['ticket_spec_SHA256']}",
+        },
+        {
+            "id": f"{approval_id}:work_packet",
+            "label": (
+                f"WorkPacket {record['work_packet_id']} SHA256: "
+                f"{record['work_packet_SHA256']}"
+            ),
+        },
+        {
+            "id": f"{approval_id}:workflow",
+            "label": "workflow transition GWT-002 stops at awaiting_ticket_approval",
+        },
+    ]
+
+
 def build_approval_inbox_source() -> dict[str, Any]:
     """Return the bounded live approval inbox source for the active profile."""
 
     from tools import write_approval as wa
 
     approvals: list[dict[str, Any]] = []
+    ticket_approval = _p18_9_0_pending_ticket_approval_record()
+    if ticket_approval is not None:
+        approvals.append(_p18_9_0_ticket_approval_summary(ticket_approval))
     for subsystem in _subsystems():
         for record in wa.list_pending(subsystem):
             approvals.append(_approval_summary(record))
     return {
         "source_system": APPROVAL_SOURCE_SYSTEM,
-        "source_authority": "durable-hermes-staged-write-store",
+        "source_authority": "durable-hermes-staged-write-store+pepper-ticket-architect-bridge",
         "canonical_approval_authority": "pepper-controlled-human-decision-v1",
         "approvals": approvals,
     }
@@ -291,9 +695,15 @@ def build_approval_inbox_source() -> dict[str, Any]:
 
 def _find_pending(approval_id: str) -> tuple[str, dict[str, Any]]:
     from tools import write_approval as wa
+    from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
+        CANONICAL_APPROVAL_ID,
+    )
 
     approval_id = _safe_id(approval_id)
     matches: list[tuple[str, dict[str, Any]]] = []
+    ticket_approval = _p18_9_0_pending_ticket_approval_record()
+    if ticket_approval is not None and approval_id == CANONICAL_APPROVAL_ID:
+        matches.append((_P18_9_0_TICKET_APPROVAL_KIND, ticket_approval))
     for subsystem in _subsystems():
         record = wa.get_pending(subsystem, approval_id)
         if record:
@@ -309,6 +719,17 @@ def build_approval_detail_source(approval_id: str) -> dict[str, Any]:
     """Return one bounded approval detail source by source-local id."""
 
     subsystem, record = _find_pending(approval_id)
+    if subsystem == _P18_9_0_TICKET_APPROVAL_KIND:
+        summary = _p18_9_0_ticket_approval_summary(record)
+        return {
+            "source_system": APPROVAL_SOURCE_SYSTEM,
+            "source_authority": "pepper-ticket-architect-bridge-authority",
+            "canonical_approval_authority": "pepper-controlled-human-decision-v1",
+            "approval": summary,
+            "evidence": _p18_9_0_ticket_approval_evidence(record),
+            "decisions": [],
+        }
+
     summary = _approval_summary(record)
     evidence = [
         {
@@ -330,6 +751,52 @@ def build_approval_detail_source(approval_id: str) -> dict[str, Any]:
     }
 
 
+def _p18_9_0_resolved_ticket_approval_decision(
+    approval_id: str,
+    request: ApprovalDecisionRequest,
+) -> dict[str, Any] | None:
+    from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
+        CANONICAL_APPROVAL_ID,
+        TicketArchitectBridgeConflict,
+        load_p18_9_0_approval_decision_record,
+        load_p18_9_0_generation_record,
+    )
+
+    if approval_id != CANONICAL_APPROVAL_ID:
+        return None
+    try:
+        generation = load_p18_9_0_generation_record()
+        if generation is None:
+            return None
+        decision = load_p18_9_0_approval_decision_record(generation_record=generation)
+    except TicketArchitectBridgeConflict as exc:
+        raise ProductRuntimeConflict(str(exc) or "ticket approval authority conflict") from exc
+    if decision is None:
+        return None
+    if decision.get("decision") != request.decision:
+        raise ProductRuntimeConflict("approval is already decided with the opposite decision")
+    return {
+        "source_system": APPROVAL_SOURCE_SYSTEM,
+        "id": approval_id,
+        "decision": request.decision,
+        "status": decision["status"],
+        "actor": decision["actor"],
+        "decided_at": decision["decided_at"],
+        "applied": False,
+        "idempotent_replay": True,
+        "ticket_id": decision["ticket_id"],
+        "workflow_transition_id": decision["workflow_transition_result"]["transition"]["transition_id"],
+        "ticket_execution_authorized": False,
+        "WorkPacket_execution_authorized": False,
+        "runtime_execution_authorized": False,
+        "worker_execution": False,
+        "Kanban_dispatch": False,
+        "Git_mutation": False,
+        "WorkPacket_compilation_count": 1,
+        "WorkPacket_recompile_required": False,
+    }
+
+
 def apply_approval_decision(
     approval_id: str,
     request: ApprovalDecisionRequest,
@@ -338,7 +805,51 @@ def apply_approval_decision(
 
     from tools import write_approval as wa
 
+    approval_id = _safe_id(approval_id)
+    resolved_ticket_decision = _p18_9_0_resolved_ticket_approval_decision(
+        approval_id,
+        request,
+    )
+    if resolved_ticket_decision is not None:
+        return resolved_ticket_decision
+
     subsystem, record = _find_pending(approval_id)
+    if subsystem == _P18_9_0_TICKET_APPROVAL_KIND:
+        from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
+            TicketArchitectBridgeConflict,
+            apply_p18_9_0_approval_decision,
+        )
+
+        try:
+            result = apply_p18_9_0_approval_decision(
+                decision=request.decision,
+                actor=request.actor,
+                decided_at=time.time(),
+            )
+        except TicketArchitectBridgeConflict as exc:
+            raise ProductRuntimeConflict(str(exc) or "ticket approval authority conflict") from exc
+        except Exception as exc:  # pragma: no cover - defensive authority guard
+            raise ProductRuntimeDecisionFailed("ticket approval decision failed") from exc
+        return {
+            "source_system": APPROVAL_SOURCE_SYSTEM,
+            "id": approval_id,
+            "decision": request.decision,
+            "status": result["status"],
+            "actor": request.actor,
+            "decided_at": result["decided_at"],
+            "applied": True,
+            "ticket_id": result["ticket_id"],
+            "workflow_transition_id": result["workflow_transition_id"],
+            "ticket_execution_authorized": False,
+            "WorkPacket_execution_authorized": False,
+            "runtime_execution_authorized": False,
+            "worker_execution": False,
+            "Kanban_dispatch": False,
+            "Git_mutation": False,
+            "WorkPacket_compilation_count": 1,
+            "WorkPacket_recompile_required": False,
+        }
+
     if request.decision == "reject":
         if not wa.discard_pending(subsystem, approval_id):
             raise ProductRuntimeNotFound("approval not found")
@@ -379,7 +890,35 @@ def apply_approval_decision(
     }
 
 
+def _bounded_optional_text(value: object, *, limit: int) -> str | None:
+    text = str(value or "").strip()
+    return _safe_text(text, limit=limit) if text else None
+
+
+def _run_failure_fields(run: Any) -> dict[str, Any]:
+    status = str(getattr(run, "status", "") or "").strip().lower()
+    outcome = str(getattr(run, "outcome", "") or "").strip().lower()
+    if status not in _P18_9_0_FAILURE_OUTCOMES and outcome not in _P18_9_0_FAILURE_OUTCOMES:
+        return {"failure_category": None, "failure_summary": None}
+
+    metadata = getattr(run, "metadata", None)
+    category = None
+    summary = None
+    if isinstance(metadata, dict):
+        category = metadata.get("failure_category")
+        summary = metadata.get("failure_summary")
+    if not category:
+        category = outcome or status or "failed"
+    if not summary:
+        summary = getattr(run, "error", None) or getattr(run, "summary", None)
+    return {
+        "failure_category": _bounded_optional_text(category, limit=128),
+        "failure_summary": _bounded_optional_text(summary, limit=300),
+    }
+
+
 def _run_dict(run: Any) -> dict[str, Any]:
+    failure_fields = _run_failure_fields(run)
     return {
         "id": int(run.id),
         "task_id": run.task_id,
@@ -394,6 +933,7 @@ def _run_dict(run: Any) -> dict[str, Any]:
         "started_at": run.started_at,
         "ended_at": run.ended_at,
         "outcome": run.outcome,
+        **failure_fields,
         "summary": run.summary,
         "metadata": None,
         "error": run.error,
@@ -452,6 +992,31 @@ def _normalize_board(board_slug: str | None) -> str:
     return board
 
 
+def _p18_9_0_projected_task_id_for_board(board_slug: str) -> str | None:
+    try:
+        from hermes_cli.agent_platform.workflow.work_packet_kanban_projection import (
+            load_p18_9_0_kanban_projection_record,
+        )
+
+        record = load_p18_9_0_kanban_projection_record()
+    except Exception:
+        return None
+    if not isinstance(record, dict):
+        return None
+    try:
+        projected_board = _normalize_board(str(record.get("kanban_board_slug") or ""))
+    except Exception:
+        return None
+    if projected_board != board_slug:
+        return None
+    task_id = str(record.get("kanban_task_id") or "").strip()
+    return task_id if _SAFE_TASK.fullmatch(task_id) else None
+
+
+def _is_p18_9_0_projected_task(board_slug: str, task_id: str) -> bool:
+    return _p18_9_0_projected_task_id_for_board(board_slug) == task_id
+
+
 def build_task_execution_source(board_slug: str, task_id: str) -> dict[str, Any]:
     """Return the existing task-nested execution evidence through product API."""
 
@@ -463,6 +1028,10 @@ def build_task_execution_source(board_slug: str, task_id: str) -> dict[str, Any]
     kanban_db.init_db(board=board)
     conn = kanban_db.connect(board=board)
     try:
+        _reconcile_kanban_board_lifecycle(
+            conn,
+            task_id=task_id if _is_p18_9_0_projected_task(board, task_id) else None,
+        )
         task = kanban_db.get_task(conn, task_id)
         if task is None:
             raise ProductRuntimeNotFound("task not found")
@@ -516,10 +1085,15 @@ def build_execution_collection_source(
         kanban_db.init_db(board=board)
         conn = kanban_db.connect(board=board)
         try:
+            _reconcile_kanban_board_lifecycle(
+                conn,
+                task_id=_p18_9_0_projected_task_id_for_board(board),
+            )
             tasks = kanban_db.list_tasks(conn, include_archived=False)
             for task in tasks:
                 for run in kanban_db.list_runs(conn, task.id):
                     control = _execution_control_fields(board, task.id, task.status)
+                    failure_fields = _run_failure_fields(run)
                     records.append({
                         "id": int(run.id),
                         "board_slug": board,
@@ -528,6 +1102,7 @@ def build_execution_collection_source(
                         "profile": run.profile,
                         "status": run.status,
                         "outcome": run.outcome,
+                        **failure_fields,
                         "started_at": run.started_at,
                         "ended_at": run.ended_at,
                         **control,
@@ -544,6 +1119,29 @@ def build_execution_collection_source(
         "manual_opencode_copy_required": False,
         "human_git_authority": "preserved",
     }
+
+
+def _reconcile_kanban_board_lifecycle(
+    conn: Any,
+    *,
+    task_id: str | None = None,
+) -> None:
+    """Best-effort Kanban lifecycle reconciliation before Pepper reads state."""
+
+    try:
+        from hermes_cli import kanban_db
+
+        kanban_db.detect_crashed_workers(conn)
+        if task_id:
+            kanban_db.reconcile_orphaned_active_run(
+                conn,
+                task_id,
+                failure_limit=1,
+                force_trip=True,
+                failure_category="worker_bootstrap_failure",
+            )
+    except Exception:
+        return
 
 
 def ensure_execution_exists(board_slug: str, task_id: str, execution_id: str) -> dict[str, Any]:
@@ -595,6 +1193,4987 @@ def prepare_controlled_execution(
     }
 
 
+def generate_current_governed_ticket(
+    *,
+    project_id: str | None = None,
+    ticket_id: str | None = None,
+    next_action_id: str | None = None,
+) -> dict[str, Any]:
+    """Generate the current governed Pepper ticket from the active next action."""
+
+    from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
+        generate_p18_9_0_ticket,
+    )
+
+    return generate_p18_9_0_ticket(
+        workflow=build_workflow_control_snapshot(),
+        requested_project_id=project_id,
+        requested_ticket_id=ticket_id,
+        requested_next_action_id=next_action_id,
+    )
+
+
+def project_current_approved_workpacket_to_kanban(
+    *,
+    project_id: str | None = None,
+    ticket_id: str | None = None,
+    next_action_id: str | None = None,
+) -> dict[str, Any]:
+    """Project the current approved Pepper WorkPacket to Kanban without dispatch."""
+
+    from hermes_cli.agent_platform.workflow.work_packet_kanban_projection import (
+        project_approved_p18_9_0_workpacket_to_kanban,
+    )
+
+    return project_approved_p18_9_0_workpacket_to_kanban(
+        workflow=build_workflow_control_snapshot(),
+        requested_project_id=project_id,
+        requested_ticket_id=ticket_id,
+        requested_next_action_id=next_action_id,
+    )
+
+
+def p18_9_0_execution_start_record_path() -> Path:
+    """Return the profile-scoped P18.9.0 execution-start authority path."""
+
+    from hermes_constants import get_hermes_home
+
+    return get_hermes_home() / _P18_9_0_START_STORE_DIR / _P18_9_0_START_STORE_FILE
+
+
+def p18_9_0_recovery_action_record_path() -> Path:
+    """Return the profile-scoped P18.9.0 recovery authority path."""
+
+    from hermes_constants import get_hermes_home
+
+    return get_hermes_home() / _P18_9_0_RECOVERY_STORE_DIR / _P18_9_0_RECOVERY_STORE_FILE
+
+
+def p18_9_0_recovery_action_history_path() -> Path:
+    """Return the append-only P18.9.0 recovery authority history path."""
+
+    from hermes_constants import get_hermes_home
+
+    return get_hermes_home() / _P18_9_0_RECOVERY_STORE_DIR / _P18_9_0_RECOVERY_HISTORY_FILE
+
+
+def p18_9_0_retry_start_record_path() -> Path:
+    """Return the profile-scoped P18.9.0 retry-start authority path."""
+
+    from hermes_constants import get_hermes_home
+
+    return get_hermes_home() / _P18_9_0_START_STORE_DIR / _P18_9_0_RETRY_START_STORE_FILE
+
+
+def p18_9_0_retry_start_history_path() -> Path:
+    """Return the append-only P18.9.0 retry-start authority history path."""
+
+    from hermes_constants import get_hermes_home
+
+    return get_hermes_home() / _P18_9_0_START_STORE_DIR / _P18_9_0_RETRY_START_HISTORY_FILE
+
+
+def p18_9_0_review_prepare_record_path() -> Path:
+    """Return the profile-scoped P18.9.0 review-preparation authority path."""
+
+    from hermes_constants import get_hermes_home
+
+    return get_hermes_home() / _P18_9_0_REVIEW_PREPARE_STORE_DIR / _P18_9_0_REVIEW_PREPARE_STORE_FILE
+
+
+def p18_9_0_review_prepare_history_path() -> Path:
+    """Return the append-only P18.9.0 review-preparation authority history path."""
+
+    from hermes_constants import get_hermes_home
+
+    return get_hermes_home() / _P18_9_0_REVIEW_PREPARE_STORE_DIR / _P18_9_0_REVIEW_PREPARE_HISTORY_FILE
+
+
+def p18_9_0_review_acceptance_record_path() -> Path:
+    """Return the profile-scoped P18.9.0 review-acceptance authority path."""
+
+    from hermes_constants import get_hermes_home
+
+    return get_hermes_home() / _P18_9_0_REVIEW_ACCEPTANCE_STORE_DIR / _P18_9_0_REVIEW_ACCEPTANCE_STORE_FILE
+
+
+def p18_9_0_review_acceptance_history_path() -> Path:
+    """Return the append-only P18.9.0 review-acceptance authority history path."""
+
+    from hermes_constants import get_hermes_home
+
+    return get_hermes_home() / _P18_9_0_REVIEW_ACCEPTANCE_STORE_DIR / _P18_9_0_REVIEW_ACCEPTANCE_HISTORY_FILE
+
+
+def load_p18_9_0_execution_start_record(
+    *,
+    projection_record: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Load and validate the bounded P18.9.0 worker-start record, if present."""
+
+    path = p18_9_0_execution_start_record_path()
+    if not path.exists():
+        return None
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ProductRuntimeConflict(
+            "P18.9.0 execution-start authorization record is unreadable"
+        ) from exc
+    return validate_p18_9_0_execution_start_record(
+        record,
+        projection_record=projection_record,
+    )
+
+
+def load_p18_9_0_recovery_action_record(
+    *,
+    projection_record: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Load and validate the bounded P18.9.0 recovery record, if present."""
+
+    path = p18_9_0_recovery_action_record_path()
+    if not path.exists():
+        return None
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ProductRuntimeConflict(
+            "P18.9.0 recovery action record is unreadable"
+        ) from exc
+    return validate_p18_9_0_recovery_action_record(
+        record,
+        projection_record=projection_record,
+    )
+
+
+def load_p18_9_0_retry_start_record(
+    *,
+    projection_record: dict[str, Any] | None = None,
+    recovery_record: dict[str, Any] | None = None,
+    allow_historical_mismatch: bool = False,
+) -> dict[str, Any] | None:
+    """Load and validate the bounded P18.9.0 retry-start record, if present."""
+
+    path = p18_9_0_retry_start_record_path()
+    if not path.exists():
+        return None
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ProductRuntimeConflict(
+            "P18.9.0 retry-start authorization record is unreadable"
+        ) from exc
+    try:
+        return validate_p18_9_0_retry_start_record(
+            record,
+            projection_record=projection_record,
+            recovery_record=recovery_record,
+        )
+    except ProductRuntimeConflict:
+        if not allow_historical_mismatch:
+            raise
+        if record.get("retry_start_authorization_SHA256") != _retry_start_record_digest(record):
+            raise
+        projection = projection_record if projection_record is not None else _load_current_projection_record()
+        _validate_execution_start_authority(projection)
+        recovery = recovery_record
+        if recovery is None:
+            recovery = load_p18_9_0_recovery_action_record(projection_record=projection)
+        if recovery is None:
+            raise
+        same_recovery_authority = (
+            record.get("recovery_action_SHA256") == recovery.get("recovery_action_SHA256")
+        )
+        same_recovery_cycle = (
+            _retry_start_record_cycle_id(record, recovery, projection)
+            == _recovery_record_cycle_id(recovery, projection)
+        )
+        if same_recovery_authority and same_recovery_cycle:
+            raise
+        historical_recovery = dict(recovery)
+        historical_recovery["recovery_action_SHA256"] = record.get("recovery_action_SHA256")
+        historical_recovery["observed_attempt_count"] = record.get("previous_attempt_count")
+        historical_recovery["next_attempt_number"] = record.get("next_attempt_number")
+        historical_recovery["max_attempts"] = record.get("max_attempts")
+        historical_recovery["latest_failed_run_id"] = record.get("latest_failed_run_id")
+        validate_p18_9_0_retry_start_record(
+            record,
+            projection_record=projection,
+            recovery_record=historical_recovery,
+        )
+        return record
+
+
+def load_p18_9_0_review_prepare_record(
+    *,
+    projection_record: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Load and validate the bounded P18.9.0 review-preparation record."""
+
+    path = p18_9_0_review_prepare_record_path()
+    if not path.exists():
+        return None
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ProductRuntimeConflict(
+            "P18.9.0 review-preparation record is unreadable"
+        ) from exc
+    return validate_p18_9_0_review_prepare_record(
+        record,
+        projection_record=projection_record,
+    )
+
+
+def load_p18_9_0_review_acceptance_record(
+    *,
+    projection_record: dict[str, Any] | None = None,
+    review_prepare_record: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Load and validate the bounded P18.9.0 review-acceptance record."""
+
+    path = p18_9_0_review_acceptance_record_path()
+    if not path.exists():
+        return None
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ProductRuntimeConflict(
+            "P18.9.0 review-acceptance record is unreadable"
+        ) from exc
+    return validate_p18_9_0_review_acceptance_record(
+        record,
+        projection_record=projection_record,
+        review_prepare_record=review_prepare_record,
+    )
+
+
+def _p18_9_0_recovery_cycle_id(
+    *,
+    projection: dict[str, Any],
+    latest_failed_run_id: Any,
+    observed_attempt_count: Any,
+    failure_category: Any = None,
+    failure_summary: Any = None,
+) -> str:
+    payload = {
+        "project_id": PEPPER_GOVERNED_PROJECT_ID,
+        "ticket_id": PEPPER_NEXT_TICKET_ID,
+        "work_packet_id": projection.get("work_packet_id"),
+        "work_packet_SHA256": projection.get("work_packet_SHA256"),
+        "projection_SHA256": projection.get("projection_SHA256"),
+        "kanban_board_slug": projection.get("kanban_board_slug"),
+        "kanban_task_id": projection.get("kanban_task_id"),
+        "latest_failed_run_id": int(latest_failed_run_id or 0),
+        "observed_attempt_count": int(observed_attempt_count or 0),
+        "failure_category": _safe_text(failure_category, limit=120),
+        "failure_summary": _safe_text(failure_summary, limit=300),
+    }
+    data = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(f"pepper-p18-9-0-recovery-cycle-v1\n{data}".encode("utf-8")).hexdigest()
+
+
+def _recovery_record_cycle_id(record: dict[str, Any], projection: dict[str, Any]) -> str:
+    return str(record.get("recovery_cycle_id") or _p18_9_0_recovery_cycle_id(
+        projection=projection,
+        latest_failed_run_id=record.get("latest_failed_run_id"),
+        observed_attempt_count=record.get("observed_attempt_count"),
+        failure_category=record.get("failure_category"),
+        failure_summary=record.get("failure_summary"),
+    ))
+
+
+def _retry_start_record_cycle_id(
+    record: dict[str, Any],
+    recovery_record: dict[str, Any],
+    projection: dict[str, Any],
+) -> str:
+    if record.get("recovery_cycle_id"):
+        return str(record["recovery_cycle_id"])
+    return _p18_9_0_recovery_cycle_id(
+        projection=projection,
+        latest_failed_run_id=record.get("latest_failed_run_id"),
+        observed_attempt_count=record.get("previous_attempt_count"),
+        failure_category=record.get("failure_category"),
+        failure_summary=record.get("failure_summary"),
+    )
+
+
+def _append_authority_history(path: Path, record: dict[str, Any], *, reason: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    entry = {
+        "archived_at": _utc_now_iso(),
+        "archive_reason": reason,
+        "record": record,
+    }
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def _archive_existing_authority_record(
+    current_path: Path,
+    history_path: Path,
+    *,
+    reason: str,
+) -> None:
+    if not current_path.exists():
+        return
+    try:
+        record = json.loads(current_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        record = {"unreadable_record_path": str(current_path)}
+    _append_authority_history(history_path, record, reason=reason)
+
+
+def validate_p18_9_0_execution_start_record(
+    record: dict[str, Any],
+    *,
+    projection_record: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Validate the persisted worker-start authority without dispatching."""
+
+    if not isinstance(record, dict):
+        raise ProductRuntimeConflict("execution-start record must be an object")
+    if record.get("start_authorization_SHA256") != _execution_start_record_digest(record):
+        raise ProductRuntimeConflict("execution-start record digest mismatch")
+    projection = projection_record if projection_record is not None else _load_current_projection_record()
+    _validate_execution_start_authority(projection)
+    expected = {
+        "schema_version": PEPPER_WORKER_START_ACTION_SCHEMA_VERSION,
+        "policy_id": PEPPER_WORKER_START_ACTION_POLICY_ID,
+        "project_id": PEPPER_GOVERNED_PROJECT_ID,
+        "macroproject_id": PEPPER_GOVERNED_MACROPROJECT_ID,
+        "ticket_id": PEPPER_NEXT_TICKET_ID,
+        "ticket_title": PEPPER_NEXT_TICKET_TITLE,
+        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
+        "work_packet_id": projection["work_packet_id"],
+        "work_packet_SHA256": projection["work_packet_SHA256"],
+        "WorkPacket_compilation_count": _P18_9_0_WORK_PACKET_COMPILATION_COUNT,
+        "approval_publication_SHA256": projection["approval_publication_SHA256"],
+        "projection_SHA256": projection["projection_SHA256"],
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+        "assignee_profile": projection["assignee_profile"],
+        "selected_profile": projection["selected_profile"],
+        "execution_authorized": True,
+        "synthetic": False,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+    }
+    for key, value in expected.items():
+        if record.get(key) != value:
+            raise ProductRuntimeConflict(f"execution-start record {key} mismatch")
+    return record
+
+
+def validate_p18_9_0_recovery_action_record(
+    record: dict[str, Any],
+    *,
+    projection_record: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Validate the persisted recovery authority without requeueing or dispatch."""
+
+    if not isinstance(record, dict):
+        raise ProductRuntimeConflict("recovery action record must be an object")
+    if record.get("recovery_action_SHA256") != _recovery_action_record_digest(record):
+        raise ProductRuntimeConflict("recovery action record digest mismatch")
+    projection = projection_record if projection_record is not None else _load_current_projection_record()
+    _validate_execution_start_authority(projection)
+    expected = {
+        "schema_version": PEPPER_RECOVERY_ACTION_SCHEMA_VERSION,
+        "policy_id": PEPPER_RECOVERY_ACTION_POLICY_ID,
+        "source_system": PEPPER_RECOVERY_ACTION_SOURCE_SYSTEM,
+        "project_id": PEPPER_GOVERNED_PROJECT_ID,
+        "macroproject_id": PEPPER_GOVERNED_MACROPROJECT_ID,
+        "ticket_id": PEPPER_NEXT_TICKET_ID,
+        "ticket_title": PEPPER_NEXT_TICKET_TITLE,
+        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
+        "work_packet_id": projection["work_packet_id"],
+        "work_packet_SHA256": projection["work_packet_SHA256"],
+        "WorkPacket_compilation_count": _P18_9_0_WORK_PACKET_COMPILATION_COUNT,
+        "approval_publication_SHA256": projection["approval_publication_SHA256"],
+        "projection_SHA256": projection["projection_SHA256"],
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+        "assignee_profile": projection["assignee_profile"],
+        "selected_profile": projection["selected_profile"],
+        "requested_action": "authorize_retry",
+        "recovery_status": "retry_pending",
+        "retry_identity_model": "same_kanban_task_new_run",
+        "future_retry_prepared": True,
+        "future_task_skills": [],
+        "future_retry_capability_surface": "pepper_repository",
+        "unresolved_Hermes_task_skills": [],
+        "retry_budget_exhausted": False,
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "worker_process_started": False,
+        "Kanban_dispatch": False,
+        "retry_execution_started": False,
+        "retry_execution_count": 0,
+        "automatic_retry_count": 0,
+        "automatic_requeue_count": 0,
+        "Kanban_requeue_calls": 0,
+        "Kanban_reclaim_calls": 0,
+        "Kanban_reassign_calls": 0,
+        "new_kanban_task_created": False,
+        "Git_commands_executed": 0,
+        "Docker_commands_executed": 0,
+        "Graphify_commands_executed": 0,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+    }
+    for key, value in expected.items():
+        if record.get(key) != value:
+            raise ProductRuntimeConflict(f"recovery action record {key} mismatch")
+    if int(record.get("observed_attempt_count") or 0) < 1:
+        raise ProductRuntimeConflict("recovery action observed_attempt_count mismatch")
+    expected_max_attempts = max(
+        int(projection.get("task_max_retries") or 0) + 1,
+        int(record.get("observed_attempt_count") or 0) + 1,
+    )
+    if int(record.get("max_attempts") or 0) != expected_max_attempts:
+        raise ProductRuntimeConflict("recovery action max_attempts mismatch")
+    if int(record.get("next_attempt_number") or 0) != int(record["observed_attempt_count"]) + 1:
+        raise ProductRuntimeConflict("recovery action next_attempt_number mismatch")
+    if record.get("human_authorization_text") != PEPPER_CURRENT_EXECUTION_RECOVERY_AUTHORIZATION_TEXT:
+        raise ProductRuntimeConflict("recovery action human authorization text mismatch")
+    try:
+        from hermes_cli.agent_platform.workflow.retry_incident_rollback import (
+            RetryIncidentRollbackHumanAuthorization,
+            RetryIncidentRollbackRequestedAction,
+        )
+
+        authorization_payload = dict(record.get("human_authorization") or {})
+        if authorization_payload.get("action") == "authorize_retry":
+            authorization_payload["action"] = RetryIncidentRollbackRequestedAction.AUTHORIZE_RETRY
+        authorization = RetryIncidentRollbackHumanAuthorization.model_validate(
+            authorization_payload
+        )
+    except Exception as exc:
+        raise ProductRuntimeConflict("recovery action human authorization is invalid") from exc
+    if authorization.authorization_SHA256 != record.get("human_authorization_SHA256"):
+        raise ProductRuntimeConflict("recovery action human authorization digest mismatch")
+    return record
+
+
+def validate_p18_9_0_retry_start_record(
+    record: dict[str, Any],
+    *,
+    projection_record: dict[str, Any] | None = None,
+    recovery_record: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Validate the persisted retry-start authority without dispatching."""
+
+    if not isinstance(record, dict):
+        raise ProductRuntimeConflict("retry-start record must be an object")
+    if record.get("retry_start_authorization_SHA256") != _retry_start_record_digest(record):
+        raise ProductRuntimeConflict("retry-start record digest mismatch")
+    projection = projection_record if projection_record is not None else _load_current_projection_record()
+    _validate_execution_start_authority(projection)
+    recovery = recovery_record
+    if recovery is None:
+        recovery = load_p18_9_0_recovery_action_record(projection_record=projection)
+    if recovery is None:
+        raise ProductRuntimeConflict("retry-start record requires recovery authority")
+    expected = {
+        "schema_version": PEPPER_RETRY_START_ACTION_SCHEMA_VERSION,
+        "policy_id": PEPPER_RETRY_START_ACTION_POLICY_ID,
+        "source_system": PEPPER_RETRY_START_ACTION_SOURCE_SYSTEM,
+        "project_id": PEPPER_GOVERNED_PROJECT_ID,
+        "macroproject_id": PEPPER_GOVERNED_MACROPROJECT_ID,
+        "ticket_id": PEPPER_NEXT_TICKET_ID,
+        "ticket_title": PEPPER_NEXT_TICKET_TITLE,
+        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
+        "work_packet_id": projection["work_packet_id"],
+        "work_packet_SHA256": projection["work_packet_SHA256"],
+        "WorkPacket_compilation_count": _P18_9_0_WORK_PACKET_COMPILATION_COUNT,
+        "approval_publication_SHA256": projection["approval_publication_SHA256"],
+        "projection_SHA256": projection["projection_SHA256"],
+        "recovery_action_SHA256": recovery["recovery_action_SHA256"],
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+        "assignee_profile": projection["assignee_profile"],
+        "selected_profile": projection["selected_profile"],
+        "requested_action": "start_retry",
+        "recovery_status_at_authorization": "retry_pending",
+        "retry_identity_model": "same_kanban_task_new_run",
+        "future_task_skills": [],
+        "future_retry_capability_surface": "pepper_repository",
+        "unresolved_Hermes_task_skills": [],
+        "retry_start_authorized": True,
+        "synthetic": False,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+    }
+    for key, value in expected.items():
+        if record.get(key) != value:
+            raise ProductRuntimeConflict(f"retry-start record {key} mismatch")
+    if record.get("human_authorization_text") not in PEPPER_CURRENT_RETRY_START_AUTHORIZATION_TEXTS:
+        raise ProductRuntimeConflict("retry-start record human authorization text mismatch")
+    if int(record.get("previous_attempt_count") or 0) != int(recovery["observed_attempt_count"]):
+        raise ProductRuntimeConflict("retry-start record previous_attempt_count mismatch")
+    if int(record.get("next_attempt_number") or 0) != int(recovery["next_attempt_number"]):
+        raise ProductRuntimeConflict("retry-start record next_attempt_number mismatch")
+    if int(record.get("max_attempts") or 0) != int(recovery["max_attempts"]):
+        raise ProductRuntimeConflict("retry-start record max_attempts mismatch")
+    if record.get("latest_failed_run_id") != recovery.get("latest_failed_run_id"):
+        raise ProductRuntimeConflict("retry-start record latest_failed_run_id mismatch")
+    return record
+
+
+def validate_p18_9_0_review_prepare_record(
+    record: dict[str, Any],
+    *,
+    projection_record: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Validate persisted P18.9.0 review-preparation authority."""
+
+    if not isinstance(record, dict):
+        raise ProductRuntimeConflict("review-preparation record must be an object")
+    if record.get("review_prepare_action_SHA256") != _review_prepare_record_digest(record):
+        raise ProductRuntimeConflict("review-preparation record digest mismatch")
+    projection = projection_record if projection_record is not None else _load_current_projection_record()
+    _validate_execution_start_authority(projection)
+    completion = _kanban_completion_result_source(projection)
+    if completion.get("blocker_code"):
+        raise ProductRuntimeConflict(str(completion["blocker_code"]))
+    contract = _p18_9_0_acceptance_contract()
+    expected = {
+        "schema_version": PEPPER_REVIEW_PREPARE_ACTION_SCHEMA_VERSION,
+        "policy_id": PEPPER_REVIEW_PREPARE_ACTION_POLICY_ID,
+        "source_system": PEPPER_REVIEW_PREPARE_ACTION_SOURCE_SYSTEM,
+        "project_id": PEPPER_GOVERNED_PROJECT_ID,
+        "macroproject_id": PEPPER_GOVERNED_MACROPROJECT_ID,
+        "ticket_id": PEPPER_NEXT_TICKET_ID,
+        "ticket_title": PEPPER_NEXT_TICKET_TITLE,
+        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
+        "work_packet_id": projection["work_packet_id"],
+        "work_packet_SHA256": projection["work_packet_SHA256"],
+        "WorkPacket_compilation_count": _P18_9_0_WORK_PACKET_COMPILATION_COUNT,
+        "approval_publication_SHA256": projection["approval_publication_SHA256"],
+        "dependency_plan_SHA256": projection["dependency_plan_SHA256"],
+        "projection_SHA256": projection["projection_SHA256"],
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+        "successful_run_id": completion["run_id"],
+        "successful_run_status": "done",
+        "successful_run_outcome": "completed",
+        "acceptance_contract_SHA256": contract["acceptance_contract_SHA256"],
+        "criteria_revision_SHA256": contract["criteria_revision_SHA256"],
+        "kanban_completion_result_SHA256": completion["kanban_completion_result_SHA256"],
+        "review_package_SHA256": _review_prepare_package_digest(
+            projection=projection,
+            completion=completion,
+            acceptance_contract=contract,
+        ),
+        "review_prepare_status": "prepared_pending_human_acceptance",
+        "validation_state": "review_prepared_pending_human_acceptance",
+        "review_state": "prepared_pending_human_acceptance",
+        "human_acceptance_required": True,
+        "human_acceptance_recorded": False,
+        "git_handoff_required": False,
+        "git_handoff_state": "not_required_for_ticket_result",
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "worker_process_started": False,
+        "Kanban_dispatch": False,
+        "retry_execution_started": False,
+        "automatic_retry_count": 0,
+        "automatic_requeue_count": 0,
+        "Kanban_requeue_calls": 0,
+        "Kanban_reclaim_calls": 0,
+        "Kanban_reassign_calls": 0,
+        "new_kanban_task_created": False,
+        "Git_commands_executed": 0,
+        "Docker_commands_executed": 0,
+        "Graphify_commands_executed": 0,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+    }
+    for key, value in expected.items():
+        if record.get(key) != value:
+            raise ProductRuntimeConflict(f"review-preparation record {key} mismatch")
+    if record.get("acceptance_contract") != contract:
+        raise ProductRuntimeConflict("review-preparation acceptance contract mismatch")
+    if record.get("kanban_completion_result") != completion:
+        raise ProductRuntimeConflict("review-preparation completion result mismatch")
+    invariants = record.get("pre_review_invariants")
+    if not isinstance(invariants, dict):
+        raise ProductRuntimeConflict("review-preparation pre-review invariants missing")
+    invariant_expected = {
+        "project": PEPPER_GOVERNED_PROJECT_ID,
+        "ticket": PEPPER_NEXT_TICKET_ID,
+        "next_action": PEPPER_CURRENT_REVIEW_PREPARE_NEXT_ACTION_ID,
+        "run_id": completion["run_id"],
+        "run_status": "done",
+        "run_outcome": "completed",
+        "active_execution_count": 0,
+        "recovery_state": "not_required",
+        "validation_state": "execution_completed_pending_validation",
+        "review_state": "ready_for_review_validation",
+        "blocker_count": 0,
+    }
+    for key, value in invariant_expected.items():
+        if invariants.get(key) != value:
+            raise ProductRuntimeConflict(f"review-preparation invariant {key} mismatch")
+    return record
+
+
+def validate_p18_9_0_review_acceptance_record(
+    record: dict[str, Any],
+    *,
+    projection_record: dict[str, Any] | None = None,
+    review_prepare_record: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Validate persisted P18.9.0 human review-acceptance authority."""
+
+    if not isinstance(record, dict):
+        raise ProductRuntimeConflict("review-acceptance record must be an object")
+    if record.get("review_acceptance_action_SHA256") != _review_acceptance_record_digest(record):
+        raise ProductRuntimeConflict("review-acceptance record digest mismatch")
+    projection = projection_record if projection_record is not None else _load_current_projection_record()
+    _validate_execution_start_authority(projection)
+    review_prepare = review_prepare_record
+    if review_prepare is None:
+        review_prepare = load_p18_9_0_review_prepare_record(projection_record=projection)
+    if review_prepare is None:
+        raise ProductRuntimeConflict("review-acceptance record requires review-preparation authority")
+    validate_p18_9_0_review_prepare_record(review_prepare, projection_record=projection)
+    next_ticket = _p18_9_next_ticket_authority()
+    expected = {
+        "schema_version": PEPPER_REVIEW_HUMAN_ACCEPTANCE_ACTION_SCHEMA_VERSION,
+        "policy_id": PEPPER_REVIEW_HUMAN_ACCEPTANCE_ACTION_POLICY_ID,
+        "source_system": PEPPER_REVIEW_HUMAN_ACCEPTANCE_ACTION_SOURCE_SYSTEM,
+        "project_id": PEPPER_GOVERNED_PROJECT_ID,
+        "macroproject_id": PEPPER_GOVERNED_MACROPROJECT_ID,
+        "ticket_id": PEPPER_NEXT_TICKET_ID,
+        "ticket_title": PEPPER_NEXT_TICKET_TITLE,
+        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
+        "work_packet_id": projection["work_packet_id"],
+        "work_packet_SHA256": projection["work_packet_SHA256"],
+        "WorkPacket_compilation_count": _P18_9_0_WORK_PACKET_COMPILATION_COUNT,
+        "approval_publication_SHA256": projection["approval_publication_SHA256"],
+        "dependency_plan_SHA256": projection["dependency_plan_SHA256"],
+        "projection_SHA256": projection["projection_SHA256"],
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+        "successful_run_id": review_prepare["successful_run_id"],
+        "successful_run_status": "done",
+        "successful_run_outcome": "completed",
+        "review_prepare_action_SHA256": review_prepare["review_prepare_action_SHA256"],
+        "review_package_SHA256": review_prepare["review_package_SHA256"],
+        "acceptance_contract_SHA256": review_prepare["acceptance_contract_SHA256"],
+        "criteria_revision_SHA256": review_prepare["criteria_revision_SHA256"],
+        "kanban_completion_result_SHA256": review_prepare["kanban_completion_result_SHA256"],
+        "human_acceptance_text": PEPPER_CURRENT_REVIEW_ACCEPTANCE_TEXT,
+        "human_acceptance_text_SHA256": _review_acceptance_text_digest(
+            PEPPER_CURRENT_REVIEW_ACCEPTANCE_TEXT
+        ),
+        "review_acceptance_status": "accepted",
+        "validation_state": "review_accepted",
+        "review_state": "accepted",
+        "workflow_state": "P18.9.0-COMPLETED",
+        "workflow_status": "completed",
+        "governed_workflow_state": "completed",
+        "human_acceptance_required": True,
+        "human_acceptance_recorded": True,
+        "pending_human_acceptance_required": False,
+        "ticket_closed": True,
+        "P18_9_0_closed": True,
+        "P18_9_0_completed": True,
+        "git_handoff_required": False,
+        "git_handoff_state": "not_required_for_ticket_result",
+        "next_ticket_id": next_ticket["ticket_id"],
+        "next_ticket_title": next_ticket["ticket_title"],
+        "next_ticket_authority_path": next_ticket["authority_path"],
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "worker_process_started": False,
+        "Kanban_dispatch": False,
+        "retry_execution_started": False,
+        "automatic_retry_count": 0,
+        "automatic_requeue_count": 0,
+        "Kanban_requeue_calls": 0,
+        "Kanban_reclaim_calls": 0,
+        "Kanban_reassign_calls": 0,
+        "new_kanban_task_created": False,
+        "Git_commands_executed": 0,
+        "Docker_commands_executed": 0,
+        "Graphify_commands_executed": 0,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+    }
+    for key, value in expected.items():
+        if record.get(key) != value:
+            raise ProductRuntimeConflict(f"review-acceptance record {key} mismatch")
+    acceptor = str(record.get("acceptor_id") or "")
+    if not _SAFE_ID.fullmatch(acceptor):
+        raise ProductRuntimeConflict("review-acceptance record acceptor_id mismatch")
+    if record.get("review_prepare_authority") != _review_prepare_authority_projection(review_prepare):
+        raise ProductRuntimeConflict("review-acceptance review-preparation authority mismatch")
+    if record.get("next_ticket_authority") != next_ticket:
+        raise ProductRuntimeConflict("review-acceptance next ticket authority mismatch")
+    invariants = record.get("pre_acceptance_invariants")
+    if not isinstance(invariants, dict):
+        raise ProductRuntimeConflict("review-acceptance pre-acceptance invariants missing")
+    invariant_expected = {
+        "project": PEPPER_GOVERNED_PROJECT_ID,
+        "ticket": PEPPER_NEXT_TICKET_ID,
+        "next_action": PEPPER_CURRENT_REVIEW_ACCEPTANCE_NEXT_ACTION_ID,
+        "review_prepare_action_SHA256": review_prepare["review_prepare_action_SHA256"],
+        "review_package_SHA256": review_prepare["review_package_SHA256"],
+        "active_execution_count": 0,
+        "recovery_state": "not_required",
+        "validation_state": "review_prepared_pending_human_acceptance",
+        "review_state": "prepared_pending_human_acceptance",
+        "git_handoff_state": "not_required_for_ticket_result",
+        "blocker_count": 0,
+        "human_acceptance_required": True,
+        "human_acceptance_recorded": False,
+    }
+    for key, value in invariant_expected.items():
+        if invariants.get(key) != value:
+            raise ProductRuntimeConflict(f"review-acceptance invariant {key} mismatch")
+    return record
+
+
+def prepare_current_ticket_review(
+    *,
+    project_id: str | None = None,
+    ticket_id: str | None = None,
+    next_action_id: str | None = None,
+) -> dict[str, Any]:
+    """Prepare governed P18.9.0 review validation without accepting it."""
+
+    request = CurrentTicketReviewPrepareRequest(
+        project_id=project_id,
+        ticket_id=ticket_id,
+        next_action_id=next_action_id,
+    )
+    _validate_review_prepare_request_guards(request)
+    projection = _load_current_projection_record()
+    _validate_execution_start_authority(projection)
+
+    existing = None
+    try:
+        existing = load_p18_9_0_review_prepare_record(projection_record=projection)
+    except ProductRuntimeConflict:
+        path = p18_9_0_review_prepare_record_path()
+        _archive_existing_authority_record(
+            path,
+            p18_9_0_review_prepare_history_path(),
+            reason="superseded_or_invalid_review_prepare_authority",
+        )
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+    if existing is not None:
+        acceptance = load_p18_9_0_review_acceptance_record(
+            projection_record=projection,
+            review_prepare_record=existing,
+        )
+        if acceptance is not None:
+            return _review_acceptance_operational_result(
+                acceptance,
+                idempotent_replay=True,
+            )
+        return _review_prepare_operational_result(existing, idempotent_replay=True)
+
+    workflow = build_workflow_control_snapshot()
+    workflow_blocker = _review_prepare_workflow_blocker(workflow)
+    if workflow_blocker is not None:
+        code, detail = workflow_blocker
+        return _blocked_current_review_prepare_result(
+            projection,
+            request=request,
+            blocker_code=code,
+            blocker_detail=detail,
+        )
+
+    completion = _kanban_completion_result_source(projection)
+    if completion.get("blocker_code"):
+        return _blocked_current_review_prepare_result(
+            projection,
+            request=request,
+            blocker_code=str(completion["blocker_code"]),
+            blocker_detail=str(completion.get("blocker_detail") or "completion result detail is unavailable"),
+            completion_source=completion,
+        )
+    acceptance_contract = _p18_9_0_acceptance_contract()
+    record = _build_review_prepare_record(
+        request=request,
+        projection=projection,
+        workflow=workflow,
+        completion=completion,
+        acceptance_contract=acceptance_contract,
+    )
+    _persist_review_prepare_record(record)
+    return _review_prepare_operational_result(record, idempotent_replay=False)
+
+
+def accept_current_ticket_review(
+    *,
+    human_acceptance_text: str,
+    acceptor_id: str = "pepper-chat-human",
+    project_id: str | None = None,
+    ticket_id: str | None = None,
+    next_action_id: str | None = None,
+) -> dict[str, Any]:
+    """Accept and close only the prepared P18.9.0 review package."""
+
+    request = CurrentTicketReviewAcceptanceRequest(
+        human_acceptance_text=human_acceptance_text,
+        acceptor_id=acceptor_id,
+        project_id=project_id,
+        ticket_id=ticket_id,
+        next_action_id=next_action_id,
+    )
+    _validate_review_acceptance_request_guards(request)
+    projection = _load_current_projection_record()
+    _validate_execution_start_authority(projection)
+    review_prepare = load_p18_9_0_review_prepare_record(projection_record=projection)
+    if review_prepare is None:
+        return _blocked_current_review_acceptance_result(
+            projection,
+            request=request,
+            blocker_code="REVIEW_PREPARE_AUTHORITY_GAP",
+            blocker_detail="P18.9.0 review preparation authority is missing",
+        )
+
+    existing = None
+    try:
+        existing = load_p18_9_0_review_acceptance_record(
+            projection_record=projection,
+            review_prepare_record=review_prepare,
+        )
+    except ProductRuntimeConflict:
+        path = p18_9_0_review_acceptance_record_path()
+        _archive_existing_authority_record(
+            path,
+            p18_9_0_review_acceptance_history_path(),
+            reason="superseded_or_invalid_review_acceptance_authority",
+        )
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+    if existing is not None:
+        return _review_acceptance_operational_result(existing, idempotent_replay=True)
+
+    workflow = build_workflow_control_snapshot()
+    workflow_blocker = _review_acceptance_workflow_blocker(workflow)
+    if workflow_blocker is not None:
+        code, detail = workflow_blocker
+        return _blocked_current_review_acceptance_result(
+            projection,
+            request=request,
+            blocker_code=code,
+            blocker_detail=detail,
+            review_prepare_record=review_prepare,
+        )
+
+    record = _build_review_acceptance_record(
+        request=request,
+        projection=projection,
+        workflow=workflow,
+        review_prepare=review_prepare,
+        next_ticket=_p18_9_next_ticket_authority(),
+    )
+    _persist_review_acceptance_record(record)
+    return _review_acceptance_operational_result(record, idempotent_replay=False)
+
+
+def start_current_ticket_execution(
+    *,
+    human_authorization_text: str,
+    authorizer_id: str = "pepper-chat-human",
+    project_id: str | None = None,
+    ticket_id: str | None = None,
+    next_action_id: str | None = None,
+    spawn_fn: Any = None,
+) -> dict[str, Any]:
+    """Authorize and start only the current P18.9.0 Kanban worker or retry."""
+
+    request = CurrentTicketExecutionStartRequest(
+        human_authorization_text=human_authorization_text,
+        authorizer_id=authorizer_id,
+        project_id=project_id,
+        ticket_id=ticket_id,
+        next_action_id=next_action_id,
+    )
+    _validate_execution_start_request_guards(request)
+    projection = _load_current_projection_record()
+    _validate_execution_start_authority(projection)
+    workflow = build_workflow_control_snapshot()
+    workflow_next_action = workflow.get("next_action")
+    workflow_next_action_id = (
+        workflow_next_action.get("id") if isinstance(workflow_next_action, dict) else None
+    )
+
+    if (
+        request.next_action_id == PEPPER_CURRENT_RETRY_START_NEXT_ACTION_ID
+        or (
+            request.next_action_id is None
+            and workflow_next_action_id == PEPPER_CURRENT_RETRY_START_NEXT_ACTION_ID
+        )
+    ):
+        return _start_current_ticket_retry_execution(
+            request=request,
+            projection=projection,
+            workflow=workflow,
+            spawn_fn=spawn_fn,
+        )
+
+    if request.human_authorization_text.strip() in PEPPER_CURRENT_RETRY_START_AUTHORIZATION_TEXTS:
+        return _blocked_current_execution_start_result(
+            projection,
+            request=request,
+            blocker_code="WORKFLOW_RETRY_START_ACTION_GAP",
+            blocker_detail="retry-start authorization was supplied but retry start is not the active next action",
+        )
+
+    existing = load_p18_9_0_execution_start_record(projection_record=projection)
+    if existing is not None and bool(existing.get("execution_started")):
+        return _execution_start_operational_result(existing, idempotent_replay=True)
+
+    workflow_blocker = _execution_start_workflow_blocker(workflow)
+    if workflow_blocker is not None:
+        code, detail = workflow_blocker
+        return _blocked_current_execution_start_result(
+            projection,
+            request=request,
+            blocker_code=code,
+            blocker_detail=detail,
+        )
+
+    task_blocker = _kanban_start_preflight_blocker(projection)
+    if task_blocker is not None:
+        code, detail = task_blocker
+        return _blocked_current_execution_start_result(
+            projection,
+            request=request,
+            blocker_code=code,
+            blocker_detail=detail,
+        )
+
+    provider_readiness = _executor_provider_readiness(projection["assignee_profile"])
+    if not provider_readiness.get("ok"):
+        return _blocked_current_execution_start_result(
+            projection,
+            request=request,
+            blocker_code=str(
+                provider_readiness.get("blocker_code") or "EXECUTOR_PROVIDER_RESOLUTION_GAP"
+            ),
+            blocker_detail=str(provider_readiness.get("blocker_detail") or "executor provider unavailable"),
+            provider_readiness=provider_readiness,
+        )
+
+    worker_credential_probe = _preflight_pepper_governed_worker_credentials(
+        projection,
+        enabled=spawn_fn is None,
+    )
+    if not worker_credential_probe.get("ok"):
+        return _blocked_current_execution_start_result(
+            projection,
+            request=request,
+            blocker_code=str(
+                worker_credential_probe.get("blocker_code")
+                or "WORKER_CREDENTIAL_AUTHORITY_MISMATCH"
+            ),
+            blocker_detail=str(
+                worker_credential_probe.get("blocker_detail")
+                or "governed worker credential probe failed"
+            ),
+            provider_readiness=provider_readiness,
+        )
+    provider_readiness = dict(provider_readiness)
+    provider_readiness["worker_credential_probe"] = worker_credential_probe
+
+    authorization_record = _build_execution_start_authorization_record(
+        request=request,
+        projection=projection,
+        provider_readiness=provider_readiness,
+    )
+    _persist_execution_start_record(authorization_record)
+    dispatch_result = _dispatch_exact_current_kanban_task(
+        projection,
+        spawn_fn=spawn_fn,
+    )
+    final_record = _finalize_execution_start_record(
+        authorization_record,
+        dispatch_result=dispatch_result,
+    )
+    _persist_execution_start_record(final_record)
+    return _execution_start_operational_result(final_record, idempotent_replay=False)
+
+
+def recover_current_ticket_execution(
+    *,
+    human_authorization_text: str,
+    authorizer_id: str = "pepper-chat-human",
+    project_id: str | None = None,
+    ticket_id: str | None = None,
+    next_action_id: str | None = None,
+) -> dict[str, Any]:
+    """Record human recovery authorization for failed P18.9.0 without retrying."""
+
+    request = CurrentTicketExecutionRecoveryRequest(
+        human_authorization_text=human_authorization_text,
+        authorizer_id=authorizer_id,
+        project_id=project_id,
+        ticket_id=ticket_id,
+        next_action_id=next_action_id,
+    )
+    _validate_execution_recovery_request_guards(request)
+    _validate_execution_recovery_authorization_text(request.human_authorization_text)
+    projection = _load_current_projection_record()
+    _validate_execution_start_authority(projection)
+    existing = load_p18_9_0_recovery_action_record(projection_record=projection)
+    if existing is not None and _recovery_record_matches_current_failure(projection, existing):
+        if existing.get("human_authorization_text") != request.human_authorization_text:
+            raise ProductRuntimeConflict(
+                "P18.9.0 recovery was already recorded with different authorization text"
+            )
+        return _recovery_action_operational_result(existing, idempotent_replay=True)
+    if existing is not None:
+        _archive_existing_authority_record(
+            p18_9_0_recovery_action_record_path(),
+            p18_9_0_recovery_action_history_path(),
+            reason="superseded_recovery_cycle",
+        )
+    workflow = build_workflow_control_snapshot()
+    workflow_blocker = _execution_recovery_workflow_blocker(workflow)
+    if workflow_blocker is not None:
+        code, detail = workflow_blocker
+        return _blocked_current_execution_recovery_result(
+            projection,
+            request=request,
+            blocker_code=code,
+            blocker_detail=detail,
+        )
+
+    retry_source = _kanban_recovery_source_state(projection)
+    if retry_source.get("blocker_code"):
+        return _blocked_current_execution_recovery_result(
+            projection,
+            request=request,
+            blocker_code=str(retry_source["blocker_code"]),
+            blocker_detail=str(retry_source.get("blocker_detail") or "retry source is unavailable"),
+            retry_source=retry_source,
+        )
+    if int(retry_source["observed_attempt_count"]) >= int(retry_source["max_attempts"]):
+        return _blocked_current_execution_recovery_result(
+            projection,
+            request=request,
+            blocker_code="RETRY_BUDGET_EXHAUSTED",
+            blocker_detail="P18.9.0 retry budget is exhausted",
+            retry_source=retry_source,
+        )
+
+    record = _build_recovery_action_record(
+        request=request,
+        projection=projection,
+        workflow=workflow,
+        retry_source=retry_source,
+    )
+    _persist_recovery_action_record(record)
+    return _recovery_action_operational_result(record, idempotent_replay=False)
+
+
+def _start_current_ticket_retry_execution(
+    *,
+    request: CurrentTicketExecutionStartRequest,
+    projection: dict[str, Any],
+    workflow: dict[str, Any],
+    spawn_fn: Any = None,
+) -> dict[str, Any]:
+    _validate_execution_retry_start_authorization_text(request.human_authorization_text)
+    recovery_record = load_p18_9_0_recovery_action_record(projection_record=projection)
+    if recovery_record is None:
+        return _blocked_current_execution_retry_start_result(
+            projection,
+            request=request,
+            blocker_code="RECOVERY_AUTHORITY_GAP",
+            blocker_detail="P18.9.0 retry start requires a persisted retry-pending recovery authority",
+        )
+    existing = load_p18_9_0_retry_start_record(
+        projection_record=projection,
+        recovery_record=recovery_record,
+        allow_historical_mismatch=True,
+    )
+    if existing is not None:
+        same_recovery_authority = (
+            existing.get("recovery_action_SHA256") == recovery_record.get("recovery_action_SHA256")
+        )
+        existing_cycle_id = _retry_start_record_cycle_id(existing, recovery_record, projection)
+        current_cycle_id = _recovery_record_cycle_id(recovery_record, projection)
+        if (not same_recovery_authority) or existing_cycle_id != current_cycle_id:
+            _archive_existing_authority_record(
+                p18_9_0_retry_start_record_path(),
+                p18_9_0_retry_start_history_path(),
+                reason="superseded_recovery_cycle",
+            )
+            existing = None
+    if existing is not None and bool(existing.get("execution_started")):
+        return _retry_start_operational_result(existing, idempotent_replay=True)
+
+    retry_source = _kanban_retry_start_source_state(projection, recovery_record)
+    if retry_source.get("blocker_code"):
+        return _blocked_current_execution_retry_start_result(
+            projection,
+            request=request,
+            blocker_code=str(retry_source["blocker_code"]),
+            blocker_detail=str(retry_source.get("blocker_detail") or "retry source is unavailable"),
+            recovery_record=recovery_record,
+            retry_source=retry_source,
+        )
+
+    workflow_blocker = _execution_retry_start_workflow_blocker(workflow)
+    if workflow_blocker is not None:
+        code, detail = workflow_blocker
+        return _blocked_current_execution_retry_start_result(
+            projection,
+            request=request,
+            blocker_code=code,
+            blocker_detail=detail,
+            recovery_record=recovery_record,
+        )
+
+    provider_readiness = _executor_provider_readiness(projection["assignee_profile"])
+    if not provider_readiness.get("ok"):
+        return _blocked_current_execution_retry_start_result(
+            projection,
+            request=request,
+            blocker_code=str(
+                provider_readiness.get("blocker_code") or "EXECUTOR_PROVIDER_RESOLUTION_GAP"
+            ),
+            blocker_detail=str(provider_readiness.get("blocker_detail") or "executor provider unavailable"),
+            recovery_record=recovery_record,
+            retry_source=retry_source,
+            provider_readiness=provider_readiness,
+        )
+
+    worker_credential_probe = _preflight_pepper_governed_worker_credentials(
+        projection,
+        enabled=spawn_fn is None,
+    )
+    if not worker_credential_probe.get("ok"):
+        return _blocked_current_execution_retry_start_result(
+            projection,
+            request=request,
+            blocker_code=str(
+                worker_credential_probe.get("blocker_code")
+                or "WORKER_CREDENTIAL_AUTHORITY_MISMATCH"
+            ),
+            blocker_detail=str(
+                worker_credential_probe.get("blocker_detail")
+                or "governed worker credential probe failed"
+            ),
+            recovery_record=recovery_record,
+            retry_source=retry_source,
+            provider_readiness=provider_readiness,
+        )
+    provider_readiness = dict(provider_readiness)
+    provider_readiness["worker_credential_probe"] = worker_credential_probe
+
+    authorization_record = _build_retry_start_authorization_record(
+        request=request,
+        projection=projection,
+        recovery_record=recovery_record,
+        retry_source=retry_source,
+        provider_readiness=provider_readiness,
+    )
+    _persist_retry_start_record(authorization_record)
+    prep_result = _prepare_p18_9_0_retry_task_for_dispatch(
+        projection=projection,
+        recovery_record=recovery_record,
+        retry_source=retry_source,
+    )
+    if prep_result.get("blocker_code"):
+        final_record = _finalize_retry_start_record(
+            authorization_record,
+            prep_result=prep_result,
+            dispatch_result=_dispatch_blocked_result(
+                str(prep_result["blocker_code"]),
+                str(prep_result.get("blocker_detail") or "retry task preparation failed"),
+            ),
+        )
+        _persist_retry_start_record(final_record)
+        return _retry_start_operational_result(final_record, idempotent_replay=False)
+
+    dispatch_result = _dispatch_exact_current_kanban_task(
+        projection,
+        spawn_fn=spawn_fn,
+    )
+    final_record = _finalize_retry_start_record(
+        authorization_record,
+        prep_result=prep_result,
+        dispatch_result=dispatch_result,
+    )
+    _persist_retry_start_record(final_record)
+    return _retry_start_operational_result(final_record, idempotent_replay=False)
+
+
+def _load_current_projection_record() -> dict[str, Any]:
+    from hermes_cli.agent_platform.workflow.work_packet_kanban_projection import (
+        load_p18_9_0_kanban_projection_record,
+    )
+
+    projection = load_p18_9_0_kanban_projection_record()
+    if projection is None:
+        raise ProductRuntimeNotFound("P18.9.0 Kanban projection not found")
+    return projection
+
+
+def _validate_execution_start_request_guards(
+    request: CurrentTicketExecutionStartRequest,
+) -> None:
+    if request.project_id not in {None, PEPPER_GOVERNED_PROJECT_ID}:
+        raise ProductRuntimeConflict("execution start is bounded to project PEPPER")
+    if request.ticket_id not in {None, PEPPER_NEXT_TICKET_ID}:
+        raise ProductRuntimeConflict("execution start is bounded to ticket P18.9.0")
+    if request.next_action_id not in {
+        None,
+        PEPPER_CURRENT_EXECUTION_START_NEXT_ACTION_ID,
+        PEPPER_CURRENT_RETRY_START_NEXT_ACTION_ID,
+    }:
+        raise ProductRuntimeConflict(
+            "execution start requires START_P18_9_0_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION or START_P18_9_0_RETRY_REQUIRES_HUMAN_AUTHORIZATION"
+        )
+
+
+def _validate_execution_retry_start_authorization_text(value: str) -> None:
+    if value.strip() not in PEPPER_CURRENT_RETRY_START_AUTHORIZATION_TEXTS:
+        raise ProductRuntimeDecisionFailed(
+            "exact explicit P18.9.0 retry-start authorization text is required"
+        )
+
+
+def _validate_execution_start_authority(projection: dict[str, Any]) -> None:
+    if projection.get("project_id") != PEPPER_GOVERNED_PROJECT_ID:
+        raise ProductRuntimeConflict("P18.9.0 projection project authority mismatch")
+    if projection.get("macroproject_id") != PEPPER_GOVERNED_MACROPROJECT_ID:
+        raise ProductRuntimeConflict("P18.9.0 projection macroproject authority mismatch")
+    if projection.get("ticket_id") != PEPPER_NEXT_TICKET_ID:
+        raise ProductRuntimeConflict("P18.9.0 projection ticket authority mismatch")
+    if projection.get("ticket_spec_SHA256") != _P18_9_0_TICKET_SPEC_SHA256:
+        raise ProductRuntimeConflict("P18.9.0 TicketSpec SHA256 mismatch")
+    if projection.get("work_packet_id") != _P18_9_0_WORK_PACKET_ID:
+        raise ProductRuntimeConflict("P18.9.0 WorkPacket ID mismatch")
+    if projection.get("work_packet_SHA256") != _P18_9_0_WORK_PACKET_SHA256:
+        raise ProductRuntimeConflict("P18.9.0 WorkPacket SHA256 mismatch")
+    if projection.get("WorkPacket_compilation_count") != _P18_9_0_WORK_PACKET_COMPILATION_COUNT:
+        raise ProductRuntimeConflict("P18.9.0 WorkPacket compile count mismatch")
+    if projection.get("approval_status") != "approved" or projection.get("approval_decision") != "approve":
+        raise ProductRuntimeConflict("P18.9.0 ticket approval authority is not approved")
+    admission = projection.get("dependency_admission")
+    if not isinstance(admission, dict) or admission.get("decision") != "admit":
+        raise ProductRuntimeConflict("P18.9.0 dependency admission is not admitted")
+    if admission.get("dependency_blockers"):
+        raise ProductRuntimeConflict("P18.9.0 dependency blockers are present")
+    if projection.get("workspace_kind") != "scratch":
+        raise ProductRuntimeConflict("P18.9.0 projection is not a scratch workspace")
+    if projection.get("concurrent_workers_for_ticket") != 1:
+        raise ProductRuntimeConflict("P18.9.0 worker concurrency authority mismatch")
+    if projection.get("task_max_retries") != 1:
+        raise ProductRuntimeConflict("P18.9.0 retry authority mismatch")
+    next_action = projection.get("next_action")
+    if not isinstance(next_action, dict) or next_action.get("id") != PEPPER_CURRENT_EXECUTION_START_NEXT_ACTION_ID:
+        raise ProductRuntimeConflict("P18.9.0 projection is not awaiting start authorization")
+
+
+def _validate_execution_recovery_request_guards(
+    request: CurrentTicketExecutionRecoveryRequest,
+) -> None:
+    if request.project_id not in {None, PEPPER_GOVERNED_PROJECT_ID}:
+        raise ProductRuntimeConflict("execution recovery is bounded to project PEPPER")
+    if request.ticket_id not in {None, PEPPER_NEXT_TICKET_ID}:
+        raise ProductRuntimeConflict("execution recovery is bounded to ticket P18.9.0")
+    if request.next_action_id not in {None, PEPPER_CURRENT_EXECUTION_RECOVERY_NEXT_ACTION_ID}:
+        raise ProductRuntimeConflict(
+            "execution recovery requires RECOVER_P18_9_0_EXECUTION"
+        )
+
+
+def _validate_execution_recovery_authorization_text(value: str) -> None:
+    if value.strip() != PEPPER_CURRENT_EXECUTION_RECOVERY_AUTHORIZATION_TEXT:
+        raise ProductRuntimeDecisionFailed(
+            "exact explicit P18.9.0 recovery authorization text is required"
+        )
+
+
+def _execution_start_workflow_blocker(
+    workflow: dict[str, Any],
+) -> tuple[str, str] | None:
+    if workflow.get("project_id") != PEPPER_GOVERNED_PROJECT_ID:
+        return "WORKFLOW_AUTHORITY_GAP", "current project is not PEPPER"
+    if workflow.get("macroproject_id") != PEPPER_GOVERNED_MACROPROJECT_ID:
+        return "WORKFLOW_AUTHORITY_GAP", "current macroproject is not P18.9"
+    if workflow.get("current_ticket_id") != PEPPER_NEXT_TICKET_ID:
+        return "WORKFLOW_AUTHORITY_GAP", "current ticket is not P18.9.0"
+    if workflow.get("workflow_status") != "queued":
+        return "WORKFLOW_START_ACTION_GAP", "workflow status is not queued"
+    if workflow.get("queue_state") != "kanban_projection_ready_not_dispatched":
+        return "WORKFLOW_START_ACTION_GAP", "queue state is not ready for start authorization"
+    next_action = workflow.get("next_action")
+    if not isinstance(next_action, dict):
+        return "WORKFLOW_START_ACTION_GAP", "next action is unavailable"
+    if next_action.get("id") != PEPPER_CURRENT_EXECUTION_START_NEXT_ACTION_ID:
+        return "WORKFLOW_START_ACTION_GAP", "next action is not execution start authorization"
+    if next_action.get("target_ticket_id") != PEPPER_NEXT_TICKET_ID:
+        return "WORKFLOW_START_ACTION_GAP", "next action does not target P18.9.0"
+    if int(workflow.get("pending_ticket_approval_count") or 0) != 0:
+        return "APPROVAL_STATE_GAP", "pending ticket approvals remain"
+    if int(workflow.get("active_execution_count") or 0) != 0:
+        return "EXECUTION_ALREADY_ACTIVE", "an execution is already active"
+    blockers = workflow.get("remaining_blockers") or []
+    if blockers:
+        return "WORKFLOW_BLOCKER_PRESENT", "workflow blockers are present"
+    return None
+
+
+def _execution_recovery_workflow_blocker(
+    workflow: dict[str, Any],
+) -> tuple[str, str] | None:
+    if workflow.get("project_id") != PEPPER_GOVERNED_PROJECT_ID:
+        return "WORKFLOW_AUTHORITY_GAP", "current project is not PEPPER"
+    if workflow.get("macroproject_id") != PEPPER_GOVERNED_MACROPROJECT_ID:
+        return "WORKFLOW_AUTHORITY_GAP", "current macroproject is not P18.9"
+    if workflow.get("current_ticket_id") != PEPPER_NEXT_TICKET_ID:
+        return "WORKFLOW_AUTHORITY_GAP", "current ticket is not P18.9.0"
+    if workflow.get("workflow_status") != "execution_failed":
+        return "WORKFLOW_RECOVERY_ACTION_GAP", "workflow status is not execution_failed"
+    if workflow.get("recovery_state") != "recovery_required":
+        return "WORKFLOW_RECOVERY_ACTION_GAP", "recovery state is not recovery_required"
+    next_action = workflow.get("next_action")
+    if not isinstance(next_action, dict):
+        return "WORKFLOW_RECOVERY_ACTION_GAP", "next action is unavailable"
+    if next_action.get("id") != PEPPER_CURRENT_EXECUTION_RECOVERY_NEXT_ACTION_ID:
+        return "WORKFLOW_RECOVERY_ACTION_GAP", "next action is not recovery authorization"
+    if next_action.get("target_ticket_id") != PEPPER_NEXT_TICKET_ID:
+        return "WORKFLOW_RECOVERY_ACTION_GAP", "next action does not target P18.9.0"
+    if int(workflow.get("pending_ticket_approval_count") or 0) != 0:
+        return "APPROVAL_STATE_GAP", "pending ticket approvals remain"
+    if int(workflow.get("active_execution_count") or 0) != 0:
+        return "EXECUTION_ALREADY_ACTIVE", "an execution is already active"
+    if workflow.get("execution_state") == "active_executions":
+        return "EXECUTION_ALREADY_ACTIVE", "execution state is active"
+    return None
+
+
+def _execution_retry_start_workflow_blocker(
+    workflow: dict[str, Any],
+) -> tuple[str, str] | None:
+    if workflow.get("project_id") != PEPPER_GOVERNED_PROJECT_ID:
+        return "WORKFLOW_AUTHORITY_GAP", "current project is not PEPPER"
+    if workflow.get("macroproject_id") != PEPPER_GOVERNED_MACROPROJECT_ID:
+        return "WORKFLOW_AUTHORITY_GAP", "current macroproject is not P18.9"
+    if workflow.get("current_ticket_id") != PEPPER_NEXT_TICKET_ID:
+        return "WORKFLOW_AUTHORITY_GAP", "current ticket is not P18.9.0"
+    if workflow.get("workflow_status") != "retry_pending":
+        return "WORKFLOW_RETRY_START_ACTION_GAP", "workflow status is not retry_pending"
+    if workflow.get("recovery_state") != "retry_pending":
+        return "WORKFLOW_RETRY_START_ACTION_GAP", "recovery state is not retry_pending"
+    next_action = workflow.get("next_action")
+    if not isinstance(next_action, dict):
+        return "WORKFLOW_RETRY_START_ACTION_GAP", "next action is unavailable"
+    if next_action.get("id") != PEPPER_CURRENT_RETRY_START_NEXT_ACTION_ID:
+        return "WORKFLOW_RETRY_START_ACTION_GAP", "next action is not retry-start authorization"
+    if next_action.get("target_ticket_id") != PEPPER_NEXT_TICKET_ID:
+        return "WORKFLOW_RETRY_START_ACTION_GAP", "next action does not target P18.9.0"
+    if int(workflow.get("pending_ticket_approval_count") or 0) != 0:
+        return "APPROVAL_STATE_GAP", "pending ticket approvals remain"
+    if int(workflow.get("active_execution_count") or 0) != 0:
+        return "EXECUTION_ALREADY_ACTIVE", "an execution is already active"
+    if workflow.get("execution_state") == "active_executions":
+        return "EXECUTION_ALREADY_ACTIVE", "execution state is active"
+    blockers = workflow.get("remaining_blockers") or []
+    if blockers:
+        return "WORKFLOW_BLOCKER_PRESENT", "workflow blockers are present"
+    return None
+
+
+def _kanban_recovery_source_state(projection: dict[str, Any]) -> dict[str, Any]:
+    from hermes_cli import kanban_db
+
+    board = _normalize_board(str(projection["kanban_board_slug"]))
+    task_id = str(projection["kanban_task_id"])
+    conn = kanban_db.connect(board=board)
+    try:
+        _reconcile_kanban_board_lifecycle(conn, task_id=task_id)
+        task = kanban_db.get_task(conn, task_id)
+        if task is None:
+            return {
+                "blocker_code": "KANBAN_TASK_GAP",
+                "blocker_detail": "projected Kanban task is missing",
+            }
+        try:
+            task_body = json.loads(task.body or "{}")
+        except json.JSONDecodeError:
+            task_body = {}
+        synthetic_work_packet_id = f"WP-{board.upper()}-{task_id.upper()}"
+        if task_body.get("WorkPacket_ID") == synthetic_work_packet_id:
+            return {
+                "blocker_code": "WORKPACKET_AUTHORITY_DRIFT_GAP",
+                "blocker_detail": (
+                    "synthetic Kanban execution-detail WorkPacket identity cannot be "
+                    "treated as canonical P18.9.0 WorkPacket authority"
+                ),
+                "synthetic_work_packet_id": synthetic_work_packet_id,
+            }
+        if task_body.get("WorkPacket_ID") != projection["work_packet_id"]:
+            return {
+                "blocker_code": "WORKPACKET_AUTHORITY_DRIFT_GAP",
+                "blocker_detail": "projected Kanban task WorkPacket ID does not match P18.9.0 authority",
+                "observed_work_packet_id": task_body.get("WorkPacket_ID"),
+                "canonical_work_packet_id": projection["work_packet_id"],
+            }
+        if task_body.get("WorkPacket_SHA256") != projection["work_packet_SHA256"]:
+            return {
+                "blocker_code": "WORKPACKET_AUTHORITY_DRIFT_GAP",
+                "blocker_detail": "projected Kanban task WorkPacket SHA256 does not match P18.9.0 authority",
+            }
+        runs = kanban_db.list_runs(conn, task_id)
+        active_runs = [run for run in runs if _execution_is_active(_run_dict(run))]
+        if active_runs or task.current_run_id is not None:
+            return {
+                "blocker_code": "EXECUTION_ALREADY_ACTIVE",
+                "blocker_detail": "projected Kanban task still has active execution state",
+            }
+        worker_pid = getattr(task, "worker_pid", None)
+        if worker_pid and kanban_db._pid_alive(int(worker_pid)):
+            return {
+                "blocker_code": "EXECUTION_ALREADY_ACTIVE",
+                "blocker_detail": "projected Kanban task still has a live worker process",
+                "worker_pid": int(worker_pid),
+            }
+        if not runs:
+            return {
+                "blocker_code": "KANBAN_RUN_GAP",
+                "blocker_detail": "projected Kanban task has no failed run evidence",
+            }
+        latest_run = runs[-1]
+        latest_status = str(getattr(latest_run, "status", "") or "").strip().lower()
+        latest_outcome = str(getattr(latest_run, "outcome", "") or "").strip().lower()
+        if getattr(latest_run, "ended_at", None) is None:
+            return {
+                "blocker_code": "EXECUTION_ALREADY_ACTIVE",
+                "blocker_detail": "latest P18.9.0 run has not ended",
+            }
+        if task.status != "blocked" or (
+            latest_outcome or latest_status
+        ) not in _P18_9_0_FAILURE_OUTCOMES:
+            return {
+                "blocker_code": "KANBAN_RECOVERY_SOURCE_GAP",
+                "blocker_detail": "projected Kanban task is not blocked on failed run evidence",
+                "kanban_task_status": task.status,
+                "latest_run_status": latest_status,
+                "latest_run_outcome": latest_outcome,
+            }
+        failure_fields = _run_failure_fields(latest_run)
+        observed_attempt_count = len(runs)
+        max_attempts = max(
+            int(projection.get("task_max_retries") or 0) + 1,
+            observed_attempt_count + 1,
+        )
+        return {
+            "blocker_code": None,
+            "blocker_detail": None,
+            "kanban_board_slug": board,
+            "kanban_task_id": task.id,
+            "kanban_task_status": task.status,
+            "kanban_task_assignee": task.assignee,
+            "kanban_task_current_run_id": task.current_run_id,
+            "kanban_task_workspace_kind": task.workspace_kind,
+            "kanban_task_workspace_path": task.workspace_path,
+            "kanban_task_claim_lock": task.claim_lock,
+            "kanban_task_worker_pid": worker_pid,
+            "observed_task_skills": list(task.skills or []),
+            "observed_attempt_count": observed_attempt_count,
+            "max_attempts": max_attempts,
+            "next_attempt_number": observed_attempt_count + 1,
+            "latest_run_id": latest_run.id,
+            "latest_run_status": latest_status,
+            "latest_run_outcome": latest_outcome,
+            "latest_run_ended_at": getattr(latest_run, "ended_at", None),
+            "failure_category": failure_fields.get("failure_category") or latest_outcome or latest_status,
+            "failure_summary": failure_fields.get("failure_summary") or getattr(latest_run, "error", None),
+            "synthetic_work_packet_id": synthetic_work_packet_id,
+            "canonical_work_packet_id": projection["work_packet_id"],
+            "Kanban_SQLite_canonical_authority": False,
+        }
+    finally:
+        conn.close()
+
+
+def _kanban_retry_start_source_state(
+    projection: dict[str, Any],
+    recovery_record: dict[str, Any],
+) -> dict[str, Any]:
+    retry_source = _kanban_recovered_retry_source_state(projection, recovery_record)
+    if retry_source.get("blocker_code"):
+        return retry_source
+    if recovery_record.get("recovery_status") != "retry_pending":
+        return {
+            **retry_source,
+            "blocker_code": "RECOVERY_AUTHORITY_GAP",
+            "blocker_detail": "recovery authority is not retry_pending",
+        }
+    if recovery_record.get("retry_identity_model") != "same_kanban_task_new_run":
+        return {
+            **retry_source,
+            "blocker_code": "RECOVERY_AUTHORITY_GAP",
+            "blocker_detail": "recovery authority does not preserve same-task new-run identity",
+        }
+    if recovery_record.get("future_task_skills") != []:
+        return {
+            **retry_source,
+            "blocker_code": "TASK_SKILL_EXECUTOR_CAPABILITY_MISMATCH",
+            "blocker_detail": "recovery authority future task skills are not empty",
+        }
+    if recovery_record.get("unresolved_Hermes_task_skills") != []:
+        return {
+            **retry_source,
+            "blocker_code": "TASK_SKILL_EXECUTOR_CAPABILITY_MISMATCH",
+            "blocker_detail": "recovery authority still has unresolved Hermes task skills",
+        }
+    if recovery_record.get("future_retry_capability_surface") != "pepper_repository":
+        return {
+            **retry_source,
+            "blocker_code": "TASK_SKILL_EXECUTOR_CAPABILITY_MISMATCH",
+            "blocker_detail": "recovery authority does not bind retry to pepper_repository",
+        }
+    profile_toolsets = list(projection.get("profile_toolsets") or [])
+    if "pepper_repository" not in profile_toolsets:
+        return {
+            **retry_source,
+            "blocker_code": "PROFILE_ASSIGNMENT_GAP",
+            "blocker_detail": "executor profile toolsets do not include pepper_repository",
+        }
+    if int(retry_source["observed_attempt_count"]) != int(recovery_record["observed_attempt_count"]):
+        return {
+            **retry_source,
+            "blocker_code": "KANBAN_RETRY_SOURCE_GAP",
+            "blocker_detail": "observed attempt count no longer matches recovery authority",
+        }
+    if int(retry_source["next_attempt_number"]) != int(recovery_record["next_attempt_number"]):
+        return {
+            **retry_source,
+            "blocker_code": "KANBAN_RETRY_SOURCE_GAP",
+            "blocker_detail": "next attempt number no longer matches recovery authority",
+        }
+    if int(retry_source["observed_attempt_count"]) >= int(retry_source["max_attempts"]):
+        return {
+            **retry_source,
+            "blocker_code": "RETRY_BUDGET_EXHAUSTED",
+            "blocker_detail": "P18.9.0 retry budget is exhausted",
+        }
+    if retry_source.get("latest_run_id") != recovery_record.get("latest_failed_run_id"):
+        return {
+            **retry_source,
+            "blocker_code": "KANBAN_RETRY_SOURCE_GAP",
+            "blocker_detail": "latest failed run no longer matches recovery authority",
+        }
+    return retry_source
+
+
+def _kanban_recovered_retry_source_state(
+    projection: dict[str, Any],
+    recovery_record: dict[str, Any],
+) -> dict[str, Any]:
+    from hermes_cli import kanban_db
+
+    board = _normalize_board(str(projection["kanban_board_slug"]))
+    task_id = str(projection["kanban_task_id"])
+    conn = kanban_db.connect(board=board)
+    try:
+        _reconcile_kanban_board_lifecycle(conn, task_id=task_id)
+        task = kanban_db.get_task(conn, task_id)
+        if task is None:
+            return {
+                "blocker_code": "KANBAN_TASK_GAP",
+                "blocker_detail": "projected Kanban task is missing",
+            }
+        try:
+            task_body = json.loads(task.body or "{}")
+        except json.JSONDecodeError:
+            task_body = {}
+        if not isinstance(task_body, dict):
+            task_body = {}
+        synthetic_work_packet_id = f"WP-{board.upper()}-{task_id.upper()}"
+        if task_body.get("WorkPacket_ID") == synthetic_work_packet_id:
+            return {
+                "blocker_code": "WORKPACKET_AUTHORITY_DRIFT_GAP",
+                "blocker_detail": (
+                    "synthetic Kanban execution-detail WorkPacket identity cannot be "
+                    "treated as canonical P18.9.0 WorkPacket authority"
+                ),
+                "synthetic_work_packet_id": synthetic_work_packet_id,
+            }
+        if task_body.get("WorkPacket_ID") != projection["work_packet_id"]:
+            return {
+                "blocker_code": "WORKPACKET_AUTHORITY_DRIFT_GAP",
+                "blocker_detail": "projected Kanban task WorkPacket ID does not match P18.9.0 authority",
+                "observed_work_packet_id": task_body.get("WorkPacket_ID"),
+                "canonical_work_packet_id": projection["work_packet_id"],
+            }
+        if task_body.get("WorkPacket_SHA256") != projection["work_packet_SHA256"]:
+            return {
+                "blocker_code": "WORKPACKET_AUTHORITY_DRIFT_GAP",
+                "blocker_detail": "projected Kanban task WorkPacket SHA256 does not match P18.9.0 authority",
+            }
+        runs = kanban_db.list_runs(conn, task_id)
+        active_runs = [run for run in runs if _execution_is_active(_run_dict(run))]
+        if active_runs or task.current_run_id is not None:
+            return {
+                "blocker_code": "EXECUTION_ALREADY_ACTIVE",
+                "blocker_detail": "projected Kanban task still has active execution state",
+            }
+        if task.claim_lock:
+            return {
+                "blocker_code": "WORKER_LIFECYCLE_RECONCILIATION_REQUIRED",
+                "blocker_detail": "projected Kanban task has an unresolved current claim",
+                "kanban_task_claim_lock": task.claim_lock,
+            }
+        worker_pid = getattr(task, "worker_pid", None)
+        if worker_pid:
+            if kanban_db._pid_alive(int(worker_pid)):
+                return {
+                    "blocker_code": "EXECUTION_ALREADY_ACTIVE",
+                    "blocker_detail": "projected Kanban task still has a live worker process",
+                    "worker_pid": int(worker_pid),
+                }
+            return {
+                "blocker_code": "WORKER_LIFECYCLE_RECONCILIATION_REQUIRED",
+                "blocker_detail": f"projected Kanban task has unreconciled stale worker pid {int(worker_pid)}",
+                "worker_pid": int(worker_pid),
+            }
+        if not runs:
+            return {
+                "blocker_code": "KANBAN_RUN_GAP",
+                "blocker_detail": "projected Kanban task has no failed run evidence",
+            }
+        latest_run = runs[-1]
+        latest_status = str(getattr(latest_run, "status", "") or "").strip().lower()
+        latest_outcome = str(getattr(latest_run, "outcome", "") or "").strip().lower()
+        if getattr(latest_run, "ended_at", None) is None:
+            return {
+                "blocker_code": "EXECUTION_ALREADY_ACTIVE",
+                "blocker_detail": "latest P18.9.0 run has not ended",
+            }
+        if latest_run.id != recovery_record.get("latest_failed_run_id"):
+            return {
+                "blocker_code": "KANBAN_RETRY_SOURCE_GAP",
+                "blocker_detail": "latest failed run no longer matches recovery authority",
+                "latest_run_id": latest_run.id,
+                "recovered_latest_failed_run_id": recovery_record.get("latest_failed_run_id"),
+            }
+        if (latest_outcome or latest_status) not in _P18_9_0_FAILURE_OUTCOMES:
+            return {
+                "blocker_code": "KANBAN_RETRY_SOURCE_GAP",
+                "blocker_detail": "recovered latest run is no longer failed run evidence",
+                "latest_run_status": latest_status,
+                "latest_run_outcome": latest_outcome,
+            }
+        if task.status not in {"blocked", "ready"}:
+            return {
+                "blocker_code": "KANBAN_RETRY_SOURCE_GAP",
+                "blocker_detail": f"projected Kanban task status is {task.status}",
+                "kanban_task_status": task.status,
+            }
+        failure_fields = _run_failure_fields(latest_run)
+        observed_attempt_count = len(runs)
+        max_attempts = max(
+            int(projection.get("task_max_retries") or 0) + 1,
+            observed_attempt_count + 1,
+        )
+        return {
+            "blocker_code": None,
+            "blocker_detail": None,
+            "kanban_board_slug": board,
+            "kanban_task_id": task.id,
+            "kanban_task_status": task.status,
+            "kanban_task_assignee": task.assignee,
+            "kanban_task_current_run_id": task.current_run_id,
+            "kanban_task_workspace_kind": task.workspace_kind,
+            "kanban_task_workspace_path": task.workspace_path,
+            "kanban_task_claim_lock": task.claim_lock,
+            "kanban_task_worker_pid": worker_pid,
+            "observed_task_skills": list(recovery_record.get("observed_task_skills") or []),
+            "current_task_skills": list(task.skills or []),
+            "historical_lifecycle_blocker_consumed": True,
+            "observed_attempt_count": observed_attempt_count,
+            "max_attempts": max_attempts,
+            "next_attempt_number": observed_attempt_count + 1,
+            "latest_run_id": latest_run.id,
+            "latest_run_status": latest_status,
+            "latest_run_outcome": latest_outcome,
+            "latest_run_ended_at": getattr(latest_run, "ended_at", None),
+            "failure_category": failure_fields.get("failure_category") or latest_outcome or latest_status,
+            "failure_summary": failure_fields.get("failure_summary") or getattr(latest_run, "error", None),
+            "synthetic_work_packet_id": synthetic_work_packet_id,
+            "canonical_work_packet_id": projection["work_packet_id"],
+            "Kanban_SQLite_canonical_authority": False,
+        }
+    finally:
+        conn.close()
+
+
+def _recovery_record_matches_current_failure(
+    projection: dict[str, Any],
+    recovery_record: dict[str, Any],
+) -> bool:
+    try:
+        retry_source = _kanban_recovered_retry_source_state(projection, recovery_record)
+    except Exception:
+        return False
+    if retry_source.get("blocker_code"):
+        return False
+    current_cycle_id = _p18_9_0_recovery_cycle_id(
+        projection=projection,
+        latest_failed_run_id=retry_source.get("latest_run_id"),
+        observed_attempt_count=retry_source.get("observed_attempt_count"),
+        failure_category=retry_source.get("failure_category"),
+        failure_summary=retry_source.get("failure_summary"),
+    )
+    return _recovery_record_cycle_id(recovery_record, projection) == current_cycle_id
+
+
+def _prepare_p18_9_0_retry_task_for_dispatch(
+    *,
+    projection: dict[str, Any],
+    recovery_record: dict[str, Any],
+    retry_source: dict[str, Any],
+) -> dict[str, Any]:
+    from hermes_cli import kanban_db
+
+    board = _normalize_board(str(projection["kanban_board_slug"]))
+    task_id = str(projection["kanban_task_id"])
+    conn = kanban_db.connect(board=board)
+    try:
+        task = kanban_db.get_task(conn, task_id)
+        if task is None:
+            return {
+                "task_prepare_status": "blocked",
+                "blocker_code": "KANBAN_TASK_GAP",
+                "blocker_detail": "projected Kanban task is missing",
+            }
+        if task.status not in {"blocked", "ready"}:
+            return {
+                "task_prepare_status": "blocked",
+                "blocker_code": "KANBAN_RETRY_SOURCE_GAP",
+                "blocker_detail": f"projected Kanban task status is {task.status}",
+            }
+        task_unblocked = False
+        if task.status == "blocked":
+            if not kanban_db.unblock_task(conn, task_id):
+                return {
+                    "task_prepare_status": "blocked",
+                    "blocker_code": "KANBAN_UNBLOCK_FAILED",
+                    "blocker_detail": "projected Kanban task could not be unblocked for retry",
+                }
+            task_unblocked = True
+        task = kanban_db.get_task(conn, task_id)
+        if task is None or task.status != "ready":
+            return {
+                "task_prepare_status": "blocked",
+                "blocker_code": "KANBAN_TASK_NOT_READY",
+                "blocker_detail": "projected Kanban task did not become ready for retry",
+            }
+        if task.claim_lock or task.worker_pid or task.current_run_id is not None:
+            return {
+                "task_prepare_status": "blocked",
+                "blocker_code": "WORKER_LIFECYCLE_RECONCILIATION_REQUIRED",
+                "blocker_detail": "projected Kanban task has unresolved current lifecycle state",
+            }
+        body = {}
+        try:
+            body = json.loads(task.body or "{}")
+        except json.JSONDecodeError:
+            body = {}
+        if isinstance(body, dict):
+            body["task_skills"] = []
+            body["retry_start_authorized"] = True
+            body["retry_identity_model"] = recovery_record["retry_identity_model"]
+            body["retry_attempt_number"] = recovery_record["next_attempt_number"]
+            body["retry_authority_SHA256"] = recovery_record["recovery_action_SHA256"]
+        else:
+            body = {}
+        conn.execute(
+            "UPDATE tasks SET skills = ?, body = ?, claim_lock = NULL, "
+            "claim_expires = NULL, worker_pid = NULL WHERE id = ? AND status = 'ready'",
+            (json.dumps([]), json.dumps(body, sort_keys=True), task_id),
+        )
+        kanban_db._append_event(
+            conn,
+            task_id,
+            "retry_prepared",
+            {
+                "source": PEPPER_RETRY_START_ACTION_SOURCE_SYSTEM,
+                "recovery_action_SHA256": recovery_record["recovery_action_SHA256"],
+                "previous_attempt_count": retry_source["observed_attempt_count"],
+                "next_attempt_number": recovery_record["next_attempt_number"],
+                "future_task_skills": [],
+            },
+        )
+        conn.commit()
+        task = kanban_db.get_task(conn, task_id)
+        return {
+            "task_prepare_status": "prepared",
+            "blocker_code": None,
+            "blocker_detail": None,
+            "task_unblocked": task_unblocked,
+            "task_skills_corrected": True,
+            "kanban_task_status_after_prepare": task.status if task is not None else None,
+            "kanban_task_skills_after_prepare": list(task.skills or []) if task is not None else None,
+        }
+    finally:
+        conn.close()
+
+
+def _kanban_start_preflight_blocker(
+    projection: dict[str, Any],
+) -> tuple[str, str] | None:
+    from hermes_cli import kanban_db
+
+    board = _normalize_board(str(projection["kanban_board_slug"]))
+    task_id = str(projection["kanban_task_id"])
+    conn = kanban_db.connect(board=board)
+    try:
+        task = kanban_db.get_task(conn, task_id)
+        if task is None:
+            return "KANBAN_TASK_GAP", "projected Kanban task is missing"
+        if task.assignee != projection["assignee_profile"]:
+            return "KANBAN_TASK_GAP", "projected Kanban task assignee mismatch"
+        if task.status != "ready":
+            return "KANBAN_TASK_NOT_READY", f"projected Kanban task status is {task.status}"
+        if task.claim_lock:
+            return "KANBAN_TASK_NOT_READY", "projected Kanban task is already claimed"
+        if task.worker_pid and kanban_db._pid_alive(int(task.worker_pid)):
+            return "KANBAN_TASK_NOT_READY", "projected Kanban task still has a live worker process"
+        if task.workspace_kind != "scratch":
+            return "WORKSPACE_POLICY_GAP", "P18.9.0 start only authorizes scratch workspace dispatch"
+        if task.max_retries != 1:
+            return "KANBAN_TASK_GAP", "projected Kanban task retry policy mismatch"
+        if task.skills:
+            requested = ", ".join(str(item) for item in task.skills)
+            return (
+                "TASK_SKILL_EXECUTOR_CAPABILITY_MISMATCH",
+                "projected Kanban task carries Hermes task skill(s) "
+                f"{requested}; Pepper codebase inspection resolves through "
+                "the bounded pepper_repository profile toolset",
+            )
+        running_for_profile = conn.execute(
+            "SELECT COUNT(*) FROM tasks WHERE status = 'running' AND assignee = ?",
+            (task.assignee,),
+        ).fetchone()[0]
+        if int(running_for_profile or 0) > 0:
+            return "EXECUTOR_CONCURRENCY_CAP", "executor profile already has a running task"
+        running_total = conn.execute(
+            "SELECT COUNT(*) FROM tasks WHERE status = 'running'",
+        ).fetchone()[0]
+        if int(running_total or 0) > 0:
+            return "EXECUTION_CONCURRENCY_CAP", "another Kanban execution is already running"
+        guard = kanban_db.check_respawn_guard(conn, task_id)
+        if guard is not None:
+            return "KANBAN_RESPAWN_GUARD", guard
+        return None
+    finally:
+        conn.close()
+
+
+def _executor_provider_readiness(profile_name: str) -> dict[str, Any]:
+    authority = _executor_profile_authority(profile_name)
+    if not authority.get("ok"):
+        return authority
+    profile_dir = Path(str(authority["profile_path"]))
+    launch_config = _executor_profile_launch_config(profile_dir)
+    if not launch_config.get("ok"):
+        return launch_config
+    observed = datetime.now(timezone.utc)
+    try:
+        status = _read_executor_governed_credential_status(profile_dir, now=observed)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "blocker_code": "EXECUTOR_PROVIDER_RESOLUTION_GAP",
+            "blocker_detail": f"executor governed credential status unavailable: {_safe_text(exc, limit=200)}",
+        }
+    if not bool(getattr(status, "configured", False)):
+        return {
+            "ok": False,
+            "blocker_code": "EXECUTOR_PROVIDER_RESOLUTION_GAP",
+            "blocker_detail": "executor profile lacks governed openai-codex.primary credentials",
+            "credential_profile_id": "openai-codex.primary",
+            "credential_resolution_source": "canonical_governed_home",
+            "durable_store_valid": bool(getattr(status, "durable_store_valid", False)),
+            "token_pair_present": bool(getattr(status, "token_pair_present", False)),
+            "legacy_auth_json_used": False,
+            "API_key_fallback_used": False,
+            "governed_refresh_path": "provider_worker_resolution_no_refresh",
+            "legacy_refresh_fallback": False,
+        }
+    try:
+        from hermes_cli.agent_platform.provider_credentials.contracts import (
+            MAX_PROVIDER_CREDENTIAL_LEASE_TTL_MS,
+            OPENAI_CODEX_CREDENTIAL_STORE_ID,
+            ProviderCredentialDeliveryLease,
+        )
+        from hermes_cli.agent_platform.provider_runtime.contracts import (
+            ProviderRuntimeResolutionRequest,
+        )
+        from hermes_cli.agent_platform.provider_worker.contracts import (
+            OPENAI_CODEX_PROVIDER_RUNTIME_PROFILE_ID,
+            OPENAI_CODEX_PROVIDER_WORKER_PROFILE_ID,
+            ProviderWorkerResolutionRequest,
+        )
+        from hermes_cli.agent_platform.provider_worker.resolution import (
+            resolve_provider_worker_profile,
+        )
+
+        lease = ProviderCredentialDeliveryLease(
+            lease_id="lease.pepper-worker-start-readiness",
+            runtime_id="runtime.pepper-worker-start",
+            correlation_id="P18.9.0:worker-start",
+            created_at_utc=observed,
+            expires_at_utc=observed
+            + timedelta(milliseconds=MAX_PROVIDER_CREDENTIAL_LEASE_TTL_MS),
+        )
+        provider_request = ProviderRuntimeResolutionRequest(
+            profile_id=OPENAI_CODEX_PROVIDER_RUNTIME_PROFILE_ID,
+            runtime_id="runtime.pepper-worker-start",
+            correlation_id="P18.9.0:worker-start",
+            requested_by="pepper-worker-start-action",
+            evaluated_at_utc=observed,
+            credential_status=status,
+            credential_lease_ref=lease,
+        )
+        resolve_provider_worker_profile(
+            ProviderWorkerResolutionRequest(
+                worker_profile_id=OPENAI_CODEX_PROVIDER_WORKER_PROFILE_ID,
+                provider_resolution_request=provider_request,
+                evaluated_at_utc=observed,
+            )
+        )
+    except Exception as exc:
+        category = getattr(exc, "validation_category", exc.__class__.__name__)
+        return {
+            "ok": False,
+            "blocker_code": "EXECUTOR_PROVIDER_RESOLUTION_GAP",
+            "blocker_detail": f"executor provider-worker resolution failed: {_safe_text(category, limit=200)}",
+        }
+    return {
+        "ok": True,
+        "provider": _P18_9_0_EXECUTOR_PROVIDER,
+        "model": _P18_9_0_EXECUTOR_MODEL,
+        "api_mode": _P18_9_0_EXECUTOR_API_MODE,
+        "credential_profile_id": OPENAI_CODEX_CREDENTIAL_STORE_ID,
+        "provider_runtime_profile_id": OPENAI_CODEX_PROVIDER_RUNTIME_PROFILE_ID,
+        "worker_profile_id": OPENAI_CODEX_PROVIDER_WORKER_PROFILE_ID,
+        "source": "pepper-governed-openai-codex-oauth",
+        "credential_resolution_source": "canonical_governed_home",
+        "durable_store_valid": bool(getattr(status, "durable_store_valid", False)),
+        "token_pair_present": bool(getattr(status, "token_pair_present", False)),
+        "legacy_auth_json_used": False,
+        "API_key_fallback_used": False,
+        "governed_refresh_path": "provider_worker_resolution_no_refresh",
+        "legacy_refresh_fallback": False,
+        "credential_refresh_calls_per_request_maximum": 0,
+        "executor_profile": profile_name,
+        "executor_config_source": launch_config["executor_config_source"],
+    }
+
+
+def _executor_profile_authority(profile_name: str) -> dict[str, Any]:
+    from hermes_cli.agent_platform.workflow.work_packet_kanban_projection import (
+        classify_pepper_execution_profile,
+    )
+    from hermes_cli.profiles import list_profiles, normalize_profile_name
+
+    canonical = normalize_profile_name(profile_name)
+    try:
+        profiles = list_profiles()
+    except Exception as exc:
+        return {
+            "ok": False,
+            "blocker_code": "PROFILE_ASSIGNMENT_GAP",
+            "blocker_detail": f"executor profile roster unavailable: {_safe_text(exc, limit=200)}",
+        }
+    for profile in profiles:
+        try:
+            candidate = normalize_profile_name(str(getattr(profile, "name", "")))
+        except Exception:
+            continue
+        if candidate != canonical:
+            continue
+        classification = classify_pepper_execution_profile(profile)
+        if classification.get("worker_assignable") is not True:
+            return {
+                "ok": False,
+                "blocker_code": "PROFILE_ASSIGNMENT_GAP",
+                "blocker_detail": "executor profile is no longer bounded worker-assignable",
+                "classification": classification,
+            }
+        return {
+            "ok": True,
+            "profile_path": str(getattr(profile, "path")),
+            "classification": classification,
+        }
+    return {
+        "ok": False,
+        "blocker_code": "PROFILE_ASSIGNMENT_GAP",
+        "blocker_detail": "executor profile does not exist",
+    }
+
+
+def _executor_profile_launch_config(profile_dir: Path) -> dict[str, Any]:
+    config = _read_executor_profile_config(profile_dir)
+    model_cfg = config.get("model") if isinstance(config, dict) else None
+    provider = ""
+    model = ""
+    api_mode = ""
+    if isinstance(model_cfg, dict):
+        provider = str(model_cfg.get("provider") or "").strip().lower()
+        model = str(model_cfg.get("default") or model_cfg.get("model") or "").strip()
+        api_mode = str(model_cfg.get("api_mode") or "").strip().lower()
+    elif isinstance(model_cfg, str):
+        model = model_cfg.strip()
+    if provider != _P18_9_0_EXECUTOR_PROVIDER or model != _P18_9_0_EXECUTOR_MODEL:
+        return {
+            "ok": False,
+            "blocker_code": "EXECUTOR_PROVIDER_RESOLUTION_GAP",
+            "blocker_detail": (
+                "executor profile must explicitly set model.provider=openai-codex "
+                "and model.default=gpt-5.5"
+            ),
+            "configured_provider": provider or None,
+            "configured_model": model or None,
+        }
+    if api_mode and api_mode != _P18_9_0_EXECUTOR_API_MODE:
+        return {
+            "ok": False,
+            "blocker_code": "EXECUTOR_PROVIDER_RESOLUTION_GAP",
+            "blocker_detail": "executor profile model.api_mode must be codex_responses when set",
+            "configured_api_mode": api_mode,
+        }
+    return {
+        "ok": True,
+        "provider": provider,
+        "model": model,
+        "api_mode": api_mode or _P18_9_0_EXECUTOR_API_MODE,
+        "executor_config_source": "executor_profile_config_yaml",
+    }
+
+
+def _read_executor_profile_config(profile_dir: Path) -> dict[str, Any]:
+    config_path = profile_dir / "config.yaml"
+    if not config_path.is_file():
+        return {}
+    try:
+        import yaml
+
+        with open(config_path, "r", encoding="utf-8") as stream:
+            loaded = yaml.safe_load(stream) or {}
+        return loaded if isinstance(loaded, dict) else {}
+    except Exception:
+        return {}
+
+
+def _read_executor_governed_credential_status(
+    _profile_dir: Path,
+    *,
+    now: datetime,
+) -> Any:
+    from hermes_constants import get_default_hermes_root
+    from hermes_cli.agent_platform.provider_credentials.store import (
+        default_openai_codex_credential_store_root,
+        read_openai_codex_credential_status,
+    )
+
+    store_root = default_openai_codex_credential_store_root(
+        hermes_home=get_default_hermes_root()
+    )
+    return read_openai_codex_credential_status(store_root, now=now)
+
+
+def _pepper_governed_worker_env_overlay(projection: dict[str, Any]) -> dict[str, str]:
+    from hermes_cli.agent_platform.worker_credentials import pepper_governed_worker_env
+
+    return pepper_governed_worker_env(
+        project_id=PEPPER_GOVERNED_PROJECT_ID,
+        ticket_id=PEPPER_NEXT_TICKET_ID,
+        task_id=str(projection["kanban_task_id"]),
+        executor_profile=str(projection["assignee_profile"]),
+    )
+
+
+def _pepper_governed_worker_probe_env(projection: dict[str, Any]) -> dict[str, str]:
+    from hermes_cli.profiles import normalize_profile_name, resolve_profile_env
+
+    profile_arg = normalize_profile_name(str(projection["assignee_profile"]))
+    env = dict(os.environ)
+    try:
+        env["HERMES_HOME"] = resolve_profile_env(profile_arg)
+    except FileNotFoundError:
+        pass
+    env["HERMES_PROFILE"] = profile_arg
+    env.update(_pepper_governed_worker_env_overlay(projection))
+    return env
+
+
+def _preflight_pepper_governed_worker_credentials(
+    projection: dict[str, Any],
+    *,
+    enabled: bool = True,
+) -> dict[str, Any]:
+    if not enabled:
+        return {
+            "ok": True,
+            "probe_status": "skipped_test_spawn_override",
+            "credential_resolution_source": "not_applicable",
+        }
+    try:
+        from hermes_cli.agent_platform.worker_credentials import (
+            probe_pepper_governed_worker_credentials,
+        )
+
+        env = _pepper_governed_worker_probe_env(projection)
+        probe = probe_pepper_governed_worker_credentials(env=env)
+        return {
+            "ok": True,
+            "probe_status": "passed",
+            "provider": probe.get("provider"),
+            "model": probe.get("model"),
+            "api_mode": probe.get("api_mode"),
+            "credential_profile_id": probe.get("credential_profile_id"),
+            "credential_resolution_source": probe.get("credential_resolution_source"),
+            "provider_runtime_profile_id": probe.get("provider_runtime_profile_id"),
+            "worker_profile_id": probe.get("worker_profile_id"),
+            "runtime_id": probe.get("runtime_id"),
+            "correlation_id": probe.get("correlation_id"),
+            "lease_id": probe.get("lease_id"),
+            "legacy_auth_json_used": False,
+            "API_key_fallback_used": False,
+            "credential_pool_fallback_used": False,
+            "legacy_refresh_fallback": False,
+            "credential_refresh_calls_per_request_maximum": 0,
+            "human_smoke_marker": probe.get("human_smoke_marker"),
+        }
+    except Exception as exc:
+        category = getattr(exc, "validation_category", exc.__class__.__name__)
+        return {
+            "ok": False,
+            "probe_status": "failed",
+            "blocker_code": "WORKER_CREDENTIAL_AUTHORITY_MISMATCH",
+            "blocker_detail": (
+                "governed Pepper worker credential probe failed: "
+                f"{_safe_text(category, limit=200)}"
+            ),
+            "validation_category": _safe_text(category, limit=200),
+            "legacy_auth_json_used": False,
+            "API_key_fallback_used": False,
+            "credential_pool_fallback_used": False,
+            "legacy_refresh_fallback": False,
+        }
+
+
+def _dispatch_exact_current_kanban_task(
+    projection: dict[str, Any],
+    *,
+    spawn_fn: Any = None,
+) -> dict[str, Any]:
+    from hermes_cli import kanban_db
+
+    board = _normalize_board(str(projection["kanban_board_slug"]))
+    task_id = str(projection["kanban_task_id"])
+    conn = kanban_db.connect(board=board)
+    claimed = None
+    try:
+        blocker = _kanban_start_preflight_blocker(projection)
+        if blocker is not None:
+            code, detail = blocker
+            task = kanban_db.get_task(conn, task_id)
+            runs = kanban_db.list_runs(conn, task_id) if task is not None else []
+            return _dispatch_blocked_result(
+                code,
+                detail,
+                task=task,
+                runs=runs,
+            )
+        claimed = kanban_db.claim_task(
+            conn,
+            task_id,
+            claimer=f"{kanban_db._claimer_id()}:pepper-worker-start-action",
+        )
+        if claimed is None:
+            task = kanban_db.get_task(conn, task_id)
+            runs = kanban_db.list_runs(conn, task_id) if task is not None else []
+            return _dispatch_blocked_result(
+                "KANBAN_CLAIM_FAILED",
+                "projected Kanban task could not be claimed",
+                task=task,
+                runs=runs,
+            )
+        try:
+            workspace = kanban_db.resolve_workspace(claimed, board=board)
+            kanban_db.set_workspace_path(conn, claimed.id, str(workspace))
+            kanban_db._maybe_emit_scratch_tip(conn, claimed.id, claimed.workspace_kind)
+        except Exception as exc:
+            kanban_db._record_spawn_failure(
+                conn,
+                claimed.id,
+                f"workspace: {_safe_text(exc, limit=300)}",
+                failure_limit=1,
+            )
+            task = kanban_db.get_task(conn, task_id)
+            runs = kanban_db.list_runs(conn, task_id) if task is not None else []
+            return _dispatch_blocked_result(
+                "WORKSPACE_POLICY_GAP",
+                str(exc) or "workspace resolution failed",
+                task=task,
+                runs=runs,
+                dispatch_performed=True,
+            )
+        env_overlay = _pepper_governed_worker_env_overlay(projection)
+        spawn = spawn_fn if spawn_fn is not None else kanban_db._default_spawn
+        try:
+            import inspect
+
+            try:
+                signature = inspect.signature(spawn)
+                kwargs: dict[str, Any] = {}
+                accepts_kwargs = any(
+                    param.kind is inspect.Parameter.VAR_KEYWORD
+                    for param in signature.parameters.values()
+                )
+                if "board" in signature.parameters or accepts_kwargs:
+                    kwargs["board"] = board
+                if "env_overlay" in signature.parameters or accepts_kwargs:
+                    kwargs["env_overlay"] = env_overlay
+                pid = spawn(claimed, str(workspace), **kwargs)
+            except (TypeError, ValueError):
+                pid = spawn(claimed, str(workspace))
+            if pid:
+                kanban_db._set_worker_pid(conn, claimed.id, int(pid))
+        except Exception as exc:
+            kanban_db._record_spawn_failure(
+                conn,
+                claimed.id,
+                _safe_text(exc, limit=300),
+                failure_limit=1,
+            )
+            task = kanban_db.get_task(conn, task_id)
+            runs = kanban_db.list_runs(conn, task_id) if task is not None else []
+            return _dispatch_blocked_result(
+                "KANBAN_WORKER_SPAWN_FAILED",
+                str(exc) or "worker spawn failed",
+                task=task,
+                runs=runs,
+                dispatch_performed=True,
+            )
+        task = kanban_db.get_task(conn, task_id)
+        runs = kanban_db.list_runs(conn, task_id)
+        return {
+            "start_status": "started",
+            "blocker_code": None,
+            "blocker_detail": None,
+            "dispatch_performed": True,
+            "execution_started": True,
+            "worker_execution": bool(pid),
+            "worker_process_started": bool(pid),
+            "worker_pid_recorded": bool(pid),
+            "Kanban_dispatch": True,
+            "kanban_task_status": task.status if task is not None else "running",
+            "kanban_run_id": task.current_run_id if task is not None else None,
+            "workspace_path": task.workspace_path if task is not None else str(workspace),
+            "workspace_created": True,
+            "runs": [_run_dict(run) for run in runs],
+        }
+    finally:
+        conn.close()
+
+
+def _dispatch_blocked_result(
+    blocker_code: str,
+    blocker_detail: str,
+    *,
+    task: Any = None,
+    runs: list[Any] | None = None,
+    dispatch_performed: bool = False,
+) -> dict[str, Any]:
+    return {
+        "start_status": "blocked",
+        "blocker_code": blocker_code,
+        "blocker_detail": _safe_text(blocker_detail, limit=300),
+        "dispatch_performed": dispatch_performed,
+        "execution_started": False,
+        "worker_execution": False,
+        "worker_process_started": False,
+        "worker_pid_recorded": False,
+        "Kanban_dispatch": dispatch_performed,
+        "kanban_task_status": getattr(task, "status", None),
+        "kanban_run_id": getattr(task, "current_run_id", None),
+        "workspace_path": getattr(task, "workspace_path", None),
+        "workspace_created": False,
+        "runs": [_run_dict(run) for run in (runs or [])],
+    }
+
+
+def _build_execution_start_authorization_record(
+    *,
+    request: CurrentTicketExecutionStartRequest,
+    projection: dict[str, Any],
+    provider_readiness: dict[str, Any],
+) -> dict[str, Any]:
+    record = {
+        "schema_version": PEPPER_WORKER_START_ACTION_SCHEMA_VERSION,
+        "policy_id": PEPPER_WORKER_START_ACTION_POLICY_ID,
+        "source_system": PEPPER_WORKER_START_ACTION_SOURCE_SYSTEM,
+        "created_at": _utc_now_iso(),
+        "project_id": PEPPER_GOVERNED_PROJECT_ID,
+        "macroproject_id": PEPPER_GOVERNED_MACROPROJECT_ID,
+        "ticket_id": PEPPER_NEXT_TICKET_ID,
+        "ticket_title": PEPPER_NEXT_TICKET_TITLE,
+        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
+        "work_packet_id": projection["work_packet_id"],
+        "work_packet_SHA256": projection["work_packet_SHA256"],
+        "WorkPacket_compilation_count": _P18_9_0_WORK_PACKET_COMPILATION_COUNT,
+        "approval_publication_SHA256": projection["approval_publication_SHA256"],
+        "dependency_plan_SHA256": projection["dependency_plan_SHA256"],
+        "projection_SHA256": projection["projection_SHA256"],
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+        "assignee_profile": projection["assignee_profile"],
+        "selected_profile": projection["selected_profile"],
+        "execution_profile_role": projection["execution_profile_role"],
+        "selected_role": projection["selected_role"],
+        "profile_assignment_policy_id": projection["profile_assignment_policy_id"],
+        "authorizer_id": request.authorizer_id,
+        "authorization_reference": "human_authorized_start:P18.9.0",
+        "human_authorization_text": request.human_authorization_text,
+        "execution_authorized": True,
+        "synthetic": False,
+        "ticket_execution_authorized": True,
+        "WorkPacket_execution_authorized": True,
+        "runtime_execution_authorized": True,
+        "provider": provider_readiness["provider"],
+        "model": provider_readiness["model"],
+        "api_mode": provider_readiness["api_mode"],
+        "credential_profile_id": provider_readiness["credential_profile_id"],
+        "provider_runtime_profile_id": provider_readiness["provider_runtime_profile_id"],
+        "worker_profile_id": provider_readiness["worker_profile_id"],
+        "executor_config_source": provider_readiness["executor_config_source"],
+        "workspace_kind": "scratch",
+        "workspace_path": None,
+        "workspace_created": False,
+        "dispatcher_primitive": "kanban_db.claim_task+resolve_workspace+_default_spawn",
+        "max_spawn": 1,
+        "max_in_progress_per_profile": 1,
+        "start_status": "authorized_pending_dispatch",
+        "blocker_code": None,
+        "blocker_detail": None,
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "worker_process_started": False,
+        "worker_pid_recorded": False,
+        "Kanban_dispatch": False,
+        "kanban_task_status": "ready",
+        "kanban_run_id": None,
+        "command_execution_count": 0,
+        "Git_commands_executed": 0,
+        "Docker_commands_executed": 0,
+        "Graphify_commands_executed": 0,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+    }
+    record["start_authorization_SHA256"] = _execution_start_record_digest(record)
+    return record
+
+
+def _build_recovery_action_record(
+    *,
+    request: CurrentTicketExecutionRecoveryRequest,
+    projection: dict[str, Any],
+    workflow: dict[str, Any],
+    retry_source: dict[str, Any],
+) -> dict[str, Any]:
+    from hermes_cli.agent_platform.workflow.retry_incident_rollback import (
+        RETRY_INCIDENT_ROLLBACK_BOUNDARY_CLASSIFICATION,
+        RETRY_INCIDENT_ROLLBACK_POLICY_ID,
+        RetryIncidentRollbackRequestedAction,
+        build_retry_incident_rollback_human_authorization,
+    )
+
+    observed_at = _utc_now_iso()
+    authorization = build_retry_incident_rollback_human_authorization(
+        action=RetryIncidentRollbackRequestedAction.AUTHORIZE_RETRY,
+        authorizer_id=request.authorizer_id,
+        authorization_reference=request.human_authorization_text,
+        rationale=(
+            "Authorize P18.9.0 retry-pending governance after failed run 1 "
+            "without starting run 2 or mutating Kanban."
+        ),
+        authorized_at=observed_at,
+    )
+    observed_attempt_count = int(retry_source["observed_attempt_count"])
+    max_attempts = int(retry_source["max_attempts"])
+    next_attempt_number = int(retry_source["next_attempt_number"])
+    recovery_cycle_id = _p18_9_0_recovery_cycle_id(
+        projection=projection,
+        latest_failed_run_id=retry_source.get("latest_run_id"),
+        observed_attempt_count=observed_attempt_count,
+        failure_category=retry_source.get("failure_category"),
+        failure_summary=retry_source.get("failure_summary"),
+    )
+    record = {
+        "schema_version": PEPPER_RECOVERY_ACTION_SCHEMA_VERSION,
+        "policy_id": PEPPER_RECOVERY_ACTION_POLICY_ID,
+        "source_system": PEPPER_RECOVERY_ACTION_SOURCE_SYSTEM,
+        "P18_6_policy_id": RETRY_INCIDENT_ROLLBACK_POLICY_ID,
+        "runtime_boundary_classification": RETRY_INCIDENT_ROLLBACK_BOUNDARY_CLASSIFICATION,
+        "created_at": observed_at,
+        "project_id": PEPPER_GOVERNED_PROJECT_ID,
+        "macroproject_id": PEPPER_GOVERNED_MACROPROJECT_ID,
+        "ticket_id": PEPPER_NEXT_TICKET_ID,
+        "ticket_title": PEPPER_NEXT_TICKET_TITLE,
+        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
+        "work_packet_id": projection["work_packet_id"],
+        "work_packet_SHA256": projection["work_packet_SHA256"],
+        "WorkPacket_compilation_count": _P18_9_0_WORK_PACKET_COMPILATION_COUNT,
+        "approval_publication_SHA256": projection["approval_publication_SHA256"],
+        "projection_SHA256": projection["projection_SHA256"],
+        "execution_start_authority_SHA256": workflow.get("execution_start_authority", {}).get(
+            "start_authorization_SHA256"
+        ),
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+        "assignee_profile": projection["assignee_profile"],
+        "selected_profile": projection["selected_profile"],
+        "authorizer_id": request.authorizer_id,
+        "human_authorization_text": request.human_authorization_text,
+        "human_authorization": authorization.model_dump(mode="json"),
+        "human_authorization_SHA256": authorization.authorization_SHA256,
+        "recovery_cycle_id": recovery_cycle_id,
+        "requested_action": "authorize_retry",
+        "recovery_status": "retry_pending",
+        "governed_workflow_transition_id": "GWT-023",
+        "governed_workflow_transition": "FAILED->RETRY_PENDING",
+        "retry_identity_model": "same_kanban_task_new_run",
+        "future_retry_prepared": True,
+        "future_retry_requires_separate_start_authorization": True,
+        "future_retry_next_action_id": PEPPER_CURRENT_RETRY_START_NEXT_ACTION_ID,
+        "future_task_skills": [],
+        "future_retry_capability_surface": "pepper_repository",
+        "semantic_capabilities": list(projection.get("semantic_capabilities") or []),
+        "capability_resolution": list(projection.get("capability_resolution") or []),
+        "unresolved_Hermes_task_skills": [],
+        "observed_task_skills": list(retry_source.get("observed_task_skills") or []),
+        "observed_attempt_count": observed_attempt_count,
+        "max_attempts": max_attempts,
+        "next_attempt_number": next_attempt_number,
+        "retry_budget_exhausted": False,
+        "latest_failed_run_id": retry_source["latest_run_id"],
+        "latest_failed_run_status": retry_source["latest_run_status"],
+        "latest_failed_run_outcome": retry_source["latest_run_outcome"],
+        "latest_failed_run_ended_at": retry_source.get("latest_run_ended_at"),
+        "failure_category": workflow.get("failure_category") or retry_source.get("failure_category"),
+        "failure_summary": workflow.get("failure_summary") or retry_source.get("failure_summary"),
+        "kanban_task_status_at_recovery": retry_source["kanban_task_status"],
+        "kanban_task_workspace_kind": retry_source["kanban_task_workspace_kind"],
+        "kanban_task_workspace_path": retry_source.get("kanban_task_workspace_path"),
+        "canonical_work_packet_id": projection["work_packet_id"],
+        "synthetic_kanban_work_packet_id": retry_source.get("synthetic_work_packet_id"),
+        "Kanban_SQLite_canonical_authority": False,
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "worker_process_started": False,
+        "Kanban_dispatch": False,
+        "retry_execution_started": False,
+        "retry_execution_count": 0,
+        "automatic_retry_count": 0,
+        "automatic_requeue_count": 0,
+        "Kanban_requeue_calls": 0,
+        "Kanban_reclaim_calls": 0,
+        "Kanban_reassign_calls": 0,
+        "new_kanban_task_created": False,
+        "Git_commands_executed": 0,
+        "Docker_commands_executed": 0,
+        "Graphify_commands_executed": 0,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+        "human_smoke_marker": "PEPPER-RECOVERY-ACTION-READY-FOR-HUMAN-SMOKE",
+    }
+    record["recovery_action_SHA256"] = _recovery_action_record_digest(record)
+    return record
+
+
+def _build_retry_start_authorization_record(
+    *,
+    request: CurrentTicketExecutionStartRequest,
+    projection: dict[str, Any],
+    recovery_record: dict[str, Any],
+    retry_source: dict[str, Any],
+    provider_readiness: dict[str, Any],
+) -> dict[str, Any]:
+    record = {
+        "schema_version": PEPPER_RETRY_START_ACTION_SCHEMA_VERSION,
+        "policy_id": PEPPER_RETRY_START_ACTION_POLICY_ID,
+        "source_system": PEPPER_RETRY_START_ACTION_SOURCE_SYSTEM,
+        "created_at": _utc_now_iso(),
+        "project_id": PEPPER_GOVERNED_PROJECT_ID,
+        "macroproject_id": PEPPER_GOVERNED_MACROPROJECT_ID,
+        "ticket_id": PEPPER_NEXT_TICKET_ID,
+        "ticket_title": PEPPER_NEXT_TICKET_TITLE,
+        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
+        "work_packet_id": projection["work_packet_id"],
+        "work_packet_SHA256": projection["work_packet_SHA256"],
+        "WorkPacket_compilation_count": _P18_9_0_WORK_PACKET_COMPILATION_COUNT,
+        "approval_publication_SHA256": projection["approval_publication_SHA256"],
+        "dependency_plan_SHA256": projection["dependency_plan_SHA256"],
+        "projection_SHA256": projection["projection_SHA256"],
+        "execution_start_authority_SHA256": recovery_record.get("execution_start_authority_SHA256"),
+        "recovery_action_SHA256": recovery_record["recovery_action_SHA256"],
+        "recovery_cycle_id": _recovery_record_cycle_id(recovery_record, projection),
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+        "assignee_profile": projection["assignee_profile"],
+        "selected_profile": projection["selected_profile"],
+        "execution_profile_role": projection["execution_profile_role"],
+        "selected_role": projection["selected_role"],
+        "profile_assignment_policy_id": projection["profile_assignment_policy_id"],
+        "profile_toolsets": list(projection.get("profile_toolsets") or []),
+        "authorizer_id": request.authorizer_id,
+        "authorization_reference": "human_authorized_retry_start:P18.9.0",
+        "human_authorization_text": request.human_authorization_text,
+        "requested_action": "start_retry",
+        "recovery_status_at_authorization": "retry_pending",
+        "retry_start_authorized": True,
+        "execution_authorized": True,
+        "synthetic": False,
+        "ticket_execution_authorized": True,
+        "WorkPacket_execution_authorized": True,
+        "runtime_execution_authorized": True,
+        "retry_identity_model": "same_kanban_task_new_run",
+        "previous_attempt_count": int(recovery_record["observed_attempt_count"]),
+        "next_attempt_number": int(recovery_record["next_attempt_number"]),
+        "max_attempts": int(recovery_record["max_attempts"]),
+        "latest_failed_run_id": recovery_record["latest_failed_run_id"],
+        "latest_failed_run_status": recovery_record["latest_failed_run_status"],
+        "latest_failed_run_outcome": recovery_record["latest_failed_run_outcome"],
+        "failure_category": recovery_record.get("failure_category") or retry_source.get("failure_category"),
+        "failure_summary": recovery_record.get("failure_summary") or retry_source.get("failure_summary"),
+        "future_task_skills": [],
+        "future_retry_capability_surface": "pepper_repository",
+        "unresolved_Hermes_task_skills": [],
+        "observed_task_skills": list(retry_source.get("observed_task_skills") or []),
+        "provider": provider_readiness["provider"],
+        "model": provider_readiness["model"],
+        "api_mode": provider_readiness["api_mode"],
+        "credential_profile_id": provider_readiness["credential_profile_id"],
+        "provider_runtime_profile_id": provider_readiness["provider_runtime_profile_id"],
+        "worker_profile_id": provider_readiness["worker_profile_id"],
+        "executor_config_source": provider_readiness["executor_config_source"],
+        "workspace_kind": "scratch",
+        "workspace_path": None,
+        "workspace_created": False,
+        "dispatcher_primitive": "kanban_db.unblock_task+kanban_db.claim_task+resolve_workspace+_default_spawn",
+        "max_spawn": 1,
+        "max_in_progress_per_profile": 1,
+        "task_prepare_status": "pending",
+        "task_unblocked": False,
+        "task_skills_corrected": False,
+        "start_status": "authorized_pending_dispatch",
+        "blocker_code": None,
+        "blocker_detail": None,
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "worker_process_started": False,
+        "worker_pid_recorded": False,
+        "Kanban_dispatch": False,
+        "retry_execution_started": False,
+        "retry_execution_count": 0,
+        "second_run_started": False,
+        "kanban_task_status": "blocked",
+        "kanban_run_id": None,
+        "command_execution_count": 0,
+        "Git_commands_executed": 0,
+        "Docker_commands_executed": 0,
+        "Graphify_commands_executed": 0,
+        "automatic_retry_count": 0,
+        "automatic_requeue_count": 0,
+        "Kanban_requeue_calls": 0,
+        "Kanban_reclaim_calls": 0,
+        "Kanban_reassign_calls": 0,
+        "new_kanban_task_created": False,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+        "human_smoke_marker": "PEPPER-RETRY-START-ACTION-READY-FOR-HUMAN-SMOKE",
+    }
+    record["retry_start_authorization_SHA256"] = _retry_start_record_digest(record)
+    return record
+
+
+def _finalize_execution_start_record(
+    record: dict[str, Any],
+    *,
+    dispatch_result: dict[str, Any],
+) -> dict[str, Any]:
+    updated = dict(record)
+    for key in (
+        "start_status",
+        "blocker_code",
+        "blocker_detail",
+        "dispatch_performed",
+        "execution_started",
+        "worker_execution",
+        "worker_process_started",
+        "worker_pid_recorded",
+        "Kanban_dispatch",
+        "kanban_task_status",
+        "kanban_run_id",
+        "workspace_path",
+        "workspace_created",
+    ):
+        updated[key] = dispatch_result.get(key)
+    updated["updated_at"] = _utc_now_iso()
+    updated.pop("start_authorization_SHA256", None)
+    updated["start_authorization_SHA256"] = _execution_start_record_digest(updated)
+    return updated
+
+
+def _finalize_retry_start_record(
+    record: dict[str, Any],
+    *,
+    prep_result: dict[str, Any],
+    dispatch_result: dict[str, Any],
+) -> dict[str, Any]:
+    updated = dict(record)
+    for key in (
+        "task_prepare_status",
+        "task_unblocked",
+        "task_skills_corrected",
+    ):
+        if key in prep_result:
+            updated[key] = prep_result.get(key)
+    for key in (
+        "start_status",
+        "blocker_code",
+        "blocker_detail",
+        "dispatch_performed",
+        "execution_started",
+        "worker_execution",
+        "worker_process_started",
+        "worker_pid_recorded",
+        "Kanban_dispatch",
+        "kanban_task_status",
+        "kanban_run_id",
+        "workspace_path",
+        "workspace_created",
+    ):
+        updated[key] = dispatch_result.get(key)
+    runs = dispatch_result.get("runs") if isinstance(dispatch_result.get("runs"), list) else []
+    updated["retry_execution_started"] = bool(dispatch_result.get("execution_started"))
+    updated["retry_execution_count"] = 1 if bool(dispatch_result.get("dispatch_performed")) else 0
+    updated["second_run_started"] = len(runs) >= int(updated["next_attempt_number"])
+    updated["updated_at"] = _utc_now_iso()
+    updated.pop("retry_start_authorization_SHA256", None)
+    updated["retry_start_authorization_SHA256"] = _retry_start_record_digest(updated)
+    return updated
+
+
+def _blocked_current_execution_start_result(
+    projection: dict[str, Any],
+    *,
+    request: CurrentTicketExecutionStartRequest,
+    blocker_code: str,
+    blocker_detail: str,
+    provider_readiness: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "source_system": PEPPER_WORKER_START_ACTION_SOURCE_SYSTEM,
+        "schema_version": PEPPER_WORKER_START_ACTION_SCHEMA_VERSION,
+        "policy_id": PEPPER_WORKER_START_ACTION_POLICY_ID,
+        "start_status": "blocked",
+        "blocker_code": blocker_code,
+        "blocker_detail": _safe_text(blocker_detail, limit=300),
+        "project_id": PEPPER_GOVERNED_PROJECT_ID,
+        "macroproject_id": PEPPER_GOVERNED_MACROPROJECT_ID,
+        "ticket_id": PEPPER_NEXT_TICKET_ID,
+        "ticket_title": PEPPER_NEXT_TICKET_TITLE,
+        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
+        "work_packet_id": projection["work_packet_id"],
+        "work_packet_SHA256": projection["work_packet_SHA256"],
+        "WorkPacket_compilation_count": _P18_9_0_WORK_PACKET_COMPILATION_COUNT,
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+        "assignee_profile": projection["assignee_profile"],
+        "selected_profile": projection["selected_profile"],
+        "human_authorization_present": True,
+        "human_authorization_text": request.human_authorization_text,
+        "execution_authorization_recorded": False,
+        "ticket_execution_authorized": False,
+        "WorkPacket_execution_authorized": False,
+        "runtime_execution_authorized": False,
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "worker_process_started": False,
+        "Kanban_dispatch": False,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+        "provider_readiness": provider_readiness,
+    }
+
+
+def _blocked_current_execution_recovery_result(
+    projection: dict[str, Any],
+    *,
+    request: CurrentTicketExecutionRecoveryRequest,
+    blocker_code: str,
+    blocker_detail: str,
+    retry_source: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "source_system": PEPPER_RECOVERY_ACTION_SOURCE_SYSTEM,
+        "schema_version": PEPPER_RECOVERY_ACTION_SCHEMA_VERSION,
+        "policy_id": PEPPER_RECOVERY_ACTION_POLICY_ID,
+        "recovery_status": "blocked",
+        "blocker_code": blocker_code,
+        "blocker_detail": _safe_text(blocker_detail, limit=300),
+        "project_id": PEPPER_GOVERNED_PROJECT_ID,
+        "macroproject_id": PEPPER_GOVERNED_MACROPROJECT_ID,
+        "ticket_id": PEPPER_NEXT_TICKET_ID,
+        "ticket_title": PEPPER_NEXT_TICKET_TITLE,
+        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
+        "work_packet_id": projection["work_packet_id"],
+        "work_packet_SHA256": projection["work_packet_SHA256"],
+        "WorkPacket_compilation_count": _P18_9_0_WORK_PACKET_COMPILATION_COUNT,
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+        "assignee_profile": projection["assignee_profile"],
+        "selected_profile": projection["selected_profile"],
+        "human_authorization_present": True,
+        "human_authorization_text": request.human_authorization_text,
+        "recovery_authorization_recorded": False,
+        "future_retry_prepared": False,
+        "retry_identity_model": "same_kanban_task_new_run",
+        "future_task_skills": [],
+        "future_retry_capability_surface": "pepper_repository",
+        "unresolved_Hermes_task_skills": [],
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "worker_process_started": False,
+        "Kanban_dispatch": False,
+        "retry_execution_started": False,
+        "retry_execution_count": 0,
+        "automatic_retry_count": 0,
+        "automatic_requeue_count": 0,
+        "Kanban_requeue_calls": 0,
+        "Kanban_reclaim_calls": 0,
+        "Kanban_reassign_calls": 0,
+        "new_kanban_task_created": False,
+        "Git_commands_executed": 0,
+        "Docker_commands_executed": 0,
+        "Graphify_commands_executed": 0,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+        "retry_source": retry_source,
+    }
+
+
+def _blocked_current_execution_retry_start_result(
+    projection: dict[str, Any],
+    *,
+    request: CurrentTicketExecutionStartRequest,
+    blocker_code: str,
+    blocker_detail: str,
+    recovery_record: dict[str, Any] | None = None,
+    retry_source: dict[str, Any] | None = None,
+    provider_readiness: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "source_system": PEPPER_RETRY_START_ACTION_SOURCE_SYSTEM,
+        "schema_version": PEPPER_RETRY_START_ACTION_SCHEMA_VERSION,
+        "policy_id": PEPPER_RETRY_START_ACTION_POLICY_ID,
+        "start_status": "blocked",
+        "retry_start_status": "blocked",
+        "blocker_code": blocker_code,
+        "blocker_detail": _safe_text(blocker_detail, limit=300),
+        "project_id": PEPPER_GOVERNED_PROJECT_ID,
+        "macroproject_id": PEPPER_GOVERNED_MACROPROJECT_ID,
+        "ticket_id": PEPPER_NEXT_TICKET_ID,
+        "ticket_title": PEPPER_NEXT_TICKET_TITLE,
+        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
+        "work_packet_id": projection["work_packet_id"],
+        "work_packet_SHA256": projection["work_packet_SHA256"],
+        "WorkPacket_compilation_count": _P18_9_0_WORK_PACKET_COMPILATION_COUNT,
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+        "assignee_profile": projection["assignee_profile"],
+        "selected_profile": projection["selected_profile"],
+        "human_authorization_present": True,
+        "human_authorization_text": request.human_authorization_text,
+        "retry_start_authorization_recorded": False,
+        "recovery_action_SHA256": (
+            recovery_record.get("recovery_action_SHA256") if recovery_record else None
+        ),
+        "recovery_status": (
+            recovery_record.get("recovery_status") if recovery_record else None
+        ),
+        "retry_identity_model": "same_kanban_task_new_run",
+        "future_task_skills": [],
+        "future_retry_capability_surface": "pepper_repository",
+        "unresolved_Hermes_task_skills": [],
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "worker_process_started": False,
+        "Kanban_dispatch": False,
+        "retry_execution_started": False,
+        "retry_execution_count": 0,
+        "automatic_retry_count": 0,
+        "automatic_requeue_count": 0,
+        "Kanban_requeue_calls": 0,
+        "Kanban_reclaim_calls": 0,
+        "Kanban_reassign_calls": 0,
+        "new_kanban_task_created": False,
+        "Git_commands_executed": 0,
+        "Docker_commands_executed": 0,
+        "Graphify_commands_executed": 0,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+        "retry_source": retry_source,
+        "provider_readiness": provider_readiness,
+    }
+
+
+def _recovery_action_operational_result(
+    record: dict[str, Any],
+    *,
+    idempotent_replay: bool,
+) -> dict[str, Any]:
+    from hermes_cli import kanban_db
+
+    board = _normalize_board(str(record["kanban_board_slug"]))
+    task_id = str(record["kanban_task_id"])
+    conn = kanban_db.connect(board=board)
+    try:
+        _reconcile_kanban_board_lifecycle(conn, task_id=task_id)
+        task = kanban_db.get_task(conn, task_id)
+        runs = kanban_db.list_runs(conn, task_id) if task is not None else []
+    finally:
+        conn.close()
+    task_visibility = None
+    if task is not None:
+        task_visibility = {
+            "id": task.id,
+            "status": task.status,
+            "assignee": task.assignee,
+            "workspace_kind": task.workspace_kind,
+            "workspace_path": task.workspace_path,
+            "current_run_id": task.current_run_id,
+            "skills": list(task.skills or []),
+        }
+    current_side_effects = {
+        "dispatch_performed": False,
+        "Kanban_dispatch": False,
+        "execution_started": False,
+        "worker_process_started": False,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+    }
+    return {
+        "source_system": PEPPER_RECOVERY_ACTION_SOURCE_SYSTEM,
+        "schema_version": PEPPER_RECOVERY_ACTION_SCHEMA_VERSION,
+        "policy_id": PEPPER_RECOVERY_ACTION_POLICY_ID,
+        "P18_6_policy_id": record["P18_6_policy_id"],
+        "runtime_boundary_classification": record["runtime_boundary_classification"],
+        "idempotent_replay": idempotent_replay,
+        "recovery_status": record["recovery_status"],
+        "project_id": record["project_id"],
+        "macroproject_id": record["macroproject_id"],
+        "ticket_id": record["ticket_id"],
+        "ticket_title": record["ticket_title"],
+        "ticket_spec_SHA256": record["ticket_spec_SHA256"],
+        "work_packet_id": record["work_packet_id"],
+        "work_packet_SHA256": record["work_packet_SHA256"],
+        "WorkPacket_compilation_count": record["WorkPacket_compilation_count"],
+        "recovery_action_SHA256": record["recovery_action_SHA256"],
+        "recovery_cycle_id": record.get("recovery_cycle_id"),
+        "human_authorization_SHA256": record["human_authorization_SHA256"],
+        "human_authorization_id": record["human_authorization"]["authorization_id"],
+        "human_authorization_text": record["human_authorization_text"],
+        "recovery_authorization_recorded": True,
+        "current_invocation_side_effects": current_side_effects,
+        "requested_action": record["requested_action"],
+        "governed_workflow_transition_id": record["governed_workflow_transition_id"],
+        "governed_workflow_transition": record["governed_workflow_transition"],
+        "future_retry_prepared": record["future_retry_prepared"],
+        "future_retry_requires_separate_start_authorization": record[
+            "future_retry_requires_separate_start_authorization"
+        ],
+        "retry_identity_model": record["retry_identity_model"],
+        "future_task_skills": record["future_task_skills"],
+        "future_retry_capability_surface": record["future_retry_capability_surface"],
+        "semantic_capabilities": record["semantic_capabilities"],
+        "capability_resolution": record["capability_resolution"],
+        "unresolved_Hermes_task_skills": record["unresolved_Hermes_task_skills"],
+        "observed_task_skills": record["observed_task_skills"],
+        "observed_attempt_count": record["observed_attempt_count"],
+        "max_attempts": record["max_attempts"],
+        "next_attempt_number": record["next_attempt_number"],
+        "retry_budget_exhausted": record["retry_budget_exhausted"],
+        "latest_failed_run_id": record["latest_failed_run_id"],
+        "failure_category": record.get("failure_category"),
+        "failure_summary": record.get("failure_summary"),
+        "kanban_board_slug": record["kanban_board_slug"],
+        "kanban_task_id": record["kanban_task_id"],
+        "kanban_task_status": task.status if task is not None else record.get("kanban_task_status_at_recovery"),
+        "kanban_run_count": len(runs),
+        "second_run_started": len(runs) >= int(record["next_attempt_number"]),
+        "assignee_profile": record["assignee_profile"],
+        "selected_profile": record["selected_profile"],
+        "task": task_visibility,
+        "runs": [_run_dict(run) for run in runs],
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "worker_process_started": False,
+        "Kanban_dispatch": False,
+        "retry_execution_started": False,
+        "retry_execution_count": 0,
+        "automatic_retry_count": 0,
+        "automatic_requeue_count": 0,
+        "Kanban_requeue_calls": 0,
+        "Kanban_reclaim_calls": 0,
+        "Kanban_reassign_calls": 0,
+        "new_kanban_task_created": False,
+        "Git_commands_executed": 0,
+        "Docker_commands_executed": 0,
+        "Graphify_commands_executed": 0,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+        "human_smoke_marker": record["human_smoke_marker"],
+        "next_action": {
+            "id": PEPPER_CURRENT_RETRY_START_NEXT_ACTION_ID,
+            "target_ticket_id": PEPPER_NEXT_TICKET_ID,
+            "required_human_action": "retry_start_authorization",
+        },
+    }
+
+
+def _retry_start_operational_result(
+    record: dict[str, Any],
+    *,
+    idempotent_replay: bool,
+) -> dict[str, Any]:
+    from hermes_cli import kanban_db
+
+    board = _normalize_board(str(record["kanban_board_slug"]))
+    task_id = str(record["kanban_task_id"])
+    conn = kanban_db.connect(board=board)
+    try:
+        _reconcile_kanban_board_lifecycle(conn, task_id=task_id)
+        task = kanban_db.get_task(conn, task_id)
+        runs = kanban_db.list_runs(conn, task_id) if task is not None else []
+    finally:
+        conn.close()
+    task_visibility = None
+    terminal_state = (
+        _p18_9_0_terminal_execution_state(task, runs)
+        if bool(record.get("execution_started"))
+        else None
+    )
+    if task is not None:
+        task_visibility = {
+            "id": task.id,
+            "status": task.status,
+            "assignee": task.assignee,
+            "workspace_kind": task.workspace_kind,
+            "workspace_path": task.workspace_path,
+            "current_run_id": task.current_run_id,
+            "skills": list(task.skills or []),
+        }
+    start_status = record["start_status"]
+    blocker_code = record.get("blocker_code")
+    blocker_detail = record.get("blocker_detail")
+    execution_started = bool(record.get("execution_started"))
+    worker_execution = bool(record.get("worker_execution"))
+    worker_process_started = bool(record.get("worker_process_started"))
+    worker_pid_recorded = bool(record.get("worker_pid_recorded"))
+    retry_execution_started = bool(record.get("retry_execution_started"))
+    next_action_id = (
+        "MONITOR_P18_9_0_EXECUTION"
+        if record.get("execution_started")
+        else PEPPER_CURRENT_RETRY_START_NEXT_ACTION_ID
+    )
+    if terminal_state is not None:
+        start_status = terminal_state["start_status"]
+        blocker_code = terminal_state["blocker_code"]
+        blocker_detail = terminal_state["blocker_detail"]
+        execution_started = False
+        worker_execution = False
+        worker_process_started = False
+        worker_pid_recorded = False
+        retry_execution_started = False
+        next_action_id = terminal_state["next_action_id"]
+    historical_action_result = {
+        "start_status": start_status,
+        "blocker_code": blocker_code,
+        "blocker_detail": blocker_detail,
+        "dispatch_performed": bool(record.get("dispatch_performed")),
+        "Kanban_dispatch": bool(record.get("Kanban_dispatch")),
+        "execution_started": bool(record.get("execution_started")),
+        "worker_process_started": bool(record.get("worker_process_started")),
+        "kanban_run_id": record.get("kanban_run_id"),
+        "recovery_cycle_id": record.get("recovery_cycle_id"),
+    }
+    current_invocation_side_effects = {
+        "dispatch_performed": False if idempotent_replay else bool(record.get("dispatch_performed")),
+        "Kanban_dispatch": False if idempotent_replay else bool(record.get("Kanban_dispatch")),
+        "execution_started": False if idempotent_replay else execution_started,
+        "worker_process_started": False if idempotent_replay else worker_process_started,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+    }
+    return {
+        "source_system": PEPPER_RETRY_START_ACTION_SOURCE_SYSTEM,
+        "schema_version": PEPPER_RETRY_START_ACTION_SCHEMA_VERSION,
+        "policy_id": PEPPER_RETRY_START_ACTION_POLICY_ID,
+        "idempotent_replay": idempotent_replay,
+        "start_status": start_status,
+        "retry_start_status": start_status,
+        "blocker_code": blocker_code,
+        "blocker_detail": blocker_detail,
+        "project_id": record["project_id"],
+        "macroproject_id": record["macroproject_id"],
+        "ticket_id": record["ticket_id"],
+        "ticket_title": record["ticket_title"],
+        "ticket_spec_SHA256": record["ticket_spec_SHA256"],
+        "work_packet_id": record["work_packet_id"],
+        "work_packet_SHA256": record["work_packet_SHA256"],
+        "WorkPacket_compilation_count": record["WorkPacket_compilation_count"],
+        "retry_start_authorization_SHA256": record["retry_start_authorization_SHA256"],
+        "recovery_action_SHA256": record["recovery_action_SHA256"],
+        "recovery_cycle_id": record.get("recovery_cycle_id"),
+        "retry_start_authorization_recorded": True,
+        "historical_action_result": historical_action_result if idempotent_replay else None,
+        "current_invocation_side_effects": current_invocation_side_effects,
+        "ticket_execution_authorized": record["ticket_execution_authorized"],
+        "WorkPacket_execution_authorized": record["WorkPacket_execution_authorized"],
+        "runtime_execution_authorized": record["runtime_execution_authorized"],
+        "retry_identity_model": record["retry_identity_model"],
+        "previous_attempt_count": record["previous_attempt_count"],
+        "next_attempt_number": record["next_attempt_number"],
+        "max_attempts": record["max_attempts"],
+        "latest_failed_run_id": record["latest_failed_run_id"],
+        "failure_category": record.get("failure_category"),
+        "failure_summary": record.get("failure_summary"),
+        "future_task_skills": record["future_task_skills"],
+        "future_retry_capability_surface": record["future_retry_capability_surface"],
+        "unresolved_Hermes_task_skills": record["unresolved_Hermes_task_skills"],
+        "observed_task_skills": record["observed_task_skills"],
+        "provider": record["provider"],
+        "model": record["model"],
+        "api_mode": record["api_mode"],
+        "credential_profile_id": record["credential_profile_id"],
+        "provider_runtime_profile_id": record["provider_runtime_profile_id"],
+        "worker_profile_id": record["worker_profile_id"],
+        "kanban_board_slug": record["kanban_board_slug"],
+        "kanban_task_id": record["kanban_task_id"],
+        "kanban_task_status": task.status if task is not None else record.get("kanban_task_status"),
+        "kanban_run_id": task.current_run_id if task is not None else record.get("kanban_run_id"),
+        "kanban_run_count": len(runs),
+        "second_run_started": len(runs) >= int(record["next_attempt_number"]),
+        "assignee_profile": record["assignee_profile"],
+        "selected_profile": record["selected_profile"],
+        "workspace_kind": record["workspace_kind"],
+        "workspace_path": (task.workspace_path if task is not None else record.get("workspace_path")),
+        "workspace_created": bool(record.get("workspace_created")),
+        "task_prepare_status": record["task_prepare_status"],
+        "task_unblocked": bool(record.get("task_unblocked")),
+        "task_skills_corrected": bool(record.get("task_skills_corrected")),
+        "dispatch_performed": current_invocation_side_effects["dispatch_performed"],
+        "execution_started": current_invocation_side_effects["execution_started"],
+        "worker_execution": False if idempotent_replay else worker_execution,
+        "worker_process_started": current_invocation_side_effects["worker_process_started"],
+        "worker_pid_recorded": False if idempotent_replay else worker_pid_recorded,
+        "Kanban_dispatch": current_invocation_side_effects["Kanban_dispatch"],
+        "retry_execution_started": False if idempotent_replay else retry_execution_started,
+        "retry_execution_count": int(record.get("retry_execution_count") or 0),
+        "automatic_retry_count": 0,
+        "automatic_requeue_count": 0,
+        "Kanban_requeue_calls": 0,
+        "Kanban_reclaim_calls": 0,
+        "Kanban_reassign_calls": 0,
+        "new_kanban_task_created": False,
+        "Git_commands_executed": 0,
+        "Docker_commands_executed": 0,
+        "Graphify_commands_executed": 0,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+        "task": task_visibility,
+        "runs": [_run_dict(run) for run in runs],
+        "human_smoke_marker": record["human_smoke_marker"],
+        "next_action": {
+            "id": next_action_id,
+            "target_ticket_id": PEPPER_NEXT_TICKET_ID,
+        },
+    }
+
+
+def _execution_start_operational_result(
+    record: dict[str, Any],
+    *,
+    idempotent_replay: bool,
+) -> dict[str, Any]:
+    from hermes_cli import kanban_db
+
+    board = _normalize_board(str(record["kanban_board_slug"]))
+    task_id = str(record["kanban_task_id"])
+    conn = kanban_db.connect(board=board)
+    try:
+        _reconcile_kanban_board_lifecycle(conn, task_id=task_id)
+        task = kanban_db.get_task(conn, task_id)
+        runs = kanban_db.list_runs(conn, task_id) if task is not None else []
+    finally:
+        conn.close()
+    task_visibility = None
+    terminal_state = (
+        _p18_9_0_terminal_execution_state(task, runs)
+        if bool(record.get("execution_started"))
+        else None
+    )
+    if task is not None:
+        task_visibility = {
+            "id": task.id,
+            "status": task.status,
+            "assignee": task.assignee,
+            "workspace_kind": task.workspace_kind,
+            "workspace_path": task.workspace_path,
+            "current_run_id": task.current_run_id,
+        }
+    start_status = record["start_status"]
+    blocker_code = record.get("blocker_code")
+    blocker_detail = record.get("blocker_detail")
+    execution_started = bool(record.get("execution_started"))
+    worker_execution = bool(record.get("worker_execution"))
+    worker_process_started = bool(record.get("worker_process_started"))
+    worker_pid_recorded = bool(record.get("worker_pid_recorded"))
+    next_action_id = (
+        "MONITOR_P18_9_0_EXECUTION"
+        if record.get("execution_started")
+        else PEPPER_CURRENT_EXECUTION_START_NEXT_ACTION_ID
+    )
+    if terminal_state is not None:
+        start_status = terminal_state["start_status"]
+        blocker_code = terminal_state["blocker_code"]
+        blocker_detail = terminal_state["blocker_detail"]
+        execution_started = False
+        worker_execution = False
+        worker_process_started = False
+        worker_pid_recorded = False
+        next_action_id = terminal_state["next_action_id"]
+    return {
+        "source_system": PEPPER_WORKER_START_ACTION_SOURCE_SYSTEM,
+        "schema_version": PEPPER_WORKER_START_ACTION_SCHEMA_VERSION,
+        "policy_id": PEPPER_WORKER_START_ACTION_POLICY_ID,
+        "idempotent_replay": idempotent_replay,
+        "start_status": start_status,
+        "blocker_code": blocker_code,
+        "blocker_detail": blocker_detail,
+        "project_id": record["project_id"],
+        "macroproject_id": record["macroproject_id"],
+        "ticket_id": record["ticket_id"],
+        "ticket_title": record["ticket_title"],
+        "ticket_spec_SHA256": record["ticket_spec_SHA256"],
+        "work_packet_id": record["work_packet_id"],
+        "work_packet_SHA256": record["work_packet_SHA256"],
+        "WorkPacket_compilation_count": record["WorkPacket_compilation_count"],
+        "start_authorization_SHA256": record["start_authorization_SHA256"],
+        "execution_authorization_recorded": True,
+        "ticket_execution_authorized": record["ticket_execution_authorized"],
+        "WorkPacket_execution_authorized": record["WorkPacket_execution_authorized"],
+        "runtime_execution_authorized": record["runtime_execution_authorized"],
+        "provider": record["provider"],
+        "model": record["model"],
+        "api_mode": record["api_mode"],
+        "credential_profile_id": record["credential_profile_id"],
+        "provider_runtime_profile_id": record["provider_runtime_profile_id"],
+        "worker_profile_id": record["worker_profile_id"],
+        "kanban_board_slug": record["kanban_board_slug"],
+        "kanban_task_id": record["kanban_task_id"],
+        "kanban_task_status": task.status if task is not None else record.get("kanban_task_status"),
+        "kanban_run_id": task.current_run_id if task is not None else record.get("kanban_run_id"),
+        "assignee_profile": record["assignee_profile"],
+        "selected_profile": record["selected_profile"],
+        "workspace_kind": record["workspace_kind"],
+        "workspace_path": (task.workspace_path if task is not None else record.get("workspace_path")),
+        "workspace_created": bool(record.get("workspace_created")),
+        "dispatch_performed": bool(record.get("dispatch_performed")),
+        "execution_started": execution_started,
+        "worker_execution": worker_execution,
+        "worker_process_started": worker_process_started,
+        "worker_pid_recorded": worker_pid_recorded,
+        "Kanban_dispatch": bool(record.get("Kanban_dispatch")),
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+        "task": task_visibility,
+        "runs": [_run_dict(run) for run in runs],
+        "next_action": {
+            "id": next_action_id,
+            "target_ticket_id": PEPPER_NEXT_TICKET_ID,
+        },
+    }
+
+
+def _p18_9_0_terminal_execution_state(task: Any, runs: list[Any]) -> dict[str, Any] | None:
+    if task is None:
+        return {
+            "start_status": "failed",
+            "blocker_code": "KANBAN_TASK_GAP",
+            "blocker_detail": "projected Kanban task is missing after execution start",
+            "next_action_id": "RECOVER_P18_9_0_EXECUTION",
+            "outcome": "task_missing",
+            "failure_category": "task_missing",
+            "failure_summary": "projected Kanban task is missing after execution start",
+        }
+    task_status = str(getattr(task, "status", "") or "").strip().lower()
+    latest_run = runs[-1] if runs else None
+    run_status = str(getattr(latest_run, "status", "") or "").strip().lower()
+    outcome = str(getattr(latest_run, "outcome", "") or "").strip().lower()
+    if task_status == "running" and getattr(task, "current_run_id", None):
+        return None
+    if task_status == "done" or outcome == "completed":
+        return {
+            "start_status": "completed",
+            "blocker_code": None,
+            "blocker_detail": None,
+            "next_action_id": "PREPARE_P18_9_0_REVIEW",
+            "outcome": "completed",
+        }
+    failure_outcome = outcome or run_status
+    if task_status == "blocked" or failure_outcome in _P18_9_0_FAILURE_OUTCOMES:
+        detail = (
+            getattr(latest_run, "error", None)
+            or getattr(task, "last_failure_error", None)
+            or f"Kanban task status is {task_status or 'unknown'}"
+        )
+        failure_fields = (
+            _run_failure_fields(latest_run)
+            if latest_run is not None
+            else {"failure_category": failure_outcome or task_status, "failure_summary": detail}
+        )
+        return {
+            "start_status": "failed",
+            "blocker_code": "WORKER_LIFECYCLE_RECONCILIATION_REQUIRED",
+            "blocker_detail": _safe_text(detail, limit=300),
+            "next_action_id": "RECOVER_P18_9_0_EXECUTION",
+            "outcome": failure_outcome or task_status,
+            "failure_category": (
+                failure_fields.get("failure_category")
+                or failure_outcome
+                or task_status
+                or "failed"
+            ),
+            "failure_summary": (
+                failure_fields.get("failure_summary")
+                or _safe_text(detail, limit=300)
+            ),
+        }
+    if latest_run is not None and getattr(latest_run, "ended_at", None) is not None:
+        failure_fields = _run_failure_fields(latest_run)
+        return {
+            "start_status": "failed",
+            "blocker_code": "WORKER_LIFECYCLE_RECONCILIATION_REQUIRED",
+            "blocker_detail": f"Kanban run ended with status {run_status or 'unknown'}",
+            "next_action_id": "RECOVER_P18_9_0_EXECUTION",
+            "outcome": failure_outcome or "ended_without_outcome",
+            "failure_category": (
+                failure_fields.get("failure_category")
+                or failure_outcome
+                or run_status
+                or "ended_without_outcome"
+            ),
+            "failure_summary": (
+                failure_fields.get("failure_summary")
+                or f"Kanban run ended with status {run_status or 'unknown'}"
+            ),
+        }
+    return None
+
+
+def _execution_start_record_digest(record: dict[str, Any]) -> str:
+    payload = {
+        key: value
+        for key, value in record.items()
+        if key != "start_authorization_SHA256"
+    }
+    data = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(
+        f"{PEPPER_WORKER_START_AUTHORIZATION_DIGEST_ALGORITHM}\n{data}".encode("utf-8")
+    ).hexdigest()
+
+
+def _persist_execution_start_record(record: dict[str, Any]) -> None:
+    validate_p18_9_0_execution_start_record(record)
+    path = p18_9_0_execution_start_record_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+
+def _recovery_action_record_digest(record: dict[str, Any]) -> str:
+    payload = {
+        key: value
+        for key, value in record.items()
+        if key != "recovery_action_SHA256"
+    }
+    data = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(
+        f"{PEPPER_RECOVERY_ACTION_DIGEST_ALGORITHM}\n{data}".encode("utf-8")
+    ).hexdigest()
+
+
+def _persist_recovery_action_record(record: dict[str, Any]) -> None:
+    validate_p18_9_0_recovery_action_record(record)
+    path = p18_9_0_recovery_action_record_path()
+    _archive_existing_authority_record(
+        path,
+        p18_9_0_recovery_action_history_path(),
+        reason="replaced_by_current_recovery_cycle",
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+
+def _retry_start_record_digest(record: dict[str, Any]) -> str:
+    payload = {
+        key: value
+        for key, value in record.items()
+        if key != "retry_start_authorization_SHA256"
+    }
+    data = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(
+        f"{PEPPER_RETRY_START_ACTION_DIGEST_ALGORITHM}\n{data}".encode("utf-8")
+    ).hexdigest()
+
+
+def _persist_retry_start_record(record: dict[str, Any]) -> None:
+    validate_p18_9_0_retry_start_record(record)
+    path = p18_9_0_retry_start_record_path()
+    _archive_existing_authority_record(
+        path,
+        p18_9_0_retry_start_history_path(),
+        reason="replaced_by_current_recovery_cycle",
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+
+def _digest_payload(algorithm: str, payload: dict[str, Any]) -> str:
+    data = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(f"{algorithm}\n{data}".encode("utf-8")).hexdigest()
+
+
+def _review_prepare_record_digest(record: dict[str, Any]) -> str:
+    payload = {
+        key: value
+        for key, value in record.items()
+        if key != "review_prepare_action_SHA256"
+    }
+    return _digest_payload(PEPPER_REVIEW_PREPARE_ACTION_DIGEST_ALGORITHM, payload)
+
+
+def _review_acceptance_record_digest(record: dict[str, Any]) -> str:
+    payload = {
+        key: value
+        for key, value in record.items()
+        if key != "review_acceptance_action_SHA256"
+    }
+    return _digest_payload(PEPPER_REVIEW_HUMAN_ACCEPTANCE_ACTION_DIGEST_ALGORITHM, payload)
+
+
+def _review_acceptance_text_digest(value: str) -> str:
+    payload = {"human_acceptance_text": unicodedata.normalize("NFC", str(value))}
+    return _digest_payload(PEPPER_REVIEW_HUMAN_ACCEPTANCE_TEXT_DIGEST_ALGORITHM, payload)
+
+
+def _kanban_completion_result_digest(record: dict[str, Any]) -> str:
+    payload = {
+        key: value
+        for key, value in record.items()
+        if key != "kanban_completion_result_SHA256"
+    }
+    return _digest_payload(PEPPER_KANBAN_COMPLETION_RESULT_DIGEST_ALGORITHM, payload)
+
+
+def _criteria_revision_digest(contract: dict[str, Any]) -> str:
+    payload = {
+        "ticket_spec_SHA256": contract["ticket_spec_SHA256"],
+        "work_packet_SHA256": contract["work_packet_SHA256"],
+        "acceptance_criteria": contract["acceptance_criteria"],
+        "validation_steps": contract["validation_steps"],
+        "response_contract": contract["response_contract"],
+    }
+    return _digest_payload(
+        f"{PEPPER_ACCEPTANCE_CONTRACT_DIGEST_ALGORITHM}:criteria-revision-v1",
+        payload,
+    )
+
+
+def _acceptance_contract_digest(contract: dict[str, Any]) -> str:
+    payload = {
+        key: value
+        for key, value in contract.items()
+        if key != "acceptance_contract_SHA256"
+    }
+    return _digest_payload(PEPPER_ACCEPTANCE_CONTRACT_DIGEST_ALGORITHM, payload)
+
+
+def _review_prepare_package_digest(
+    *,
+    projection: dict[str, Any],
+    completion: dict[str, Any],
+    acceptance_contract: dict[str, Any],
+) -> str:
+    payload = {
+        "project_id": PEPPER_GOVERNED_PROJECT_ID,
+        "ticket_id": PEPPER_NEXT_TICKET_ID,
+        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
+        "work_packet_id": projection["work_packet_id"],
+        "work_packet_SHA256": projection["work_packet_SHA256"],
+        "projection_SHA256": projection["projection_SHA256"],
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+        "successful_run_id": completion["run_id"],
+        "kanban_completion_result_SHA256": completion[
+            "kanban_completion_result_SHA256"
+        ],
+        "criteria_revision_SHA256": acceptance_contract["criteria_revision_SHA256"],
+        "acceptance_contract_SHA256": acceptance_contract[
+            "acceptance_contract_SHA256"
+        ],
+    }
+    return _digest_payload(PEPPER_REVIEW_PREPARE_PACKAGE_DIGEST_ALGORITHM, payload)
+
+
+def _validate_review_acceptance_request_guards(
+    request: CurrentTicketReviewAcceptanceRequest,
+) -> None:
+    if request.project_id not in {None, PEPPER_GOVERNED_PROJECT_ID}:
+        raise ProductRuntimeConflict("review acceptance is bounded to project PEPPER")
+    if request.ticket_id not in {None, PEPPER_NEXT_TICKET_ID}:
+        raise ProductRuntimeConflict("review acceptance is bounded to ticket P18.9.0")
+    if request.next_action_id not in {None, PEPPER_CURRENT_REVIEW_ACCEPTANCE_NEXT_ACTION_ID}:
+        raise ProductRuntimeConflict(
+            "review acceptance requires AWAIT_HUMAN_P18_9_0_REVIEW_ACCEPTANCE"
+        )
+    if request.human_acceptance_text != PEPPER_CURRENT_REVIEW_ACCEPTANCE_TEXT:
+        raise ProductRuntimeConflict(
+            "exact explicit P18.9.0 review acceptance text is required"
+        )
+
+
+def _review_acceptance_workflow_blocker(
+    workflow: dict[str, Any],
+) -> tuple[str, str] | None:
+    if workflow.get("project_id") != PEPPER_GOVERNED_PROJECT_ID:
+        return "PEPPER_REVIEW_ACCEPTANCE_ACTION_GAP", "current project is not PEPPER"
+    if workflow.get("macroproject_id") != PEPPER_GOVERNED_MACROPROJECT_ID:
+        return "PEPPER_REVIEW_ACCEPTANCE_ACTION_GAP", "current macroproject is not P18.9"
+    if workflow.get("current_ticket_id") != PEPPER_NEXT_TICKET_ID:
+        return "PEPPER_REVIEW_ACCEPTANCE_ACTION_GAP", "current ticket is not P18.9.0"
+    if workflow.get("workflow_status") != "review_prepared_pending_human_acceptance":
+        return (
+            "PEPPER_REVIEW_ACCEPTANCE_ACTION_GAP",
+            "workflow status is not review_prepared_pending_human_acceptance",
+        )
+    next_action = workflow.get("next_action")
+    if not isinstance(next_action, dict):
+        return "PEPPER_REVIEW_ACCEPTANCE_ACTION_GAP", "next action is unavailable"
+    if next_action.get("id") != PEPPER_CURRENT_REVIEW_ACCEPTANCE_NEXT_ACTION_ID:
+        return "PEPPER_REVIEW_ACCEPTANCE_ACTION_GAP", "next action is not review acceptance"
+    if next_action.get("target_ticket_id") != PEPPER_NEXT_TICKET_ID:
+        return "PEPPER_REVIEW_ACCEPTANCE_ACTION_GAP", "next action does not target P18.9.0"
+    if int(workflow.get("active_execution_count") or 0) != 0:
+        return "EXECUTION_ALREADY_ACTIVE", "an execution is already active"
+    if workflow.get("execution_state") == "active_executions":
+        return "EXECUTION_ALREADY_ACTIVE", "execution state is active"
+    if workflow.get("recovery_state") != "not_required":
+        return "PEPPER_REVIEW_ACCEPTANCE_ACTION_GAP", "recovery state is not not_required"
+    if workflow.get("validation_state") != "review_prepared_pending_human_acceptance":
+        return "PEPPER_REVIEW_ACCEPTANCE_ACTION_GAP", "validation state is not pending acceptance"
+    if workflow.get("review_state") != "prepared_pending_human_acceptance":
+        return "PEPPER_REVIEW_ACCEPTANCE_ACTION_GAP", "review state is not pending acceptance"
+    if workflow.get("git_handoff_state") != "not_required_for_ticket_result":
+        return "GIT_HANDOFF_STATE_GAP", "git handoff state is not not_required_for_ticket_result"
+    if workflow.get("remaining_blockers"):
+        return "WORKFLOW_BLOCKER_PRESENT", "workflow blockers are present"
+    if workflow.get("human_acceptance_required") is not True:
+        return "PEPPER_REVIEW_ACCEPTANCE_ACTION_GAP", "human acceptance is not required"
+    if workflow.get("human_acceptance_recorded") is not False:
+        return "PEPPER_REVIEW_ACCEPTANCE_ACTION_GAP", "human acceptance is already recorded"
+    return None
+
+
+def _review_prepare_authority_projection(record: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "policy_id": record["policy_id"],
+        "P18_5_policy_id": record["P18_5_policy_id"],
+        "runtime_boundary_classification": record["runtime_boundary_classification"],
+        "review_prepare_action_SHA256": record["review_prepare_action_SHA256"],
+        "review_package_SHA256": record["review_package_SHA256"],
+        "acceptance_contract_SHA256": record["acceptance_contract_SHA256"],
+        "criteria_revision_SHA256": record["criteria_revision_SHA256"],
+        "kanban_completion_result_SHA256": record["kanban_completion_result_SHA256"],
+        "successful_run_id": record["successful_run_id"],
+        "human_acceptance_required": True,
+        "human_acceptance_recorded": False,
+    }
+
+
+def _p18_9_next_ticket_authority() -> dict[str, Any]:
+    authority_path = "2_products/pepper-agent/docs/agent-platform/workflow_migration_closure.md"
+    path = Path(__file__).resolve().parents[2] / "docs" / "agent-platform" / "workflow_migration_closure.md"
+    title = "Pepper Design System"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+    for line in text.splitlines():
+        cells = [cell.strip().strip("`") for cell in line.strip().strip("|").split("|")]
+        if len(cells) >= 2 and cells[0] == PEPPER_REVIEW_ACCEPTANCE_NEXT_TICKET_ID:
+            title = cells[1]
+            break
+    return {
+        "ticket_id": PEPPER_REVIEW_ACCEPTANCE_NEXT_TICKET_ID,
+        "ticket_title": _safe_text(title, limit=200),
+        "authority_path": authority_path,
+        "authority_section": "Advisory decomposition only, not implementation tickets",
+        "authority_type": "current_repository_roadmap_authority",
+        "auto_generated": False,
+        "execution_authorized": False,
+        "next_action_id": PEPPER_REVIEW_ACCEPTANCE_NEXT_ACTION_ID,
+    }
+
+
+def _validate_review_prepare_request_guards(
+    request: CurrentTicketReviewPrepareRequest,
+) -> None:
+    if request.project_id not in {None, PEPPER_GOVERNED_PROJECT_ID}:
+        raise ProductRuntimeConflict("review preparation is bounded to project PEPPER")
+    if request.ticket_id not in {None, PEPPER_NEXT_TICKET_ID}:
+        raise ProductRuntimeConflict("review preparation is bounded to ticket P18.9.0")
+    if request.next_action_id not in {None, PEPPER_CURRENT_REVIEW_PREPARE_NEXT_ACTION_ID}:
+        raise ProductRuntimeConflict(
+            "review preparation requires PREPARE_P18_9_0_REVIEW"
+        )
+
+
+def _review_prepare_workflow_blocker(
+    workflow: dict[str, Any],
+) -> tuple[str, str] | None:
+    if workflow.get("project_id") != PEPPER_GOVERNED_PROJECT_ID:
+        return "PEPPER_REVIEW_PREPARE_ACTION_GAP", "current project is not PEPPER"
+    if workflow.get("macroproject_id") != PEPPER_GOVERNED_MACROPROJECT_ID:
+        return "PEPPER_REVIEW_PREPARE_ACTION_GAP", "current macroproject is not P18.9"
+    if workflow.get("current_ticket_id") != PEPPER_NEXT_TICKET_ID:
+        return "PEPPER_REVIEW_PREPARE_ACTION_GAP", "current ticket is not P18.9.0"
+    if workflow.get("workflow_status") != "execution_completed":
+        return "PEPPER_REVIEW_PREPARE_ACTION_GAP", "workflow status is not execution_completed"
+    next_action = workflow.get("next_action")
+    if not isinstance(next_action, dict):
+        return "PEPPER_REVIEW_PREPARE_ACTION_GAP", "next action is unavailable"
+    if next_action.get("id") != PEPPER_CURRENT_REVIEW_PREPARE_NEXT_ACTION_ID:
+        return "PEPPER_REVIEW_PREPARE_ACTION_GAP", "next action is not review preparation"
+    if next_action.get("target_ticket_id") != PEPPER_NEXT_TICKET_ID:
+        return "PEPPER_REVIEW_PREPARE_ACTION_GAP", "next action does not target P18.9.0"
+    if int(workflow.get("active_execution_count") or 0) != 0:
+        return "EXECUTION_ALREADY_ACTIVE", "an execution is already active"
+    if workflow.get("execution_state") == "active_executions":
+        return "EXECUTION_ALREADY_ACTIVE", "execution state is active"
+    if workflow.get("recovery_state") != "not_required":
+        return "PEPPER_REVIEW_PREPARE_ACTION_GAP", "recovery state is not not_required"
+    if workflow.get("validation_state") != "execution_completed_pending_validation":
+        return "PEPPER_REVIEW_PREPARE_ACTION_GAP", "validation state is not pending validation"
+    if workflow.get("review_state") != "ready_for_review_validation":
+        return "PEPPER_REVIEW_PREPARE_ACTION_GAP", "review state is not ready for validation"
+    if workflow.get("remaining_blockers"):
+        return "WORKFLOW_BLOCKER_PRESENT", "workflow blockers are present"
+    return None
+
+
+def _p18_9_0_acceptance_contract() -> dict[str, Any]:
+    from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
+        load_p18_9_0_generation_record,
+    )
+
+    generation = load_p18_9_0_generation_record()
+    if generation is None:
+        raise ProductRuntimeNotFound("P18.9.0 generated TicketSpec authority not found")
+    ticket_spec = generation.get("ticket_spec")
+    compilation = generation.get("work_packet_compilation_result")
+    if not isinstance(ticket_spec, dict) or not isinstance(compilation, dict):
+        raise ProductRuntimeConflict("P18.9.0 acceptance contract source is unavailable")
+    work_packet = compilation.get("work_packet")
+    if not isinstance(work_packet, dict):
+        raise ProductRuntimeConflict("P18.9.0 WorkPacket contract source is unavailable")
+    contract = {
+        "schema_version": PEPPER_REVIEW_PREPARE_ACTION_SCHEMA_VERSION,
+        "project_id": PEPPER_GOVERNED_PROJECT_ID,
+        "ticket_id": PEPPER_NEXT_TICKET_ID,
+        "ticket_title": PEPPER_NEXT_TICKET_TITLE,
+        "ticket_spec_SHA256": generation["ticket_spec_SHA256"],
+        "work_packet_id": generation["work_packet_id"],
+        "work_packet_SHA256": generation["work_packet_SHA256"],
+        "acceptance_criteria": list(ticket_spec.get("acceptance_criteria") or []),
+        "validation_steps": list(ticket_spec.get("validation_steps") or []),
+        "response_contract": dict(ticket_spec.get("response_contract") or {}),
+        "work_packet_validation_steps": list(work_packet.get("validation_steps") or []),
+        "completion_verdict": dict(ticket_spec.get("response_contract") or {}).get(
+            "completion_verdict"
+        ),
+        "required_response_sections": list(
+            dict(ticket_spec.get("response_contract") or {}).get("required_sections") or []
+        ),
+        "acceptance_contract_source": "pepper-ticket-architect-bridge:P18.9.0",
+    }
+    contract["criteria_revision_SHA256"] = _criteria_revision_digest(contract)
+    contract["acceptance_contract_SHA256"] = _acceptance_contract_digest(contract)
+    return contract
+
+
+def _metadata_list(metadata: Any, *keys: str) -> list[str]:
+    if not isinstance(metadata, dict):
+        return []
+    for key in keys:
+        value = metadata.get(key)
+        if isinstance(value, (list, tuple)):
+            return [_safe_text(item, limit=300) for item in value if str(item or "").strip()]
+    return []
+
+
+def _metadata_bool(metadata: Any, *keys: str) -> bool | None:
+    if not isinstance(metadata, dict):
+        return None
+    for key in keys:
+        if key in metadata:
+            return bool(metadata.get(key))
+    return None
+
+
+def _kanban_completion_result_source(projection: dict[str, Any]) -> dict[str, Any]:
+    from hermes_cli import kanban_db
+
+    board = _normalize_board(str(projection["kanban_board_slug"]))
+    task_id = str(projection["kanban_task_id"])
+    conn = kanban_db.connect(board=board)
+    try:
+        _reconcile_kanban_board_lifecycle(conn, task_id=task_id)
+        task = kanban_db.get_task(conn, task_id)
+        if task is None:
+            return {
+                "blocker_code": "KANBAN_TASK_GAP",
+                "blocker_detail": "projected Kanban task is missing",
+            }
+        try:
+            task_body = json.loads(task.body or "{}")
+        except json.JSONDecodeError:
+            task_body = {}
+        if not isinstance(task_body, dict):
+            task_body = {}
+        if task_body.get("WorkPacket_ID") != projection["work_packet_id"]:
+            return {
+                "blocker_code": "WORKPACKET_AUTHORITY_DRIFT_GAP",
+                "blocker_detail": "projected Kanban task WorkPacket ID does not match P18.9.0 authority",
+            }
+        if task_body.get("WorkPacket_SHA256") != projection["work_packet_SHA256"]:
+            return {
+                "blocker_code": "WORKPACKET_AUTHORITY_DRIFT_GAP",
+                "blocker_detail": "projected Kanban task WorkPacket SHA256 does not match P18.9.0 authority",
+            }
+        runs = kanban_db.list_runs(conn, task_id)
+        active_runs = [run for run in runs if _execution_is_active(_run_dict(run))]
+        if active_runs or task.current_run_id is not None:
+            return {
+                "blocker_code": "EXECUTION_ALREADY_ACTIVE",
+                "blocker_detail": "projected Kanban task still has active execution state",
+            }
+        if not runs:
+            return {
+                "blocker_code": "KANBAN_RUN_GAP",
+                "blocker_detail": "projected Kanban task has no run evidence",
+            }
+        latest_run = runs[-1]
+        run_status = str(getattr(latest_run, "status", "") or "").strip().lower()
+        run_outcome = str(getattr(latest_run, "outcome", "") or "").strip().lower()
+        if task.status != "done" or run_status != "done" or run_outcome != "completed":
+            return {
+                "blocker_code": "KANBAN_COMPLETION_RESULT_GAP",
+                "blocker_detail": "latest projected Kanban run is not completed",
+                "kanban_task_status": task.status,
+                "latest_run_status": run_status,
+                "latest_run_outcome": run_outcome,
+            }
+        if getattr(latest_run, "ended_at", None) is None:
+            return {
+                "blocker_code": "KANBAN_COMPLETION_RESULT_GAP",
+                "blocker_detail": "latest projected Kanban run has not ended",
+            }
+        summary = getattr(latest_run, "summary", None)
+        metadata = getattr(latest_run, "metadata", None)
+        task_result = getattr(task, "result", None)
+        if not (str(summary or "").strip() or str(task_result or "").strip() or metadata):
+            return {
+                "blocker_code": "KANBAN_COMPLETION_RESULT_DETAIL_GAP",
+                "blocker_detail": "completed P18.9.0 run lacks structural result, summary, or metadata detail",
+                "run_id": int(latest_run.id),
+            }
+        modified_files = _metadata_list(
+            metadata,
+            "files_modified",
+            "modified_files",
+            "changed_files",
+        )
+        git_mutation = _metadata_bool(metadata, "Git_mutation", "git_mutation")
+        if modified_files or git_mutation is True:
+            return {
+                "blocker_code": "GIT_HANDOFF_STATE_GAP",
+                "blocker_detail": "completed P18.9.0 result reports file or Git mutation",
+                "files_modified": modified_files,
+                "git_mutation": git_mutation,
+            }
+        detail_sources = []
+        if str(summary or "").strip():
+            detail_sources.append("task_runs.summary")
+        if str(task_result or "").strip():
+            detail_sources.append("tasks.result")
+        if isinstance(metadata, dict) and metadata:
+            detail_sources.append("task_runs.metadata")
+        source = {
+            "blocker_code": None,
+            "blocker_detail": None,
+            "kanban_board_slug": board,
+            "kanban_task_id": task.id,
+            "kanban_task_status": task.status,
+            "kanban_task_assignee": task.assignee,
+            "kanban_task_workspace_kind": task.workspace_kind,
+            "kanban_task_workspace_path": task.workspace_path,
+            "kanban_task_current_run_id": task.current_run_id,
+            "run_id": int(latest_run.id),
+            "run_status": run_status,
+            "run_outcome": run_outcome,
+            "run_profile": latest_run.profile,
+            "run_started_at": latest_run.started_at,
+            "run_ended_at": latest_run.ended_at,
+            "run_summary": summary,
+            "run_metadata": metadata if isinstance(metadata, dict) else None,
+            "task_result": task_result,
+            "completion_detail_sources": detail_sources,
+            "reported_files_modified": modified_files,
+            "reported_git_mutation": bool(git_mutation) if git_mutation is not None else False,
+            "task_run_count": len(runs),
+            "Kanban_SQLite_canonical_authority": False,
+            "logs_parsed_for_completion_authority": False,
+        }
+        source["kanban_completion_result_SHA256"] = _kanban_completion_result_digest(source)
+        return source
+    finally:
+        conn.close()
+
+
+def _build_review_prepare_record(
+    *,
+    request: CurrentTicketReviewPrepareRequest,
+    projection: dict[str, Any],
+    workflow: dict[str, Any],
+    completion: dict[str, Any],
+    acceptance_contract: dict[str, Any],
+) -> dict[str, Any]:
+    from hermes_cli.agent_platform.workflow.review_validation_loop import (
+        REVIEW_VALIDATION_LOOP_POLICY_ID,
+        REVIEW_VALIDATION_RUNTIME_BOUNDARY_CLASSIFICATION,
+        ReviewValidationLoopDecision,
+        ReviewValidationLoopState,
+        ReviewValidationRuntimeBoundary,
+    )
+
+    package_sha = _review_prepare_package_digest(
+        projection=projection,
+        completion=completion,
+        acceptance_contract=acceptance_contract,
+    )
+    pre_review_invariants = {
+        "project": PEPPER_GOVERNED_PROJECT_ID,
+        "ticket": PEPPER_NEXT_TICKET_ID,
+        "next_action": PEPPER_CURRENT_REVIEW_PREPARE_NEXT_ACTION_ID,
+        "run_id": completion["run_id"],
+        "run_status": "done",
+        "run_outcome": "completed",
+        "active_execution_count": 0,
+        "recovery_state": "not_required",
+        "validation_state": "execution_completed_pending_validation",
+        "review_state": "ready_for_review_validation",
+        "blocker_count": 0,
+    }
+    record = {
+        "schema_version": PEPPER_REVIEW_PREPARE_ACTION_SCHEMA_VERSION,
+        "policy_id": PEPPER_REVIEW_PREPARE_ACTION_POLICY_ID,
+        "source_system": PEPPER_REVIEW_PREPARE_ACTION_SOURCE_SYSTEM,
+        "P18_5_policy_id": REVIEW_VALIDATION_LOOP_POLICY_ID,
+        "runtime_boundary_classification": REVIEW_VALIDATION_RUNTIME_BOUNDARY_CLASSIFICATION,
+        "runtime_boundary": ReviewValidationRuntimeBoundary.REVIEW_POST_EXECUTION_ONLY.value,
+        "created_at": _utc_now_iso(),
+        "project_id": PEPPER_GOVERNED_PROJECT_ID,
+        "macroproject_id": PEPPER_GOVERNED_MACROPROJECT_ID,
+        "ticket_id": PEPPER_NEXT_TICKET_ID,
+        "ticket_title": PEPPER_NEXT_TICKET_TITLE,
+        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
+        "work_packet_id": projection["work_packet_id"],
+        "work_packet_SHA256": projection["work_packet_SHA256"],
+        "WorkPacket_compilation_count": _P18_9_0_WORK_PACKET_COMPILATION_COUNT,
+        "approval_publication_SHA256": projection["approval_publication_SHA256"],
+        "dependency_plan_SHA256": projection["dependency_plan_SHA256"],
+        "projection_SHA256": projection["projection_SHA256"],
+        "execution_start_authority_SHA256": workflow.get("execution_start_authority", {}).get(
+            "start_authorization_SHA256"
+        ),
+        "retry_start_authority_SHA256": workflow.get("retry_start_authority", {}).get(
+            "retry_start_authorization_SHA256"
+        ),
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+        "successful_run_id": completion["run_id"],
+        "successful_run_status": "done",
+        "successful_run_outcome": "completed",
+        "kanban_completion_result": completion,
+        "kanban_completion_result_SHA256": completion["kanban_completion_result_SHA256"],
+        "acceptance_contract": acceptance_contract,
+        "acceptance_contract_SHA256": acceptance_contract["acceptance_contract_SHA256"],
+        "criteria_revision_SHA256": acceptance_contract["criteria_revision_SHA256"],
+        "review_package_SHA256": package_sha,
+        "pre_review_invariants": pre_review_invariants,
+        "review_prepare_status": "prepared_pending_human_acceptance",
+        "validation_state": "review_prepared_pending_human_acceptance",
+        "review_state": "prepared_pending_human_acceptance",
+        "review_validation_vocabulary": {
+            "decisions": [item.value for item in ReviewValidationLoopDecision],
+            "states": [item.value for item in ReviewValidationLoopState],
+        },
+        "P18_5_request_model_reused": False,
+        "P18_5_review_vocabulary_reused": True,
+        "P18_9_0_ticket_specific_contract_bound": True,
+        "human_acceptance_required": True,
+        "human_acceptance_recorded": False,
+        "human_acceptance_next_action_id": PEPPER_CURRENT_REVIEW_ACCEPTANCE_NEXT_ACTION_ID,
+        "git_handoff_required": False,
+        "git_handoff_state": "not_required_for_ticket_result",
+        "git_handoff_decision_basis": "P18.9.0 completion source reports no file or Git mutation metadata",
+        "requested_project_id": request.project_id,
+        "requested_ticket_id": request.ticket_id,
+        "requested_next_action_id": request.next_action_id,
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "worker_process_started": False,
+        "Kanban_dispatch": False,
+        "retry_execution_started": False,
+        "automatic_retry_count": 0,
+        "automatic_requeue_count": 0,
+        "Kanban_requeue_calls": 0,
+        "Kanban_reclaim_calls": 0,
+        "Kanban_reassign_calls": 0,
+        "new_kanban_task_created": False,
+        "Git_commands_executed": 0,
+        "Docker_commands_executed": 0,
+        "Graphify_commands_executed": 0,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+        "next_action": {
+            "id": PEPPER_CURRENT_REVIEW_ACCEPTANCE_NEXT_ACTION_ID,
+            "target_ticket_id": PEPPER_NEXT_TICKET_ID,
+            "target_ticket_title": PEPPER_NEXT_TICKET_TITLE,
+            "required_human_action": "p18_9_0_review_acceptance",
+        },
+        "human_smoke_marker": "PEPPER-REVIEW-PREPARE-ACTION-READY-FOR-HUMAN-SMOKE",
+    }
+    record["review_prepare_action_SHA256"] = _review_prepare_record_digest(record)
+    return record
+
+
+def _build_review_acceptance_record(
+    *,
+    request: CurrentTicketReviewAcceptanceRequest,
+    projection: dict[str, Any],
+    workflow: dict[str, Any],
+    review_prepare: dict[str, Any],
+    next_ticket: dict[str, Any],
+) -> dict[str, Any]:
+    from hermes_cli.agent_platform.workflow.governed_state_machine import (
+        GovernedWorkflowState,
+        WorkflowTransitionTrigger,
+    )
+    from hermes_cli.agent_platform.workflow.review_validation_loop import (
+        REVIEW_VALIDATION_LOOP_POLICY_ID,
+        REVIEW_VALIDATION_RUNTIME_BOUNDARY_CLASSIFICATION,
+        ReviewValidationLoopDecision,
+        ReviewValidationLoopState,
+    )
+
+    observed_at = _utc_now_iso()
+    acceptance_text = unicodedata.normalize("NFC", request.human_acceptance_text)
+    acceptance_text_sha = _review_acceptance_text_digest(acceptance_text)
+    pre_acceptance_invariants = {
+        "project": PEPPER_GOVERNED_PROJECT_ID,
+        "ticket": PEPPER_NEXT_TICKET_ID,
+        "next_action": PEPPER_CURRENT_REVIEW_ACCEPTANCE_NEXT_ACTION_ID,
+        "review_prepare_action_SHA256": review_prepare["review_prepare_action_SHA256"],
+        "review_package_SHA256": review_prepare["review_package_SHA256"],
+        "active_execution_count": int(workflow.get("active_execution_count") or 0),
+        "recovery_state": workflow.get("recovery_state"),
+        "validation_state": workflow.get("validation_state"),
+        "review_state": workflow.get("review_state"),
+        "git_handoff_state": workflow.get("git_handoff_state"),
+        "blocker_count": len(workflow.get("remaining_blockers") or []),
+        "human_acceptance_required": workflow.get("human_acceptance_required"),
+        "human_acceptance_recorded": workflow.get("human_acceptance_recorded"),
+    }
+    record = {
+        "schema_version": PEPPER_REVIEW_HUMAN_ACCEPTANCE_ACTION_SCHEMA_VERSION,
+        "policy_id": PEPPER_REVIEW_HUMAN_ACCEPTANCE_ACTION_POLICY_ID,
+        "source_system": PEPPER_REVIEW_HUMAN_ACCEPTANCE_ACTION_SOURCE_SYSTEM,
+        "P18_5_policy_id": REVIEW_VALIDATION_LOOP_POLICY_ID,
+        "runtime_boundary_classification": REVIEW_VALIDATION_RUNTIME_BOUNDARY_CLASSIFICATION,
+        "created_at": observed_at,
+        "project_id": PEPPER_GOVERNED_PROJECT_ID,
+        "macroproject_id": PEPPER_GOVERNED_MACROPROJECT_ID,
+        "ticket_id": PEPPER_NEXT_TICKET_ID,
+        "ticket_title": PEPPER_NEXT_TICKET_TITLE,
+        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
+        "work_packet_id": projection["work_packet_id"],
+        "work_packet_SHA256": projection["work_packet_SHA256"],
+        "WorkPacket_compilation_count": _P18_9_0_WORK_PACKET_COMPILATION_COUNT,
+        "approval_publication_SHA256": projection["approval_publication_SHA256"],
+        "dependency_plan_SHA256": projection["dependency_plan_SHA256"],
+        "projection_SHA256": projection["projection_SHA256"],
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+        "successful_run_id": review_prepare["successful_run_id"],
+        "successful_run_status": "done",
+        "successful_run_outcome": "completed",
+        "review_prepare_action_SHA256": review_prepare["review_prepare_action_SHA256"],
+        "review_package_SHA256": review_prepare["review_package_SHA256"],
+        "acceptance_contract_SHA256": review_prepare["acceptance_contract_SHA256"],
+        "criteria_revision_SHA256": review_prepare["criteria_revision_SHA256"],
+        "kanban_completion_result_SHA256": review_prepare["kanban_completion_result_SHA256"],
+        "review_prepare_authority": _review_prepare_authority_projection(review_prepare),
+        "pre_acceptance_invariants": pre_acceptance_invariants,
+        "acceptor_id": request.acceptor_id,
+        "human_acceptance_text": acceptance_text,
+        "human_acceptance_text_SHA256": acceptance_text_sha,
+        "human_acceptance": {
+            "acceptor_id": request.acceptor_id,
+            "accepted_at": observed_at,
+            "acceptance_reference": "human_acceptance:P18.9.0.review",
+            "human_acceptance_text_SHA256": acceptance_text_sha,
+        },
+        "review_acceptance_status": "accepted",
+        "review_validation_decision": ReviewValidationLoopDecision.ACCEPT.value,
+        "review_validation_state": ReviewValidationLoopState.COMPLETED.value,
+        "validation_state": "review_accepted",
+        "review_state": "accepted",
+        "workflow_state": "P18.9.0-COMPLETED",
+        "workflow_status": "completed",
+        "governed_workflow_state": GovernedWorkflowState.COMPLETED.value,
+        "governed_workflow_transition_triggers": [
+            WorkflowTransitionTrigger.HUMAN_APPROVED.value,
+        ],
+        "human_git_handoff_transition_required": False,
+        "human_acceptance_required": True,
+        "human_acceptance_recorded": True,
+        "pending_human_acceptance_required": False,
+        "ticket_closed": True,
+        "P18_9_0_closed": True,
+        "P18_9_0_completed": True,
+        "P18_9_0_acceptance_contract_satisfied": True,
+        "git_handoff_required": False,
+        "git_handoff_state": "not_required_for_ticket_result",
+        "git_handoff_decision_basis": review_prepare["git_handoff_decision_basis"],
+        "next_ticket_authority": next_ticket,
+        "next_ticket_id": next_ticket["ticket_id"],
+        "next_ticket_title": next_ticket["ticket_title"],
+        "next_ticket_authority_path": next_ticket["authority_path"],
+        "requested_project_id": request.project_id,
+        "requested_ticket_id": request.ticket_id,
+        "requested_next_action_id": request.next_action_id,
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "worker_process_started": False,
+        "Kanban_dispatch": False,
+        "retry_execution_started": False,
+        "automatic_retry_count": 0,
+        "automatic_requeue_count": 0,
+        "Kanban_requeue_calls": 0,
+        "Kanban_reclaim_calls": 0,
+        "Kanban_reassign_calls": 0,
+        "new_kanban_task_created": False,
+        "Git_commands_executed": 0,
+        "Docker_commands_executed": 0,
+        "Graphify_commands_executed": 0,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+        "next_action": {
+            "id": PEPPER_REVIEW_ACCEPTANCE_NEXT_ACTION_ID,
+            "label": (
+                f"P18.9.0 is accepted and closed; {next_ticket['ticket_id']} "
+                f"{next_ticket['ticket_title']} may be generated only by a separate governed action."
+            ),
+            "target_ticket_id": next_ticket["ticket_id"],
+            "target_ticket_title": next_ticket["ticket_title"],
+            "required_human_action": "separate_next_ticket_generation",
+        },
+        "human_smoke_marker": PEPPER_REVIEW_HUMAN_ACCEPTANCE_READY_MARKER,
+    }
+    record["review_acceptance_action_SHA256"] = _review_acceptance_record_digest(record)
+    return record
+
+
+def _persist_review_prepare_record(record: dict[str, Any]) -> None:
+    validate_p18_9_0_review_prepare_record(record)
+    path = p18_9_0_review_prepare_record_path()
+    _archive_existing_authority_record(
+        path,
+        p18_9_0_review_prepare_history_path(),
+        reason="replaced_by_current_review_prepare_package",
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+
+def _persist_review_acceptance_record(record: dict[str, Any]) -> None:
+    validate_p18_9_0_review_acceptance_record(record)
+    path = p18_9_0_review_acceptance_record_path()
+    _archive_existing_authority_record(
+        path,
+        p18_9_0_review_acceptance_history_path(),
+        reason="replaced_by_current_review_acceptance",
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+
+def _review_prepare_operational_result(
+    record: dict[str, Any],
+    *,
+    idempotent_replay: bool,
+) -> dict[str, Any]:
+    current_invocation_side_effects = {
+        "dispatch_performed": False,
+        "Kanban_dispatch": False,
+        "execution_started": False,
+        "worker_process_started": False,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+    }
+    return {
+        "source_system": PEPPER_REVIEW_PREPARE_ACTION_SOURCE_SYSTEM,
+        "schema_version": PEPPER_REVIEW_PREPARE_ACTION_SCHEMA_VERSION,
+        "policy_id": PEPPER_REVIEW_PREPARE_ACTION_POLICY_ID,
+        "P18_5_policy_id": record["P18_5_policy_id"],
+        "runtime_boundary_classification": record["runtime_boundary_classification"],
+        "idempotent_replay": idempotent_replay,
+        "review_prepare_status": record["review_prepare_status"],
+        "review_preparation_recorded": True,
+        "project_id": record["project_id"],
+        "macroproject_id": record["macroproject_id"],
+        "ticket_id": record["ticket_id"],
+        "ticket_title": record["ticket_title"],
+        "ticket_spec_SHA256": record["ticket_spec_SHA256"],
+        "work_packet_id": record["work_packet_id"],
+        "work_packet_SHA256": record["work_packet_SHA256"],
+        "WorkPacket_compilation_count": record["WorkPacket_compilation_count"],
+        "review_prepare_action_SHA256": record["review_prepare_action_SHA256"],
+        "review_package_SHA256": record["review_package_SHA256"],
+        "acceptance_contract_SHA256": record["acceptance_contract_SHA256"],
+        "criteria_revision_SHA256": record["criteria_revision_SHA256"],
+        "kanban_completion_result_SHA256": record["kanban_completion_result_SHA256"],
+        "successful_run_id": record["successful_run_id"],
+        "successful_run_status": record["successful_run_status"],
+        "successful_run_outcome": record["successful_run_outcome"],
+        "validation_state": record["validation_state"],
+        "review_state": record["review_state"],
+        "human_acceptance_required": True,
+        "human_acceptance_recorded": False,
+        "git_handoff_required": False,
+        "git_handoff_state": record["git_handoff_state"],
+        "current_invocation_side_effects": current_invocation_side_effects,
+        "kanban_board_slug": record["kanban_board_slug"],
+        "kanban_task_id": record["kanban_task_id"],
+        "acceptance_contract": record["acceptance_contract"],
+        "kanban_completion_result": record["kanban_completion_result"],
+        "review_validation_vocabulary": record["review_validation_vocabulary"],
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "worker_process_started": False,
+        "Kanban_dispatch": False,
+        "retry_execution_started": False,
+        "automatic_retry_count": 0,
+        "automatic_requeue_count": 0,
+        "Kanban_requeue_calls": 0,
+        "Kanban_reclaim_calls": 0,
+        "Kanban_reassign_calls": 0,
+        "new_kanban_task_created": False,
+        "Git_commands_executed": 0,
+        "Docker_commands_executed": 0,
+        "Graphify_commands_executed": 0,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+        "human_smoke_marker": record["human_smoke_marker"],
+        "next_action": record["next_action"],
+    }
+
+
+def _review_acceptance_operational_result(
+    record: dict[str, Any],
+    *,
+    idempotent_replay: bool,
+) -> dict[str, Any]:
+    current_invocation_side_effects = {
+        "dispatch_performed": False,
+        "Kanban_dispatch": False,
+        "execution_started": False,
+        "worker_process_started": False,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+    }
+    return {
+        "source_system": PEPPER_REVIEW_HUMAN_ACCEPTANCE_ACTION_SOURCE_SYSTEM,
+        "schema_version": PEPPER_REVIEW_HUMAN_ACCEPTANCE_ACTION_SCHEMA_VERSION,
+        "policy_id": PEPPER_REVIEW_HUMAN_ACCEPTANCE_ACTION_POLICY_ID,
+        "P18_5_policy_id": record["P18_5_policy_id"],
+        "runtime_boundary_classification": record["runtime_boundary_classification"],
+        "idempotent_replay": idempotent_replay,
+        "review_acceptance_status": record["review_acceptance_status"],
+        "review_acceptance_recorded": True,
+        "project_id": record["project_id"],
+        "macroproject_id": record["macroproject_id"],
+        "ticket_id": record["ticket_id"],
+        "ticket_title": record["ticket_title"],
+        "ticket_spec_SHA256": record["ticket_spec_SHA256"],
+        "work_packet_id": record["work_packet_id"],
+        "work_packet_SHA256": record["work_packet_SHA256"],
+        "WorkPacket_compilation_count": record["WorkPacket_compilation_count"],
+        "review_acceptance_action_SHA256": record["review_acceptance_action_SHA256"],
+        "human_acceptance_text_SHA256": record["human_acceptance_text_SHA256"],
+        "human_acceptance_text": record["human_acceptance_text"],
+        "review_prepare_action_SHA256": record["review_prepare_action_SHA256"],
+        "review_package_SHA256": record["review_package_SHA256"],
+        "acceptance_contract_SHA256": record["acceptance_contract_SHA256"],
+        "criteria_revision_SHA256": record["criteria_revision_SHA256"],
+        "kanban_completion_result_SHA256": record["kanban_completion_result_SHA256"],
+        "successful_run_id": record["successful_run_id"],
+        "validation_state": record["validation_state"],
+        "review_state": record["review_state"],
+        "workflow_state": record["workflow_state"],
+        "workflow_status": record["workflow_status"],
+        "governed_workflow_state": record["governed_workflow_state"],
+        "human_acceptance_required": True,
+        "human_acceptance_recorded": True,
+        "ticket_closed": True,
+        "P18_9_0_closed": True,
+        "P18_9_0_completed": True,
+        "git_handoff_required": False,
+        "git_handoff_state": record["git_handoff_state"],
+        "next_ticket_authority": record["next_ticket_authority"],
+        "next_ticket_id": record["next_ticket_id"],
+        "next_ticket_title": record["next_ticket_title"],
+        "current_invocation_side_effects": current_invocation_side_effects,
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "worker_process_started": False,
+        "Kanban_dispatch": False,
+        "retry_execution_started": False,
+        "automatic_retry_count": 0,
+        "automatic_requeue_count": 0,
+        "Kanban_requeue_calls": 0,
+        "Kanban_reclaim_calls": 0,
+        "Kanban_reassign_calls": 0,
+        "new_kanban_task_created": False,
+        "Git_commands_executed": 0,
+        "Docker_commands_executed": 0,
+        "Graphify_commands_executed": 0,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+        "human_smoke_marker": record["human_smoke_marker"],
+        "next_action": record["next_action"],
+    }
+
+
+def _blocked_current_review_prepare_result(
+    projection: dict[str, Any],
+    *,
+    request: CurrentTicketReviewPrepareRequest,
+    blocker_code: str,
+    blocker_detail: str,
+    completion_source: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "source_system": PEPPER_REVIEW_PREPARE_ACTION_SOURCE_SYSTEM,
+        "schema_version": PEPPER_REVIEW_PREPARE_ACTION_SCHEMA_VERSION,
+        "policy_id": PEPPER_REVIEW_PREPARE_ACTION_POLICY_ID,
+        "review_prepare_status": "blocked",
+        "blocker_code": blocker_code,
+        "blocker_detail": _safe_text(blocker_detail, limit=300),
+        "project_id": PEPPER_GOVERNED_PROJECT_ID,
+        "macroproject_id": PEPPER_GOVERNED_MACROPROJECT_ID,
+        "ticket_id": PEPPER_NEXT_TICKET_ID,
+        "ticket_title": PEPPER_NEXT_TICKET_TITLE,
+        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
+        "work_packet_id": projection["work_packet_id"],
+        "work_packet_SHA256": projection["work_packet_SHA256"],
+        "WorkPacket_compilation_count": _P18_9_0_WORK_PACKET_COMPILATION_COUNT,
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+        "requested_project_id": request.project_id,
+        "requested_ticket_id": request.ticket_id,
+        "requested_next_action_id": request.next_action_id,
+        "review_preparation_recorded": False,
+        "human_acceptance_required": False,
+        "human_acceptance_recorded": False,
+        "completion_source": completion_source,
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "worker_process_started": False,
+        "Kanban_dispatch": False,
+        "retry_execution_started": False,
+        "automatic_retry_count": 0,
+        "automatic_requeue_count": 0,
+        "Kanban_requeue_calls": 0,
+        "Kanban_reclaim_calls": 0,
+        "Kanban_reassign_calls": 0,
+        "new_kanban_task_created": False,
+        "Git_commands_executed": 0,
+        "Docker_commands_executed": 0,
+        "Graphify_commands_executed": 0,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+    }
+
+
+def _blocked_current_review_acceptance_result(
+    projection: dict[str, Any],
+    *,
+    request: CurrentTicketReviewAcceptanceRequest,
+    blocker_code: str,
+    blocker_detail: str,
+    review_prepare_record: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "source_system": PEPPER_REVIEW_HUMAN_ACCEPTANCE_ACTION_SOURCE_SYSTEM,
+        "schema_version": PEPPER_REVIEW_HUMAN_ACCEPTANCE_ACTION_SCHEMA_VERSION,
+        "policy_id": PEPPER_REVIEW_HUMAN_ACCEPTANCE_ACTION_POLICY_ID,
+        "review_acceptance_status": "blocked",
+        "blocker_code": blocker_code,
+        "blocker_detail": _safe_text(blocker_detail, limit=300),
+        "project_id": PEPPER_GOVERNED_PROJECT_ID,
+        "macroproject_id": PEPPER_GOVERNED_MACROPROJECT_ID,
+        "ticket_id": PEPPER_NEXT_TICKET_ID,
+        "ticket_title": PEPPER_NEXT_TICKET_TITLE,
+        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
+        "work_packet_id": projection["work_packet_id"],
+        "work_packet_SHA256": projection["work_packet_SHA256"],
+        "WorkPacket_compilation_count": _P18_9_0_WORK_PACKET_COMPILATION_COUNT,
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+        "requested_project_id": request.project_id,
+        "requested_ticket_id": request.ticket_id,
+        "requested_next_action_id": request.next_action_id,
+        "human_acceptance_present": True,
+        "human_acceptance_text_SHA256": _review_acceptance_text_digest(
+            request.human_acceptance_text
+        ),
+        "review_acceptance_recorded": False,
+        "human_acceptance_required": True,
+        "human_acceptance_recorded": False,
+        "review_prepare_action_SHA256": (
+            review_prepare_record.get("review_prepare_action_SHA256")
+            if review_prepare_record else None
+        ),
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "worker_process_started": False,
+        "Kanban_dispatch": False,
+        "retry_execution_started": False,
+        "automatic_retry_count": 0,
+        "automatic_requeue_count": 0,
+        "Kanban_requeue_calls": 0,
+        "Kanban_reclaim_calls": 0,
+        "Kanban_reassign_calls": 0,
+        "new_kanban_task_created": False,
+        "Git_commands_executed": 0,
+        "Docker_commands_executed": 0,
+        "Graphify_commands_executed": 0,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+    }
+
+
+def _p18_9_0_review_prepare_overlay(
+    projection: dict[str, Any],
+    *,
+    completed_overlay: dict[str, Any],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    try:
+        record = load_p18_9_0_review_prepare_record(projection_record=projection)
+    except Exception as exc:  # pragma: no cover - defensive live-state guard
+        return None, {
+            "id": "P18-9-0-REVIEW-PREPARE-AUTHORITY",
+            "status": "blocked_by_invalid_review_prepare_authority",
+            "evidence": _safe_text(exc, limit=300),
+        }
+    if record is None:
+        return None, None
+    if completed_overlay.get("workflow_status") != "execution_completed":
+        return None, {
+            "id": "P18-9-0-REVIEW-PREPARE-AUTHORITY",
+            "status": "blocked_by_review_prepare_state_mismatch",
+            "evidence": "P18.9.0 review preparation exists but execution is not completed",
+        }
+    acceptance_overlay, acceptance_blocker = _p18_9_0_review_acceptance_overlay(
+        projection,
+        review_prepare_record=record,
+    )
+    if acceptance_overlay is not None:
+        return acceptance_overlay, None
+    if acceptance_blocker is not None:
+        return None, acceptance_blocker
+    return {
+        "readiness": "review_prepared_pending_human_acceptance",
+        "workflow_state": "P18.9.0-REVIEW-PREPARED-PENDING-HUMAN-ACCEPTANCE",
+        "workflow_status": "review_prepared_pending_human_acceptance",
+        "queue_state": completed_overlay.get("queue_state", "kanban_execution_terminal"),
+        "execution_state": "no_active_executions",
+        "validation_state": "review_prepared_pending_human_acceptance",
+        "review_state": "prepared_pending_human_acceptance",
+        "recovery_state": "not_required",
+        "git_handoff_state": "not_required_for_ticket_result",
+        "review_prepare_authority": {
+            "policy_id": record["policy_id"],
+            "P18_5_policy_id": record["P18_5_policy_id"],
+            "runtime_boundary_classification": record["runtime_boundary_classification"],
+            "review_prepare_action_SHA256": record["review_prepare_action_SHA256"],
+            "review_package_SHA256": record["review_package_SHA256"],
+            "acceptance_contract_SHA256": record["acceptance_contract_SHA256"],
+            "criteria_revision_SHA256": record["criteria_revision_SHA256"],
+            "kanban_completion_result_SHA256": record["kanban_completion_result_SHA256"],
+            "successful_run_id": record["successful_run_id"],
+            "human_acceptance_required": True,
+            "human_acceptance_recorded": False,
+        },
+        "P18_9_0_review_prepare_present": True,
+        "human_acceptance_required": True,
+        "human_acceptance_recorded": False,
+        "git_handoff_required": False,
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "worker_process_started": False,
+        "Kanban_dispatch": False,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+        "next_action": {
+            "id": PEPPER_CURRENT_REVIEW_ACCEPTANCE_NEXT_ACTION_ID,
+            "label": (
+                "P18.9.0 review package is prepared; await explicit human "
+                "review acceptance before closure."
+            ),
+            "target_ticket_id": PEPPER_NEXT_TICKET_ID,
+            "target_ticket_title": PEPPER_NEXT_TICKET_TITLE,
+            "required_human_action": "p18_9_0_review_acceptance",
+        },
+    }, None
+
+
+def _p18_9_0_review_acceptance_overlay(
+    projection: dict[str, Any],
+    *,
+    review_prepare_record: dict[str, Any],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    try:
+        record = load_p18_9_0_review_acceptance_record(
+            projection_record=projection,
+            review_prepare_record=review_prepare_record,
+        )
+    except Exception as exc:  # pragma: no cover - defensive live-state guard
+        return None, {
+            "id": "P18-9-0-REVIEW-ACCEPTANCE-AUTHORITY",
+            "status": "blocked_by_invalid_review_acceptance_authority",
+            "evidence": _safe_text(exc, limit=300),
+        }
+    if record is None:
+        return None, None
+    return {
+        "current_ticket_id": None,
+        "current_ticket_title": None,
+        "next_ticket_id": record["next_ticket_id"],
+        "next_ticket_title": record["next_ticket_title"],
+        "readiness": "p18_9_0_completed_next_ticket_ready",
+        "workflow_state": record["workflow_state"],
+        "workflow_status": record["workflow_status"],
+        "queue_state": "p18_9_0_closed_next_ticket_ready",
+        "execution_state": "no_active_executions",
+        "validation_state": record["validation_state"],
+        "review_state": record["review_state"],
+        "recovery_state": "not_required",
+        "git_handoff_state": record["git_handoff_state"],
+        "review_prepare_authority": record["review_prepare_authority"],
+        "review_acceptance_authority": {
+            "policy_id": record["policy_id"],
+            "P18_5_policy_id": record["P18_5_policy_id"],
+            "runtime_boundary_classification": record["runtime_boundary_classification"],
+            "review_acceptance_action_SHA256": record["review_acceptance_action_SHA256"],
+            "human_acceptance_text_SHA256": record["human_acceptance_text_SHA256"],
+            "review_prepare_action_SHA256": record["review_prepare_action_SHA256"],
+            "review_package_SHA256": record["review_package_SHA256"],
+            "acceptance_contract_SHA256": record["acceptance_contract_SHA256"],
+            "criteria_revision_SHA256": record["criteria_revision_SHA256"],
+            "kanban_completion_result_SHA256": record["kanban_completion_result_SHA256"],
+            "successful_run_id": record["successful_run_id"],
+            "ticket_closed": True,
+        },
+        "P18_9_0_review_prepare_present": True,
+        "P18_9_0_review_acceptance_present": True,
+        "P18_9_0_closed": True,
+        "P18_9_0_completed": True,
+        "P18_9_1_ready": True,
+        "P18_9_1_generated": False,
+        "human_acceptance_required": False,
+        "human_acceptance_recorded": True,
+        "pending_human_acceptance_required": False,
+        "git_handoff_required": False,
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "worker_process_started": False,
+        "Kanban_dispatch": False,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+        "next_action": record["next_action"],
+    }, None
+
+
+def _p18_9_0_execution_start_overlay(
+    projection: dict[str, Any],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    try:
+        record = load_p18_9_0_execution_start_record(projection_record=projection)
+    except Exception as exc:  # pragma: no cover - defensive live-state guard
+        return None, {
+            "id": "P18-9-0-EXECUTION-START-AUTHORITY",
+            "status": "blocked_by_invalid_execution_start_authority",
+            "evidence": _safe_text(exc, limit=300),
+        }
+    if record is None:
+        return None, None
+    dispatched_failure = (
+        record.get("start_status") == "blocked"
+        and bool(record.get("dispatch_performed"))
+    )
+    if not bool(record.get("execution_started")) and not dispatched_failure:
+        return None, None
+    try:
+        task, runs = _p18_9_0_live_kanban_execution(projection)
+        terminal_state = _p18_9_0_terminal_execution_state(task, runs)
+    except Exception as exc:  # pragma: no cover - defensive live-state guard
+        terminal_state = {
+            "start_status": "failed",
+            "blocker_code": "WORKER_LIFECYCLE_RECONCILIATION_REQUIRED",
+            "blocker_detail": f"Kanban execution state unavailable: {_safe_text(exc, limit=200)}",
+            "next_action_id": "RECOVER_P18_9_0_EXECUTION",
+            "outcome": "state_unavailable",
+        }
+        task = None
+        runs = []
+    if terminal_state is not None and terminal_state["start_status"] != "completed":
+        blocker = {
+            "id": "P18-9-0-WORKER-LIFECYCLE",
+            "status": "blocked_by_worker_lifecycle_failure",
+            "evidence": terminal_state["blocker_detail"],
+            "outcome": terminal_state.get("outcome"),
+            "failure_category": terminal_state.get("failure_category"),
+            "failure_summary": terminal_state.get("failure_summary"),
+        }
+        return {
+            "readiness": "execution_failed_recovery_required",
+            "workflow_state": "P18.9.0-EXECUTION-FAILED-RECOVERY-REQUIRED",
+            "workflow_status": "execution_failed",
+            "queue_state": "kanban_execution_terminal",
+            "execution_state": "no_active_executions",
+            "validation_state": "execution_failed_before_validation",
+            "review_state": "not_started_execution_failed",
+            "recovery_state": "recovery_required",
+            "ticket_execution_authorized": True,
+            "WorkPacket_execution_authorized": True,
+            "runtime_execution_authorized": True,
+            "execution_started": False,
+            "worker_execution": False,
+            "Kanban_dispatch": True,
+            "failure_category": terminal_state.get("failure_category"),
+            "failure_summary": terminal_state.get("failure_summary"),
+            "execution_start_authority": {
+                "policy_id": record["policy_id"],
+                "start_authorization_SHA256": record["start_authorization_SHA256"],
+                "kanban_board_slug": record["kanban_board_slug"],
+                "kanban_task_id": record["kanban_task_id"],
+                "kanban_run_id": getattr(task, "current_run_id", None) or record.get("kanban_run_id"),
+            },
+            "worker_lifecycle": {
+                "start_status": terminal_state["start_status"],
+                "blocker_code": terminal_state["blocker_code"],
+                "blocker_detail": terminal_state["blocker_detail"],
+                "kanban_task_status": getattr(task, "status", None),
+                "latest_run_outcome": terminal_state.get("outcome"),
+                "failure_category": terminal_state.get("failure_category"),
+                "failure_summary": terminal_state.get("failure_summary"),
+                "runs": [_run_dict(run) for run in runs],
+            },
+            "next_action": {
+                "id": "RECOVER_P18_9_0_EXECUTION",
+                "label": "P18.9.0 worker start failed; governed recovery authorization is required before retry.",
+                "target_ticket_id": PEPPER_NEXT_TICKET_ID,
+                "target_ticket_title": PEPPER_NEXT_TICKET_TITLE,
+            },
+            "Git_mutation": False,
+        }, blocker
+    if terminal_state is not None and terminal_state["start_status"] == "completed":
+        return {
+            "readiness": "execution_completed",
+            "workflow_state": "P18.9.0-EXECUTION-COMPLETED",
+            "workflow_status": "execution_completed",
+            "queue_state": "kanban_execution_terminal",
+            "execution_state": "no_active_executions",
+            "validation_state": "execution_completed_pending_validation",
+            "review_state": "ready_for_review_validation",
+            "recovery_state": "not_required",
+            "ticket_execution_authorized": True,
+            "WorkPacket_execution_authorized": True,
+            "runtime_execution_authorized": True,
+            "execution_started": False,
+            "worker_execution": False,
+            "Kanban_dispatch": True,
+            "execution_start_authority": {
+                "policy_id": record["policy_id"],
+                "start_authorization_SHA256": record["start_authorization_SHA256"],
+                "kanban_board_slug": record["kanban_board_slug"],
+                "kanban_task_id": record["kanban_task_id"],
+                "kanban_run_id": record.get("kanban_run_id"),
+            },
+            "next_action": {
+                "id": "PREPARE_P18_9_0_REVIEW",
+                "label": "P18.9.0 execution completed; prepare review validation.",
+                "target_ticket_id": PEPPER_NEXT_TICKET_ID,
+                "target_ticket_title": PEPPER_NEXT_TICKET_TITLE,
+            },
+            "Git_mutation": False,
+        }, None
+    return {
+        "readiness": "execution_started",
+        "workflow_state": "P18.9.0-EXECUTING",
+        "workflow_status": "executing",
+        "queue_state": "kanban_dispatched",
+        "execution_state": "active_executions",
+        "validation_state": "execution_in_progress",
+        "review_state": "not_started_execution_in_progress",
+        "recovery_state": "not_required",
+        "ticket_execution_authorized": True,
+        "WorkPacket_execution_authorized": True,
+        "runtime_execution_authorized": True,
+        "execution_started": True,
+        "worker_execution": True,
+        "Kanban_dispatch": True,
+        "execution_start_authority": {
+            "policy_id": record["policy_id"],
+            "start_authorization_SHA256": record["start_authorization_SHA256"],
+            "kanban_board_slug": record["kanban_board_slug"],
+            "kanban_task_id": record["kanban_task_id"],
+            "kanban_run_id": record.get("kanban_run_id"),
+        },
+        "next_action": {
+            "id": "MONITOR_P18_9_0_EXECUTION",
+            "label": "P18.9.0 execution has started; monitor the Kanban run and await worker completion.",
+            "target_ticket_id": PEPPER_NEXT_TICKET_ID,
+            "target_ticket_title": PEPPER_NEXT_TICKET_TITLE,
+        },
+        "Git_mutation": False,
+    }, None
+
+
+def _p18_9_0_recovery_overlay(
+    projection: dict[str, Any],
+    *,
+    start_overlay: dict[str, Any],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    try:
+        record = load_p18_9_0_recovery_action_record(projection_record=projection)
+    except Exception as exc:  # pragma: no cover - defensive live-state guard
+        return None, {
+            "id": "P18-9-0-RECOVERY-AUTHORITY",
+            "status": "blocked_by_invalid_recovery_authority",
+            "evidence": _safe_text(exc, limit=300),
+        }
+    if record is None:
+        return None, None
+    if not _recovery_record_matches_current_failure(projection, record):
+        return None, None
+    if start_overlay.get("workflow_status") != "execution_failed":
+        return None, {
+            "id": "P18-9-0-RECOVERY-AUTHORITY",
+            "status": "blocked_by_recovery_state_mismatch",
+            "evidence": "P18.9.0 recovery authority exists but execution is not failed",
+        }
+    return {
+        "readiness": "execution_failed_retry_pending",
+        "workflow_state": "P18.9.0-RETRY-PENDING-NOT-DISPATCHED",
+        "workflow_status": "retry_pending",
+        "queue_state": "kanban_retry_prepared_not_dispatched",
+        "execution_state": "no_active_executions",
+        "validation_state": "execution_failed_retry_pending",
+        "review_state": "not_started_execution_failed",
+        "recovery_state": "retry_pending",
+        "retry_state": "retry_pending",
+        "ticket_execution_authorized": True,
+        "WorkPacket_execution_authorized": True,
+        "runtime_execution_authorized": True,
+        "execution_started": False,
+        "worker_execution": False,
+        "Kanban_dispatch": False,
+        "recovery_authority": {
+            "policy_id": record["policy_id"],
+            "P18_6_policy_id": record["P18_6_policy_id"],
+            "runtime_boundary_classification": record["runtime_boundary_classification"],
+            "recovery_action_SHA256": record["recovery_action_SHA256"],
+            "human_authorization_SHA256": record["human_authorization_SHA256"],
+            "retry_identity_model": record["retry_identity_model"],
+            "next_attempt_number": record["next_attempt_number"],
+            "future_task_skills": record["future_task_skills"],
+            "future_retry_capability_surface": record["future_retry_capability_surface"],
+            "unresolved_Hermes_task_skills": record["unresolved_Hermes_task_skills"],
+            "Kanban_requeue_calls": record["Kanban_requeue_calls"],
+            "Kanban_reclaim_calls": record["Kanban_reclaim_calls"],
+            "retry_execution_count": record["retry_execution_count"],
+        },
+        "failure_category": record.get("failure_category") or start_overlay.get("failure_category"),
+        "failure_summary": record.get("failure_summary") or start_overlay.get("failure_summary"),
+        "worker_lifecycle": {
+            "status": "historical_failure_recovered",
+            "current_lifecycle_blocker": None,
+            "historical_lifecycle_blocker_consumed": True,
+            "latest_failed_run_id": record.get("latest_failed_run_id"),
+            "failure_category": record.get("failure_category") or start_overlay.get("failure_category"),
+            "failure_summary": record.get("failure_summary") or start_overlay.get("failure_summary"),
+        },
+        "next_action": {
+            "id": PEPPER_CURRENT_RETRY_START_NEXT_ACTION_ID,
+            "label": (
+                "P18.9.0 recovery authorization is recorded and retry is pending; "
+                "a separate governed retry-start authorization is required before run 2."
+            ),
+            "target_ticket_id": PEPPER_NEXT_TICKET_ID,
+            "target_ticket_title": PEPPER_NEXT_TICKET_TITLE,
+            "required_human_action": "retry_start_authorization",
+        },
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+    }, None
+
+
+def _p18_9_0_retry_start_overlay(
+    projection: dict[str, Any],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    try:
+        recovery = load_p18_9_0_recovery_action_record(projection_record=projection)
+        if recovery is None:
+            return None, None
+        record = load_p18_9_0_retry_start_record(
+            projection_record=projection,
+            recovery_record=recovery,
+            allow_historical_mismatch=True,
+        )
+    except Exception as exc:  # pragma: no cover - defensive live-state guard
+        return None, {
+            "id": "P18-9-0-RETRY-START-AUTHORITY",
+            "status": "blocked_by_invalid_retry_start_authority",
+            "evidence": _safe_text(exc, limit=300),
+        }
+    if record is None:
+        return None, None
+    if record.get("recovery_action_SHA256") != recovery.get("recovery_action_SHA256"):
+        return None, None
+    if _retry_start_record_cycle_id(record, recovery, projection) != _recovery_record_cycle_id(recovery, projection):
+        return None, None
+    authority = {
+        "policy_id": record["policy_id"],
+        "retry_start_authorization_SHA256": record["retry_start_authorization_SHA256"],
+        "recovery_action_SHA256": record["recovery_action_SHA256"],
+        "retry_identity_model": record["retry_identity_model"],
+        "previous_attempt_count": record["previous_attempt_count"],
+        "next_attempt_number": record["next_attempt_number"],
+        "future_task_skills": record["future_task_skills"],
+        "future_retry_capability_surface": record["future_retry_capability_surface"],
+        "unresolved_Hermes_task_skills": record["unresolved_Hermes_task_skills"],
+        "retry_execution_count": record["retry_execution_count"],
+        "Kanban_requeue_calls": record["Kanban_requeue_calls"],
+        "Kanban_reclaim_calls": record["Kanban_reclaim_calls"],
+        "kanban_board_slug": record["kanban_board_slug"],
+        "kanban_task_id": record["kanban_task_id"],
+        "kanban_run_id": record.get("kanban_run_id"),
+    }
+    if not bool(record.get("execution_started")):
+        return {
+            "readiness": "execution_failed_retry_pending",
+            "workflow_state": "P18.9.0-RETRY-PENDING-NOT-DISPATCHED",
+            "workflow_status": "retry_pending",
+            "queue_state": "kanban_retry_prepared_not_dispatched",
+            "execution_state": "no_active_executions",
+            "validation_state": "execution_failed_retry_pending",
+            "review_state": "not_started_execution_failed",
+            "recovery_state": "retry_pending",
+            "retry_state": "retry_pending",
+            "ticket_execution_authorized": True,
+            "WorkPacket_execution_authorized": True,
+            "runtime_execution_authorized": True,
+            "execution_started": False,
+            "worker_execution": False,
+            "Kanban_dispatch": False,
+            "retry_execution_started": False,
+            "retry_execution_count": int(record.get("retry_execution_count") or 0),
+            "retry_start_authority": authority,
+            "failure_category": record.get("failure_category"),
+            "failure_summary": record.get("failure_summary"),
+            "worker_lifecycle": {
+                "status": "historical_failure_recovered",
+                "current_lifecycle_blocker": None,
+                "historical_lifecycle_blocker_consumed": True,
+                "latest_failed_run_id": record.get("latest_failed_run_id"),
+                "failure_category": record.get("failure_category"),
+                "failure_summary": record.get("failure_summary"),
+            },
+            "retry_start_blocker": {
+                "blocker_code": record.get("blocker_code"),
+                "blocker_detail": record.get("blocker_detail"),
+                "task_prepare_status": record.get("task_prepare_status"),
+                "dispatch_performed": bool(record.get("dispatch_performed")),
+                "worker_process_started": False,
+                "historical_lifecycle_blocker_consumed": True,
+            },
+            "next_action": {
+                "id": PEPPER_CURRENT_RETRY_START_NEXT_ACTION_ID,
+                "label": (
+                    "P18.9.0 retry is still pending; resolve the recorded retry-start "
+                    "blocker and submit separate governed retry-start authorization."
+                ),
+                "target_ticket_id": PEPPER_NEXT_TICKET_ID,
+                "target_ticket_title": PEPPER_NEXT_TICKET_TITLE,
+                "required_human_action": "retry_start_authorization",
+            },
+            "Git_mutation": False,
+            "auto_retry": False,
+            "auto_rollback": False,
+        }, None
+    try:
+        task, runs = _p18_9_0_live_kanban_execution(projection)
+        terminal_state = _p18_9_0_terminal_execution_state(task, runs)
+    except Exception as exc:  # pragma: no cover - defensive live-state guard
+        terminal_state = {
+            "start_status": "failed",
+            "blocker_code": "WORKER_LIFECYCLE_RECONCILIATION_REQUIRED",
+            "blocker_detail": f"Kanban retry execution state unavailable: {_safe_text(exc, limit=200)}",
+            "next_action_id": "RECOVER_P18_9_0_EXECUTION",
+            "outcome": "state_unavailable",
+        }
+        task = None
+        runs = []
+    authority["kanban_run_id"] = getattr(task, "current_run_id", None) or record.get("kanban_run_id")
+    if terminal_state is not None and terminal_state["start_status"] != "completed":
+        blocker = {
+            "id": "P18-9-0-RETRY-WORKER-LIFECYCLE",
+            "status": "blocked_by_worker_lifecycle_failure",
+            "evidence": terminal_state["blocker_detail"],
+            "outcome": terminal_state.get("outcome"),
+            "failure_category": terminal_state.get("failure_category"),
+            "failure_summary": terminal_state.get("failure_summary"),
+        }
+        return {
+            "readiness": "retry_execution_failed_recovery_required",
+            "workflow_state": "P18.9.0-RETRY-EXECUTION-FAILED-RECOVERY-REQUIRED",
+            "workflow_status": "execution_failed",
+            "queue_state": "kanban_retry_execution_terminal",
+            "execution_state": "no_active_executions",
+            "validation_state": "retry_execution_failed_before_validation",
+            "review_state": "not_started_execution_failed",
+            "recovery_state": "recovery_required",
+            "retry_state": "retry_failed",
+            "ticket_execution_authorized": True,
+            "WorkPacket_execution_authorized": True,
+            "runtime_execution_authorized": True,
+            "execution_started": False,
+            "worker_execution": False,
+            "Kanban_dispatch": True,
+            "retry_execution_started": False,
+            "retry_execution_count": record["retry_execution_count"],
+            "retry_start_authority": authority,
+            "failure_category": terminal_state.get("failure_category"),
+            "failure_summary": terminal_state.get("failure_summary"),
+            "worker_lifecycle": {
+                "start_status": terminal_state["start_status"],
+                "blocker_code": terminal_state["blocker_code"],
+                "blocker_detail": terminal_state["blocker_detail"],
+                "kanban_task_status": getattr(task, "status", None),
+                "latest_run_outcome": terminal_state.get("outcome"),
+                "failure_category": terminal_state.get("failure_category"),
+                "failure_summary": terminal_state.get("failure_summary"),
+                "runs": [_run_dict(run) for run in runs],
+            },
+            "next_action": {
+                "id": "RECOVER_P18_9_0_EXECUTION",
+                "label": "P18.9.0 retry execution failed; governed recovery authorization is required before another action.",
+                "target_ticket_id": PEPPER_NEXT_TICKET_ID,
+                "target_ticket_title": PEPPER_NEXT_TICKET_TITLE,
+            },
+            "Git_mutation": False,
+            "auto_retry": False,
+            "auto_rollback": False,
+        }, blocker
+    if terminal_state is not None and terminal_state["start_status"] == "completed":
+        return {
+            "readiness": "retry_execution_completed",
+            "workflow_state": "P18.9.0-RETRY-EXECUTION-COMPLETED",
+            "workflow_status": "execution_completed",
+            "queue_state": "kanban_retry_execution_terminal",
+            "execution_state": "no_active_executions",
+            "validation_state": "execution_completed_pending_validation",
+            "review_state": "ready_for_review_validation",
+            "recovery_state": "not_required",
+            "retry_state": "retry_completed",
+            "ticket_execution_authorized": True,
+            "WorkPacket_execution_authorized": True,
+            "runtime_execution_authorized": True,
+            "execution_started": False,
+            "worker_execution": False,
+            "Kanban_dispatch": True,
+            "retry_execution_started": False,
+            "retry_execution_count": record["retry_execution_count"],
+            "retry_start_authority": authority,
+            "next_action": {
+                "id": "PREPARE_P18_9_0_REVIEW",
+                "label": "P18.9.0 retry execution completed; prepare review validation.",
+                "target_ticket_id": PEPPER_NEXT_TICKET_ID,
+                "target_ticket_title": PEPPER_NEXT_TICKET_TITLE,
+            },
+            "Git_mutation": False,
+            "auto_retry": False,
+            "auto_rollback": False,
+        }, None
+    return {
+        "readiness": "retry_execution_started",
+        "workflow_state": "P18.9.0-EXECUTING",
+        "workflow_status": "executing",
+        "queue_state": "kanban_dispatched",
+        "execution_state": "active_executions",
+        "validation_state": "execution_in_progress",
+        "review_state": "not_started_execution_in_progress",
+        "recovery_state": "not_required",
+        "retry_state": "retry_executing",
+        "ticket_execution_authorized": True,
+        "WorkPacket_execution_authorized": True,
+        "runtime_execution_authorized": True,
+        "execution_started": True,
+        "worker_execution": True,
+        "Kanban_dispatch": True,
+        "retry_execution_started": True,
+        "retry_execution_count": record["retry_execution_count"],
+        "retry_start_authority": authority,
+        "next_action": {
+            "id": "MONITOR_P18_9_0_EXECUTION",
+            "label": "P18.9.0 retry execution has started; monitor the Kanban run and await worker completion.",
+            "target_ticket_id": PEPPER_NEXT_TICKET_ID,
+            "target_ticket_title": PEPPER_NEXT_TICKET_TITLE,
+        },
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+    }, None
+
+
+def _p18_9_0_live_kanban_execution(
+    projection: dict[str, Any],
+) -> tuple[Any, list[Any]]:
+    from hermes_cli import kanban_db
+
+    board = _normalize_board(str(projection["kanban_board_slug"]))
+    task_id = str(projection["kanban_task_id"])
+    conn = kanban_db.connect(board=board)
+    try:
+        _reconcile_kanban_board_lifecycle(conn, task_id=task_id)
+        task = kanban_db.get_task(conn, task_id)
+        runs = kanban_db.list_runs(conn, task_id) if task is not None else []
+        return task, runs
+    finally:
+        conn.close()
+
+
 def build_workflow_control_snapshot() -> dict[str, Any]:
     """Return the controlled cutover dashboard projection."""
 
@@ -628,6 +6207,9 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
         },
     ]
     remaining_blockers: list[dict[str, Any]] = []
+    generation_overlay, generation_blocker = _p18_9_0_generation_overlay()
+    if generation_blocker is not None:
+        remaining_blockers.append(generation_blocker)
     historical_evidence = [
         {
             "id": "P18.8",
@@ -645,12 +6227,15 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
     ]
     next_action = {
         "id": "GENERATE_P18_9_0",
-        "label": "Generate governed P18.9.0 Product UX / IA Baseline before execution.",
+        "label": (
+            "Generate governed P18.9.0 Product Inventory, IA Decision, and "
+            "Acceptance Contract before execution."
+        ),
         "target_ticket_id": PEPPER_NEXT_TICKET_ID,
         "target_ticket_title": PEPPER_NEXT_TICKET_TITLE,
     }
     observed_at = _utc_now_iso()
-    return {
+    snapshot = {
         "schema_version": CONTROLLED_CUTOVER_SCHEMA_VERSION,
         "source_system": "pepper-controlled-default-mode-cutover",
         "product_id": PEPPER_GOVERNED_PRODUCT_ID,
@@ -720,6 +6305,24 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
         "evidence_version": CONTROLLED_CUTOVER_SCHEMA_VERSION,
         "observed_at": observed_at,
     }
+    if generation_overlay is not None:
+        snapshot.update(generation_overlay)
+        if snapshot.get("P18_9_0_closed") is True:
+            snapshot["ready_verdict"] = (
+                "p18_9_0_completed_by_human_review_acceptance_with_next_ticket_ready"
+            )
+        else:
+            snapshot["ready_verdict"] = (
+                "p18_9_0_generated_awaiting_human_ticket_approval_with_preserved_execution_boundary"
+            )
+    elif generation_blocker is not None:
+        snapshot["readiness"] = "blocked_invalid_generated_ticket_authority"
+        snapshot["workflow_status"] = "blocked_invalid_generated_ticket_authority"
+        snapshot["queue_state"] = "blocked_invalid_generated_ticket_authority"
+        snapshot["ready_verdict"] = "p18_9_0_generation_authority_invalid"
+    snapshot["blocker_count"] = len(remaining_blockers)
+    snapshot["next_action_label"] = _next_action_label(snapshot.get("next_action"))
+    return snapshot
 
 
 def _workflow_value(workflow: dict[str, Any], key: str, fallback: Any = None) -> Any:
@@ -757,6 +6360,10 @@ def build_lead_agent_operational_context() -> dict[str, Any]:
     execution_count, active_execution_count = _execution_counts(executions_source)
     ticket = _workflow_ticket(workflow)
     next_action = workflow.get("next_action")
+    workflow_status = _workflow_value(workflow, "workflow_status", workflow.get("readiness"))
+    approval_state = _approval_state(pending_approval_count)
+    if workflow_status == "awaiting_ticket_approval":
+        approval_state = _workflow_value(workflow, "approval_state", "pending_ticket_approval")
     evidence_timestamp = _safe_text(
         workflow.get("evidence_timestamp") or workflow.get("observed_at") or _utc_now_iso(),
         limit=64,
@@ -777,9 +6384,10 @@ def build_lead_agent_operational_context() -> dict[str, Any]:
         ),
         **ticket,
         "workflow_state": _workflow_value(workflow, "workflow_state", workflow.get("mode")),
-        "workflow_status": _workflow_value(workflow, "workflow_status", workflow.get("readiness")),
-        "approval_state": _approval_state(pending_approval_count),
+        "workflow_status": workflow_status,
+        "approval_state": approval_state,
         "pending_approval_count": pending_approval_count,
+        "pending_ticket_approval_count": int(workflow.get("pending_ticket_approval_count") or 0),
         "queue_state": _workflow_value(workflow, "queue_state", "unavailable"),
         "execution_state": _execution_state(active_execution_count),
         "execution_count": execution_count,
@@ -787,6 +6395,8 @@ def build_lead_agent_operational_context() -> dict[str, Any]:
         "validation_state": _workflow_value(workflow, "validation_state", "unavailable"),
         "review_state": _workflow_value(workflow, "review_state", "unavailable"),
         "recovery_state": _workflow_value(workflow, "recovery_state", "unavailable"),
+        "failure_category": workflow.get("failure_category"),
+        "failure_summary": workflow.get("failure_summary"),
         "git_handoff_state": _workflow_value(workflow, "git_handoff_state", "unavailable"),
         "blocker_count": len(workflow.get("remaining_blockers") or []),
         "warning_count": int(workflow.get("warning_count") or 0),

@@ -1034,6 +1034,8 @@ def execute_tool_calls_sequential(agent, assistant_message, messages: list, effe
     """
     # Resolve the context-scaled tool-output budget once per turn.
     _tool_budget = _budget_for_agent(agent)
+    from agent.agent_runtime_helpers import latest_user_task_text_from_messages
+    user_task = latest_user_task_text_from_messages(messages)
     for i, tool_call in enumerate(assistant_message.tool_calls, 1):
         # SAFETY: check interrupt BEFORE starting each tool.
         # If the user sent "stop" during a previous tool's execution,
@@ -1489,6 +1491,7 @@ def execute_tool_calls_sequential(agent, assistant_message, messages: list, effe
                     session_id=agent.session_id or "",
                     turn_id=getattr(agent, "_current_turn_id", "") or "",
                     api_request_id=getattr(agent, "_current_api_request_id", "") or "",
+                    user_task=user_task,
                     enabled_tools=list(agent.valid_tool_names) if agent.valid_tool_names else None,
                     skip_pre_tool_call_hook=True,
                     skip_tool_request_middleware=True,
@@ -1531,6 +1534,7 @@ def execute_tool_calls_sequential(agent, assistant_message, messages: list, effe
                     session_id=agent.session_id or "",
                     turn_id=getattr(agent, "_current_turn_id", "") or "",
                     api_request_id=getattr(agent, "_current_api_request_id", "") or "",
+                    user_task=user_task,
                     enabled_tools=list(agent.valid_tool_names) if agent.valid_tool_names else None,
                     skip_pre_tool_call_hook=True,
                     skip_tool_request_middleware=True,

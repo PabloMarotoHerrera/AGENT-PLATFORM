@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from hermes_cli.timeouts import get_provider_request_timeout
+from agent.message_content import flatten_message_text
 from agent.prompt_builder import format_steer_marker
 from agent.tool_dispatch_helpers import _trajectory_normalize_msg, make_tool_result_message
 from agent.trajectory import convert_scratchpad_to_think
@@ -71,6 +72,30 @@ def agent_runtime_owns_post_tool_hook(agent: Any, function_name: str) -> bool:
         return True
     memory_manager = getattr(agent, "_memory_manager", None)
     return bool(memory_manager and memory_manager.has_tool(function_name))
+
+
+def latest_user_task_text_from_messages(messages: Optional[List[Dict[str, Any]]]) -> Optional[str]:
+    """Return the latest real user message text for task-aware tool handlers."""
+    if not messages:
+        return None
+    try:
+        from agent.conversation_compression import _is_real_user_message
+    except Exception:
+        _is_real_user_message = None
+
+    for message in reversed(messages):
+        if not isinstance(message, dict) or message.get("role") != "user":
+            continue
+        if _is_real_user_message is not None:
+            try:
+                if not _is_real_user_message(message):
+                    continue
+            except Exception:
+                pass
+        text = flatten_message_text(message.get("content")).strip()
+        if text:
+            return text
+    return None
 
 
 def convert_to_trajectory_format(agent, messages: List[Dict[str, Any]], user_query: str, completed: bool) -> List[Dict[str, Any]]:
@@ -2355,6 +2380,7 @@ def invoke_tool(agent, function_name: str, function_args: dict, effective_task_i
     """
     if not isinstance(function_args, dict):
         function_args = {}
+    user_task = latest_user_task_text_from_messages(messages)
 
     _tool_middleware_trace = list(tool_request_middleware_trace or [])
     try:
@@ -2530,6 +2556,7 @@ def invoke_tool(agent, function_name: str, function_args: dict, effective_task_i
                 session_id=agent.session_id or "",
                 turn_id=getattr(agent, "_current_turn_id", "") or "",
                 api_request_id=getattr(agent, "_current_api_request_id", "") or "",
+                user_task=user_task,
                 enabled_tools=list(agent.valid_tool_names) if agent.valid_tool_names else None,
                 skip_pre_tool_call_hook=True,
                 skip_tool_request_middleware=True,
@@ -3461,6 +3488,7 @@ __all__ = [
     "create_openai_client",
     "switch_model",
     "invoke_tool",
+    "latest_user_task_text_from_messages",
     "repair_tool_call",
     "sanitize_api_messages",
     "looks_like_codex_intermediate_ack",

@@ -322,8 +322,11 @@ def _product_runtime_http_error(exc: Exception) -> HTTPException:
 def list_agent_platform_approvals(profile: Optional[str] = None) -> dict[str, Any]:
     """Return durable staged-write approvals through the product auth boundary."""
 
-    with _profile_scope(profile):
-        return build_approval_inbox_source()
+    try:
+        with _profile_scope(profile):
+            return build_approval_inbox_source()
+    except Exception as exc:
+        raise _product_runtime_http_error(exc) from exc
 
 
 @app.get(
