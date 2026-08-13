@@ -207,6 +207,18 @@ def _validate_explicit_generation_request(value: object) -> str:
     return raw
 
 
+def _validate_explicit_reconciliation_request(value: object) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        raise ValueError("human_request_text is required")
+    normalized = _normalize_intent_text(raw)
+    if "?" in raw or "¿" in raw:
+        raise ValueError("reconciliation request text must not be a question")
+    if not re.search(r"\b(reconcile|reconciliar|quarantine|cuarentena|invalidar|invalidate)\b", normalized):
+        raise ValueError("explicit stale-authority reconciliation request text is required")
+    return raw
+
+
 def _validate_explicit_start_request(value: object) -> str:
     raw = str(value or "").strip()
     if not raw:
@@ -407,6 +419,8 @@ def _get_workflow_control(args: dict[str, Any], **_kwargs) -> str:
         "product_id": ctx["product_id"],
         "project_id": ctx["project_id"],
         "current_ticket_id": ctx["current_ticket_id"],
+        "next_ticket_id": ctx["next_ticket_id"],
+        "next_ticket_title": ctx["next_ticket_title"],
         "workflow_state": ctx["workflow_state"],
         "workflow_status": ctx["workflow_status"],
         "approval_state": ctx["approval_state"],
@@ -601,6 +615,8 @@ def _get_next_action(args: dict[str, Any], **_kwargs) -> str:
         "source_system": ctx["source_system"],
         "project_id": ctx["project_id"],
         "current_ticket_id": ctx["current_ticket_id"],
+        "next_ticket_id": ctx["next_ticket_id"],
+        "next_ticket_title": ctx["next_ticket_title"],
         "workflow_status": ctx["workflow_status"],
         "recovery_state": ctx["recovery_state"],
         "failure_category": ctx.get("failure_category"),
@@ -635,6 +651,33 @@ def _generate_current_ticket(args: dict[str, Any], **_kwargs) -> str:
         "source_tool": "generate_current_ticket",
         "human_request_text": human_request_text,
         **result,
+    })
+
+
+def _reconcile_invalid_current_generation_authority(args: dict[str, Any], **_kwargs) -> str:
+    pr = _runtime()
+    try:
+        human_request_text = _validate_explicit_reconciliation_request(
+            args.get("human_request_text")
+        )
+        result = pr.reconcile_invalid_current_generation_authority(
+            project_id=str(args.get("project_id") or "").strip() or None,
+            ticket_id=str(args.get("ticket_id") or "").strip() or None,
+        )
+        updated_context = pr.build_lead_agent_operational_context()
+    except Exception as exc:
+        return tool_error(str(exc) or "invalid generation authority reconciliation failed")
+    return _result({
+        "source_tool": "reconcile_invalid_current_generation_authority",
+        "human_request_text": human_request_text,
+        **result,
+        "current_ticket_id": updated_context.get("current_ticket_id"),
+        "next_ticket_id": updated_context.get("next_ticket_id"),
+        "next_ticket_title": updated_context.get("next_ticket_title"),
+        "workflow_status": updated_context.get("workflow_status"),
+        "pending_approval_count": updated_context.get("pending_approval_count"),
+        "active_execution_count": updated_context.get("active_execution_count"),
+        "next_action": updated_context.get("next_action"),
     })
 
 
@@ -873,6 +916,27 @@ _GENERATE_CURRENT_TICKET_SCHEMA = {
             "description": "Exact user text that explicitly requests generation of the current canonical next governed ticket.",
         },
     },
+    "additionalProperties": False,
+}
+
+
+_RECONCILE_INVALID_CURRENT_GENERATION_AUTHORITY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "project_id": {
+            "type": "string",
+            "description": "Optional governed project guard. Must be PEPPER if supplied.",
+        },
+        "ticket_id": {
+            "type": "string",
+            "description": "Optional governed ticket guard. Must equal the current canonical next ticket if supplied.",
+        },
+        "human_request_text": {
+            "type": "string",
+            "description": "Exact user text explicitly requesting stale generated-authority reconciliation.",
+        },
+    },
+    "required": ["human_request_text"],
     "additionalProperties": False,
 }
 
@@ -1252,6 +1316,25 @@ registry.register(
     handler=_get_next_action,
     emoji="N",
 )
+
+
+registry.register(
+    name="reconcile_invalid_current_generation_authority",
+    toolset=TOOLSET,
+    schema={
+        "name": "reconcile_invalid_current_generation_authority",
+        "description": (
+            "Quarantine invalid unaccepted future-ticket generation authority for only the "
+            "current canonical next ticket. Does not generate, approve, project, execute, "
+            "dispatch workers, mutate Git, invoke Docker, or invoke Graphify."
+        ),
+        "parameters": _RECONCILE_INVALID_CURRENT_GENERATION_AUTHORITY_SCHEMA,
+    },
+    handler=_reconcile_invalid_current_generation_authority,
+    emoji="X",
+    max_result_size_chars=24000,
+)
+
 
 registry.register(
     name="generate_current_ticket",

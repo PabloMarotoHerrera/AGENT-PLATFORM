@@ -100,6 +100,9 @@ TICKET_APPROVAL_PUBLICATION_POLICY_ID = (
 TICKET_APPROVAL_PUBLICATION_DIGEST_ALGORITHM = (
     "agent-platform-ticket-approval-publication-p18-9-0-sha256-v1"
 )
+TICKET_ARCHITECT_RECONCILIATION_DIGEST_ALGORITHM = (
+    "agent-platform-ticket-architect-stale-authority-reconciliation-sha256-v1"
+)
 
 CANONICAL_PROJECT_ID = "PEPPER"
 CANONICAL_PROJECT_NAME = "Pepper"
@@ -122,6 +125,7 @@ CANONICAL_APPROVAL_ID = "P18.9.0"
 
 _STORE_DIR = Path("agent-platform") / "pepper-ticket-architect-bridge"
 _APPROVAL_DECISION_STORE_FILE = "P18.9.0.approval-decision.json"
+_RECONCILIATION_STORE_DIR = _STORE_DIR / "reconciliation-history"
 _STORE_LOCK = threading.Lock()
 _P17_ACCEPTED_CLOSURE_SHA256 = hashlib.sha256(
     b"pepper-p17-accepted-work-packet-execution-mvp-closure-reused-for-p18-9-0"
@@ -170,6 +174,9 @@ class GovernedTicketGenerationTarget:
     canonical_roadmap_authority: str
     roadmap_authority_path: str
     roadmap_authority_section: str
+    predecessor_ticket_id: str | None = None
+    readiness_state: str | None = None
+    authority_source: str | None = None
 
     @property
     def action_token(self) -> str:
@@ -178,6 +185,62 @@ class GovernedTicketGenerationTarget:
     @property
     def idempotency_key(self) -> str:
         return f"{self.project_id}:{self.macroproject_id}:{self.ticket_id}:{self.next_action_id}"
+
+
+@dataclass(frozen=True)
+class CanonicalNextTicketAuthority:
+    """Canonical next governed ticket resolved from workflow and roadmap authority."""
+
+    project_id: str
+    project_name: str
+    macroproject_id: str
+    macroproject_title: str
+    ticket_id: str
+    ticket_title: str
+    next_action_id: str
+    canonical_roadmap_authority: str
+    roadmap_authority_path: str
+    roadmap_authority_section: str
+    predecessor_ticket_id: str | None
+    readiness_state: str
+    authority_source: str
+
+    def generation_target(self) -> GovernedTicketGenerationTarget:
+        return GovernedTicketGenerationTarget(
+            project_id=self.project_id,
+            project_name=self.project_name,
+            macroproject_id=self.macroproject_id,
+            macroproject_title=self.macroproject_title,
+            ticket_id=self.ticket_id,
+            ticket_title=self.ticket_title,
+            next_action_id=self.next_action_id,
+            approval_next_action_id=approval_action_id(self.ticket_id),
+            approved_no_execution_next_action_id=approved_no_execution_action_id(self.ticket_id),
+            revise_next_action_id=revise_action_id(self.ticket_id),
+            canonical_roadmap_authority=self.canonical_roadmap_authority,
+            roadmap_authority_path=canonical_roadmap_authority_path(self.roadmap_authority_path),
+            roadmap_authority_section=self.roadmap_authority_section,
+            predecessor_ticket_id=self.predecessor_ticket_id,
+            readiness_state=self.readiness_state,
+            authority_source=self.authority_source,
+        )
+
+    def asdict(self) -> dict[str, Any]:
+        return {
+            "project_id": self.project_id,
+            "project_name": self.project_name,
+            "macroproject_id": self.macroproject_id,
+            "macroproject_title": self.macroproject_title,
+            "ticket_id": self.ticket_id,
+            "ticket_title": self.ticket_title,
+            "next_action_id": self.next_action_id,
+            "canonical_roadmap_authority": self.canonical_roadmap_authority,
+            "roadmap_authority_path": self.roadmap_authority_path,
+            "roadmap_authority_section": self.roadmap_authority_section,
+            "predecessor_ticket_id": self.predecessor_ticket_id,
+            "readiness_state": self.readiness_state,
+            "authority_source": self.authority_source,
+        }
 
 
 def generation_action_id(ticket_id: str) -> str:
@@ -192,6 +255,21 @@ def is_generation_action_id_for_ticket(action_id: str, ticket_id: str) -> bool:
     prefix = generation_action_id(ticket_id)
     candidate = str(action_id or "").strip()
     return candidate == prefix or candidate.startswith(prefix + "_")
+
+
+def canonical_generation_action_id(ticket_id: str) -> str:
+    return f"{generation_action_id(ticket_id)}_REQUIRES_SEPARATE_HUMAN_ACTION"
+
+
+def canonical_roadmap_authority_path(value: object) -> str:
+    """Return the persisted roadmap-authority path in repository-relative form."""
+
+    candidate = str(value or "").strip().replace("\\", "/")
+    while candidate.startswith("./"):
+        candidate = candidate[2:]
+    if not candidate:
+        raise TicketArchitectBridgeInputError("roadmap authority path is unavailable")
+    return candidate
 
 
 def approval_action_id(ticket_id: str) -> str:
@@ -230,20 +308,30 @@ def _target_from_record(record: dict[str, Any]) -> GovernedTicketGenerationTarge
     ticket_id = _safe_ticket_id(record.get("ticket_id"))
     if ticket_id == CANONICAL_TICKET_ID:
         return p18_9_0_generation_target()
+    authority = resolve_roadmap_ticket_authority(ticket_id)
+    canonical_authority = record.get("canonical_next_ticket_authority")
+    if not isinstance(canonical_authority, dict):
+        canonical_authority = {}
     return GovernedTicketGenerationTarget(
         project_id=str(record.get("project_id") or CANONICAL_PROJECT_ID),
         project_name=str(record.get("project_name") or CANONICAL_PROJECT_NAME),
         macroproject_id=str(record.get("macroproject_id") or CANONICAL_MACROPROJECT_ID),
         macroproject_title=str(record.get("macroproject_title") or CANONICAL_MACROPROJECT_TITLE),
         ticket_id=ticket_id,
-        ticket_title=str(record.get("ticket_title") or ""),
-        next_action_id=str(record.get("source_next_action_id") or generation_action_id(ticket_id)),
+        ticket_title=str(authority["ticket_title"]),
+        next_action_id=str(
+            authority.get("next_action_id")
+            or canonical_generation_action_id(ticket_id)
+        ),
         approval_next_action_id=approval_action_id(ticket_id),
         approved_no_execution_next_action_id=approved_no_execution_action_id(ticket_id),
         revise_next_action_id=revise_action_id(ticket_id),
-        canonical_roadmap_authority=str(record.get("canonical_roadmap_authority") or CANONICAL_ROADMAP_AUTHORITY),
-        roadmap_authority_path=str(record.get("roadmap_authority_path") or CANONICAL_ROADMAP_AUTHORITY_PATH),
-        roadmap_authority_section=str(record.get("roadmap_authority_section") or CANONICAL_ROADMAP_AUTHORITY_SECTION),
+        canonical_roadmap_authority=str(authority["authority_type"]),
+        roadmap_authority_path=canonical_roadmap_authority_path(authority["authority_path"]),
+        roadmap_authority_section=str(authority["authority_section"]),
+        predecessor_ticket_id=str(record.get("predecessor_ticket_id") or "") or None,
+        readiness_state=str(canonical_authority.get("readiness_state") or "") or None,
+        authority_source=str(canonical_authority.get("authority_source") or "") or None,
     )
 
 
@@ -252,56 +340,216 @@ def resolve_generation_target_from_workflow(
 ) -> GovernedTicketGenerationTarget:
     """Resolve the canonical next-ticket generation target from workflow state."""
 
-    if not isinstance(workflow, dict):
+    return resolve_canonical_next_ticket(workflow).generation_target()
+
+
+def resolve_canonical_next_ticket(
+    workflow: dict[str, Any] | None = None,
+    *,
+    roadmap_items: tuple[dict[str, Any], ...] | None = None,
+) -> CanonicalNextTicketAuthority:
+    """Resolve the single canonical next governed ticket from current authority."""
+
+    state = workflow or {}
+    if workflow is not None and not isinstance(workflow, dict):
         raise TicketArchitectBridgeInputError("workflow state is unavailable")
-    next_ticket_id = str(workflow.get("next_ticket_id") or "").strip()
-    if not next_ticket_id:
+
+    items = roadmap_items if roadmap_items is not None else resolve_roadmap_ticket_authorities()
+    if not items:
+        raise TicketArchitectBridgeInputError("roadmap authority cannot resolve target")
+
+    predecessor_ticket_id = _closed_predecessor_ticket_id(state)
+    next_ticket_id = str(state.get("next_ticket_id") or "").strip()
+    authority_source = "historical_bootstrap_roadmap_default"
+    readiness_state = "bootstrap_ready"
+
+    if predecessor_ticket_id:
+        derived = _roadmap_successor_ticket_id(predecessor_ticket_id, items)
+        if not derived:
+            raise TicketArchitectBridgeInputError("roadmap authority cannot resolve successor")
+        if next_ticket_id and next_ticket_id not in {derived, predecessor_ticket_id}:
+            raise TicketArchitectBridgeInputError(
+                "workflow next ticket conflicts with closed predecessor roadmap successor"
+            )
+        next_ticket_id = derived
+        authority_source = "accepted_closed_workflow_state+canonical_roadmap"
+        readiness_state = "closed_predecessor_next_ticket_ready"
+    elif next_ticket_id:
+        _require_workflow_generation_action(state, next_ticket_id)
+        authority_source = "workflow_control_next_ticket"
+        readiness_state = str(
+            state.get("readiness")
+            or state.get("workflow_status")
+            or "workflow_next_ticket_ready"
+        )
+    elif _has_active_governed_ticket(state):
         raise TicketArchitectBridgeInputError("no next governed ticket is available")
-    if next_ticket_id == CANONICAL_TICKET_ID:
-        return p18_9_0_generation_target()
-    next_action = workflow.get("next_action")
-    if not isinstance(next_action, dict):
-        raise TicketArchitectBridgeInputError("next action is unavailable")
-    authority = resolve_roadmap_ticket_authority(next_ticket_id)
-    expected_action_id = str(next_action.get("id") or "").strip()
-    if not is_generation_action_id_for_ticket(expected_action_id, next_ticket_id):
-        raise TicketArchitectBridgeInputError("next action is not the canonical generation action")
-    return GovernedTicketGenerationTarget(
-        project_id=CANONICAL_PROJECT_ID,
-        project_name=CANONICAL_PROJECT_NAME,
-        macroproject_id=str(workflow.get("macroproject_id") or CANONICAL_MACROPROJECT_ID),
-        macroproject_title=str(workflow.get("macroproject_title") or CANONICAL_MACROPROJECT_TITLE),
+    else:
+        next_ticket_id = str(items[0]["ticket_id"])
+
+    authority = _roadmap_item_for_ticket(next_ticket_id, items)
+    _require_workflow_generation_action(
+        state,
+        next_ticket_id,
+        stale_predecessor_ticket_id=predecessor_ticket_id,
+    )
+    macroproject_id = str(state.get("macroproject_id") or CANONICAL_MACROPROJECT_ID)
+    macroproject_title = str(state.get("macroproject_title") or CANONICAL_MACROPROJECT_TITLE)
+    next_action_id = _canonical_workflow_generation_action_id(
+        state,
+        next_ticket_id,
+        fallback=str(authority.get("next_action_id") or canonical_generation_action_id(next_ticket_id)),
+        stale_predecessor_ticket_id=predecessor_ticket_id,
+    )
+    return CanonicalNextTicketAuthority(
+        project_id=str(state.get("project_id") or CANONICAL_PROJECT_ID),
+        project_name=str(state.get("project_name") or CANONICAL_PROJECT_NAME),
+        macroproject_id=macroproject_id,
+        macroproject_title=macroproject_title,
         ticket_id=next_ticket_id,
         ticket_title=str(authority["ticket_title"]),
-        next_action_id=expected_action_id,
-        approval_next_action_id=approval_action_id(next_ticket_id),
-        approved_no_execution_next_action_id=approved_no_execution_action_id(next_ticket_id),
-        revise_next_action_id=revise_action_id(next_ticket_id),
+        next_action_id=next_action_id,
         canonical_roadmap_authority=str(authority["authority_type"]),
-        roadmap_authority_path=str(authority["authority_path"]),
+        roadmap_authority_path=canonical_roadmap_authority_path(authority["authority_path"]),
         roadmap_authority_section=str(authority["authority_section"]),
+        predecessor_ticket_id=predecessor_ticket_id,
+        readiness_state=readiness_state,
+        authority_source=authority_source,
     )
+
+
+def _has_active_governed_ticket(workflow: dict[str, Any]) -> bool:
+    return bool(str(workflow.get("current_ticket_id") or "").strip())
+
+
+def _closed_predecessor_ticket_id(workflow: dict[str, Any]) -> str | None:
+    if not workflow:
+        return None
+    explicit = str(workflow.get("closed_predecessor_ticket_id") or "").strip()
+    if explicit:
+        return _safe_ticket_id(explicit)
+    review_acceptance = workflow.get("review_acceptance_authority")
+    if (
+        isinstance(review_acceptance, dict)
+        and review_acceptance.get("ticket_closed") is True
+        and workflow.get("P18_9_0_closed") is True
+    ):
+        return CANONICAL_TICKET_ID
+    if workflow.get("P18_9_0_closed") is True and workflow.get("P18_9_0_completed") is True:
+        return CANONICAL_TICKET_ID
+    if workflow.get("workflow_status") == "completed" and workflow.get("workflow_state") == "P18.9.0-COMPLETED":
+        return CANONICAL_TICKET_ID
+    return None
+
+
+def _workflow_next_action_id(workflow: dict[str, Any]) -> str | None:
+    next_action = workflow.get("next_action")
+    if not isinstance(next_action, dict):
+        return None
+    return str(next_action.get("id") or "").strip() or None
+
+
+def _require_workflow_generation_action(
+    workflow: dict[str, Any],
+    ticket_id: str,
+    *,
+    stale_predecessor_ticket_id: str | None = None,
+) -> None:
+    if not workflow:
+        return
+    action_id = _workflow_next_action_id(workflow)
+    if not action_id:
+        return
+    if not is_generation_action_id_for_ticket(action_id, ticket_id):
+        if stale_predecessor_ticket_id and is_generation_action_id_for_ticket(
+            action_id,
+            stale_predecessor_ticket_id,
+        ):
+            return
+        raise TicketArchitectBridgeInputError("next action is not the canonical generation action")
+    next_action = workflow.get("next_action")
+    if isinstance(next_action, dict):
+        target_ticket_id = str(next_action.get("target_ticket_id") or "").strip()
+        allowed_targets = {ticket_id}
+        if stale_predecessor_ticket_id:
+            allowed_targets.add(stale_predecessor_ticket_id)
+        if target_ticket_id and target_ticket_id not in allowed_targets:
+            raise TicketArchitectBridgeInputError("next action does not target canonical next ticket")
+
+
+def _canonical_workflow_generation_action_id(
+    workflow: dict[str, Any],
+    ticket_id: str,
+    *,
+    fallback: str,
+    stale_predecessor_ticket_id: str | None = None,
+) -> str:
+    action_id = _workflow_next_action_id(workflow)
+    if action_id and is_generation_action_id_for_ticket(action_id, ticket_id):
+        return action_id
+    if (
+        action_id
+        and stale_predecessor_ticket_id
+        and is_generation_action_id_for_ticket(action_id, stale_predecessor_ticket_id)
+    ):
+        return fallback
+    return fallback
+
+
+def _roadmap_successor_ticket_id(
+    predecessor_ticket_id: str,
+    items: tuple[dict[str, Any], ...],
+) -> str | None:
+    for index, item in enumerate(items):
+        if item["ticket_id"] != predecessor_ticket_id:
+            continue
+        if index + 1 >= len(items):
+            return None
+        return str(items[index + 1]["ticket_id"])
+    return None
+
+
+def _roadmap_predecessor_ticket_id(
+    ticket_id: str,
+    items: tuple[dict[str, Any], ...],
+) -> str | None:
+    requested = _safe_ticket_id(ticket_id)
+    for index, item in enumerate(items):
+        if item["ticket_id"] != requested:
+            continue
+        if index <= 0:
+            return None
+        return str(items[index - 1]["ticket_id"])
+    return None
+
+
+def _roadmap_item_for_ticket(
+    ticket_id: str,
+    items: tuple[dict[str, Any], ...],
+) -> dict[str, Any]:
+    requested = _safe_ticket_id(ticket_id)
+    for item in items:
+        if item["ticket_id"] == requested:
+            return dict(item)
+    raise TicketArchitectBridgeInputError("roadmap authority cannot resolve target")
 
 
 def resolve_roadmap_ticket_authority(ticket_id: str) -> dict[str, Any]:
     """Resolve one ticket id from canonical P18.9 roadmap authority."""
 
-    requested = _safe_ticket_id(ticket_id)
-    if requested == CANONICAL_TICKET_ID:
-        return {
-            "ticket_id": CANONICAL_TICKET_ID,
-            "ticket_title": CANONICAL_TICKET_TITLE,
-            "authority_path": CANONICAL_ROADMAP_AUTHORITY_PATH,
-            "authority_section": CANONICAL_ROADMAP_AUTHORITY_SECTION,
-            "authority_type": CANONICAL_ROADMAP_AUTHORITY,
-            "next_action_id": CANONICAL_NEXT_ACTION_ID,
-        }
+    return _roadmap_item_for_ticket(ticket_id, resolve_roadmap_ticket_authorities())
+
+
+def resolve_roadmap_ticket_authorities() -> tuple[dict[str, Any], ...]:
+    """Return the canonical ordered P18.9 roadmap ticket authorities."""
+
     path = Path(__file__).resolve().parents[3] / "docs" / "agent-platform" / "workflow_migration_closure.md"
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
         raise TicketArchitectBridgeInputError("roadmap authority cannot resolve target") from exc
     in_section = False
+    items: list[dict[str, Any]] = []
     for line in text.splitlines():
         stripped = line.strip()
         if stripped == CANONICAL_ROADMAP_AUTHORITY_SECTION + ":":
@@ -312,21 +560,46 @@ def resolve_roadmap_ticket_authority(ticket_id: str) -> dict[str, Any]:
         if not in_section or "|" not in stripped:
             continue
         cells = [cell.strip().strip("`") for cell in stripped.strip("|").split("|")]
-        if len(cells) >= 2 and cells[0] == requested:
-            return {
-                "ticket_id": requested,
-                "ticket_title": cells[1],
+        if len(cells) >= 2 and _is_safe_ticket_id(cells[0]):
+            ticket_id = _safe_ticket_id(cells[0])
+            ticket_title = cells[1]
+            next_action_id = canonical_generation_action_id(ticket_id)
+            if ticket_id == CANONICAL_TICKET_ID:
+                ticket_title = CANONICAL_TICKET_TITLE
+                next_action_id = CANONICAL_NEXT_ACTION_ID
+            items.append({
+                "ticket_id": ticket_id,
+                "ticket_title": ticket_title,
                 "authority_path": CANONICAL_ROADMAP_AUTHORITY_PATH,
                 "authority_section": CANONICAL_ROADMAP_AUTHORITY_SECTION,
                 "authority_type": CANONICAL_ROADMAP_AUTHORITY,
-    }
-    raise TicketArchitectBridgeInputError("roadmap authority cannot resolve target")
+                "next_action_id": next_action_id,
+            })
+    if not items:
+        raise TicketArchitectBridgeInputError("roadmap authority cannot resolve target")
+    return tuple(items)
 
 
 def _safe_ticket_id(value: object) -> str:
     candidate = str(value or "").strip()
-    if not re.fullmatch(r"P[1-9][0-9]{0,3}(?:\.[A-Z0-9]+)+", candidate):
+    if not _is_safe_ticket_id(candidate):
         raise TicketArchitectBridgeInputError("governed ticket id is invalid")
+    return candidate
+
+
+def _is_safe_ticket_id(value: object) -> bool:
+    return bool(
+        re.fullmatch(
+            r"[A-Z][A-Z0-9]{0,31}(?:\.[A-Z0-9]+)+",
+            str(value or "").strip(),
+        )
+    )
+
+
+def _safe_digest(value: object) -> str:
+    candidate = str(value or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", candidate):
+        raise TicketArchitectBridgeInputError("authority digest is invalid")
     return candidate
 
 
@@ -373,6 +646,21 @@ def generation_record_path_for_ticket(ticket_id: str) -> Path:
     return get_hermes_home() / _STORE_DIR / f"{safe_ticket_id}.json"
 
 
+def reconciliation_history_path_for_ticket(ticket_id: str) -> Path:
+    """Return the profile-scoped stale future-ticket reconciliation history path."""
+
+    safe_ticket_id = _safe_ticket_id(ticket_id)
+    return get_hermes_home() / _RECONCILIATION_STORE_DIR / f"{safe_ticket_id}.jsonl"
+
+
+def quarantined_generation_record_path(*, ticket_id: str, bridge_sha256: str) -> Path:
+    """Return the deterministic quarantine path for one stale generated record."""
+
+    safe_ticket_id = _safe_ticket_id(ticket_id)
+    safe_digest = _safe_digest(bridge_sha256)
+    return get_hermes_home() / _RECONCILIATION_STORE_DIR / f"{safe_ticket_id}.{safe_digest}.json"
+
+
 def approval_decision_record_path() -> Path:
     """Return the profile-scoped P18.9.0 human decision authority path."""
 
@@ -385,10 +673,16 @@ def load_p18_9_0_generation_record() -> dict[str, Any] | None:
     return load_generation_record(ticket_id=CANONICAL_TICKET_ID)
 
 
-def load_generation_record(*, ticket_id: str) -> dict[str, Any] | None:
+def load_generation_record(
+    *,
+    ticket_id: str,
+    target: GovernedTicketGenerationTarget | None = None,
+) -> dict[str, Any] | None:
     """Load and validate one persisted ticket-generation authority record."""
 
-    target = p18_9_0_generation_target() if ticket_id == CANONICAL_TICKET_ID else None
+    resolved_target = target or (
+        p18_9_0_generation_target() if ticket_id == CANONICAL_TICKET_ID else None
+    )
     path = generation_record_path_for_ticket(ticket_id)
     if not path.exists():
         return None
@@ -398,7 +692,7 @@ def load_generation_record(*, ticket_id: str) -> dict[str, Any] | None:
         raise TicketArchitectBridgeConflict(
             f"{ticket_id} generated authority record is unreadable"
         ) from exc
-    return validate_generation_record(record, target=target)
+    return validate_generation_record(record, target=resolved_target)
 
 
 def load_p18_9_0_approval_decision_record(
@@ -512,6 +806,139 @@ def validate_generation_record(
         if record.get(field_name) is not False:
             raise TicketArchitectBridgeConflict(f"{field_name} must be false")
     return record
+
+
+def inspect_invalid_future_ticket_authority(
+    *,
+    ticket_id: str,
+    workflow: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Classify a future-ticket generation record without mutating state."""
+
+    safe_ticket_id = _safe_ticket_id(ticket_id)
+    if safe_ticket_id == CANONICAL_TICKET_ID:
+        raise TicketArchitectBridgeInputError("historical generated authority is not reconcilable")
+    path = generation_record_path_for_ticket(safe_ticket_id)
+    if not path.exists():
+        return _reconciliation_absent_result(safe_ticket_id, path)
+    record = _read_generation_record_unvalidated(path, ticket_id=safe_ticket_id)
+    target = _reconciliation_target_for_ticket(safe_ticket_id, workflow=workflow)
+    validation_error = _future_generation_validation_error(record, target=target)
+    classification = (
+        "valid_current_generated_authority"
+        if validation_error is None
+        else "unaccepted_partial_failed_future_ticket_authority"
+    )
+    blockers = _future_reconciliation_blockers(record, path=path)
+    return {
+        "source_system": "pepper-ticket-architect-bridge",
+        "schema_version": TICKET_ARCHITECT_BRIDGE_SCHEMA_VERSION,
+        "ticket_id": safe_ticket_id,
+        "record_path": str(path),
+        "record_path_relative": str(_STORE_DIR / f"{safe_ticket_id}.json").replace("\\", "/"),
+        "classification": classification,
+        "reconcilable": validation_error is not None and not blockers,
+        "validation_error": validation_error,
+        "expected_roadmap_authority_path": target.roadmap_authority_path,
+        "actual_roadmap_authority_path": record.get("roadmap_authority_path"),
+        "source_next_action_id": record.get("source_next_action_id"),
+        "bridge_SHA256": record.get("bridge_SHA256"),
+        "created_at": record.get("created_at"),
+        "ticket_spec_SHA256": record.get("ticket_spec_SHA256"),
+        "dependency_plan_SHA256": record.get("dependency_plan_SHA256"),
+        "work_packet_id": record.get("work_packet_id"),
+        "work_packet_SHA256": record.get("work_packet_SHA256"),
+        "generation_completed_structurally": _generation_completed_structurally(record),
+        "human_ticket_approval_present": record.get("human_ticket_approval_present"),
+        "Kanban_dispatch": record.get("Kanban_dispatch"),
+        "worker_execution": record.get("worker_execution"),
+        "Git_mutation": record.get("Git_mutation"),
+        "blockers": blockers,
+    }
+
+
+def reconcile_invalid_future_ticket_authority(
+    *,
+    ticket_id: str,
+    workflow: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Quarantine one invalid unaccepted future-ticket generation authority."""
+
+    safe_ticket_id = _safe_ticket_id(ticket_id)
+    if safe_ticket_id == CANONICAL_TICKET_ID:
+        raise TicketArchitectBridgeInputError("historical generated authority is not reconcilable")
+    with _STORE_LOCK:
+        path = generation_record_path_for_ticket(safe_ticket_id)
+        if not path.exists():
+            return _reconciliation_absent_result(safe_ticket_id, path)
+        record = _read_generation_record_unvalidated(path, ticket_id=safe_ticket_id)
+        target = _reconciliation_target_for_ticket(safe_ticket_id, workflow=workflow)
+        validation_error = _future_generation_validation_error(record, target=target)
+        if validation_error is None:
+            return {
+                "source_system": "pepper-ticket-architect-bridge",
+                "schema_version": TICKET_ARCHITECT_BRIDGE_SCHEMA_VERSION,
+                "ticket_id": safe_ticket_id,
+                "record_path": str(path),
+                "classification": "valid_current_generated_authority",
+                "reconciled": False,
+                "idempotent_replay": False,
+                "reason": "generated authority already validates against current canonical provenance",
+            }
+        blockers = _future_reconciliation_blockers(record, path=path)
+        if blockers:
+            raise TicketArchitectBridgeConflict(
+                "invalid future-ticket authority crossed guarded boundary: "
+                + "; ".join(blockers)
+            )
+        record_digest = _safe_digest(record.get("bridge_SHA256"))
+        quarantine_path = quarantined_generation_record_path(
+            ticket_id=safe_ticket_id,
+            bridge_sha256=record_digest,
+        )
+        history_path = reconciliation_history_path_for_ticket(safe_ticket_id)
+        existing_reconciliation = _load_existing_reconciliation(history_path, record_digest)
+        if path.exists():
+            quarantine_path.parent.mkdir(parents=True, exist_ok=True)
+            if not quarantine_path.exists():
+                tmp = quarantine_path.with_suffix(quarantine_path.suffix + ".tmp")
+                tmp.write_text(
+                    json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+                tmp.replace(quarantine_path)
+            if existing_reconciliation is None:
+                _append_reconciliation_history(
+                    history_path,
+                    record=record,
+                    target=target,
+                    validation_error=validation_error,
+                    quarantine_path=quarantine_path,
+                )
+            path.unlink()
+        return {
+            "source_system": "pepper-ticket-architect-bridge",
+            "schema_version": TICKET_ARCHITECT_BRIDGE_SCHEMA_VERSION,
+            "ticket_id": safe_ticket_id,
+            "classification": "unaccepted_partial_failed_future_ticket_authority",
+            "reconciled": True,
+            "idempotent_replay": existing_reconciliation is not None,
+            "record_path": str(path),
+            "history_path": str(history_path),
+            "quarantine_path": str(quarantine_path),
+            "bridge_SHA256": record_digest,
+            "validation_error": validation_error,
+            "expected_roadmap_authority_path": target.roadmap_authority_path,
+            "actual_roadmap_authority_path": record.get("roadmap_authority_path"),
+            "source_next_action_id": record.get("source_next_action_id"),
+            "ticket_generated": False,
+            "human_ticket_approval_present": False,
+            "execution_ready": False,
+            "worker_execution": False,
+            "Kanban_dispatch": False,
+            "Git_mutation": False,
+            "fresh_generation_required": True,
+        }
 
 
 def validate_p18_9_0_approval_decision_record(
@@ -674,6 +1101,11 @@ def generate_current_ticket(
     """Generate or replay the single canonical next governed ticket."""
 
     resolved_target = target or resolve_generation_target_from_workflow(workflow)
+    eligible_workflow = (
+        workflow
+        if target is not None
+        else _workflow_bound_to_generation_target(workflow, target=resolved_target)
+    )
     _validate_requested_identity(
         requested_project_id=requested_project_id,
         requested_ticket_id=requested_ticket_id,
@@ -681,13 +1113,16 @@ def generate_current_ticket(
         target=resolved_target,
     )
     with _STORE_LOCK:
-        existing = load_generation_record(ticket_id=resolved_target.ticket_id)
+        existing = load_generation_record(
+            ticket_id=resolved_target.ticket_id,
+            target=resolved_target,
+        )
         if existing is not None:
             return _operational_result(existing, idempotent_replay=True)
 
-        _validate_workflow_eligibility(workflow, target=resolved_target)
+        _validate_workflow_eligibility(eligible_workflow, target=resolved_target)
         try:
-            record = _build_generation_record(workflow, target=resolved_target)
+            record = _build_generation_record(eligible_workflow, target=resolved_target)
             validate_generation_record(record, target=resolved_target)
             _persist_generation_record(record)
         except TicketArchitectBridgeError:
@@ -697,6 +1132,34 @@ def generate_current_ticket(
                 f"{resolved_target.ticket_id} Ticket Architect bridge generation failed"
             ) from exc
     return _operational_result(record, idempotent_replay=False)
+
+
+def _workflow_bound_to_generation_target(
+    workflow: dict[str, Any],
+    *,
+    target: GovernedTicketGenerationTarget,
+) -> dict[str, Any]:
+    if not isinstance(workflow, dict):
+        return workflow
+    bounded = dict(workflow)
+    bounded["next_ticket_id"] = target.ticket_id
+    bounded["next_ticket_title"] = target.ticket_title
+    next_action = workflow.get("next_action")
+    label = (
+        str(next_action.get("label") or "").strip()
+        if isinstance(next_action, dict)
+        and next_action.get("id") == target.next_action_id
+        and next_action.get("target_ticket_id") == target.ticket_id
+        else ""
+    )
+    bounded["next_action"] = {
+        "id": target.next_action_id,
+        "label": label or f"Generate governed {target.ticket_id} {target.ticket_title}.",
+        "target_ticket_id": target.ticket_id,
+        "target_ticket_title": target.ticket_title,
+        "required_human_action": "ticket_generation",
+    }
+    return bounded
 
 
 def generated_record_to_workflow_overlay(record: dict[str, Any]) -> dict[str, Any]:
@@ -868,7 +1331,7 @@ def _build_generation_record(
         "ticket_id": target.ticket_id,
         "ticket_title": target.ticket_title,
         "canonical_roadmap_authority": target.canonical_roadmap_authority,
-        "roadmap_authority_path": target.roadmap_authority_path,
+        "roadmap_authority_path": canonical_roadmap_authority_path(target.roadmap_authority_path),
         "roadmap_authority_section": target.roadmap_authority_section,
         "idempotency_key": target.idempotency_key,
         "project_spec": project_spec.model_dump(mode="json"),
@@ -901,6 +1364,11 @@ def _build_generation_record(
         "Graphify_commands_executed": 0,
         "WorkPacket_compilation_count": 1,
     }
+    if target.ticket_id != CANONICAL_TICKET_ID:
+        record["predecessor_ticket_id"] = target.predecessor_ticket_id
+        record["canonical_next_ticket_authority"] = _canonical_next_ticket_authority_projection(
+            target
+        )
     record["bridge_SHA256"] = _record_digest(record)
     return record
 
@@ -1630,6 +2098,211 @@ def _persist_approval_decision_record(record: dict[str, Any]) -> None:
     tmp.replace(path)
 
 
+def _read_generation_record_unvalidated(path: Path, *, ticket_id: str) -> dict[str, Any]:
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise TicketArchitectBridgeConflict(
+            f"{ticket_id} generated authority record is unreadable"
+        ) from exc
+    if not isinstance(record, dict):
+        raise TicketArchitectBridgeConflict("generated authority record must be an object")
+    if _safe_ticket_id(record.get("ticket_id")) != ticket_id:
+        raise TicketArchitectBridgeConflict("generated authority ticket_id mismatch")
+    if record.get("bridge_SHA256") != _record_digest(record):
+        raise TicketArchitectBridgeConflict("generated authority record digest mismatch")
+    return record
+
+
+def _reconciliation_target_for_ticket(
+    ticket_id: str,
+    *,
+    workflow: dict[str, Any] | None,
+) -> GovernedTicketGenerationTarget:
+    state = dict(workflow or {})
+    state.setdefault("project_id", CANONICAL_PROJECT_ID)
+    state.setdefault("project_name", CANONICAL_PROJECT_NAME)
+    state.setdefault("macroproject_id", CANONICAL_MACROPROJECT_ID)
+    state.setdefault("macroproject_title", CANONICAL_MACROPROJECT_TITLE)
+    predecessor = _roadmap_predecessor_ticket_id(
+        ticket_id,
+        resolve_roadmap_ticket_authorities(),
+    )
+    if predecessor and not _closed_predecessor_ticket_id(state):
+        state["closed_predecessor_ticket_id"] = predecessor
+    state["next_ticket_id"] = ticket_id
+    state["next_action"] = {
+        "id": canonical_generation_action_id(ticket_id),
+        "target_ticket_id": ticket_id,
+    }
+    return resolve_generation_target_from_workflow(state)
+
+
+def _future_generation_validation_error(
+    record: dict[str, Any],
+    *,
+    target: GovernedTicketGenerationTarget,
+) -> str | None:
+    try:
+        validate_generation_record(record, target=target)
+    except TicketArchitectBridgeConflict as exc:
+        return str(exc) or "generated authority validation failed"
+    return None
+
+
+def _generation_completed_structurally(record: dict[str, Any]) -> bool:
+    required_fields = (
+        "ticket_spec_SHA256",
+        "dependency_plan_SHA256",
+        "lint_report_SHA256",
+        "work_packet_id",
+        "work_packet_SHA256",
+        "workflow_transition_result_SHA256",
+        "ticket_spec",
+        "dependency_plan",
+        "lint_report",
+        "work_packet_compilation_result",
+        "workflow_transition_result",
+    )
+    return all(record.get(field) is not None and record.get(field) != "" for field in required_fields)
+
+
+def _future_reconciliation_blockers(record: dict[str, Any], *, path: Path) -> list[str]:
+    blockers: list[str] = []
+    if record.get("human_ticket_approval_present") is True:
+        blockers.append("human ticket approval is recorded")
+    for field_name in (
+        "ticket_execution_authorized",
+        "WorkPacket_execution_authorized",
+        "runtime_execution_authorized",
+        "worker_execution",
+        "Kanban_dispatch",
+        "Git_mutation",
+    ):
+        if record.get(field_name) is not False:
+            blockers.append(f"{field_name} crossed boundary")
+    for field_name in (
+        "provider_dispatch_count",
+        "model_inference_count",
+        "Git_commands_executed",
+        "Docker_commands_executed",
+        "Graphify_commands_executed",
+    ):
+        if record.get(field_name) not in {0, None}:
+            blockers.append(f"{field_name} is nonzero")
+    blockers.extend(_downstream_authority_blockers(_safe_ticket_id(record.get("ticket_id")), path=path))
+    return blockers
+
+
+def _downstream_authority_blockers(ticket_id: str, *, path: Path) -> list[str]:
+    blockers: list[str] = []
+    root = get_hermes_home() / "agent-platform"
+    if not root.exists():
+        return blockers
+    current_path = path.resolve()
+    reconciliation_root = (get_hermes_home() / _RECONCILIATION_STORE_DIR).resolve()
+    for candidate in sorted(root.glob("**/*.json")):
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            continue
+        if resolved == current_path:
+            continue
+        try:
+            resolved.relative_to(reconciliation_root)
+            continue
+        except ValueError:
+            pass
+        try:
+            data = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if _authority_record_targets_ticket(data, ticket_id):
+            blockers.append(f"downstream authority exists at {candidate}")
+    return blockers
+
+
+def _authority_record_targets_ticket(value: object, ticket_id: str) -> bool:
+    return isinstance(value, dict) and any(
+        value.get(field_name) == ticket_id
+        for field_name in (
+            "ticket_id",
+            "approval_id",
+            "current_ticket_id",
+            "target_ticket_id",
+        )
+    )
+
+
+def _reconciliation_absent_result(ticket_id: str, path: Path) -> dict[str, Any]:
+    return {
+        "source_system": "pepper-ticket-architect-bridge",
+        "schema_version": TICKET_ARCHITECT_BRIDGE_SCHEMA_VERSION,
+        "ticket_id": ticket_id,
+        "record_path": str(path),
+        "classification": "no_future_ticket_generation_authority",
+        "reconcilable": False,
+        "reconciled": False,
+        "idempotent_replay": False,
+        "ticket_generated": False,
+    }
+
+
+def _append_reconciliation_history(
+    path: Path,
+    *,
+    record: dict[str, Any],
+    target: GovernedTicketGenerationTarget,
+    validation_error: str,
+    quarantine_path: Path,
+) -> dict[str, Any]:
+    entry = {
+        "schema_version": TICKET_ARCHITECT_BRIDGE_SCHEMA_VERSION,
+        "policy_id": "pepper-ticket-architect-stale-future-authority-reconciliation-v1",
+        "source_system": "pepper-ticket-architect-bridge",
+        "reconciled_at": _utc_now_iso(),
+        "classification": "unaccepted_partial_failed_future_ticket_authority",
+        "ticket_id": target.ticket_id,
+        "bridge_SHA256": record["bridge_SHA256"],
+        "validation_error": validation_error,
+        "expected_roadmap_authority_path": target.roadmap_authority_path,
+        "actual_roadmap_authority_path": record.get("roadmap_authority_path"),
+        "source_next_action_id": record.get("source_next_action_id"),
+        "quarantine_path": str(quarantine_path),
+        "quarantine_path_relative": str(
+            _RECONCILIATION_STORE_DIR / quarantine_path.name
+        ).replace("\\", "/"),
+        "ticket_generated": False,
+        "human_ticket_approval_present": False,
+        "execution_ready": False,
+        "worker_execution": False,
+        "Kanban_dispatch": False,
+        "Git_mutation": False,
+    }
+    entry["reconciliation_SHA256"] = _reconciliation_record_digest(entry)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n")
+    return entry
+
+
+def _load_existing_reconciliation(path: Path, bridge_sha256: str) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    for line in lines:
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(entry, dict) and entry.get("bridge_SHA256") == bridge_sha256:
+            return entry
+    return None
+
+
 def _operational_result(record: dict[str, Any], *, idempotent_replay: bool) -> dict[str, Any]:
     target = _target_from_record(record)
     authority = _authority_projection(record)
@@ -1716,6 +2389,26 @@ def _authority_projection(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _canonical_next_ticket_authority_projection(
+    target: GovernedTicketGenerationTarget,
+) -> dict[str, Any]:
+    return {
+        "project_id": target.project_id,
+        "project_name": target.project_name,
+        "macroproject_id": target.macroproject_id,
+        "macroproject_title": target.macroproject_title,
+        "ticket_id": target.ticket_id,
+        "ticket_title": target.ticket_title,
+        "next_action_id": target.next_action_id,
+        "canonical_roadmap_authority": target.canonical_roadmap_authority,
+        "roadmap_authority_path": canonical_roadmap_authority_path(target.roadmap_authority_path),
+        "roadmap_authority_section": target.roadmap_authority_section,
+        "predecessor_ticket_id": target.predecessor_ticket_id,
+        "readiness_state": target.readiness_state,
+        "authority_source": target.authority_source,
+    }
+
+
 def _approval_decision_projection(record: dict[str, Any]) -> dict[str, Any]:
     return {
         "authority_record": str(_STORE_DIR / _APPROVAL_DECISION_STORE_FILE).replace("\\", "/"),
@@ -1747,11 +2440,21 @@ def _require_identity(
         "ticket_title": target.ticket_title,
         "source_next_action_id": target.next_action_id,
         "canonical_roadmap_authority": target.canonical_roadmap_authority,
-        "roadmap_authority_path": target.roadmap_authority_path,
-        "roadmap_authority_section": target.roadmap_authority_section,
         "idempotency_key": target.idempotency_key,
         "generation_status": "awaiting_ticket_approval",
     }
+    if target.ticket_id == CANONICAL_TICKET_ID:
+        if record.get("roadmap_authority_path") not in {None, target.roadmap_authority_path}:
+            raise TicketArchitectBridgeConflict("generated authority roadmap_authority_path mismatch")
+        if record.get("roadmap_authority_section") not in {None, target.roadmap_authority_section}:
+            raise TicketArchitectBridgeConflict("generated authority roadmap_authority_section mismatch")
+    else:
+        expected["roadmap_authority_path"] = canonical_roadmap_authority_path(target.roadmap_authority_path)
+        expected["roadmap_authority_section"] = target.roadmap_authority_section
+        expected["predecessor_ticket_id"] = target.predecessor_ticket_id
+        expected["canonical_next_ticket_authority"] = _canonical_next_ticket_authority_projection(
+            target
+        )
     for key, value in expected.items():
         if record.get(key) != value:
             raise TicketArchitectBridgeConflict(f"generated authority {key} mismatch")
@@ -1813,6 +2516,22 @@ def _approval_decision_record_digest(record: dict[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _reconciliation_record_digest(record: dict[str, Any]) -> str:
+    payload = {
+        key: value for key, value in record.items() if key != "reconciliation_SHA256"
+    }
+    encoded = json.dumps(
+        {
+            "algorithm": TICKET_ARCHITECT_RECONCILIATION_DIGEST_ALGORITHM,
+            "record": _normalize(payload),
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def _normalize(value: object) -> object:
     if isinstance(value, BaseModel):
         return _normalize(value.model_dump(mode="json", warnings=False))
@@ -1861,12 +2580,22 @@ __all__ = (
     "TicketArchitectBridgeConflict",
     "TicketArchitectBridgeGenerationError",
     "generation_record_path",
+    "generation_record_path_for_ticket",
+    "reconciliation_history_path_for_ticket",
+    "quarantined_generation_record_path",
     "approval_decision_record_path",
+    "load_generation_record",
     "load_p18_9_0_generation_record",
     "load_p18_9_0_approval_decision_record",
+    "validate_generation_record",
     "validate_p18_9_0_generation_record",
     "validate_p18_9_0_approval_decision_record",
+    "inspect_invalid_future_ticket_authority",
+    "reconcile_invalid_future_ticket_authority",
     "generate_p18_9_0_ticket",
+    "generate_current_ticket",
+    "resolve_canonical_next_ticket",
+    "resolve_generation_target_from_workflow",
     "generated_record_to_workflow_overlay",
     "apply_p18_9_0_approval_decision",
 )

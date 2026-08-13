@@ -43,8 +43,10 @@ PEPPER_CURRENT_TICKET_ID = None
 PEPPER_CURRENT_TICKET_TITLE = None
 PEPPER_CURRENT_GAP_ID = None
 PEPPER_CURRENT_GAP_TITLE = None
-PEPPER_NEXT_TICKET_ID = "P18.9.0"
-PEPPER_NEXT_TICKET_TITLE = "Product Inventory, IA Decision, and Acceptance Contract"
+PEPPER_BOOTSTRAP_NEXT_TICKET_ID = "P18.9.0"
+PEPPER_BOOTSTRAP_NEXT_TICKET_TITLE = "Product Inventory, IA Decision, and Acceptance Contract"
+PEPPER_NEXT_TICKET_ID = PEPPER_BOOTSTRAP_NEXT_TICKET_ID
+PEPPER_NEXT_TICKET_TITLE = PEPPER_BOOTSTRAP_NEXT_TICKET_TITLE
 PEPPER_WORKFLOW_CONTEXT_SOURCE_SYSTEM = "pepper-lead-agent-governed-context"
 PEPPER_CURRENT_EXECUTION_START_NEXT_ACTION_ID = (
     "START_P18_9_0_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION"
@@ -111,10 +113,6 @@ PEPPER_REVIEW_HUMAN_ACCEPTANCE_READY_MARKER = (
 )
 PEPPER_CURRENT_REVIEW_ACCEPTANCE_TEXT = (
     "Acepto explícitamente la review de P18.9.0 y el resultado preparado para aceptación humana."
-)
-PEPPER_REVIEW_ACCEPTANCE_NEXT_TICKET_ID = "P18.9.1"
-PEPPER_REVIEW_ACCEPTANCE_NEXT_ACTION_ID = (
-    "GENERATE_P18_9_1_REQUIRES_SEPARATE_HUMAN_ACTION"
 )
 PEPPER_CURRENT_RETRY_START_AUTHORIZATION_TEXTS = frozenset({
     "Autorizo explícitamente el retry de P18.9.0.",
@@ -1470,6 +1468,32 @@ def generate_current_governed_ticket(
         requested_project_id=project_id,
         requested_ticket_id=ticket_id,
         requested_next_action_id=next_action_id,
+    )
+
+
+def reconcile_invalid_current_generation_authority(
+    *,
+    project_id: str | None = None,
+    ticket_id: str | None = None,
+) -> dict[str, Any]:
+    """Reconcile invalid unaccepted future-ticket authority without generation."""
+
+    from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
+        reconcile_invalid_future_ticket_authority,
+        resolve_canonical_next_ticket as bridge_resolve_canonical_next_ticket,
+    )
+
+    workflow = build_workflow_control_snapshot()
+    authority = bridge_resolve_canonical_next_ticket(workflow)
+    if project_id not in {None, authority.project_id}:
+        raise ProductRuntimeConflict(f"current generation authority is bounded to {authority.project_id}")
+    if ticket_id not in {None, authority.ticket_id}:
+        raise ProductRuntimeConflict(
+            f"current generation authority is bounded to {authority.ticket_id}"
+        )
+    return reconcile_invalid_future_ticket_authority(
+        ticket_id=authority.ticket_id,
+        workflow=workflow,
     )
 
 
@@ -4992,28 +5016,38 @@ def _review_prepare_authority_projection(record: dict[str, Any]) -> dict[str, An
 
 
 def _p18_9_next_ticket_authority() -> dict[str, Any]:
-    authority_path = "2_products/pepper-agent/docs/agent-platform/workflow_migration_closure.md"
-    path = Path(__file__).resolve().parents[2] / "docs" / "agent-platform" / "workflow_migration_closure.md"
-    title = "Pepper Design System"
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        text = ""
-    for line in text.splitlines():
-        cells = [cell.strip().strip("`") for cell in line.strip().strip("|").split("|")]
-        if len(cells) >= 2 and cells[0] == PEPPER_REVIEW_ACCEPTANCE_NEXT_TICKET_ID:
-            title = cells[1]
-            break
+    from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
+        resolve_canonical_next_ticket,
+    )
+
+    authority = resolve_canonical_next_ticket({
+        "project_id": PEPPER_GOVERNED_PROJECT_ID,
+        "project_name": PEPPER_GOVERNED_PROJECT_NAME,
+        "macroproject_id": PEPPER_GOVERNED_MACROPROJECT_ID,
+        "macroproject_title": PEPPER_GOVERNED_MACROPROJECT_TITLE,
+        "closed_predecessor_ticket_id": PEPPER_BOOTSTRAP_NEXT_TICKET_ID,
+    })
     return {
-        "ticket_id": PEPPER_REVIEW_ACCEPTANCE_NEXT_TICKET_ID,
-        "ticket_title": _safe_text(title, limit=200),
-        "authority_path": authority_path,
-        "authority_section": "Advisory decomposition only, not implementation tickets",
+        "ticket_id": authority.ticket_id,
+        "ticket_title": _safe_text(authority.ticket_title, limit=200),
+        "authority_path": authority.roadmap_authority_path,
+        "authority_section": authority.roadmap_authority_section,
         "authority_type": "current_repository_roadmap_authority",
         "auto_generated": False,
         "execution_authorized": False,
-        "next_action_id": PEPPER_REVIEW_ACCEPTANCE_NEXT_ACTION_ID,
+        "next_action_id": authority.next_action_id,
     }
+
+
+def resolve_canonical_next_ticket(workflow: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Resolve Pepper's canonical next governed ticket for runtime surfaces."""
+
+    from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
+        resolve_canonical_next_ticket as bridge_resolve_canonical_next_ticket,
+    )
+
+    source = workflow if workflow is not None else build_workflow_control_snapshot()
+    return bridge_resolve_canonical_next_ticket(source).asdict()
 
 
 def _current_next_ticket_generation_target(workflow: dict[str, Any]) -> dict[str, Any]:
@@ -5495,7 +5529,7 @@ def _build_review_acceptance_record(
         "auto_retry": False,
         "auto_rollback": False,
         "next_action": {
-            "id": PEPPER_REVIEW_ACCEPTANCE_NEXT_ACTION_ID,
+            "id": next_ticket["next_action_id"],
             "label": (
                 f"P18.9.0 is accepted and closed; {next_ticket['ticket_id']} "
                 f"{next_ticket['ticket_title']} may be generated only by a separate governed action."
@@ -6451,14 +6485,21 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
             "evidence": "docs/agent-platform/workflow_migration_closure.md",
         },
     ]
+    canonical_next = resolve_canonical_next_ticket({
+        "project_id": PEPPER_GOVERNED_PROJECT_ID,
+        "project_name": PEPPER_GOVERNED_PROJECT_NAME,
+        "macroproject_id": PEPPER_GOVERNED_MACROPROJECT_ID,
+        "macroproject_title": PEPPER_GOVERNED_MACROPROJECT_TITLE,
+    })
     next_action = {
-        "id": "GENERATE_P18_9_0",
+        "id": canonical_next["next_action_id"],
         "label": (
-            "Generate governed P18.9.0 Product Inventory, IA Decision, and "
-            "Acceptance Contract before execution."
+            f"Generate governed {canonical_next['ticket_id']} "
+            f"{canonical_next['ticket_title']} before execution."
         ),
-        "target_ticket_id": PEPPER_NEXT_TICKET_ID,
-        "target_ticket_title": PEPPER_NEXT_TICKET_TITLE,
+        "target_ticket_id": canonical_next["ticket_id"],
+        "target_ticket_title": canonical_next["ticket_title"],
+        "required_human_action": "ticket_generation",
     }
     observed_at = _utc_now_iso()
     snapshot = {
@@ -6477,15 +6518,16 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
         "current_ticket_title": PEPPER_CURRENT_TICKET_TITLE,
         "current_gap_id": PEPPER_CURRENT_GAP_ID,
         "current_gap_title": PEPPER_CURRENT_GAP_TITLE,
-        "next_ticket_id": PEPPER_NEXT_TICKET_ID,
-        "next_ticket_title": PEPPER_NEXT_TICKET_TITLE,
+        "next_ticket_id": canonical_next["ticket_id"],
+        "next_ticket_title": canonical_next["ticket_title"],
+        "canonical_next_ticket_authority": canonical_next,
         "mode": "controlled_default",
         "readiness": "planning_approved_or_intake_ready",
         "workflow_state": "P18.9-PEPPER-PRODUCT-PERSONALIZATION-INTAKE-READY",
         "workflow_status": "planning_approved_or_intake_ready",
         "approval_state": approval_summary["approval_state"],
         "pending_approval_count": approval_summary["pending_approval_count"],
-        "queue_state": "ready_to_generate_P18_9_0",
+        "queue_state": f"ready_to_generate_{canonical_next['ticket_id'].replace('.', '_')}",
         "execution_state": execution_summary["execution_state"],
         "active_execution_count": execution_summary["active_execution_count"],
         "validation_state": "not_started_no_ticket_generated",
@@ -6546,6 +6588,29 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
         snapshot["workflow_status"] = "blocked_invalid_generated_ticket_authority"
         snapshot["queue_state"] = "blocked_invalid_generated_ticket_authority"
         snapshot["ready_verdict"] = "p18_9_0_generation_authority_invalid"
+    if (
+        generation_blocker is None
+        and snapshot.get("current_ticket_id") in {None, ""}
+        and snapshot.get("next_ticket_ready") is not False
+    ):
+        canonical_next = resolve_canonical_next_ticket(snapshot)
+        snapshot["next_ticket_id"] = canonical_next["ticket_id"]
+        snapshot["next_ticket_title"] = canonical_next["ticket_title"]
+        snapshot["next_action"] = {
+            "id": canonical_next["next_action_id"],
+            "label": (
+                f"Generate governed {canonical_next['ticket_id']} "
+                f"{canonical_next['ticket_title']}."
+            ),
+            "target_ticket_id": canonical_next["ticket_id"],
+            "target_ticket_title": canonical_next["ticket_title"],
+            "required_human_action": "ticket_generation",
+        }
+        if snapshot.get("P18_9_0_closed") is not True:
+            snapshot["queue_state"] = f"ready_to_generate_{canonical_next['ticket_id'].replace('.', '_')}"
+        snapshot["canonical_next_ticket_authority"] = canonical_next
+    else:
+        snapshot["canonical_next_ticket_authority"] = None
     snapshot["blocker_count"] = len(remaining_blockers)
     snapshot["next_action_label"] = _next_action_label(snapshot.get("next_action"))
     return snapshot
@@ -6563,6 +6628,8 @@ def _workflow_ticket(workflow: dict[str, Any]) -> dict[str, Any]:
         "available": bool(ticket_id),
         "current_ticket_id": ticket_id,
         "current_ticket_title": ticket_title,
+        "next_ticket_id": _workflow_value(workflow, "next_ticket_id"),
+        "next_ticket_title": _workflow_value(workflow, "next_ticket_title"),
         "current_gap_id": _workflow_value(workflow, "current_gap_id"),
         "current_gap_title": _workflow_value(workflow, "current_gap_title"),
         "message": "active governed ticket" if ticket_id else "no active governed ticket",

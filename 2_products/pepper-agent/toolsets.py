@@ -243,6 +243,7 @@ TOOLSETS = {
             "get_execution_status",
             "get_review_status",
             "get_next_action",
+            "reconcile_invalid_current_generation_authority",
             "generate_current_ticket",
             "prepare_current_ticket_execution",
             "start_current_ticket_execution",

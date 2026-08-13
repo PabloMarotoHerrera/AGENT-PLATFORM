@@ -66,6 +66,35 @@ def _next_ticket_workflow(**overrides):
     return data
 
 
+def _synthetic_roadmap_items() -> tuple[dict[str, object], ...]:
+    return (
+        {
+            "ticket_id": "TEST.1",
+            "ticket_title": "Synthetic Predecessor",
+            "authority_path": "synthetic-roadmap.md",
+            "authority_section": "Synthetic roadmap",
+            "authority_type": "synthetic_test_roadmap",
+            "next_action_id": "GENERATE_TEST_1_REQUIRES_SEPARATE_HUMAN_ACTION",
+        },
+        {
+            "ticket_id": "TEST.2",
+            "ticket_title": "Synthetic Successor",
+            "authority_path": "synthetic-roadmap.md",
+            "authority_section": "Synthetic roadmap",
+            "authority_type": "synthetic_test_roadmap",
+            "next_action_id": "GENERATE_TEST_2_REQUIRES_SEPARATE_HUMAN_ACTION",
+        },
+        {
+            "ticket_id": "TEST.3",
+            "ticket_title": "Synthetic Future",
+            "authority_path": "synthetic-roadmap.md",
+            "authority_section": "Synthetic roadmap",
+            "authority_type": "synthetic_test_roadmap",
+            "next_action_id": "GENERATE_TEST_3_REQUIRES_SEPARATE_HUMAN_ACTION",
+        },
+    )
+
+
 @pytest.fixture
 def bridge_home(tmp_path, monkeypatch):
     home = tmp_path / "hermes-home"
@@ -78,6 +107,23 @@ def _chat_tool_result(name: str, args: dict | None = None) -> dict:
     from model_tools import handle_function_call
 
     return json.loads(handle_function_call(name, args or {}))
+
+
+def _write_generation_record(record: dict) -> None:
+    bridge.generation_record_path_for_ticket(record["ticket_id"]).write_text(
+        json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _make_stale_future_generation_record() -> dict:
+    bridge.generate_current_ticket(workflow=_next_ticket_workflow())
+    record = bridge.load_generation_record(ticket_id="P18.9.1")
+    assert record is not None
+    record["roadmap_authority_path"] = "2_products/pepper-agent/docs/agent-platform/stale_roadmap.md"
+    record["bridge_SHA256"] = bridge._record_digest(record)
+    _write_generation_record(record)
+    return record
 
 
 def test_generate_p18_9_0_bridge_success_and_persists(bridge_home) -> None:
@@ -147,8 +193,27 @@ def test_stale_workflow_title_does_not_override_canonical_roadmap(bridge_home) -
     assert record["canonical_roadmap_authority"] == "human-approved-p18.9-roadmap"
 
 
+def test_historical_p18_9_0_record_without_top_level_roadmap_path_remains_valid(bridge_home) -> None:
+    bridge.generate_p18_9_0_ticket(workflow=_workflow())
+    record = bridge.load_p18_9_0_generation_record()
+    assert record is not None
+
+    record.pop("roadmap_authority_path", None)
+    record.pop("roadmap_authority_section", None)
+    record["bridge_SHA256"] = bridge._record_digest(record)
+    _write_generation_record(record)
+
+    validated = bridge.load_p18_9_0_generation_record()
+
+    assert validated is not None
+    assert validated["ticket_id"] == "P18.9.0"
+    assert validated["canonical_roadmap_authority"] == bridge.CANONICAL_ROADMAP_AUTHORITY
+
+
 def test_generic_generation_resolves_canonical_next_ticket_from_roadmap(bridge_home) -> None:
-    result = bridge.generate_current_ticket(workflow=_next_ticket_workflow())
+    workflow = _next_ticket_workflow()
+    authority = bridge.resolve_canonical_next_ticket(workflow)
+    result = bridge.generate_current_ticket(workflow=workflow)
     record = bridge.load_generation_record(ticket_id="P18.9.1")
 
     assert result["idempotent_replay"] is False
@@ -164,6 +229,8 @@ def test_generic_generation_resolves_canonical_next_ticket_from_roadmap(bridge_h
     assert result["Git_mutation"] is False
     assert bridge.generation_record_path_for_ticket("P18.9.1").exists()
     assert record is not None
+    assert record["predecessor_ticket_id"] == "P18.9.0"
+    assert record["canonical_next_ticket_authority"] == authority.asdict()
     assert record["ticket_spec"]["ticket_id"] == "P18.9.1"
     assert record["ticket_spec"]["title"] == "Pepper Design System"
     assert record["dependency_plan"]["ticket_ids"] == ["P18.9.1"]
@@ -171,6 +238,308 @@ def test_generic_generation_resolves_canonical_next_ticket_from_roadmap(bridge_h
     assert record["work_packet_compilation_result"]["work_packet"]["execution_ready"] is False
     assert record["WorkPacket_compilation_count"] == 1
     assert record["workflow_transition_result"]["transition"]["transition_id"] == "GWT-002"
+
+
+def test_future_generation_rejects_stale_roadmap_authority_record(bridge_home) -> None:
+    bridge.generate_current_ticket(workflow=_next_ticket_workflow())
+    record = bridge.load_generation_record(ticket_id="P18.9.1")
+    assert record is not None
+
+    record["roadmap_authority_path"] = "2_products/pepper-agent/docs/agent-platform/stale_roadmap.md"
+    record["bridge_SHA256"] = bridge._record_digest(record)
+    bridge.generation_record_path_for_ticket("P18.9.1").write_text(
+        json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(bridge.TicketArchitectBridgeConflict, match="roadmap_authority_path"):
+        bridge.load_generation_record(ticket_id="P18.9.1")
+    with pytest.raises(bridge.TicketArchitectBridgeConflict, match="roadmap_authority_path"):
+        bridge.generate_current_ticket(workflow=_next_ticket_workflow())
+
+    record["roadmap_authority_path"] = bridge.CANONICAL_ROADMAP_AUTHORITY_PATH
+    record["canonical_next_ticket_authority"]["roadmap_authority_path"] = (
+        "2_products/pepper-agent/docs/agent-platform/stale_roadmap.md"
+    )
+    record["bridge_SHA256"] = bridge._record_digest(record)
+    bridge.generation_record_path_for_ticket("P18.9.1").write_text(
+        json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(bridge.TicketArchitectBridgeConflict, match="canonical_next_ticket_authority"):
+        bridge.load_generation_record(ticket_id="P18.9.1")
+
+
+def test_future_generation_rejects_stale_source_next_action_record(bridge_home) -> None:
+    bridge.generate_current_ticket(workflow=_next_ticket_workflow())
+    record = bridge.load_generation_record(ticket_id="P18.9.1")
+    assert record is not None
+
+    record["source_next_action_id"] = "GENERATE_P18_9_1_STALE_ACTION"
+    record["idempotency_key"] = "PEPPER:P18.9:P18.9.1:GENERATE_P18_9_1_STALE_ACTION"
+    record["bridge_SHA256"] = bridge._record_digest(record)
+    bridge.generation_record_path_for_ticket("P18.9.1").write_text(
+        json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(bridge.TicketArchitectBridgeConflict, match="source_next_action_id"):
+        bridge.load_generation_record(ticket_id="P18.9.1")
+
+
+def test_stale_future_authority_can_be_reconciled_without_generation(bridge_home, monkeypatch) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    stale = _make_stale_future_generation_record()
+    before = bridge.inspect_invalid_future_ticket_authority(ticket_id="P18.9.1")
+
+    assert before["classification"] == "unaccepted_partial_failed_future_ticket_authority"
+    assert before["reconcilable"] is True
+    assert before["actual_roadmap_authority_path"].endswith("stale_roadmap.md")
+    assert before["expected_roadmap_authority_path"] == bridge.CANONICAL_ROADMAP_AUTHORITY_PATH
+    assert before["ticket_spec_SHA256"] == stale["ticket_spec_SHA256"]
+    assert before["work_packet_id"] == stale["work_packet_id"]
+    assert before["generation_completed_structurally"] is True
+
+    result = bridge.reconcile_invalid_future_ticket_authority(ticket_id="P18.9.1")
+    workflow = _next_ticket_workflow()
+    monkeypatch.setattr(pr, "build_workflow_control_snapshot", lambda: workflow)
+    workflow_tool = _chat_tool_result("get_workflow_control")
+    next_action_tool = _chat_tool_result("get_next_action")
+
+    assert result["reconciled"] is True
+    assert result["ticket_generated"] is False
+    assert result["fresh_generation_required"] is True
+    assert bridge.load_generation_record(ticket_id="P18.9.1") is None
+    assert not bridge.generation_record_path_for_ticket("P18.9.1").exists()
+    quarantine = bridge.quarantined_generation_record_path(
+        ticket_id="P18.9.1",
+        bridge_sha256=stale["bridge_SHA256"],
+    )
+    assert quarantine.exists()
+    retained = json.loads(quarantine.read_text(encoding="utf-8"))
+    assert retained["bridge_SHA256"] == stale["bridge_SHA256"]
+    history_lines = bridge.reconciliation_history_path_for_ticket("P18.9.1").read_text(
+        encoding="utf-8"
+    ).splitlines()
+    assert len(history_lines) == 1
+    history = json.loads(history_lines[0])
+    assert history["bridge_SHA256"] == stale["bridge_SHA256"]
+    assert history["actual_roadmap_authority_path"].endswith("stale_roadmap.md")
+    assert workflow_tool["next_ticket_id"] == "P18.9.1"
+    assert workflow_tool["next_ticket_title"] == "Pepper Design System"
+    assert workflow_tool["current_ticket_id"] is None
+    assert next_action_tool["next_action"]["id"] == "GENERATE_P18_9_1_REQUIRES_SEPARATE_HUMAN_ACTION"
+    assert next_action_tool["next_ticket_id"] == "P18.9.1"
+
+
+def test_runtime_and_chat_tool_reconcile_stale_current_generation_authority(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    stale = _make_stale_future_generation_record()
+    workflow = _next_ticket_workflow()
+    monkeypatch.setattr(pr, "build_workflow_control_snapshot", lambda: workflow)
+
+    result = _chat_tool_result(
+        "reconcile_invalid_current_generation_authority",
+        {
+            "human_request_text": "Reconcile stale generated authority for P18.9.1.",
+            "project_id": "PEPPER",
+            "ticket_id": "P18.9.1",
+        },
+    )
+
+    assert result["success"] is True
+    assert result["source_tool"] == "reconcile_invalid_current_generation_authority"
+    assert result["reconciled"] is True
+    assert result["bridge_SHA256"] == stale["bridge_SHA256"]
+    assert result["ticket_generated"] is False
+    assert result["current_ticket_id"] is None
+    assert result["next_ticket_id"] == "P18.9.1"
+    assert result["next_ticket_title"] == "Pepper Design System"
+    assert result["next_action"]["id"] == "GENERATE_P18_9_1_REQUIRES_SEPARATE_HUMAN_ACTION"
+    assert bridge.load_generation_record(ticket_id="P18.9.1") is None
+
+
+def test_stale_future_authority_reconciliation_is_idempotent(bridge_home) -> None:
+    stale = _make_stale_future_generation_record()
+    first = bridge.reconcile_invalid_future_ticket_authority(ticket_id="P18.9.1")
+    second = bridge.reconcile_invalid_future_ticket_authority(ticket_id="P18.9.1")
+    history_lines = bridge.reconciliation_history_path_for_ticket("P18.9.1").read_text(
+        encoding="utf-8"
+    ).splitlines()
+
+    assert first["reconciled"] is True
+    assert second["classification"] == "no_future_ticket_generation_authority"
+    assert second["idempotent_replay"] is False
+    assert len(history_lines) == 1
+    assert bridge.quarantined_generation_record_path(
+        ticket_id="P18.9.1",
+        bridge_sha256=stale["bridge_SHA256"],
+    ).exists()
+
+
+@pytest.mark.parametrize(
+    "mutation, message",
+    [
+        (lambda record: record.__setitem__("human_ticket_approval_present", True), "approval"),
+        (lambda record: record.__setitem__("Kanban_dispatch", True), "Kanban_dispatch"),
+        (lambda record: record.__setitem__("worker_execution", True), "worker_execution"),
+    ],
+)
+def test_stale_future_authority_with_later_boundary_cannot_reconcile(
+    bridge_home,
+    mutation,
+    message,
+) -> None:
+    record = _make_stale_future_generation_record()
+    mutation(record)
+    record["bridge_SHA256"] = bridge._record_digest(record)
+    _write_generation_record(record)
+
+    with pytest.raises(bridge.TicketArchitectBridgeConflict, match=message):
+        bridge.reconcile_invalid_future_ticket_authority(ticket_id="P18.9.1")
+
+    assert bridge.generation_record_path_for_ticket("P18.9.1").exists()
+    assert not bridge.reconciliation_history_path_for_ticket("P18.9.1").exists()
+
+
+def test_stale_future_authority_with_downstream_projection_cannot_reconcile(bridge_home) -> None:
+    _make_stale_future_generation_record()
+    projection_path = bridge_home / "agent-platform" / "pepper-future-projection" / "P18.9.1.projection.json"
+    projection_path.parent.mkdir(parents=True)
+    projection_path.write_text(
+        json.dumps({"ticket_id": "P18.9.1", "Kanban_dispatch": False}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(bridge.TicketArchitectBridgeConflict, match="downstream authority"):
+        bridge.reconcile_invalid_future_ticket_authority(ticket_id="P18.9.1")
+
+    assert bridge.generation_record_path_for_ticket("P18.9.1").exists()
+
+
+def test_valid_future_authority_and_historical_p18_9_0_are_not_reconciled(bridge_home) -> None:
+    bridge.generate_current_ticket(workflow=_next_ticket_workflow())
+    valid = bridge.reconcile_invalid_future_ticket_authority(ticket_id="P18.9.1")
+
+    assert valid["classification"] == "valid_current_generated_authority"
+    assert valid["reconciled"] is False
+    assert bridge.load_generation_record(ticket_id="P18.9.1") is not None
+    assert not bridge.reconciliation_history_path_for_ticket("P18.9.1").exists()
+
+    bridge.generate_p18_9_0_ticket(workflow=_workflow())
+    with pytest.raises(bridge.TicketArchitectBridgeInputError, match="historical"):
+        bridge.reconcile_invalid_future_ticket_authority(ticket_id="P18.9.0")
+    assert bridge.load_p18_9_0_generation_record() is not None
+
+
+def test_closed_p18_9_0_resolves_p18_9_1_across_runtime_and_generation(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    monkeypatch.setattr(
+        pr,
+        "_p18_9_0_generation_overlay",
+        lambda: (
+            {
+                "current_ticket_id": None,
+                "current_ticket_title": None,
+                "next_ticket_id": "P18.9.1",
+                "next_ticket_title": "Pepper Design System",
+                "readiness": "p18_9_0_completed_next_ticket_ready",
+                "workflow_state": "P18.9.0-COMPLETED",
+                "workflow_status": "completed",
+                "queue_state": "p18_9_0_closed_next_ticket_ready",
+                "validation_state": "review_accepted",
+                "review_state": "accepted",
+                "recovery_state": "not_required",
+                "git_handoff_state": "not_required_for_ticket_result",
+                "review_acceptance_authority": {"ticket_closed": True},
+                "P18_9_0_closed": True,
+                "P18_9_0_completed": True,
+                "next_ticket_ready": True,
+                "next_ticket_generated": False,
+                "human_acceptance_recorded": True,
+                "next_action": {
+                    "id": "GENERATE_P18_9_1_REQUIRES_SEPARATE_HUMAN_ACTION",
+                    "target_ticket_id": "P18.9.1",
+                    "target_ticket_title": "Pepper Design System",
+                },
+            },
+            None,
+        ),
+    )
+
+    workflow = pr.build_workflow_control_snapshot()
+    runtime_authority = pr.resolve_canonical_next_ticket(workflow)
+    bridge_authority = bridge.resolve_canonical_next_ticket(workflow)
+    workflow_tool = _chat_tool_result("get_workflow_control")
+    next_action_tool = _chat_tool_result("get_next_action")
+    generated = pr.generate_current_governed_ticket(
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+        next_action_id="GENERATE_P18_9_1_REQUIRES_SEPARATE_HUMAN_ACTION",
+    )
+
+    assert workflow["next_ticket_id"] == "P18.9.1"
+    assert workflow["next_ticket_title"] == "Pepper Design System"
+    assert workflow["next_action"]["id"] == "GENERATE_P18_9_1_REQUIRES_SEPARATE_HUMAN_ACTION"
+    assert workflow_tool["workflow_control"]["next_ticket_id"] == workflow["next_ticket_id"]
+    assert workflow_tool["workflow_control"]["next_ticket_title"] == workflow["next_ticket_title"]
+    assert workflow_tool["next_ticket_id"] == workflow["next_ticket_id"]
+    assert workflow_tool["next_ticket_title"] == workflow["next_ticket_title"]
+    assert workflow_tool["next_action"]["id"] == workflow["next_action"]["id"]
+    assert next_action_tool["next_ticket_id"] == workflow["next_ticket_id"]
+    assert next_action_tool["next_ticket_title"] == workflow["next_ticket_title"]
+    assert next_action_tool["next_action"]["id"] == workflow["next_action"]["id"]
+    assert next_action_tool["next_action"]["target_ticket_id"] == workflow["next_ticket_id"]
+    assert next_action_tool["next_action"]["target_ticket_title"] == workflow["next_ticket_title"]
+    assert runtime_authority["ticket_id"] == workflow["next_ticket_id"]
+    assert runtime_authority["ticket_title"] == workflow["next_ticket_title"]
+    assert runtime_authority["next_action_id"] == workflow["next_action"]["id"]
+    assert bridge_authority.ticket_id == workflow["next_ticket_id"]
+    assert bridge_authority.ticket_title == workflow["next_ticket_title"]
+    assert bridge_authority.next_action_id == workflow["next_action"]["id"]
+    assert generated["ticket_id"] == workflow["next_ticket_id"]
+    assert generated["ticket_title"] == workflow["next_ticket_title"]
+    assert generated["next_action"]["id"] == "APPROVE_P18_9_1"
+    assert generated["human_ticket_approval_present"] is False
+    assert generated["worker_execution"] is False
+    assert generated["Kanban_dispatch"] is False
+    assert generated["Git_mutation"] is False
+
+
+def test_stale_bootstrap_p18_9_0_cannot_override_closed_workflow_state(bridge_home) -> None:
+    stale = _next_ticket_workflow(
+        next_ticket_id="P18.9.0",
+        next_ticket_title=bridge.CANONICAL_TICKET_TITLE,
+        next_action={
+            "id": "GENERATE_P18_9_0",
+            "target_ticket_id": "P18.9.0",
+            "target_ticket_title": bridge.CANONICAL_TICKET_TITLE,
+        },
+    )
+
+    authority = bridge.resolve_canonical_next_ticket(stale)
+    accepted = bridge.generate_current_ticket(
+        workflow=stale,
+        requested_ticket_id="P18.9.1",
+        requested_next_action_id="GENERATE_P18_9_1_REQUIRES_SEPARATE_HUMAN_ACTION",
+    )
+
+    assert authority.ticket_id == "P18.9.1"
+    assert authority.ticket_title == "Pepper Design System"
+    assert authority.next_action_id == "GENERATE_P18_9_1_REQUIRES_SEPARATE_HUMAN_ACTION"
+    assert authority.predecessor_ticket_id == "P18.9.0"
+    assert accepted["ticket_id"] == "P18.9.1"
+    assert bridge.load_generation_record(ticket_id="P18.9.0") is None
 
 
 def test_generic_generation_rejects_wrong_requested_ticket_and_wrong_next_action(bridge_home) -> None:
@@ -189,10 +558,75 @@ def test_generic_generation_rejects_wrong_requested_ticket_and_wrong_next_action
     assert bridge.load_generation_record(ticket_id="P18.9.1") is None
 
 
+def test_p18_9_2_request_fails_while_p18_9_1_is_canonical(bridge_home) -> None:
+    with pytest.raises(bridge.TicketArchitectBridgeInputError, match="canonical next ticket P18.9.1"):
+        bridge.generate_current_ticket(
+            workflow=_next_ticket_workflow(),
+            requested_ticket_id="P18.9.2",
+        )
+
+    assert bridge.load_generation_record(ticket_id="P18.9.1") is None
+    assert bridge.load_generation_record(ticket_id="P18.9.2") is None
+
+
+def test_bootstrap_no_history_resolves_first_roadmap_ticket(bridge_home) -> None:
+    authority = bridge.resolve_canonical_next_ticket(_workflow())
+    result = bridge.generate_current_ticket(
+        workflow=_workflow(),
+        requested_ticket_id="P18.9.0",
+        requested_next_action_id="GENERATE_P18_9_0",
+    )
+
+    assert authority.ticket_id == "P18.9.0"
+    assert authority.ticket_title == bridge.CANONICAL_TICKET_TITLE
+    assert authority.next_action_id == "GENERATE_P18_9_0"
+    assert authority.authority_source == "workflow_control_next_ticket"
+    assert result["ticket_id"] == "P18.9.0"
+
+
+def test_synthetic_successor_fixture_proves_generic_next_ticket_authority() -> None:
+    workflow = {
+        "project_id": "PEPPER",
+        "project_name": "Pepper",
+        "macroproject_id": "PTEST",
+        "macroproject_title": "Synthetic Macroproject",
+        "current_ticket_id": None,
+        "next_ticket_id": "TEST.1",
+        "workflow_status": "completed",
+        "closed_predecessor_ticket_id": "TEST.1",
+        "next_action": {
+            "id": "GENERATE_TEST_1_REQUIRES_SEPARATE_HUMAN_ACTION",
+            "target_ticket_id": "TEST.1",
+        },
+    }
+
+    authority = bridge.resolve_canonical_next_ticket(
+        workflow,
+        roadmap_items=_synthetic_roadmap_items(),
+    )
+
+    assert authority.ticket_id == "TEST.2"
+    assert authority.ticket_title == "Synthetic Successor"
+    assert authority.next_action_id == "GENERATE_TEST_2_REQUIRES_SEPARATE_HUMAN_ACTION"
+    bridge._validate_requested_identity(
+        requested_project_id="PEPPER",
+        requested_ticket_id="TEST.2",
+        requested_next_action_id="GENERATE_TEST_2_REQUIRES_SEPARATE_HUMAN_ACTION",
+        target=authority.generation_target(),
+    )
+    with pytest.raises(bridge.TicketArchitectBridgeInputError, match="canonical next ticket TEST.2"):
+        bridge._validate_requested_identity(
+            requested_project_id="PEPPER",
+            requested_ticket_id="TEST.3",
+            requested_next_action_id="GENERATE_TEST_3_REQUIRES_SEPARATE_HUMAN_ACTION",
+            target=authority.generation_target(),
+        )
+
+
 @pytest.mark.parametrize(
     "workflow, message",
     [
-        (_next_ticket_workflow(next_ticket_id=None), "no next governed ticket"),
+        (_workflow(next_ticket_id=None, current_ticket_id="P18.9.0"), "no next governed ticket"),
         (_next_ticket_workflow(current_ticket_id="P18.9.1"), "requires no active ticket"),
         (_next_ticket_workflow(next_action={"id": "APPROVE_P18_9_1", "target_ticket_id": "P18.9.1"}), "generation action"),
         (_next_ticket_workflow(next_action={"id": "GENERATE_P18_9_1_REQUIRES_SEPARATE_HUMAN_ACTION", "target_ticket_id": "P18.9.2"}), "target"),
