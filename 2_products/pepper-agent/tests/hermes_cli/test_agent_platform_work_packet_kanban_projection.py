@@ -344,6 +344,53 @@ def _project_via_runtime():
     )
 
 
+def test_current_ticket_lifecycle_binding_derives_actions_and_paths(
+    projection_home,
+    monkeypatch,
+) -> None:
+    _install_execution_profile(monkeypatch, projection_home)
+    generation, _decision = _approve_current_ticket()
+    projected = _project_via_runtime()
+
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    binding = pr.resolve_current_ticket_lifecycle_binding(projection_record=projected)
+
+    assert binding.ticket_id == "P18.9.0"
+    assert binding.ticket_action_token == "P18_9_0"
+    assert binding.ticket_hyphen_token == "P18-9-0"
+    assert binding.ticket_spec_sha256 == generation["ticket_spec_SHA256"]
+    assert binding.work_packet_id == generation["work_packet_id"]
+    assert binding.work_packet_sha256 == generation["work_packet_SHA256"]
+    assert binding.work_packet_compilation_count == 1
+    assert binding.execution_start_next_action_id == "START_P18_9_0_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION"
+    assert binding.execution_recovery_next_action_id == "RECOVER_P18_9_0_EXECUTION"
+    assert binding.retry_start_next_action_id == "START_P18_9_0_RETRY_REQUIRES_HUMAN_AUTHORIZATION"
+    assert binding.review_prepare_next_action_id == "PREPARE_P18_9_0_REVIEW"
+    assert binding.review_acceptance_next_action_id == "AWAIT_HUMAN_P18_9_0_REVIEW_ACCEPTANCE"
+    assert binding.monitor_execution_next_action_id == "MONITOR_P18_9_0_EXECUTION"
+    assert binding.approved_no_execution_next_action_id == "P18_9_0_APPROVED_NO_EXECUTION"
+    authority = projection.load_p18_9_0_kanban_projection_record()
+    assert authority is not None
+    assert pr.validate_governed_ticket_lifecycle_projection_authority(authority) == binding
+
+    assert pr.governed_ticket_lifecycle_action_ids("P18.10.2")["retry_start"] == (
+        "START_P18_10_2_RETRY_REQUIRES_HUMAN_AUTHORIZATION"
+    )
+    assert pr.p18_9_0_execution_start_record_path() == (
+        projection_home
+        / "agent-platform"
+        / "pepper-worker-start-action"
+        / "P18.9.0.execution-start.json"
+    )
+    assert pr.p18_9_0_review_acceptance_history_path() == (
+        projection_home
+        / "agent-platform"
+        / "pepper-review-human-acceptance-action"
+        / "P18.9.0.review-acceptance.history.jsonl"
+    )
+
+
 def _prepare_completed_review_package(monkeypatch):
     generation, _decision = _approve_current_ticket()
     projected = _project_via_runtime()
@@ -2417,8 +2464,10 @@ def test_accept_current_ticket_review_closes_p18_9_0_and_exposes_next_ticket(
     assert workflow["human_acceptance_required"] is False
     assert workflow["human_acceptance_recorded"] is True
     assert workflow["P18_9_0_closed"] is True
-    assert workflow["P18_9_1_ready"] is True
-    assert workflow["P18_9_1_generated"] is False
+    assert workflow["next_ticket_ready"] is True
+    assert workflow["next_ticket_generated"] is False
+    assert "P18_9_1_ready" not in workflow
+    assert "P18_9_1_generated" not in workflow
     assert workflow["next_action"]["id"] == "GENERATE_P18_9_1_REQUIRES_SEPARATE_HUMAN_ACTION"
     assert workflow["blocker_count"] == 0
 

@@ -8,7 +8,7 @@ engine, or Git authority path.
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -122,30 +122,54 @@ PEPPER_CURRENT_RETRY_START_AUTHORIZATION_TEXTS = frozenset({
     "Inicia el segundo intento de P18.9.0.",
 })
 
-_P18_9_0_TICKET_SPEC_SHA256 = (
-    "6594c3536c6b9a6f570baf0fdb3b83a2820fa0863f64f45735e8f15d6eb1eb8d"
+PEPPER_GOVERNED_EXECUTOR_PROVIDER = "openai-codex"
+PEPPER_GOVERNED_EXECUTOR_MODEL = "gpt-5.5"
+PEPPER_GOVERNED_EXECUTOR_API_MODE = "codex_responses"
+
+_GOVERNED_TICKET_START_STORE_DIR = Path("agent-platform") / "pepper-worker-start-action"
+_GOVERNED_TICKET_RECOVERY_STORE_DIR = Path("agent-platform") / "pepper-recovery-action"
+_GOVERNED_TICKET_REVIEW_PREPARE_STORE_DIR = Path("agent-platform") / "pepper-review-prepare-action"
+_GOVERNED_TICKET_REVIEW_ACCEPTANCE_STORE_DIR = (
+    Path("agent-platform") / "pepper-review-human-acceptance-action"
 )
-_P18_9_0_WORK_PACKET_ID = "WP-P18-9-0-R0001-4864e660625e"
-_P18_9_0_WORK_PACKET_SHA256 = (
-    "3ab63fccee9e5018ac19d10a7543a43acb2db093450b7897ad1b8c0b74288302"
-)
-_P18_9_0_WORK_PACKET_COMPILATION_COUNT = 1
-_P18_9_0_START_STORE_DIR = Path("agent-platform") / "pepper-worker-start-action"
-_P18_9_0_START_STORE_FILE = "P18.9.0.execution-start.json"
-_P18_9_0_RETRY_START_STORE_FILE = "P18.9.0.retry-start.json"
-_P18_9_0_RECOVERY_STORE_DIR = Path("agent-platform") / "pepper-recovery-action"
-_P18_9_0_RECOVERY_STORE_FILE = "P18.9.0.recovery-action.json"
-_P18_9_0_RECOVERY_HISTORY_FILE = "P18.9.0.recovery-action.history.jsonl"
-_P18_9_0_RETRY_START_HISTORY_FILE = "P18.9.0.retry-start.history.jsonl"
-_P18_9_0_REVIEW_PREPARE_STORE_DIR = Path("agent-platform") / "pepper-review-prepare-action"
-_P18_9_0_REVIEW_PREPARE_STORE_FILE = "P18.9.0.review-prepare.json"
-_P18_9_0_REVIEW_PREPARE_HISTORY_FILE = "P18.9.0.review-prepare.history.jsonl"
-_P18_9_0_REVIEW_ACCEPTANCE_STORE_DIR = Path("agent-platform") / "pepper-review-human-acceptance-action"
-_P18_9_0_REVIEW_ACCEPTANCE_STORE_FILE = "P18.9.0.review-acceptance.json"
-_P18_9_0_REVIEW_ACCEPTANCE_HISTORY_FILE = "P18.9.0.review-acceptance.history.jsonl"
-_P18_9_0_EXECUTOR_PROVIDER = "openai-codex"
-_P18_9_0_EXECUTOR_MODEL = "gpt-5.5"
-_P18_9_0_EXECUTOR_API_MODE = "codex_responses"
+_GOVERNED_TICKET_AUTHORITY_PATH_SPECS = {
+    "execution_start": (
+        _GOVERNED_TICKET_START_STORE_DIR,
+        "execution-start.json",
+    ),
+    "retry_start": (
+        _GOVERNED_TICKET_START_STORE_DIR,
+        "retry-start.json",
+    ),
+    "retry_start_history": (
+        _GOVERNED_TICKET_START_STORE_DIR,
+        "retry-start.history.jsonl",
+    ),
+    "recovery_action": (
+        _GOVERNED_TICKET_RECOVERY_STORE_DIR,
+        "recovery-action.json",
+    ),
+    "recovery_action_history": (
+        _GOVERNED_TICKET_RECOVERY_STORE_DIR,
+        "recovery-action.history.jsonl",
+    ),
+    "review_prepare": (
+        _GOVERNED_TICKET_REVIEW_PREPARE_STORE_DIR,
+        "review-prepare.json",
+    ),
+    "review_prepare_history": (
+        _GOVERNED_TICKET_REVIEW_PREPARE_STORE_DIR,
+        "review-prepare.history.jsonl",
+    ),
+    "review_acceptance": (
+        _GOVERNED_TICKET_REVIEW_ACCEPTANCE_STORE_DIR,
+        "review-acceptance.json",
+    ),
+    "review_acceptance_history": (
+        _GOVERNED_TICKET_REVIEW_ACCEPTANCE_STORE_DIR,
+        "review-acceptance.history.jsonl",
+    ),
+}
 
 _ACTIVE_EXECUTION_STATUSES = frozenset({"running"})
 _TERMINAL_EXECUTION_STATUSES = frozenset({
@@ -161,7 +185,7 @@ _TERMINAL_EXECUTION_STATUSES = frozenset({
     "spawn_failed",
     "timed_out",
 })
-_P18_9_0_FAILURE_OUTCOMES = frozenset({
+_GOVERNED_TICKET_FAILURE_OUTCOMES = frozenset({
     "blocked",
     "crashed",
     "failed",
@@ -193,6 +217,37 @@ class ProductRuntimeConflict(ProductRuntimeError):
 
 class ProductRuntimeDecisionFailed(ProductRuntimeError):
     """Raised when an approval decision cannot be applied safely."""
+
+
+@dataclass(frozen=True)
+class GovernedTicketLifecycleBinding:
+    """Current governed ticket identity, actions, and runtime authority."""
+
+    product_id: str
+    project_id: str
+    macroproject_id: str
+    macroproject_title: str
+    ticket_id: str
+    ticket_title: str
+    ticket_action_token: str
+    ticket_hyphen_token: str
+    ticket_spec_sha256: str | None
+    work_packet_id: str | None
+    work_packet_sha256: str | None
+    work_packet_compilation_count: int | None
+    executor_provider: str
+    executor_model: str
+    executor_api_mode: str
+    generate_next_action_id: str
+    approve_next_action_id: str
+    approved_no_execution_next_action_id: str
+    execution_start_next_action_id: str
+    execution_recovery_next_action_id: str
+    retry_start_next_action_id: str
+    review_prepare_next_action_id: str
+    review_acceptance_next_action_id: str
+    monitor_execution_next_action_id: str
+    revise_next_action_id: str
 
 
 class ApprovalDecisionRequest(BaseModel):
@@ -391,6 +446,168 @@ def _safe_id(value: object) -> str:
     if not _SAFE_ID.fullmatch(text):
         raise ProductRuntimeNotFound("invalid source-local identifier")
     return text
+
+
+def governed_ticket_lifecycle_action_token(ticket_id: str) -> str:
+    """Return the reusable action-token form for a governed ticket id."""
+
+    token = re.sub(r"[^A-Za-z0-9]+", "_", str(ticket_id or "").strip()).strip("_")
+    if not token:
+        raise ProductRuntimeConflict("governed ticket id is unavailable")
+    return token.upper()
+
+
+def governed_ticket_lifecycle_hyphen_token(ticket_id: str) -> str:
+    token = re.sub(r"[^A-Za-z0-9]+", "-", str(ticket_id or "").strip()).strip("-")
+    if not token:
+        raise ProductRuntimeConflict("governed ticket id is unavailable")
+    return token.upper()
+
+
+def governed_ticket_lifecycle_action_ids(ticket_id: str) -> dict[str, str]:
+    token = governed_ticket_lifecycle_action_token(ticket_id)
+    return {
+        "generate": f"GENERATE_{token}",
+        "approve": f"APPROVE_{token}",
+        "approved_no_execution": f"{token}_APPROVED_NO_EXECUTION",
+        "execution_start": f"START_{token}_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION",
+        "execution_recovery": f"RECOVER_{token}_EXECUTION",
+        "retry_start": f"START_{token}_RETRY_REQUIRES_HUMAN_AUTHORIZATION",
+        "review_prepare": f"PREPARE_{token}_REVIEW",
+        "review_acceptance": f"AWAIT_HUMAN_{token}_REVIEW_ACCEPTANCE",
+        "monitor_execution": f"MONITOR_{token}_EXECUTION",
+        "revise": f"REVISE_{token}",
+    }
+
+
+def _int_or_none(value: object) -> int | None:
+    try:
+        return int(value) if value not in {None, ""} else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _current_generation_record_for_binding() -> dict[str, Any] | None:
+    try:
+        from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
+            load_p18_9_0_generation_record,
+        )
+
+        return load_p18_9_0_generation_record()
+    except Exception:
+        return None
+
+
+def _current_projection_record_for_binding() -> dict[str, Any] | None:
+    try:
+        from hermes_cli.agent_platform.workflow.work_packet_kanban_projection import (
+            load_p18_9_0_kanban_projection_record,
+        )
+
+        return load_p18_9_0_kanban_projection_record()
+    except Exception:
+        return None
+
+
+def resolve_current_ticket_lifecycle_binding(
+    *,
+    generation_record: dict[str, Any] | None = None,
+    projection_record: dict[str, Any] | None = None,
+) -> GovernedTicketLifecycleBinding:
+    """Resolve current governed ticket lifecycle values from live authority."""
+
+    generation = generation_record
+    projection = projection_record
+    if projection is None:
+        projection = _current_projection_record_for_binding()
+    if generation is None:
+        generation = _current_generation_record_for_binding()
+    authority = generation if isinstance(generation, dict) else projection
+    authority = authority if isinstance(authority, dict) else {}
+
+    ticket_id = _safe_text(authority.get("ticket_id") or PEPPER_NEXT_TICKET_ID, limit=128)
+    ticket_title = _safe_text(
+        authority.get("ticket_title") or PEPPER_NEXT_TICKET_TITLE,
+        limit=300,
+    )
+    action_ids = governed_ticket_lifecycle_action_ids(ticket_id)
+    return GovernedTicketLifecycleBinding(
+        product_id=PEPPER_GOVERNED_PRODUCT_ID,
+        project_id=_safe_text(authority.get("project_id") or PEPPER_GOVERNED_PROJECT_ID, limit=128),
+        macroproject_id=_safe_text(
+            authority.get("macroproject_id") or PEPPER_GOVERNED_MACROPROJECT_ID,
+            limit=128,
+        ),
+        macroproject_title=_safe_text(
+            authority.get("macroproject_title") or PEPPER_GOVERNED_MACROPROJECT_TITLE,
+            limit=300,
+        ),
+        ticket_id=ticket_id,
+        ticket_title=ticket_title,
+        ticket_action_token=governed_ticket_lifecycle_action_token(ticket_id),
+        ticket_hyphen_token=governed_ticket_lifecycle_hyphen_token(ticket_id),
+        ticket_spec_sha256=authority.get("ticket_spec_SHA256"),
+        work_packet_id=authority.get("work_packet_id"),
+        work_packet_sha256=authority.get("work_packet_SHA256"),
+        work_packet_compilation_count=_int_or_none(
+            authority.get("WorkPacket_compilation_count")
+        ),
+        executor_provider=PEPPER_GOVERNED_EXECUTOR_PROVIDER,
+        executor_model=PEPPER_GOVERNED_EXECUTOR_MODEL,
+        executor_api_mode=PEPPER_GOVERNED_EXECUTOR_API_MODE,
+        generate_next_action_id=action_ids["generate"],
+        approve_next_action_id=action_ids["approve"],
+        approved_no_execution_next_action_id=action_ids["approved_no_execution"],
+        execution_start_next_action_id=action_ids["execution_start"],
+        execution_recovery_next_action_id=action_ids["execution_recovery"],
+        retry_start_next_action_id=action_ids["retry_start"],
+        review_prepare_next_action_id=action_ids["review_prepare"],
+        review_acceptance_next_action_id=action_ids["review_acceptance"],
+        monitor_execution_next_action_id=action_ids["monitor_execution"],
+        revise_next_action_id=action_ids["revise"],
+    )
+
+
+def governed_ticket_lifecycle_authority_path(
+    kind: str,
+    *,
+    binding: GovernedTicketLifecycleBinding | None = None,
+    ticket_id: str | None = None,
+) -> Path:
+    from hermes_constants import get_hermes_home
+
+    if kind not in _GOVERNED_TICKET_AUTHORITY_PATH_SPECS:
+        raise ProductRuntimeConflict("unknown governed ticket authority path kind")
+    if binding is None and ticket_id is None:
+        binding = resolve_current_ticket_lifecycle_binding()
+    scoped_ticket_id = _safe_text(
+        ticket_id or (binding.ticket_id if binding is not None else PEPPER_NEXT_TICKET_ID),
+        limit=128,
+    )
+    store_dir, suffix = _GOVERNED_TICKET_AUTHORITY_PATH_SPECS[kind]
+    return get_hermes_home() / store_dir / f"{scoped_ticket_id}.{suffix}"
+
+
+def _current_ticket_identity_fields(
+    projection: dict[str, Any],
+) -> tuple[GovernedTicketLifecycleBinding, dict[str, Any]]:
+    binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
+    expected = {
+        "project_id": binding.project_id,
+        "macroproject_id": binding.macroproject_id,
+        "ticket_id": binding.ticket_id,
+        "ticket_title": binding.ticket_title,
+        "ticket_spec_SHA256": binding.ticket_spec_sha256,
+        "work_packet_id": binding.work_packet_id,
+        "work_packet_SHA256": binding.work_packet_sha256,
+        "WorkPacket_compilation_count": binding.work_packet_compilation_count,
+    }
+    return binding, expected
+
+
+def _current_ticket_projection_identity_fields(projection: dict[str, Any]) -> dict[str, Any]:
+    _binding, identity = _current_ticket_identity_fields(projection)
+    return identity
 
 
 def _next_action_label(next_action: Any) -> str:
@@ -898,7 +1115,7 @@ def _bounded_optional_text(value: object, *, limit: int) -> str | None:
 def _run_failure_fields(run: Any) -> dict[str, Any]:
     status = str(getattr(run, "status", "") or "").strip().lower()
     outcome = str(getattr(run, "outcome", "") or "").strip().lower()
-    if status not in _P18_9_0_FAILURE_OUTCOMES and outcome not in _P18_9_0_FAILURE_OUTCOMES:
+    if status not in _GOVERNED_TICKET_FAILURE_OUTCOMES and outcome not in _GOVERNED_TICKET_FAILURE_OUTCOMES:
         return {"failure_category": None, "failure_summary": None}
 
     metadata = getattr(run, "metadata", None)
@@ -1236,73 +1453,82 @@ def project_current_approved_workpacket_to_kanban(
 def p18_9_0_execution_start_record_path() -> Path:
     """Return the profile-scoped P18.9.0 execution-start authority path."""
 
-    from hermes_constants import get_hermes_home
-
-    return get_hermes_home() / _P18_9_0_START_STORE_DIR / _P18_9_0_START_STORE_FILE
+    return governed_ticket_lifecycle_authority_path(
+        "execution_start",
+        ticket_id=PEPPER_NEXT_TICKET_ID,
+    )
 
 
 def p18_9_0_recovery_action_record_path() -> Path:
     """Return the profile-scoped P18.9.0 recovery authority path."""
 
-    from hermes_constants import get_hermes_home
-
-    return get_hermes_home() / _P18_9_0_RECOVERY_STORE_DIR / _P18_9_0_RECOVERY_STORE_FILE
+    return governed_ticket_lifecycle_authority_path(
+        "recovery_action",
+        ticket_id=PEPPER_NEXT_TICKET_ID,
+    )
 
 
 def p18_9_0_recovery_action_history_path() -> Path:
     """Return the append-only P18.9.0 recovery authority history path."""
 
-    from hermes_constants import get_hermes_home
-
-    return get_hermes_home() / _P18_9_0_RECOVERY_STORE_DIR / _P18_9_0_RECOVERY_HISTORY_FILE
+    return governed_ticket_lifecycle_authority_path(
+        "recovery_action_history",
+        ticket_id=PEPPER_NEXT_TICKET_ID,
+    )
 
 
 def p18_9_0_retry_start_record_path() -> Path:
     """Return the profile-scoped P18.9.0 retry-start authority path."""
 
-    from hermes_constants import get_hermes_home
-
-    return get_hermes_home() / _P18_9_0_START_STORE_DIR / _P18_9_0_RETRY_START_STORE_FILE
+    return governed_ticket_lifecycle_authority_path(
+        "retry_start",
+        ticket_id=PEPPER_NEXT_TICKET_ID,
+    )
 
 
 def p18_9_0_retry_start_history_path() -> Path:
     """Return the append-only P18.9.0 retry-start authority history path."""
 
-    from hermes_constants import get_hermes_home
-
-    return get_hermes_home() / _P18_9_0_START_STORE_DIR / _P18_9_0_RETRY_START_HISTORY_FILE
+    return governed_ticket_lifecycle_authority_path(
+        "retry_start_history",
+        ticket_id=PEPPER_NEXT_TICKET_ID,
+    )
 
 
 def p18_9_0_review_prepare_record_path() -> Path:
     """Return the profile-scoped P18.9.0 review-preparation authority path."""
 
-    from hermes_constants import get_hermes_home
-
-    return get_hermes_home() / _P18_9_0_REVIEW_PREPARE_STORE_DIR / _P18_9_0_REVIEW_PREPARE_STORE_FILE
+    return governed_ticket_lifecycle_authority_path(
+        "review_prepare",
+        ticket_id=PEPPER_NEXT_TICKET_ID,
+    )
 
 
 def p18_9_0_review_prepare_history_path() -> Path:
     """Return the append-only P18.9.0 review-preparation authority history path."""
 
-    from hermes_constants import get_hermes_home
-
-    return get_hermes_home() / _P18_9_0_REVIEW_PREPARE_STORE_DIR / _P18_9_0_REVIEW_PREPARE_HISTORY_FILE
+    return governed_ticket_lifecycle_authority_path(
+        "review_prepare_history",
+        ticket_id=PEPPER_NEXT_TICKET_ID,
+    )
 
 
 def p18_9_0_review_acceptance_record_path() -> Path:
     """Return the profile-scoped P18.9.0 review-acceptance authority path."""
 
-    from hermes_constants import get_hermes_home
-
-    return get_hermes_home() / _P18_9_0_REVIEW_ACCEPTANCE_STORE_DIR / _P18_9_0_REVIEW_ACCEPTANCE_STORE_FILE
+    return governed_ticket_lifecycle_authority_path(
+        "review_acceptance",
+        ticket_id=PEPPER_NEXT_TICKET_ID,
+    )
 
 
 def p18_9_0_review_acceptance_history_path() -> Path:
     """Return the append-only P18.9.0 review-acceptance authority history path."""
 
-    from hermes_constants import get_hermes_home
-
-    return get_hermes_home() / _P18_9_0_REVIEW_ACCEPTANCE_STORE_DIR / _P18_9_0_REVIEW_ACCEPTANCE_HISTORY_FILE
+    return governed_ticket_lifecycle_authority_path(
+        "review_acceptance_history",
+        ticket_id=PEPPER_NEXT_TICKET_ID,
+    )
 
 
 def load_p18_9_0_execution_start_record(
@@ -1539,17 +1765,11 @@ def validate_p18_9_0_execution_start_record(
         raise ProductRuntimeConflict("execution-start record digest mismatch")
     projection = projection_record if projection_record is not None else _load_current_projection_record()
     _validate_execution_start_authority(projection)
+    _binding, identity = _current_ticket_identity_fields(projection)
     expected = {
         "schema_version": PEPPER_WORKER_START_ACTION_SCHEMA_VERSION,
         "policy_id": PEPPER_WORKER_START_ACTION_POLICY_ID,
-        "project_id": PEPPER_GOVERNED_PROJECT_ID,
-        "macroproject_id": PEPPER_GOVERNED_MACROPROJECT_ID,
-        "ticket_id": PEPPER_NEXT_TICKET_ID,
-        "ticket_title": PEPPER_NEXT_TICKET_TITLE,
-        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
-        "work_packet_id": projection["work_packet_id"],
-        "work_packet_SHA256": projection["work_packet_SHA256"],
-        "WorkPacket_compilation_count": _P18_9_0_WORK_PACKET_COMPILATION_COUNT,
+        **identity,
         "approval_publication_SHA256": projection["approval_publication_SHA256"],
         "projection_SHA256": projection["projection_SHA256"],
         "kanban_board_slug": projection["kanban_board_slug"],
@@ -1581,18 +1801,12 @@ def validate_p18_9_0_recovery_action_record(
         raise ProductRuntimeConflict("recovery action record digest mismatch")
     projection = projection_record if projection_record is not None else _load_current_projection_record()
     _validate_execution_start_authority(projection)
+    _binding, identity = _current_ticket_identity_fields(projection)
     expected = {
         "schema_version": PEPPER_RECOVERY_ACTION_SCHEMA_VERSION,
         "policy_id": PEPPER_RECOVERY_ACTION_POLICY_ID,
         "source_system": PEPPER_RECOVERY_ACTION_SOURCE_SYSTEM,
-        "project_id": PEPPER_GOVERNED_PROJECT_ID,
-        "macroproject_id": PEPPER_GOVERNED_MACROPROJECT_ID,
-        "ticket_id": PEPPER_NEXT_TICKET_ID,
-        "ticket_title": PEPPER_NEXT_TICKET_TITLE,
-        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
-        "work_packet_id": projection["work_packet_id"],
-        "work_packet_SHA256": projection["work_packet_SHA256"],
-        "WorkPacket_compilation_count": _P18_9_0_WORK_PACKET_COMPILATION_COUNT,
+        **identity,
         "approval_publication_SHA256": projection["approval_publication_SHA256"],
         "projection_SHA256": projection["projection_SHA256"],
         "kanban_board_slug": projection["kanban_board_slug"],
@@ -1680,18 +1894,12 @@ def validate_p18_9_0_retry_start_record(
         recovery = load_p18_9_0_recovery_action_record(projection_record=projection)
     if recovery is None:
         raise ProductRuntimeConflict("retry-start record requires recovery authority")
+    _binding, identity = _current_ticket_identity_fields(projection)
     expected = {
         "schema_version": PEPPER_RETRY_START_ACTION_SCHEMA_VERSION,
         "policy_id": PEPPER_RETRY_START_ACTION_POLICY_ID,
         "source_system": PEPPER_RETRY_START_ACTION_SOURCE_SYSTEM,
-        "project_id": PEPPER_GOVERNED_PROJECT_ID,
-        "macroproject_id": PEPPER_GOVERNED_MACROPROJECT_ID,
-        "ticket_id": PEPPER_NEXT_TICKET_ID,
-        "ticket_title": PEPPER_NEXT_TICKET_TITLE,
-        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
-        "work_packet_id": projection["work_packet_id"],
-        "work_packet_SHA256": projection["work_packet_SHA256"],
-        "WorkPacket_compilation_count": _P18_9_0_WORK_PACKET_COMPILATION_COUNT,
+        **identity,
         "approval_publication_SHA256": projection["approval_publication_SHA256"],
         "projection_SHA256": projection["projection_SHA256"],
         "recovery_action_SHA256": recovery["recovery_action_SHA256"],
@@ -1744,18 +1952,12 @@ def validate_p18_9_0_review_prepare_record(
     if completion.get("blocker_code"):
         raise ProductRuntimeConflict(str(completion["blocker_code"]))
     contract = _p18_9_0_acceptance_contract()
+    binding, identity = _current_ticket_identity_fields(projection)
     expected = {
         "schema_version": PEPPER_REVIEW_PREPARE_ACTION_SCHEMA_VERSION,
         "policy_id": PEPPER_REVIEW_PREPARE_ACTION_POLICY_ID,
         "source_system": PEPPER_REVIEW_PREPARE_ACTION_SOURCE_SYSTEM,
-        "project_id": PEPPER_GOVERNED_PROJECT_ID,
-        "macroproject_id": PEPPER_GOVERNED_MACROPROJECT_ID,
-        "ticket_id": PEPPER_NEXT_TICKET_ID,
-        "ticket_title": PEPPER_NEXT_TICKET_TITLE,
-        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
-        "work_packet_id": projection["work_packet_id"],
-        "work_packet_SHA256": projection["work_packet_SHA256"],
-        "WorkPacket_compilation_count": _P18_9_0_WORK_PACKET_COMPILATION_COUNT,
+        **identity,
         "approval_publication_SHA256": projection["approval_publication_SHA256"],
         "dependency_plan_SHA256": projection["dependency_plan_SHA256"],
         "projection_SHA256": projection["projection_SHA256"],
@@ -1809,9 +2011,9 @@ def validate_p18_9_0_review_prepare_record(
     if not isinstance(invariants, dict):
         raise ProductRuntimeConflict("review-preparation pre-review invariants missing")
     invariant_expected = {
-        "project": PEPPER_GOVERNED_PROJECT_ID,
-        "ticket": PEPPER_NEXT_TICKET_ID,
-        "next_action": PEPPER_CURRENT_REVIEW_PREPARE_NEXT_ACTION_ID,
+        "project": binding.project_id,
+        "ticket": binding.ticket_id,
+        "next_action": binding.review_prepare_next_action_id,
         "run_id": completion["run_id"],
         "run_status": "done",
         "run_outcome": "completed",
@@ -1848,18 +2050,12 @@ def validate_p18_9_0_review_acceptance_record(
         raise ProductRuntimeConflict("review-acceptance record requires review-preparation authority")
     validate_p18_9_0_review_prepare_record(review_prepare, projection_record=projection)
     next_ticket = _p18_9_next_ticket_authority()
+    binding, identity = _current_ticket_identity_fields(projection)
     expected = {
         "schema_version": PEPPER_REVIEW_HUMAN_ACCEPTANCE_ACTION_SCHEMA_VERSION,
         "policy_id": PEPPER_REVIEW_HUMAN_ACCEPTANCE_ACTION_POLICY_ID,
         "source_system": PEPPER_REVIEW_HUMAN_ACCEPTANCE_ACTION_SOURCE_SYSTEM,
-        "project_id": PEPPER_GOVERNED_PROJECT_ID,
-        "macroproject_id": PEPPER_GOVERNED_MACROPROJECT_ID,
-        "ticket_id": PEPPER_NEXT_TICKET_ID,
-        "ticket_title": PEPPER_NEXT_TICKET_TITLE,
-        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
-        "work_packet_id": projection["work_packet_id"],
-        "work_packet_SHA256": projection["work_packet_SHA256"],
-        "WorkPacket_compilation_count": _P18_9_0_WORK_PACKET_COMPILATION_COUNT,
+        **identity,
         "approval_publication_SHA256": projection["approval_publication_SHA256"],
         "dependency_plan_SHA256": projection["dependency_plan_SHA256"],
         "projection_SHA256": projection["projection_SHA256"],
@@ -1927,9 +2123,9 @@ def validate_p18_9_0_review_acceptance_record(
     if not isinstance(invariants, dict):
         raise ProductRuntimeConflict("review-acceptance pre-acceptance invariants missing")
     invariant_expected = {
-        "project": PEPPER_GOVERNED_PROJECT_ID,
-        "ticket": PEPPER_NEXT_TICKET_ID,
-        "next_action": PEPPER_CURRENT_REVIEW_ACCEPTANCE_NEXT_ACTION_ID,
+        "project": binding.project_id,
+        "ticket": binding.ticket_id,
+        "next_action": binding.review_acceptance_next_action_id,
         "review_prepare_action_SHA256": review_prepare["review_prepare_action_SHA256"],
         "review_package_SHA256": review_prepare["review_package_SHA256"],
         "active_execution_count": 0,
@@ -2115,6 +2311,7 @@ def start_current_ticket_execution(
     _validate_execution_start_request_guards(request)
     projection = _load_current_projection_record()
     _validate_execution_start_authority(projection)
+    binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
     workflow = build_workflow_control_snapshot()
     workflow_next_action = workflow.get("next_action")
     workflow_next_action_id = (
@@ -2122,10 +2319,10 @@ def start_current_ticket_execution(
     )
 
     if (
-        request.next_action_id == PEPPER_CURRENT_RETRY_START_NEXT_ACTION_ID
+        request.next_action_id == binding.retry_start_next_action_id
         or (
             request.next_action_id is None
-            and workflow_next_action_id == PEPPER_CURRENT_RETRY_START_NEXT_ACTION_ID
+            and workflow_next_action_id == binding.retry_start_next_action_id
         )
     ):
         return _start_current_ticket_retry_execution(
@@ -2439,17 +2636,19 @@ def _load_current_projection_record() -> dict[str, Any]:
 def _validate_execution_start_request_guards(
     request: CurrentTicketExecutionStartRequest,
 ) -> None:
-    if request.project_id not in {None, PEPPER_GOVERNED_PROJECT_ID}:
-        raise ProductRuntimeConflict("execution start is bounded to project PEPPER")
-    if request.ticket_id not in {None, PEPPER_NEXT_TICKET_ID}:
-        raise ProductRuntimeConflict("execution start is bounded to ticket P18.9.0")
+    binding = resolve_current_ticket_lifecycle_binding()
+    if request.project_id not in {None, binding.project_id}:
+        raise ProductRuntimeConflict(f"execution start is bounded to project {binding.project_id}")
+    if request.ticket_id not in {None, binding.ticket_id}:
+        raise ProductRuntimeConflict(f"execution start is bounded to ticket {binding.ticket_id}")
     if request.next_action_id not in {
         None,
-        PEPPER_CURRENT_EXECUTION_START_NEXT_ACTION_ID,
-        PEPPER_CURRENT_RETRY_START_NEXT_ACTION_ID,
+        binding.execution_start_next_action_id,
+        binding.retry_start_next_action_id,
     }:
         raise ProductRuntimeConflict(
-            "execution start requires START_P18_9_0_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION or START_P18_9_0_RETRY_REQUIRES_HUMAN_AUTHORIZATION"
+            "execution start requires "
+            f"{binding.execution_start_next_action_id} or {binding.retry_start_next_action_id}"
         )
 
 
@@ -2461,48 +2660,63 @@ def _validate_execution_retry_start_authorization_text(value: str) -> None:
 
 
 def _validate_execution_start_authority(projection: dict[str, Any]) -> None:
-    if projection.get("project_id") != PEPPER_GOVERNED_PROJECT_ID:
-        raise ProductRuntimeConflict("P18.9.0 projection project authority mismatch")
-    if projection.get("macroproject_id") != PEPPER_GOVERNED_MACROPROJECT_ID:
-        raise ProductRuntimeConflict("P18.9.0 projection macroproject authority mismatch")
-    if projection.get("ticket_id") != PEPPER_NEXT_TICKET_ID:
-        raise ProductRuntimeConflict("P18.9.0 projection ticket authority mismatch")
-    if projection.get("ticket_spec_SHA256") != _P18_9_0_TICKET_SPEC_SHA256:
-        raise ProductRuntimeConflict("P18.9.0 TicketSpec SHA256 mismatch")
-    if projection.get("work_packet_id") != _P18_9_0_WORK_PACKET_ID:
-        raise ProductRuntimeConflict("P18.9.0 WorkPacket ID mismatch")
-    if projection.get("work_packet_SHA256") != _P18_9_0_WORK_PACKET_SHA256:
-        raise ProductRuntimeConflict("P18.9.0 WorkPacket SHA256 mismatch")
-    if projection.get("WorkPacket_compilation_count") != _P18_9_0_WORK_PACKET_COMPILATION_COUNT:
-        raise ProductRuntimeConflict("P18.9.0 WorkPacket compile count mismatch")
+    validate_governed_ticket_lifecycle_projection_authority(projection)
+
+
+def validate_governed_ticket_lifecycle_projection_authority(
+    projection: dict[str, Any],
+    *,
+    binding: GovernedTicketLifecycleBinding | None = None,
+) -> GovernedTicketLifecycleBinding:
+    """Validate projection authority for the current governed ticket lifecycle."""
+
+    binding = binding or resolve_current_ticket_lifecycle_binding(
+        projection_record=projection,
+    )
+    if projection.get("project_id") != binding.project_id:
+        raise ProductRuntimeConflict(f"{binding.ticket_id} projection project authority mismatch")
+    if projection.get("macroproject_id") != binding.macroproject_id:
+        raise ProductRuntimeConflict(f"{binding.ticket_id} projection macroproject authority mismatch")
+    if projection.get("ticket_id") != binding.ticket_id:
+        raise ProductRuntimeConflict(f"{binding.ticket_id} projection ticket authority mismatch")
+    if projection.get("ticket_spec_SHA256") != binding.ticket_spec_sha256:
+        raise ProductRuntimeConflict(f"{binding.ticket_id} TicketSpec SHA256 mismatch")
+    if projection.get("work_packet_id") != binding.work_packet_id:
+        raise ProductRuntimeConflict(f"{binding.ticket_id} WorkPacket ID mismatch")
+    if projection.get("work_packet_SHA256") != binding.work_packet_sha256:
+        raise ProductRuntimeConflict(f"{binding.ticket_id} WorkPacket SHA256 mismatch")
+    if projection.get("WorkPacket_compilation_count") != binding.work_packet_compilation_count:
+        raise ProductRuntimeConflict(f"{binding.ticket_id} WorkPacket compile count mismatch")
     if projection.get("approval_status") != "approved" or projection.get("approval_decision") != "approve":
-        raise ProductRuntimeConflict("P18.9.0 ticket approval authority is not approved")
+        raise ProductRuntimeConflict(f"{binding.ticket_id} ticket approval authority is not approved")
     admission = projection.get("dependency_admission")
     if not isinstance(admission, dict) or admission.get("decision") != "admit":
-        raise ProductRuntimeConflict("P18.9.0 dependency admission is not admitted")
+        raise ProductRuntimeConflict(f"{binding.ticket_id} dependency admission is not admitted")
     if admission.get("dependency_blockers"):
-        raise ProductRuntimeConflict("P18.9.0 dependency blockers are present")
+        raise ProductRuntimeConflict(f"{binding.ticket_id} dependency blockers are present")
     if projection.get("workspace_kind") != "scratch":
-        raise ProductRuntimeConflict("P18.9.0 projection is not a scratch workspace")
+        raise ProductRuntimeConflict(f"{binding.ticket_id} projection is not a scratch workspace")
     if projection.get("concurrent_workers_for_ticket") != 1:
-        raise ProductRuntimeConflict("P18.9.0 worker concurrency authority mismatch")
+        raise ProductRuntimeConflict(f"{binding.ticket_id} worker concurrency authority mismatch")
     if projection.get("task_max_retries") != 1:
-        raise ProductRuntimeConflict("P18.9.0 retry authority mismatch")
+        raise ProductRuntimeConflict(f"{binding.ticket_id} retry authority mismatch")
     next_action = projection.get("next_action")
-    if not isinstance(next_action, dict) or next_action.get("id") != PEPPER_CURRENT_EXECUTION_START_NEXT_ACTION_ID:
-        raise ProductRuntimeConflict("P18.9.0 projection is not awaiting start authorization")
+    if not isinstance(next_action, dict) or next_action.get("id") != binding.execution_start_next_action_id:
+        raise ProductRuntimeConflict(f"{binding.ticket_id} projection is not awaiting start authorization")
+    return binding
 
 
 def _validate_execution_recovery_request_guards(
     request: CurrentTicketExecutionRecoveryRequest,
 ) -> None:
-    if request.project_id not in {None, PEPPER_GOVERNED_PROJECT_ID}:
-        raise ProductRuntimeConflict("execution recovery is bounded to project PEPPER")
-    if request.ticket_id not in {None, PEPPER_NEXT_TICKET_ID}:
-        raise ProductRuntimeConflict("execution recovery is bounded to ticket P18.9.0")
-    if request.next_action_id not in {None, PEPPER_CURRENT_EXECUTION_RECOVERY_NEXT_ACTION_ID}:
+    binding = resolve_current_ticket_lifecycle_binding()
+    if request.project_id not in {None, binding.project_id}:
+        raise ProductRuntimeConflict(f"execution recovery is bounded to project {binding.project_id}")
+    if request.ticket_id not in {None, binding.ticket_id}:
+        raise ProductRuntimeConflict(f"execution recovery is bounded to ticket {binding.ticket_id}")
+    if request.next_action_id not in {None, binding.execution_recovery_next_action_id}:
         raise ProductRuntimeConflict(
-            "execution recovery requires RECOVER_P18_9_0_EXECUTION"
+            f"execution recovery requires {binding.execution_recovery_next_action_id}"
         )
 
 
@@ -2516,12 +2730,13 @@ def _validate_execution_recovery_authorization_text(value: str) -> None:
 def _execution_start_workflow_blocker(
     workflow: dict[str, Any],
 ) -> tuple[str, str] | None:
-    if workflow.get("project_id") != PEPPER_GOVERNED_PROJECT_ID:
-        return "WORKFLOW_AUTHORITY_GAP", "current project is not PEPPER"
-    if workflow.get("macroproject_id") != PEPPER_GOVERNED_MACROPROJECT_ID:
-        return "WORKFLOW_AUTHORITY_GAP", "current macroproject is not P18.9"
-    if workflow.get("current_ticket_id") != PEPPER_NEXT_TICKET_ID:
-        return "WORKFLOW_AUTHORITY_GAP", "current ticket is not P18.9.0"
+    binding = resolve_current_ticket_lifecycle_binding()
+    if workflow.get("project_id") != binding.project_id:
+        return "WORKFLOW_AUTHORITY_GAP", f"current project is not {binding.project_id}"
+    if workflow.get("macroproject_id") != binding.macroproject_id:
+        return "WORKFLOW_AUTHORITY_GAP", f"current macroproject is not {binding.macroproject_id}"
+    if workflow.get("current_ticket_id") != binding.ticket_id:
+        return "WORKFLOW_AUTHORITY_GAP", f"current ticket is not {binding.ticket_id}"
     if workflow.get("workflow_status") != "queued":
         return "WORKFLOW_START_ACTION_GAP", "workflow status is not queued"
     if workflow.get("queue_state") != "kanban_projection_ready_not_dispatched":
@@ -2529,10 +2744,10 @@ def _execution_start_workflow_blocker(
     next_action = workflow.get("next_action")
     if not isinstance(next_action, dict):
         return "WORKFLOW_START_ACTION_GAP", "next action is unavailable"
-    if next_action.get("id") != PEPPER_CURRENT_EXECUTION_START_NEXT_ACTION_ID:
+    if next_action.get("id") != binding.execution_start_next_action_id:
         return "WORKFLOW_START_ACTION_GAP", "next action is not execution start authorization"
-    if next_action.get("target_ticket_id") != PEPPER_NEXT_TICKET_ID:
-        return "WORKFLOW_START_ACTION_GAP", "next action does not target P18.9.0"
+    if next_action.get("target_ticket_id") != binding.ticket_id:
+        return "WORKFLOW_START_ACTION_GAP", f"next action does not target {binding.ticket_id}"
     if int(workflow.get("pending_ticket_approval_count") or 0) != 0:
         return "APPROVAL_STATE_GAP", "pending ticket approvals remain"
     if int(workflow.get("active_execution_count") or 0) != 0:
@@ -2546,12 +2761,13 @@ def _execution_start_workflow_blocker(
 def _execution_recovery_workflow_blocker(
     workflow: dict[str, Any],
 ) -> tuple[str, str] | None:
-    if workflow.get("project_id") != PEPPER_GOVERNED_PROJECT_ID:
-        return "WORKFLOW_AUTHORITY_GAP", "current project is not PEPPER"
-    if workflow.get("macroproject_id") != PEPPER_GOVERNED_MACROPROJECT_ID:
-        return "WORKFLOW_AUTHORITY_GAP", "current macroproject is not P18.9"
-    if workflow.get("current_ticket_id") != PEPPER_NEXT_TICKET_ID:
-        return "WORKFLOW_AUTHORITY_GAP", "current ticket is not P18.9.0"
+    binding = resolve_current_ticket_lifecycle_binding()
+    if workflow.get("project_id") != binding.project_id:
+        return "WORKFLOW_AUTHORITY_GAP", f"current project is not {binding.project_id}"
+    if workflow.get("macroproject_id") != binding.macroproject_id:
+        return "WORKFLOW_AUTHORITY_GAP", f"current macroproject is not {binding.macroproject_id}"
+    if workflow.get("current_ticket_id") != binding.ticket_id:
+        return "WORKFLOW_AUTHORITY_GAP", f"current ticket is not {binding.ticket_id}"
     if workflow.get("workflow_status") != "execution_failed":
         return "WORKFLOW_RECOVERY_ACTION_GAP", "workflow status is not execution_failed"
     if workflow.get("recovery_state") != "recovery_required":
@@ -2559,10 +2775,10 @@ def _execution_recovery_workflow_blocker(
     next_action = workflow.get("next_action")
     if not isinstance(next_action, dict):
         return "WORKFLOW_RECOVERY_ACTION_GAP", "next action is unavailable"
-    if next_action.get("id") != PEPPER_CURRENT_EXECUTION_RECOVERY_NEXT_ACTION_ID:
+    if next_action.get("id") != binding.execution_recovery_next_action_id:
         return "WORKFLOW_RECOVERY_ACTION_GAP", "next action is not recovery authorization"
-    if next_action.get("target_ticket_id") != PEPPER_NEXT_TICKET_ID:
-        return "WORKFLOW_RECOVERY_ACTION_GAP", "next action does not target P18.9.0"
+    if next_action.get("target_ticket_id") != binding.ticket_id:
+        return "WORKFLOW_RECOVERY_ACTION_GAP", f"next action does not target {binding.ticket_id}"
     if int(workflow.get("pending_ticket_approval_count") or 0) != 0:
         return "APPROVAL_STATE_GAP", "pending ticket approvals remain"
     if int(workflow.get("active_execution_count") or 0) != 0:
@@ -2575,12 +2791,13 @@ def _execution_recovery_workflow_blocker(
 def _execution_retry_start_workflow_blocker(
     workflow: dict[str, Any],
 ) -> tuple[str, str] | None:
-    if workflow.get("project_id") != PEPPER_GOVERNED_PROJECT_ID:
-        return "WORKFLOW_AUTHORITY_GAP", "current project is not PEPPER"
-    if workflow.get("macroproject_id") != PEPPER_GOVERNED_MACROPROJECT_ID:
-        return "WORKFLOW_AUTHORITY_GAP", "current macroproject is not P18.9"
-    if workflow.get("current_ticket_id") != PEPPER_NEXT_TICKET_ID:
-        return "WORKFLOW_AUTHORITY_GAP", "current ticket is not P18.9.0"
+    binding = resolve_current_ticket_lifecycle_binding()
+    if workflow.get("project_id") != binding.project_id:
+        return "WORKFLOW_AUTHORITY_GAP", f"current project is not {binding.project_id}"
+    if workflow.get("macroproject_id") != binding.macroproject_id:
+        return "WORKFLOW_AUTHORITY_GAP", f"current macroproject is not {binding.macroproject_id}"
+    if workflow.get("current_ticket_id") != binding.ticket_id:
+        return "WORKFLOW_AUTHORITY_GAP", f"current ticket is not {binding.ticket_id}"
     if workflow.get("workflow_status") != "retry_pending":
         return "WORKFLOW_RETRY_START_ACTION_GAP", "workflow status is not retry_pending"
     if workflow.get("recovery_state") != "retry_pending":
@@ -2588,10 +2805,10 @@ def _execution_retry_start_workflow_blocker(
     next_action = workflow.get("next_action")
     if not isinstance(next_action, dict):
         return "WORKFLOW_RETRY_START_ACTION_GAP", "next action is unavailable"
-    if next_action.get("id") != PEPPER_CURRENT_RETRY_START_NEXT_ACTION_ID:
+    if next_action.get("id") != binding.retry_start_next_action_id:
         return "WORKFLOW_RETRY_START_ACTION_GAP", "next action is not retry-start authorization"
-    if next_action.get("target_ticket_id") != PEPPER_NEXT_TICKET_ID:
-        return "WORKFLOW_RETRY_START_ACTION_GAP", "next action does not target P18.9.0"
+    if next_action.get("target_ticket_id") != binding.ticket_id:
+        return "WORKFLOW_RETRY_START_ACTION_GAP", f"next action does not target {binding.ticket_id}"
     if int(workflow.get("pending_ticket_approval_count") or 0) != 0:
         return "APPROVAL_STATE_GAP", "pending ticket approvals remain"
     if int(workflow.get("active_execution_count") or 0) != 0:
@@ -2673,7 +2890,7 @@ def _kanban_recovery_source_state(projection: dict[str, Any]) -> dict[str, Any]:
             }
         if task.status != "blocked" or (
             latest_outcome or latest_status
-        ) not in _P18_9_0_FAILURE_OUTCOMES:
+        ) not in _GOVERNED_TICKET_FAILURE_OUTCOMES:
             return {
                 "blocker_code": "KANBAN_RECOVERY_SOURCE_GAP",
                 "blocker_detail": "projected Kanban task is not blocked on failed run evidence",
@@ -2879,7 +3096,7 @@ def _kanban_recovered_retry_source_state(
                 "latest_run_id": latest_run.id,
                 "recovered_latest_failed_run_id": recovery_record.get("latest_failed_run_id"),
             }
-        if (latest_outcome or latest_status) not in _P18_9_0_FAILURE_OUTCOMES:
+        if (latest_outcome or latest_status) not in _GOVERNED_TICKET_FAILURE_OUTCOMES:
             return {
                 "blocker_code": "KANBAN_RETRY_SOURCE_GAP",
                 "blocker_detail": "recovered latest run is no longer failed run evidence",
@@ -3175,9 +3392,9 @@ def _executor_provider_readiness(profile_name: str) -> dict[str, Any]:
         }
     return {
         "ok": True,
-        "provider": _P18_9_0_EXECUTOR_PROVIDER,
-        "model": _P18_9_0_EXECUTOR_MODEL,
-        "api_mode": _P18_9_0_EXECUTOR_API_MODE,
+        "provider": PEPPER_GOVERNED_EXECUTOR_PROVIDER,
+        "model": PEPPER_GOVERNED_EXECUTOR_MODEL,
+        "api_mode": PEPPER_GOVERNED_EXECUTOR_API_MODE,
         "credential_profile_id": OPENAI_CODEX_CREDENTIAL_STORE_ID,
         "provider_runtime_profile_id": OPENAI_CODEX_PROVIDER_RUNTIME_PROFILE_ID,
         "worker_profile_id": OPENAI_CODEX_PROVIDER_WORKER_PROFILE_ID,
@@ -3249,7 +3466,7 @@ def _executor_profile_launch_config(profile_dir: Path) -> dict[str, Any]:
         api_mode = str(model_cfg.get("api_mode") or "").strip().lower()
     elif isinstance(model_cfg, str):
         model = model_cfg.strip()
-    if provider != _P18_9_0_EXECUTOR_PROVIDER or model != _P18_9_0_EXECUTOR_MODEL:
+    if provider != PEPPER_GOVERNED_EXECUTOR_PROVIDER or model != PEPPER_GOVERNED_EXECUTOR_MODEL:
         return {
             "ok": False,
             "blocker_code": "EXECUTOR_PROVIDER_RESOLUTION_GAP",
@@ -3260,7 +3477,7 @@ def _executor_profile_launch_config(profile_dir: Path) -> dict[str, Any]:
             "configured_provider": provider or None,
             "configured_model": model or None,
         }
-    if api_mode and api_mode != _P18_9_0_EXECUTOR_API_MODE:
+    if api_mode and api_mode != PEPPER_GOVERNED_EXECUTOR_API_MODE:
         return {
             "ok": False,
             "blocker_code": "EXECUTOR_PROVIDER_RESOLUTION_GAP",
@@ -3271,7 +3488,7 @@ def _executor_profile_launch_config(profile_dir: Path) -> dict[str, Any]:
         "ok": True,
         "provider": provider,
         "model": model,
-        "api_mode": api_mode or _P18_9_0_EXECUTOR_API_MODE,
+        "api_mode": api_mode or PEPPER_GOVERNED_EXECUTOR_API_MODE,
         "executor_config_source": "executor_profile_config_yaml",
     }
 
@@ -3536,19 +3753,13 @@ def _build_execution_start_authorization_record(
     projection: dict[str, Any],
     provider_readiness: dict[str, Any],
 ) -> dict[str, Any]:
+    binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
     record = {
         "schema_version": PEPPER_WORKER_START_ACTION_SCHEMA_VERSION,
         "policy_id": PEPPER_WORKER_START_ACTION_POLICY_ID,
         "source_system": PEPPER_WORKER_START_ACTION_SOURCE_SYSTEM,
         "created_at": _utc_now_iso(),
-        "project_id": PEPPER_GOVERNED_PROJECT_ID,
-        "macroproject_id": PEPPER_GOVERNED_MACROPROJECT_ID,
-        "ticket_id": PEPPER_NEXT_TICKET_ID,
-        "ticket_title": PEPPER_NEXT_TICKET_TITLE,
-        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
-        "work_packet_id": projection["work_packet_id"],
-        "work_packet_SHA256": projection["work_packet_SHA256"],
-        "WorkPacket_compilation_count": _P18_9_0_WORK_PACKET_COMPILATION_COUNT,
+        **_current_ticket_projection_identity_fields(projection),
         "approval_publication_SHA256": projection["approval_publication_SHA256"],
         "dependency_plan_SHA256": projection["dependency_plan_SHA256"],
         "projection_SHA256": projection["projection_SHA256"],
@@ -3560,7 +3771,7 @@ def _build_execution_start_authorization_record(
         "selected_role": projection["selected_role"],
         "profile_assignment_policy_id": projection["profile_assignment_policy_id"],
         "authorizer_id": request.authorizer_id,
-        "authorization_reference": "human_authorized_start:P18.9.0",
+        "authorization_reference": f"human_authorized_start:{binding.ticket_id}",
         "human_authorization_text": request.human_authorization_text,
         "execution_authorized": True,
         "synthetic": False,
@@ -3618,12 +3829,13 @@ def _build_recovery_action_record(
     )
 
     observed_at = _utc_now_iso()
+    binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
     authorization = build_retry_incident_rollback_human_authorization(
         action=RetryIncidentRollbackRequestedAction.AUTHORIZE_RETRY,
         authorizer_id=request.authorizer_id,
         authorization_reference=request.human_authorization_text,
         rationale=(
-            "Authorize P18.9.0 retry-pending governance after failed run 1 "
+            f"Authorize {binding.ticket_id} retry-pending governance after failed run 1 "
             "without starting run 2 or mutating Kanban."
         ),
         authorized_at=observed_at,
@@ -3645,14 +3857,7 @@ def _build_recovery_action_record(
         "P18_6_policy_id": RETRY_INCIDENT_ROLLBACK_POLICY_ID,
         "runtime_boundary_classification": RETRY_INCIDENT_ROLLBACK_BOUNDARY_CLASSIFICATION,
         "created_at": observed_at,
-        "project_id": PEPPER_GOVERNED_PROJECT_ID,
-        "macroproject_id": PEPPER_GOVERNED_MACROPROJECT_ID,
-        "ticket_id": PEPPER_NEXT_TICKET_ID,
-        "ticket_title": PEPPER_NEXT_TICKET_TITLE,
-        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
-        "work_packet_id": projection["work_packet_id"],
-        "work_packet_SHA256": projection["work_packet_SHA256"],
-        "WorkPacket_compilation_count": _P18_9_0_WORK_PACKET_COMPILATION_COUNT,
+        **_current_ticket_projection_identity_fields(projection),
         "approval_publication_SHA256": projection["approval_publication_SHA256"],
         "projection_SHA256": projection["projection_SHA256"],
         "execution_start_authority_SHA256": workflow.get("execution_start_authority", {}).get(
@@ -3674,7 +3879,7 @@ def _build_recovery_action_record(
         "retry_identity_model": "same_kanban_task_new_run",
         "future_retry_prepared": True,
         "future_retry_requires_separate_start_authorization": True,
-        "future_retry_next_action_id": PEPPER_CURRENT_RETRY_START_NEXT_ACTION_ID,
+        "future_retry_next_action_id": binding.retry_start_next_action_id,
         "future_task_skills": [],
         "future_retry_capability_surface": "pepper_repository",
         "semantic_capabilities": list(projection.get("semantic_capabilities") or []),
@@ -3730,19 +3935,13 @@ def _build_retry_start_authorization_record(
     retry_source: dict[str, Any],
     provider_readiness: dict[str, Any],
 ) -> dict[str, Any]:
+    binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
     record = {
         "schema_version": PEPPER_RETRY_START_ACTION_SCHEMA_VERSION,
         "policy_id": PEPPER_RETRY_START_ACTION_POLICY_ID,
         "source_system": PEPPER_RETRY_START_ACTION_SOURCE_SYSTEM,
         "created_at": _utc_now_iso(),
-        "project_id": PEPPER_GOVERNED_PROJECT_ID,
-        "macroproject_id": PEPPER_GOVERNED_MACROPROJECT_ID,
-        "ticket_id": PEPPER_NEXT_TICKET_ID,
-        "ticket_title": PEPPER_NEXT_TICKET_TITLE,
-        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
-        "work_packet_id": projection["work_packet_id"],
-        "work_packet_SHA256": projection["work_packet_SHA256"],
-        "WorkPacket_compilation_count": _P18_9_0_WORK_PACKET_COMPILATION_COUNT,
+        **_current_ticket_projection_identity_fields(projection),
         "approval_publication_SHA256": projection["approval_publication_SHA256"],
         "dependency_plan_SHA256": projection["dependency_plan_SHA256"],
         "projection_SHA256": projection["projection_SHA256"],
@@ -3758,7 +3957,7 @@ def _build_retry_start_authorization_record(
         "profile_assignment_policy_id": projection["profile_assignment_policy_id"],
         "profile_toolsets": list(projection.get("profile_toolsets") or []),
         "authorizer_id": request.authorizer_id,
-        "authorization_reference": "human_authorized_retry_start:P18.9.0",
+        "authorization_reference": f"human_authorized_retry_start:{binding.ticket_id}",
         "human_authorization_text": request.human_authorization_text,
         "requested_action": "start_retry",
         "recovery_status_at_authorization": "retry_pending",
@@ -3913,14 +4112,7 @@ def _blocked_current_execution_start_result(
         "start_status": "blocked",
         "blocker_code": blocker_code,
         "blocker_detail": _safe_text(blocker_detail, limit=300),
-        "project_id": PEPPER_GOVERNED_PROJECT_ID,
-        "macroproject_id": PEPPER_GOVERNED_MACROPROJECT_ID,
-        "ticket_id": PEPPER_NEXT_TICKET_ID,
-        "ticket_title": PEPPER_NEXT_TICKET_TITLE,
-        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
-        "work_packet_id": projection["work_packet_id"],
-        "work_packet_SHA256": projection["work_packet_SHA256"],
-        "WorkPacket_compilation_count": _P18_9_0_WORK_PACKET_COMPILATION_COUNT,
+        **_current_ticket_projection_identity_fields(projection),
         "kanban_board_slug": projection["kanban_board_slug"],
         "kanban_task_id": projection["kanban_task_id"],
         "assignee_profile": projection["assignee_profile"],
@@ -3958,14 +4150,7 @@ def _blocked_current_execution_recovery_result(
         "recovery_status": "blocked",
         "blocker_code": blocker_code,
         "blocker_detail": _safe_text(blocker_detail, limit=300),
-        "project_id": PEPPER_GOVERNED_PROJECT_ID,
-        "macroproject_id": PEPPER_GOVERNED_MACROPROJECT_ID,
-        "ticket_id": PEPPER_NEXT_TICKET_ID,
-        "ticket_title": PEPPER_NEXT_TICKET_TITLE,
-        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
-        "work_packet_id": projection["work_packet_id"],
-        "work_packet_SHA256": projection["work_packet_SHA256"],
-        "WorkPacket_compilation_count": _P18_9_0_WORK_PACKET_COMPILATION_COUNT,
+        **_current_ticket_projection_identity_fields(projection),
         "kanban_board_slug": projection["kanban_board_slug"],
         "kanban_task_id": projection["kanban_task_id"],
         "assignee_profile": projection["assignee_profile"],
@@ -4019,14 +4204,7 @@ def _blocked_current_execution_retry_start_result(
         "retry_start_status": "blocked",
         "blocker_code": blocker_code,
         "blocker_detail": _safe_text(blocker_detail, limit=300),
-        "project_id": PEPPER_GOVERNED_PROJECT_ID,
-        "macroproject_id": PEPPER_GOVERNED_MACROPROJECT_ID,
-        "ticket_id": PEPPER_NEXT_TICKET_ID,
-        "ticket_title": PEPPER_NEXT_TICKET_TITLE,
-        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
-        "work_packet_id": projection["work_packet_id"],
-        "work_packet_SHA256": projection["work_packet_SHA256"],
-        "WorkPacket_compilation_count": _P18_9_0_WORK_PACKET_COMPILATION_COUNT,
+        **_current_ticket_projection_identity_fields(projection),
         "kanban_board_slug": projection["kanban_board_slug"],
         "kanban_task_id": projection["kanban_task_id"],
         "assignee_profile": projection["assignee_profile"],
@@ -4075,6 +4253,7 @@ def _recovery_action_operational_result(
 ) -> dict[str, Any]:
     from hermes_cli import kanban_db
 
+    action_ids = governed_ticket_lifecycle_action_ids(str(record["ticket_id"]))
     board = _normalize_board(str(record["kanban_board_slug"]))
     task_id = str(record["kanban_task_id"])
     conn = kanban_db.connect(board=board)
@@ -4178,8 +4357,8 @@ def _recovery_action_operational_result(
         "auto_rollback": False,
         "human_smoke_marker": record["human_smoke_marker"],
         "next_action": {
-            "id": PEPPER_CURRENT_RETRY_START_NEXT_ACTION_ID,
-            "target_ticket_id": PEPPER_NEXT_TICKET_ID,
+            "id": action_ids["retry_start"],
+            "target_ticket_id": record["ticket_id"],
             "required_human_action": "retry_start_authorization",
         },
     }
@@ -4217,6 +4396,7 @@ def _retry_start_operational_result(
             "current_run_id": task.current_run_id,
             "skills": list(task.skills or []),
         }
+    action_ids = governed_ticket_lifecycle_action_ids(str(record["ticket_id"]))
     start_status = record["start_status"]
     blocker_code = record.get("blocker_code")
     blocker_detail = record.get("blocker_detail")
@@ -4226,9 +4406,9 @@ def _retry_start_operational_result(
     worker_pid_recorded = bool(record.get("worker_pid_recorded"))
     retry_execution_started = bool(record.get("retry_execution_started"))
     next_action_id = (
-        "MONITOR_P18_9_0_EXECUTION"
+        action_ids["monitor_execution"]
         if record.get("execution_started")
-        else PEPPER_CURRENT_RETRY_START_NEXT_ACTION_ID
+        else action_ids["retry_start"]
     )
     if terminal_state is not None:
         start_status = terminal_state["start_status"]
@@ -4378,6 +4558,7 @@ def _execution_start_operational_result(
             "workspace_path": task.workspace_path,
             "current_run_id": task.current_run_id,
         }
+    action_ids = governed_ticket_lifecycle_action_ids(str(record["ticket_id"]))
     start_status = record["start_status"]
     blocker_code = record.get("blocker_code")
     blocker_detail = record.get("blocker_detail")
@@ -4386,9 +4567,9 @@ def _execution_start_operational_result(
     worker_process_started = bool(record.get("worker_process_started"))
     worker_pid_recorded = bool(record.get("worker_pid_recorded"))
     next_action_id = (
-        "MONITOR_P18_9_0_EXECUTION"
+        action_ids["monitor_execution"]
         if record.get("execution_started")
-        else PEPPER_CURRENT_EXECUTION_START_NEXT_ACTION_ID
+        else action_ids["execution_start"]
     )
     if terminal_state is not None:
         start_status = terminal_state["start_status"]
@@ -4479,7 +4660,7 @@ def _p18_9_0_terminal_execution_state(task: Any, runs: list[Any]) -> dict[str, A
             "outcome": "completed",
         }
     failure_outcome = outcome or run_status
-    if task_status == "blocked" or failure_outcome in _P18_9_0_FAILURE_OUTCOMES:
+    if task_status == "blocked" or failure_outcome in _GOVERNED_TICKET_FAILURE_OUTCOMES:
         detail = (
             getattr(latest_run, "error", None)
             or getattr(task, "last_failure_error", None)
@@ -4668,9 +4849,10 @@ def _review_prepare_package_digest(
     completion: dict[str, Any],
     acceptance_contract: dict[str, Any],
 ) -> str:
+    binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
     payload = {
-        "project_id": PEPPER_GOVERNED_PROJECT_ID,
-        "ticket_id": PEPPER_NEXT_TICKET_ID,
+        "project_id": binding.project_id,
+        "ticket_id": binding.ticket_id,
         "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
         "work_packet_id": projection["work_packet_id"],
         "work_packet_SHA256": projection["work_packet_SHA256"],
@@ -4692,13 +4874,14 @@ def _review_prepare_package_digest(
 def _validate_review_acceptance_request_guards(
     request: CurrentTicketReviewAcceptanceRequest,
 ) -> None:
-    if request.project_id not in {None, PEPPER_GOVERNED_PROJECT_ID}:
-        raise ProductRuntimeConflict("review acceptance is bounded to project PEPPER")
-    if request.ticket_id not in {None, PEPPER_NEXT_TICKET_ID}:
-        raise ProductRuntimeConflict("review acceptance is bounded to ticket P18.9.0")
-    if request.next_action_id not in {None, PEPPER_CURRENT_REVIEW_ACCEPTANCE_NEXT_ACTION_ID}:
+    binding = resolve_current_ticket_lifecycle_binding()
+    if request.project_id not in {None, binding.project_id}:
+        raise ProductRuntimeConflict(f"review acceptance is bounded to project {binding.project_id}")
+    if request.ticket_id not in {None, binding.ticket_id}:
+        raise ProductRuntimeConflict(f"review acceptance is bounded to ticket {binding.ticket_id}")
+    if request.next_action_id not in {None, binding.review_acceptance_next_action_id}:
         raise ProductRuntimeConflict(
-            "review acceptance requires AWAIT_HUMAN_P18_9_0_REVIEW_ACCEPTANCE"
+            f"review acceptance requires {binding.review_acceptance_next_action_id}"
         )
     if request.human_acceptance_text != PEPPER_CURRENT_REVIEW_ACCEPTANCE_TEXT:
         raise ProductRuntimeConflict(
@@ -4709,12 +4892,13 @@ def _validate_review_acceptance_request_guards(
 def _review_acceptance_workflow_blocker(
     workflow: dict[str, Any],
 ) -> tuple[str, str] | None:
-    if workflow.get("project_id") != PEPPER_GOVERNED_PROJECT_ID:
-        return "PEPPER_REVIEW_ACCEPTANCE_ACTION_GAP", "current project is not PEPPER"
-    if workflow.get("macroproject_id") != PEPPER_GOVERNED_MACROPROJECT_ID:
-        return "PEPPER_REVIEW_ACCEPTANCE_ACTION_GAP", "current macroproject is not P18.9"
-    if workflow.get("current_ticket_id") != PEPPER_NEXT_TICKET_ID:
-        return "PEPPER_REVIEW_ACCEPTANCE_ACTION_GAP", "current ticket is not P18.9.0"
+    binding = resolve_current_ticket_lifecycle_binding()
+    if workflow.get("project_id") != binding.project_id:
+        return "PEPPER_REVIEW_ACCEPTANCE_ACTION_GAP", f"current project is not {binding.project_id}"
+    if workflow.get("macroproject_id") != binding.macroproject_id:
+        return "PEPPER_REVIEW_ACCEPTANCE_ACTION_GAP", f"current macroproject is not {binding.macroproject_id}"
+    if workflow.get("current_ticket_id") != binding.ticket_id:
+        return "PEPPER_REVIEW_ACCEPTANCE_ACTION_GAP", f"current ticket is not {binding.ticket_id}"
     if workflow.get("workflow_status") != "review_prepared_pending_human_acceptance":
         return (
             "PEPPER_REVIEW_ACCEPTANCE_ACTION_GAP",
@@ -4723,10 +4907,10 @@ def _review_acceptance_workflow_blocker(
     next_action = workflow.get("next_action")
     if not isinstance(next_action, dict):
         return "PEPPER_REVIEW_ACCEPTANCE_ACTION_GAP", "next action is unavailable"
-    if next_action.get("id") != PEPPER_CURRENT_REVIEW_ACCEPTANCE_NEXT_ACTION_ID:
+    if next_action.get("id") != binding.review_acceptance_next_action_id:
         return "PEPPER_REVIEW_ACCEPTANCE_ACTION_GAP", "next action is not review acceptance"
-    if next_action.get("target_ticket_id") != PEPPER_NEXT_TICKET_ID:
-        return "PEPPER_REVIEW_ACCEPTANCE_ACTION_GAP", "next action does not target P18.9.0"
+    if next_action.get("target_ticket_id") != binding.ticket_id:
+        return "PEPPER_REVIEW_ACCEPTANCE_ACTION_GAP", f"next action does not target {binding.ticket_id}"
     if int(workflow.get("active_execution_count") or 0) != 0:
         return "EXECUTION_ALREADY_ACTIVE", "an execution is already active"
     if workflow.get("execution_state") == "active_executions":
@@ -4792,34 +4976,36 @@ def _p18_9_next_ticket_authority() -> dict[str, Any]:
 def _validate_review_prepare_request_guards(
     request: CurrentTicketReviewPrepareRequest,
 ) -> None:
-    if request.project_id not in {None, PEPPER_GOVERNED_PROJECT_ID}:
-        raise ProductRuntimeConflict("review preparation is bounded to project PEPPER")
-    if request.ticket_id not in {None, PEPPER_NEXT_TICKET_ID}:
-        raise ProductRuntimeConflict("review preparation is bounded to ticket P18.9.0")
-    if request.next_action_id not in {None, PEPPER_CURRENT_REVIEW_PREPARE_NEXT_ACTION_ID}:
+    binding = resolve_current_ticket_lifecycle_binding()
+    if request.project_id not in {None, binding.project_id}:
+        raise ProductRuntimeConflict(f"review preparation is bounded to project {binding.project_id}")
+    if request.ticket_id not in {None, binding.ticket_id}:
+        raise ProductRuntimeConflict(f"review preparation is bounded to ticket {binding.ticket_id}")
+    if request.next_action_id not in {None, binding.review_prepare_next_action_id}:
         raise ProductRuntimeConflict(
-            "review preparation requires PREPARE_P18_9_0_REVIEW"
+            f"review preparation requires {binding.review_prepare_next_action_id}"
         )
 
 
 def _review_prepare_workflow_blocker(
     workflow: dict[str, Any],
 ) -> tuple[str, str] | None:
-    if workflow.get("project_id") != PEPPER_GOVERNED_PROJECT_ID:
-        return "PEPPER_REVIEW_PREPARE_ACTION_GAP", "current project is not PEPPER"
-    if workflow.get("macroproject_id") != PEPPER_GOVERNED_MACROPROJECT_ID:
-        return "PEPPER_REVIEW_PREPARE_ACTION_GAP", "current macroproject is not P18.9"
-    if workflow.get("current_ticket_id") != PEPPER_NEXT_TICKET_ID:
-        return "PEPPER_REVIEW_PREPARE_ACTION_GAP", "current ticket is not P18.9.0"
+    binding = resolve_current_ticket_lifecycle_binding()
+    if workflow.get("project_id") != binding.project_id:
+        return "PEPPER_REVIEW_PREPARE_ACTION_GAP", f"current project is not {binding.project_id}"
+    if workflow.get("macroproject_id") != binding.macroproject_id:
+        return "PEPPER_REVIEW_PREPARE_ACTION_GAP", f"current macroproject is not {binding.macroproject_id}"
+    if workflow.get("current_ticket_id") != binding.ticket_id:
+        return "PEPPER_REVIEW_PREPARE_ACTION_GAP", f"current ticket is not {binding.ticket_id}"
     if workflow.get("workflow_status") != "execution_completed":
         return "PEPPER_REVIEW_PREPARE_ACTION_GAP", "workflow status is not execution_completed"
     next_action = workflow.get("next_action")
     if not isinstance(next_action, dict):
         return "PEPPER_REVIEW_PREPARE_ACTION_GAP", "next action is unavailable"
-    if next_action.get("id") != PEPPER_CURRENT_REVIEW_PREPARE_NEXT_ACTION_ID:
+    if next_action.get("id") != binding.review_prepare_next_action_id:
         return "PEPPER_REVIEW_PREPARE_ACTION_GAP", "next action is not review preparation"
-    if next_action.get("target_ticket_id") != PEPPER_NEXT_TICKET_ID:
-        return "PEPPER_REVIEW_PREPARE_ACTION_GAP", "next action does not target P18.9.0"
+    if next_action.get("target_ticket_id") != binding.ticket_id:
+        return "PEPPER_REVIEW_PREPARE_ACTION_GAP", f"next action does not target {binding.ticket_id}"
     if int(workflow.get("active_execution_count") or 0) != 0:
         return "EXECUTION_ALREADY_ACTIVE", "an execution is already active"
     if workflow.get("execution_state") == "active_executions":
@@ -4850,11 +5036,12 @@ def _p18_9_0_acceptance_contract() -> dict[str, Any]:
     work_packet = compilation.get("work_packet")
     if not isinstance(work_packet, dict):
         raise ProductRuntimeConflict("P18.9.0 WorkPacket contract source is unavailable")
+    binding = resolve_current_ticket_lifecycle_binding(generation_record=generation)
     contract = {
         "schema_version": PEPPER_REVIEW_PREPARE_ACTION_SCHEMA_VERSION,
-        "project_id": PEPPER_GOVERNED_PROJECT_ID,
-        "ticket_id": PEPPER_NEXT_TICKET_ID,
-        "ticket_title": PEPPER_NEXT_TICKET_TITLE,
+        "project_id": binding.project_id,
+        "ticket_id": binding.ticket_id,
+        "ticket_title": binding.ticket_title,
         "ticket_spec_SHA256": generation["ticket_spec_SHA256"],
         "work_packet_id": generation["work_packet_id"],
         "work_packet_SHA256": generation["work_packet_SHA256"],
@@ -4868,7 +5055,7 @@ def _p18_9_0_acceptance_contract() -> dict[str, Any]:
         "required_response_sections": list(
             dict(ticket_spec.get("response_contract") or {}).get("required_sections") or []
         ),
-        "acceptance_contract_source": "pepper-ticket-architect-bridge:P18.9.0",
+        "acceptance_contract_source": f"pepper-ticket-architect-bridge:{binding.ticket_id}",
     }
     contract["criteria_revision_SHA256"] = _criteria_revision_digest(contract)
     contract["acceptance_contract_SHA256"] = _acceptance_contract_digest(contract)
@@ -5035,10 +5222,11 @@ def _build_review_prepare_record(
         completion=completion,
         acceptance_contract=acceptance_contract,
     )
+    binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
     pre_review_invariants = {
-        "project": PEPPER_GOVERNED_PROJECT_ID,
-        "ticket": PEPPER_NEXT_TICKET_ID,
-        "next_action": PEPPER_CURRENT_REVIEW_PREPARE_NEXT_ACTION_ID,
+        "project": binding.project_id,
+        "ticket": binding.ticket_id,
+        "next_action": binding.review_prepare_next_action_id,
         "run_id": completion["run_id"],
         "run_status": "done",
         "run_outcome": "completed",
@@ -5056,14 +5244,7 @@ def _build_review_prepare_record(
         "runtime_boundary_classification": REVIEW_VALIDATION_RUNTIME_BOUNDARY_CLASSIFICATION,
         "runtime_boundary": ReviewValidationRuntimeBoundary.REVIEW_POST_EXECUTION_ONLY.value,
         "created_at": _utc_now_iso(),
-        "project_id": PEPPER_GOVERNED_PROJECT_ID,
-        "macroproject_id": PEPPER_GOVERNED_MACROPROJECT_ID,
-        "ticket_id": PEPPER_NEXT_TICKET_ID,
-        "ticket_title": PEPPER_NEXT_TICKET_TITLE,
-        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
-        "work_packet_id": projection["work_packet_id"],
-        "work_packet_SHA256": projection["work_packet_SHA256"],
-        "WorkPacket_compilation_count": _P18_9_0_WORK_PACKET_COMPILATION_COUNT,
+        **_current_ticket_projection_identity_fields(projection),
         "approval_publication_SHA256": projection["approval_publication_SHA256"],
         "dependency_plan_SHA256": projection["dependency_plan_SHA256"],
         "projection_SHA256": projection["projection_SHA256"],
@@ -5097,7 +5278,7 @@ def _build_review_prepare_record(
         "P18_9_0_ticket_specific_contract_bound": True,
         "human_acceptance_required": True,
         "human_acceptance_recorded": False,
-        "human_acceptance_next_action_id": PEPPER_CURRENT_REVIEW_ACCEPTANCE_NEXT_ACTION_ID,
+        "human_acceptance_next_action_id": binding.review_acceptance_next_action_id,
         "git_handoff_required": False,
         "git_handoff_state": "not_required_for_ticket_result",
         "git_handoff_decision_basis": "P18.9.0 completion source reports no file or Git mutation metadata",
@@ -5123,9 +5304,9 @@ def _build_review_prepare_record(
         "auto_retry": False,
         "auto_rollback": False,
         "next_action": {
-            "id": PEPPER_CURRENT_REVIEW_ACCEPTANCE_NEXT_ACTION_ID,
-            "target_ticket_id": PEPPER_NEXT_TICKET_ID,
-            "target_ticket_title": PEPPER_NEXT_TICKET_TITLE,
+            "id": binding.review_acceptance_next_action_id,
+            "target_ticket_id": binding.ticket_id,
+            "target_ticket_title": binding.ticket_title,
             "required_human_action": "p18_9_0_review_acceptance",
         },
         "human_smoke_marker": "PEPPER-REVIEW-PREPARE-ACTION-READY-FOR-HUMAN-SMOKE",
@@ -5154,12 +5335,13 @@ def _build_review_acceptance_record(
     )
 
     observed_at = _utc_now_iso()
+    binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
     acceptance_text = unicodedata.normalize("NFC", request.human_acceptance_text)
     acceptance_text_sha = _review_acceptance_text_digest(acceptance_text)
     pre_acceptance_invariants = {
-        "project": PEPPER_GOVERNED_PROJECT_ID,
-        "ticket": PEPPER_NEXT_TICKET_ID,
-        "next_action": PEPPER_CURRENT_REVIEW_ACCEPTANCE_NEXT_ACTION_ID,
+        "project": binding.project_id,
+        "ticket": binding.ticket_id,
+        "next_action": binding.review_acceptance_next_action_id,
         "review_prepare_action_SHA256": review_prepare["review_prepare_action_SHA256"],
         "review_package_SHA256": review_prepare["review_package_SHA256"],
         "active_execution_count": int(workflow.get("active_execution_count") or 0),
@@ -5178,14 +5360,7 @@ def _build_review_acceptance_record(
         "P18_5_policy_id": REVIEW_VALIDATION_LOOP_POLICY_ID,
         "runtime_boundary_classification": REVIEW_VALIDATION_RUNTIME_BOUNDARY_CLASSIFICATION,
         "created_at": observed_at,
-        "project_id": PEPPER_GOVERNED_PROJECT_ID,
-        "macroproject_id": PEPPER_GOVERNED_MACROPROJECT_ID,
-        "ticket_id": PEPPER_NEXT_TICKET_ID,
-        "ticket_title": PEPPER_NEXT_TICKET_TITLE,
-        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
-        "work_packet_id": projection["work_packet_id"],
-        "work_packet_SHA256": projection["work_packet_SHA256"],
-        "WorkPacket_compilation_count": _P18_9_0_WORK_PACKET_COMPILATION_COUNT,
+        **_current_ticket_projection_identity_fields(projection),
         "approval_publication_SHA256": projection["approval_publication_SHA256"],
         "dependency_plan_SHA256": projection["dependency_plan_SHA256"],
         "projection_SHA256": projection["projection_SHA256"],
@@ -5207,7 +5382,7 @@ def _build_review_acceptance_record(
         "human_acceptance": {
             "acceptor_id": request.acceptor_id,
             "accepted_at": observed_at,
-            "acceptance_reference": "human_acceptance:P18.9.0.review",
+            "acceptance_reference": f"human_acceptance:{binding.ticket_id}.review",
             "human_acceptance_text_SHA256": acceptance_text_sha,
         },
         "review_acceptance_status": "accepted",
@@ -5469,14 +5644,7 @@ def _blocked_current_review_prepare_result(
         "review_prepare_status": "blocked",
         "blocker_code": blocker_code,
         "blocker_detail": _safe_text(blocker_detail, limit=300),
-        "project_id": PEPPER_GOVERNED_PROJECT_ID,
-        "macroproject_id": PEPPER_GOVERNED_MACROPROJECT_ID,
-        "ticket_id": PEPPER_NEXT_TICKET_ID,
-        "ticket_title": PEPPER_NEXT_TICKET_TITLE,
-        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
-        "work_packet_id": projection["work_packet_id"],
-        "work_packet_SHA256": projection["work_packet_SHA256"],
-        "WorkPacket_compilation_count": _P18_9_0_WORK_PACKET_COMPILATION_COUNT,
+        **_current_ticket_projection_identity_fields(projection),
         "kanban_board_slug": projection["kanban_board_slug"],
         "kanban_task_id": projection["kanban_task_id"],
         "requested_project_id": request.project_id,
@@ -5522,14 +5690,7 @@ def _blocked_current_review_acceptance_result(
         "review_acceptance_status": "blocked",
         "blocker_code": blocker_code,
         "blocker_detail": _safe_text(blocker_detail, limit=300),
-        "project_id": PEPPER_GOVERNED_PROJECT_ID,
-        "macroproject_id": PEPPER_GOVERNED_MACROPROJECT_ID,
-        "ticket_id": PEPPER_NEXT_TICKET_ID,
-        "ticket_title": PEPPER_NEXT_TICKET_TITLE,
-        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
-        "work_packet_id": projection["work_packet_id"],
-        "work_packet_SHA256": projection["work_packet_SHA256"],
-        "WorkPacket_compilation_count": _P18_9_0_WORK_PACKET_COMPILATION_COUNT,
+        **_current_ticket_projection_identity_fields(projection),
         "kanban_board_slug": projection["kanban_board_slug"],
         "kanban_task_id": projection["kanban_task_id"],
         "requested_project_id": request.project_id,
@@ -5572,6 +5733,7 @@ def _p18_9_0_review_prepare_overlay(
     *,
     completed_overlay: dict[str, Any],
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
     try:
         record = load_p18_9_0_review_prepare_record(projection_record=projection)
     except Exception as exc:  # pragma: no cover - defensive live-state guard
@@ -5632,13 +5794,13 @@ def _p18_9_0_review_prepare_overlay(
         "auto_retry": False,
         "auto_rollback": False,
         "next_action": {
-            "id": PEPPER_CURRENT_REVIEW_ACCEPTANCE_NEXT_ACTION_ID,
+            "id": binding.review_acceptance_next_action_id,
             "label": (
-                "P18.9.0 review package is prepared; await explicit human "
+                f"{binding.ticket_id} review package is prepared; await explicit human "
                 "review acceptance before closure."
             ),
-            "target_ticket_id": PEPPER_NEXT_TICKET_ID,
-            "target_ticket_title": PEPPER_NEXT_TICKET_TITLE,
+            "target_ticket_id": binding.ticket_id,
+            "target_ticket_title": binding.ticket_title,
             "required_human_action": "p18_9_0_review_acceptance",
         },
     }, None
@@ -5695,8 +5857,8 @@ def _p18_9_0_review_acceptance_overlay(
         "P18_9_0_review_acceptance_present": True,
         "P18_9_0_closed": True,
         "P18_9_0_completed": True,
-        "P18_9_1_ready": True,
-        "P18_9_1_generated": False,
+        "next_ticket_ready": True,
+        "next_ticket_generated": False,
         "human_acceptance_required": False,
         "human_acceptance_recorded": True,
         "pending_human_acceptance_required": False,
@@ -5864,6 +6026,7 @@ def _p18_9_0_recovery_overlay(
     *,
     start_overlay: dict[str, Any],
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
     try:
         record = load_p18_9_0_recovery_action_record(projection_record=projection)
     except Exception as exc:  # pragma: no cover - defensive live-state guard
@@ -5924,13 +6087,13 @@ def _p18_9_0_recovery_overlay(
             "failure_summary": record.get("failure_summary") or start_overlay.get("failure_summary"),
         },
         "next_action": {
-            "id": PEPPER_CURRENT_RETRY_START_NEXT_ACTION_ID,
+            "id": binding.retry_start_next_action_id,
             "label": (
-                "P18.9.0 recovery authorization is recorded and retry is pending; "
+                f"{binding.ticket_id} recovery authorization is recorded and retry is pending; "
                 "a separate governed retry-start authorization is required before run 2."
             ),
-            "target_ticket_id": PEPPER_NEXT_TICKET_ID,
-            "target_ticket_title": PEPPER_NEXT_TICKET_TITLE,
+            "target_ticket_id": binding.ticket_id,
+            "target_ticket_title": binding.ticket_title,
             "required_human_action": "retry_start_authorization",
         },
         "Git_mutation": False,
@@ -5942,6 +6105,7 @@ def _p18_9_0_recovery_overlay(
 def _p18_9_0_retry_start_overlay(
     projection: dict[str, Any],
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
     try:
         recovery = load_p18_9_0_recovery_action_record(projection_record=projection)
         if recovery is None:
@@ -6019,13 +6183,13 @@ def _p18_9_0_retry_start_overlay(
                 "historical_lifecycle_blocker_consumed": True,
             },
             "next_action": {
-                "id": PEPPER_CURRENT_RETRY_START_NEXT_ACTION_ID,
+                "id": binding.retry_start_next_action_id,
                 "label": (
-                    "P18.9.0 retry is still pending; resolve the recorded retry-start "
+                    f"{binding.ticket_id} retry is still pending; resolve the recorded retry-start "
                     "blocker and submit separate governed retry-start authorization."
                 ),
-                "target_ticket_id": PEPPER_NEXT_TICKET_ID,
-                "target_ticket_title": PEPPER_NEXT_TICKET_TITLE,
+                "target_ticket_id": binding.ticket_id,
+                "target_ticket_title": binding.ticket_title,
                 "required_human_action": "retry_start_authorization",
             },
             "Git_mutation": False,
