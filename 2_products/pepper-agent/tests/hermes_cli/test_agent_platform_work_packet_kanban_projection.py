@@ -12,6 +12,8 @@ from hermes_cli.agent_platform.workflow import work_packet_kanban_projection as 
 
 
 _EXECUTOR_PROFILE = "pepper-architecture-product"
+_IMPLEMENTATION_PROFILE = "pepper-frontend-implementation"
+_P18_9_1_TITLE = "Pepper Shell, Routing, and Compact Navigation"
 NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
@@ -41,6 +43,33 @@ def _workflow(**overrides):
             "target_ticket_title": bridge.CANONICAL_TICKET_TITLE,
         },
     }
+    data.update(overrides)
+    return data
+
+
+def _next_ticket_workflow(**overrides):
+    data = _workflow(
+        current_ticket_id=None,
+        current_ticket_title=None,
+        next_ticket_id="P18.9.1",
+        next_ticket_title=_P18_9_1_TITLE,
+        workflow_state="P18.9.0-COMPLETED",
+        workflow_status="completed",
+        queue_state="p18_9_0_closed_next_ticket_ready",
+        validation_state="review_accepted",
+        review_state="accepted",
+        P18_9_ticket_generated=True,
+        P18_9_0_closed=True,
+        next_ticket_ready=True,
+        next_ticket_generated=False,
+        next_action={
+            "id": "GENERATE_P18_9_1_REQUIRES_SEPARATE_HUMAN_ACTION",
+            "label": f"Generate governed P18.9.1 {_P18_9_1_TITLE}.",
+            "target_ticket_id": "P18.9.1",
+            "target_ticket_title": _P18_9_1_TITLE,
+            "required_human_action": "ticket_generation",
+        },
+    )
     data.update(overrides)
     return data
 
@@ -89,6 +118,7 @@ def _profile_stub(
 
 
 def _install_execution_profile(monkeypatch, home, **overrides) -> None:
+    overrides.setdefault("model_config", True)
     profile = _profile_stub(home, **overrides)
     monkeypatch.setattr(projection, "list_profiles", lambda: [profile])
 
@@ -161,6 +191,7 @@ def _ready_executor_provider_payload(profile_name=_EXECUTOR_PROFILE) -> dict:
         "model": "gpt-5.5",
         "api_mode": "codex_responses",
         "credential_profile_id": "openai-codex.primary",
+        "credential_policy_revision": "provider-runtime-v1.provider-worker-v1.provider-credential-v1",
         "provider_runtime_profile_id": "provider.openai-codex.chatgpt-oauth.gpt-5.5.v1",
         "worker_profile_id": "worker.openai-codex.chatgpt-oauth.gpt-5.5.single-request.v1",
         "executor_config_source": "test",
@@ -186,8 +217,10 @@ def _ready_worker_credential_probe() -> dict:
 
 def _persist_started_execution_record(pr, projected, run_id: int) -> None:
     authority = projected
-    if "approval_publication_SHA256" not in authority:
-        authority = projection.load_p18_9_0_kanban_projection_record()
+    if "projection_SHA256" not in authority or "dependency_plan_SHA256" not in authority:
+        authority = projection.load_kanban_projection_record(
+            ticket_id=projected.get("ticket_id") or "P18.9.0"
+        )
     assert authority is not None
     record = pr._build_execution_start_authorization_record(
         request=pr.CurrentTicketExecutionStartRequest(
@@ -332,6 +365,115 @@ def _approve_current_ticket() -> tuple[dict, dict]:
     assert generation is not None
     assert decision is not None
     return generation, decision
+
+
+def _install_implementation_profile(monkeypatch, home, **overrides) -> None:
+    data = {
+        "name": _IMPLEMENTATION_PROFILE,
+        "description": "Pepper frontend product implementation execution profile",
+        "cli_toolsets": ("pepper_repository", "file", "no_mcp"),
+    }
+    data.update(overrides)
+    _install_execution_profile(monkeypatch, home, **data)
+
+
+def _approve_next_ticket() -> tuple[dict, dict]:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    bridge.generate_current_ticket(workflow=_next_ticket_workflow())
+    approved = pr.apply_approval_decision(
+        "P18.9.1",
+        pr.ApprovalDecisionRequest(decision="approve", actor="human.p18.9"),
+    )
+    assert approved["status"] == "approved"
+    generation = bridge.load_generation_record(ticket_id="P18.9.1")
+    decision = bridge.load_approval_decision_record(ticket_id="P18.9.1")
+    assert generation is not None
+    assert decision is not None
+    return generation, decision
+
+
+def _approved_workflow_for_record(record: dict) -> dict:
+    return {
+        **_next_ticket_workflow(),
+        **bridge.generated_record_to_workflow_overlay(record),
+        "active_execution_count": 0,
+        "execution_state": "no_active_executions",
+    }
+
+
+def _project_next_ticket_direct():
+    generation = bridge.load_generation_record(ticket_id="P18.9.1")
+    assert generation is not None
+    return projection.project_current_approved_workpacket_to_kanban(
+        workflow=_approved_workflow_for_record(generation),
+        requested_project_id="PEPPER",
+        requested_ticket_id="P18.9.1",
+        requested_next_action_id="P18_9_1_APPROVED_NO_EXECUTION",
+    )
+
+
+def _synthetic_implementation_contract(label: str) -> dict[str, object]:
+    return {
+        "ticket_type": "implementation",
+        "objective": f"Implement synthetic governed surface {label}.",
+        "predecessor_evidence": ["Synthetic predecessor accepted IA handoff."],
+        "information_architecture": [f"CONTROL: Synthetic {label}"],
+        "required_surfaces": [f"Synthetic surface {label}"],
+        "allowed_paths": ["2_products/pepper-agent/web/src/agent-platform/shell/**"],
+        "allowed_actions": ["Reuse existing synthetic shell seam."],
+        "constraints": ["Do not create a second synthetic router."],
+        "tasks": [f"Implement synthetic task {label} through the existing seam."],
+        "acceptance_criteria": [
+            f"Synthetic surface {label} is implemented through the existing seam."
+        ],
+        "validation_steps": [
+            f"V1: Human review confirms synthetic contract {label} => The generated TicketSpec is implementation-oriented."
+        ],
+        "completion_verdict": f"synthetic_{label.lower()}_implementation_ready",
+    }
+
+
+def _synthetic_implementation_target(ticket_id: str = "P99.2"):
+    return bridge.GovernedTicketGenerationTarget(
+        project_id="PEPPER",
+        project_name="Pepper",
+        macroproject_id="P99.0",
+        macroproject_title="Synthetic Implementation Macroproject",
+        ticket_id=ticket_id,
+        ticket_title="Synthetic Future Projection",
+        next_action_id=bridge.canonical_generation_action_id(ticket_id),
+        approval_next_action_id=bridge.approval_action_id(ticket_id),
+        approved_no_execution_next_action_id=bridge.approved_no_execution_action_id(ticket_id),
+        revise_next_action_id=bridge.revise_action_id(ticket_id),
+        canonical_roadmap_authority="synthetic_test_roadmap",
+        roadmap_authority_path="synthetic-roadmap.md",
+        roadmap_authority_section="Synthetic roadmap",
+        dependency_ticket_ids=(),
+        predecessor_ticket_id=None,
+        readiness_state="synthetic_ready",
+        authority_source="synthetic_contract_fixture",
+        ticket_contract=_synthetic_implementation_contract("Projection"),
+    )
+
+
+def _synthetic_workflow_for_target(target) -> dict:
+    return {
+        "project_id": target.project_id,
+        "project_name": target.project_name,
+        "macroproject_id": target.macroproject_id,
+        "macroproject_title": target.macroproject_title,
+        "current_ticket_id": None,
+        "next_ticket_id": target.ticket_id,
+        "next_ticket_title": target.ticket_title,
+        "workflow_status": "completed",
+        "P18_9_ready": True,
+        "next_action": {
+            "id": target.next_action_id,
+            "target_ticket_id": target.ticket_id,
+            "target_ticket_title": target.ticket_title,
+        },
+    }
 
 
 def _project_via_runtime():
@@ -543,6 +685,135 @@ def test_projection_preserves_workpacket_and_creates_ready_kanban_task(
         conn.close()
 
 
+def test_generic_projection_preserves_p18_9_1_workpacket_and_creates_ready_task(
+    projection_home,
+    monkeypatch,
+) -> None:
+    _install_implementation_profile(monkeypatch, projection_home)
+    generation, decision = _approve_next_ticket()
+
+    resolved = projection.resolve_current_approved_workpacket_projection(
+        workflow=_approved_workflow_for_record(generation),
+        requested_project_id="PEPPER",
+        requested_ticket_id="P18.9.1",
+        requested_next_action_id="P18_9_1_APPROVED_NO_EXECUTION",
+    )
+    result = _project_next_ticket_direct()
+    replay = _project_next_ticket_direct()
+    record = projection.load_kanban_projection_record(ticket_id="P18.9.1")
+
+    assert resolved["ticket_id"] == "P18.9.1"
+    assert resolved["ticket_spec_SHA256"] == generation["ticket_spec_SHA256"]
+    assert resolved["work_packet_id"] == generation["work_packet_id"]
+    assert resolved["work_packet_SHA256"] == generation["work_packet_SHA256"]
+    assert resolved["approval_publication_SHA256"] == decision["approval_publication_SHA256"]
+    assert result["projection_status"] == "projected"
+    assert result["ticket_id"] == "P18.9.1"
+    assert result["ticket_spec_SHA256"] == generation["ticket_spec_SHA256"]
+    assert result["work_packet_id"] == generation["work_packet_id"]
+    assert result["work_packet_SHA256"] == generation["work_packet_SHA256"]
+    assert result["WorkPacket_compilation_count"] == 1
+    assert result["assignee_profile"] == _IMPLEMENTATION_PROFILE
+    assert result["selected_profile"] == _IMPLEMENTATION_PROFILE
+    assert result["execution_profile_role"] == "implementation_product"
+    assert result["selected_role"] == "implementation_product"
+    assert result["profile_toolsets"] == ["pepper_repository", "file"]
+    assert result["required_write_toolsets"] == ["file"]
+    assert result["required_capabilities"] == ["codebase-inspection", "codebase-edit"]
+    assert result["ticket_execution_requirements"]["ticket_type"] == "implementation"
+    assert result["profile_assignment_policy_id"] == projection.PEPPER_EXECUTION_PROFILES_POLICY_ID
+    assert result["profile_assignment_policy_revision"] == projection.PEPPER_EXECUTION_PROFILES_POLICY_REVISION
+    assert result["dispatch_performed"] is False
+    assert result["execution_started"] is False
+    assert result["worker_execution"] is False
+    assert result["Kanban_dispatch"] is False
+    assert result["Git_mutation"] is False
+    assert result["next_action"]["id"] == "START_P18_9_1_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION"
+    assert replay["idempotent_replay"] is True
+    assert replay["kanban_task_id"] == result["kanban_task_id"]
+    assert projection.kanban_projection_record_path_for_ticket("P18.9.1") == (
+        projection_home / "agent-platform" / "pepper-workpacket-kanban-projection" / "P18.9.1.json"
+    )
+    assert record is not None
+    assert record["approval_publication_SHA256"] == decision["approval_publication_SHA256"]
+    assert record["dispatch_performed"] is False
+    assert record["worker_execution"] is False
+
+    from hermes_cli import kanban_db
+
+    conn = kanban_db.connect(board=result["kanban_board_slug"])
+    try:
+        tasks = kanban_db.list_tasks(conn)
+        task = kanban_db.get_task(conn, result["kanban_task_id"])
+        assert [task.id for task in tasks] == [result["kanban_task_id"]]
+        assert task is not None
+        assert task.status == "ready"
+        assert task.assignee == _IMPLEMENTATION_PROFILE
+        assert kanban_db.list_runs(conn, task.id) == []
+        body = json.loads(task.body or "{}")
+        assert body["ticket_id"] == "P18.9.1"
+        assert body["WorkPacket_ID"] == generation["work_packet_id"]
+        assert body["WorkPacket_SHA256"] == generation["work_packet_SHA256"]
+        assert body["TicketSpec_SHA256"] == generation["ticket_spec_SHA256"]
+        assert body["execution_profile_role"] == "implementation_product"
+        assert body["profile_toolsets"] == ["pepper_repository", "file"]
+        assert body["required_write_toolsets"] == ["file"]
+        assert body["required_capabilities"] == ["codebase-inspection", "codebase-edit"]
+    finally:
+        conn.close()
+
+
+def test_synthetic_future_ticket_projection_uses_generic_primitive(
+    projection_home,
+    monkeypatch,
+) -> None:
+    _install_implementation_profile(monkeypatch, projection_home)
+    target = _synthetic_implementation_target()
+    bridge.generate_current_ticket(
+        workflow=_synthetic_workflow_for_target(target),
+        target=target,
+    )
+    approval = bridge.apply_ticket_approval_decision(
+        ticket_id=target.ticket_id,
+        decision="approve",
+        actor="synthetic-human",
+    )
+    generation = bridge.load_generation_record(ticket_id=target.ticket_id)
+    assert generation is not None
+    workflow = {
+        **_synthetic_workflow_for_target(target),
+        **bridge.generated_record_to_workflow_overlay(generation),
+        "active_execution_count": 0,
+        "execution_state": "no_active_executions",
+    }
+
+    result = projection.project_current_approved_workpacket_to_kanban(
+        workflow=workflow,
+        requested_project_id="PEPPER",
+        requested_ticket_id=target.ticket_id,
+        requested_next_action_id="P99_2_APPROVED_NO_EXECUTION",
+    )
+
+    assert result["ticket_id"] == target.ticket_id
+    assert result["ticket_spec_SHA256"] == generation["ticket_spec_SHA256"]
+    assert result["work_packet_id"] == generation["work_packet_id"]
+    assert result["work_packet_SHA256"] == generation["work_packet_SHA256"]
+    assert result["assignee_profile"] == _IMPLEMENTATION_PROFILE
+    assert result["execution_profile_role"] == "implementation_product"
+    assert result["approval_publication_SHA256"] == approval["authority"]["approval_publication_SHA256"]
+    assert result["dispatch_performed"] is False
+    assert result["worker_execution"] is False
+    assert result["Kanban_dispatch"] is False
+    assert result["Git_mutation"] is False
+    assert result["next_action"]["id"] == "START_P99_2_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION"
+
+    overlay = projection.kanban_projection_to_workflow_overlay(
+        projection.load_kanban_projection_record(ticket_id=target.ticket_id)
+    )
+    assert overlay["workflow_status"] == "queued"
+    assert overlay["next_action"]["id"] == "START_P99_2_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION"
+
+
 def test_legacy_semantic_task_skill_projection_still_validates_as_evidence(
     projection_home,
     monkeypatch,
@@ -717,6 +988,28 @@ def test_profile_description_participates_in_architecture_product_selection(
     assert selected["selected_role"] == "architecture_product"
 
 
+def test_execution_profile_classifier_accepts_bounded_implementation_profile(
+    projection_home,
+) -> None:
+    profile = _profile_stub(
+        projection_home,
+        name=_IMPLEMENTATION_PROFILE,
+        description="Pepper frontend product implementation execution profile",
+        cli_toolsets=("pepper_repository", "file", "no_mcp"),
+    )
+
+    classification = projection.classify_pepper_execution_profile(profile)
+
+    assert classification["canonical_name"] == _IMPLEMENTATION_PROFILE
+    assert classification["role"] == "implementation_product"
+    assert classification["classification_basis"] == "product_implementation_role_terms"
+    assert classification["worker_assignable"] is True
+    assert classification["cli_toolsets"] == ["pepper_repository", "file"]
+    assert classification["required_write_toolsets"] == ["file"]
+    assert classification["write_capable"] is True
+    assert classification["rejection_reasons"] == []
+
+
 def test_profile_assignment_does_not_expose_secret_material(
     projection_home,
 ) -> None:
@@ -766,6 +1059,9 @@ def test_executor_provider_binding_resolves_governed_primary_without_profile_loc
     assert result["model"] == "gpt-5.5"
     assert result["api_mode"] == "codex_responses"
     assert result["credential_profile_id"] == "openai-codex.primary"
+    assert result["credential_policy_revision"] == (
+        "provider-runtime-v1.provider-worker-v1.provider-credential-v1"
+    )
     assert result["provider_runtime_profile_id"] == (
         "provider.openai-codex.chatgpt-oauth.gpt-5.5.v1"
     )
@@ -795,6 +1091,62 @@ def test_executor_provider_binding_resolves_governed_primary_without_profile_loc
     assert lead_agent.PEPPER_LEAD_AGENT_CREDENTIAL_PROFILE == "openai-codex.primary"
 
 
+def test_executor_provider_binding_accepts_implementation_product_profile(
+    projection_home,
+    monkeypatch,
+) -> None:
+    profile = _profile_stub(
+        projection_home,
+        name=_IMPLEMENTATION_PROFILE,
+        description="Pepper frontend product implementation execution profile",
+        cli_toolsets=("pepper_repository", "file", "no_mcp"),
+        model_config=True,
+    )
+    _install_executor_profile_roster(monkeypatch, [profile])
+    canonical_root = (
+        projection_home
+        / "agent-platform"
+        / "provider-credentials"
+        / "openai-codex.primary"
+    )
+    captured = _patch_ready_governed_provider(monkeypatch, canonical_root)
+    (profile.path / "auth.json").write_text(
+        json.dumps({"access_token": "IMPLEMENTATION_PROFILE_LOCAL_SHOULD_NOT_LEAK"}),
+        encoding="utf-8",
+    )
+
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    result = pr._executor_provider_readiness(_IMPLEMENTATION_PROFILE)
+    serialized = json.dumps(result, sort_keys=True)
+    classification = projection.classify_pepper_execution_profile(profile)
+
+    assert result["ok"] is True
+    assert result["executor_profile"] == _IMPLEMENTATION_PROFILE
+    assert result["provider"] == "openai-codex"
+    assert result["model"] == "gpt-5.5"
+    assert result["api_mode"] == "codex_responses"
+    assert result["credential_profile_id"] == "openai-codex.primary"
+    assert result["credential_policy_revision"] == (
+        "provider-runtime-v1.provider-worker-v1.provider-credential-v1"
+    )
+    assert result["provider_runtime_profile_id"] == (
+        "provider.openai-codex.chatgpt-oauth.gpt-5.5.v1"
+    )
+    assert result["worker_profile_id"] == (
+        "worker.openai-codex.chatgpt-oauth.gpt-5.5.single-request.v1"
+    )
+    assert result["credential_resolution_source"] == "canonical_governed_home"
+    assert result["legacy_auth_json_used"] is False
+    assert result["API_key_fallback_used"] is False
+    assert captured["hermes_home_arg"] == projection_home
+    assert captured["credential_root"] == canonical_root
+    assert profile.path not in captured["credential_root"].parents
+    assert "IMPLEMENTATION_PROFILE_LOCAL_SHOULD_NOT_LEAK" not in serialized
+    assert classification["role"] == "implementation_product"
+    assert classification["worker_assignable"] is True
+
+
 def test_executor_provider_binding_rejects_default_profile_even_with_model_config(
     projection_home,
     monkeypatch,
@@ -814,7 +1166,7 @@ def test_executor_provider_binding_rejects_default_profile_even_with_model_confi
 
     assert result["ok"] is False
     assert result["blocker_code"] == "PROFILE_ASSIGNMENT_GAP"
-    assert result["classification"]["worker_assignable"] is False
+    assert result["validation_category"] == "selected_profile_not_worker_assignable"
 
 
 @pytest.mark.parametrize(
@@ -883,6 +1235,107 @@ def test_ambiguous_execution_profiles_require_human_selection(
         projection.WorkPacketKanbanProjectionProfileSelectionRequired
     ) as exc:
         projection.resolve_p18_9_0_execution_profile()
+
+    assert "HUMAN_PROFILE_SELECTION_REQUIRED" in str(exc.value)
+
+
+def test_implementation_ticket_profile_assignment_gap_is_explicit(
+    projection_home,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(projection, "list_profiles", lambda: [])
+    generation, _decision = _approve_next_ticket()
+
+    with pytest.raises(projection.WorkPacketKanbanProjectionProfileGap) as exc:
+        projection.project_current_approved_workpacket_to_kanban(
+            workflow=_approved_workflow_for_record(generation),
+            requested_project_id="PEPPER",
+            requested_ticket_id="P18.9.1",
+            requested_next_action_id="P18_9_1_APPROVED_NO_EXECUTION",
+        )
+
+    assert "PROFILE_ASSIGNMENT_GAP" in str(exc.value)
+    assert exc.value.blocker_code == "PROFILE_ASSIGNMENT_GAP"
+    assert exc.value.diagnostics["required_role"] == "implementation_product"
+    assert exc.value.diagnostics["candidate_profiles"] == []
+
+
+def test_read_only_implementation_profile_is_write_capability_gap(
+    projection_home,
+    monkeypatch,
+) -> None:
+    profile = _profile_stub(
+        projection_home,
+        name=_IMPLEMENTATION_PROFILE,
+        description="Pepper frontend product implementation execution profile",
+        cli_toolsets=("pepper_repository", "no_mcp"),
+    )
+    monkeypatch.setattr(projection, "list_profiles", lambda: [profile])
+    generation, _decision = _approve_next_ticket()
+
+    with pytest.raises(projection.WorkPacketKanbanProjectionProfileGap) as exc:
+        projection.project_current_approved_workpacket_to_kanban(
+            workflow=_approved_workflow_for_record(generation),
+            requested_project_id="PEPPER",
+            requested_ticket_id="P18.9.1",
+            requested_next_action_id="P18_9_1_APPROVED_NO_EXECUTION",
+        )
+
+    diagnostics = exc.value.diagnostics
+    assert str(exc.value) == "IMPLEMENTATION_WORKER_WRITE_CAPABILITY_GAP"
+    assert exc.value.blocker_code == "IMPLEMENTATION_WORKER_WRITE_CAPABILITY_GAP"
+    assert diagnostics["policy_id"] == projection.PEPPER_EXECUTION_PROFILES_POLICY_ID
+    assert diagnostics["policy_revision"] == projection.PEPPER_EXECUTION_PROFILES_POLICY_REVISION
+    assert diagnostics["required_role"] == "implementation_product"
+    assert diagnostics["ticket_execution_requirements"]["required_toolsets"] == [
+        "pepper_repository",
+        "file",
+    ]
+    assert diagnostics["ticket_execution_requirements"]["required_write_toolsets"] == ["file"]
+    assert diagnostics["role_candidate_profiles"] == [_IMPLEMENTATION_PROFILE]
+    assert diagnostics["candidate_profiles"] == []
+    reasons = diagnostics["rejection_reasons_by_profile"][_IMPLEMENTATION_PROFILE]
+    assert "missing_required_toolsets:file" in reasons
+    assert "missing_required_write_toolsets:file" in reasons
+    assert "implementation_profile_read_only" in reasons
+
+    from hermes_cli import kanban_db
+
+    conn = kanban_db.connect(board="default")
+    try:
+        assert kanban_db.list_tasks(conn) == []
+    finally:
+        conn.close()
+
+
+def test_implementation_ticket_ambiguous_profiles_require_human_selection(
+    projection_home,
+    monkeypatch,
+) -> None:
+    alpha = _profile_stub(
+        projection_home,
+        name="pepper-frontend-implementation-a",
+        description="Pepper frontend product implementation execution profile",
+        cli_toolsets=("pepper_repository", "file", "no_mcp"),
+    )
+    beta = _profile_stub(
+        projection_home,
+        name="pepper-shell-implementation-b",
+        description="Pepper shell product implementation execution profile",
+        cli_toolsets=("pepper_repository", "file", "no_mcp"),
+    )
+    monkeypatch.setattr(projection, "list_profiles", lambda: [beta, alpha])
+    generation, _decision = _approve_next_ticket()
+
+    with pytest.raises(
+        projection.WorkPacketKanbanProjectionProfileSelectionRequired
+    ) as exc:
+        projection.project_current_approved_workpacket_to_kanban(
+            workflow=_approved_workflow_for_record(generation),
+            requested_project_id="PEPPER",
+            requested_ticket_id="P18.9.1",
+            requested_next_action_id="P18_9_1_APPROVED_NO_EXECUTION",
+        )
 
     assert "HUMAN_PROFILE_SELECTION_REQUIRED" in str(exc.value)
 
@@ -974,6 +1427,69 @@ def test_blocked_dependency_admission_does_not_create_ready_task(
         conn.close()
 
 
+def test_generic_projection_blocks_active_execution_before_task_creation(
+    projection_home,
+    monkeypatch,
+) -> None:
+    _install_implementation_profile(monkeypatch, projection_home)
+    generation, _decision = _approve_next_ticket()
+    workflow = {
+        **_approved_workflow_for_record(generation),
+        "active_execution_count": 1,
+        "execution_state": "active_executions",
+    }
+
+    with pytest.raises(projection.WorkPacketKanbanProjectionBlocked) as exc:
+        projection.project_current_approved_workpacket_to_kanban(
+            workflow=workflow,
+            requested_project_id="PEPPER",
+            requested_ticket_id="P18.9.1",
+            requested_next_action_id="P18_9_1_APPROVED_NO_EXECUTION",
+        )
+
+    assert "EXECUTION_ALREADY_ACTIVE" in str(exc.value)
+
+    from hermes_cli import kanban_db
+
+    conn = kanban_db.connect(board="default")
+    try:
+        assert kanban_db.list_tasks(conn) == []
+    finally:
+        conn.close()
+
+
+def test_generic_projection_rejects_wrong_approval_revision_before_task_creation(
+    projection_home,
+    monkeypatch,
+) -> None:
+    _install_implementation_profile(monkeypatch, projection_home)
+    generation, decision = _approve_next_ticket()
+    workflow = _approved_workflow_for_record(generation)
+    tampered = dict(decision)
+    tampered["work_packet_SHA256"] = "0" * 64
+    tampered["approval_publication_SHA256"] = bridge._approval_decision_record_digest(tampered)
+    bridge.approval_decision_record_path_for_ticket("P18.9.1").write_text(
+        json.dumps(tampered, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(projection.WorkPacketKanbanProjectionConflict):
+        projection.project_current_approved_workpacket_to_kanban(
+            workflow=workflow,
+            requested_project_id="PEPPER",
+            requested_ticket_id="P18.9.1",
+            requested_next_action_id="P18_9_1_APPROVED_NO_EXECUTION",
+        )
+
+    from hermes_cli import kanban_db
+
+    conn = kanban_db.connect(board="default")
+    try:
+        assert kanban_db.list_tasks(conn) == []
+    finally:
+        conn.close()
+
+
 def test_chat_tool_prepares_current_ticket_execution_projection(
     projection_home,
     monkeypatch,
@@ -1013,11 +1529,112 @@ def test_chat_tool_prepares_current_ticket_execution_projection(
     assert result["Git_mutation"] is False
 
 
+def test_chat_tool_prepares_current_generic_ticket_execution_projection(
+    projection_home,
+    monkeypatch,
+) -> None:
+    _install_implementation_profile(monkeypatch, projection_home)
+    generation, _decision = _approve_next_ticket()
+
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    def workflow_snapshot() -> dict:
+        record = bridge.load_generation_record(ticket_id="P18.9.1")
+        assert record is not None
+        workflow = _approved_workflow_for_record(record)
+        projected = projection.load_kanban_projection_record(
+            ticket_id="P18.9.1",
+            generation_record=record,
+        )
+        if projected is not None:
+            workflow.update(projection.kanban_projection_to_workflow_overlay(projected))
+        return workflow
+
+    monkeypatch.setattr(pr, "build_workflow_control_snapshot", workflow_snapshot)
+    import tools.pepper_workflow_tools  # noqa: F401
+    from model_tools import handle_function_call
+
+    result = json.loads(
+        handle_function_call(
+            "prepare_current_ticket_execution",
+            {
+                "human_request_text": "Prepara P18.9.1 para ejecucion",
+                "project_id": "PEPPER",
+                "ticket_id": "P18.9.1",
+                "next_action_id": "P18_9_1_APPROVED_NO_EXECUTION",
+            },
+        )
+    )
+
+    assert result["success"] is True
+    assert result["ticket_id"] == "P18.9.1"
+    assert result["ticket_spec_SHA256"] == generation["ticket_spec_SHA256"]
+    assert result["work_packet_id"] == generation["work_packet_id"]
+    assert result["work_packet_SHA256"] == generation["work_packet_SHA256"]
+    assert result["workflow_status"] == "queued"
+    assert result["queue_state"] == "kanban_projection_ready_not_dispatched"
+    assert result["assignee_profile"] == _IMPLEMENTATION_PROFILE
+    assert result["execution_profile_role"] == "implementation_product"
+    assert result["next_action"]["id"] == "START_P18_9_1_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION"
+    assert result["dispatch_performed"] is False
+    assert result["execution_started"] is False
+    assert result["worker_execution"] is False
+    assert result["Kanban_dispatch"] is False
+    assert result["Git_mutation"] is False
+
+
+def test_chat_tool_returns_profile_assignment_diagnostics_on_gap(
+    projection_home,
+    monkeypatch,
+) -> None:
+    profile = _profile_stub(
+        projection_home,
+        name=_IMPLEMENTATION_PROFILE,
+        description="Pepper frontend product implementation execution profile",
+        cli_toolsets=("pepper_repository", "no_mcp"),
+    )
+    monkeypatch.setattr(projection, "list_profiles", lambda: [profile])
+    _approve_next_ticket()
+
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    def workflow_snapshot() -> dict:
+        record = bridge.load_generation_record(ticket_id="P18.9.1")
+        assert record is not None
+        return _approved_workflow_for_record(record)
+
+    monkeypatch.setattr(pr, "build_workflow_control_snapshot", workflow_snapshot)
+    import tools.pepper_workflow_tools  # noqa: F401
+    from model_tools import handle_function_call
+
+    result = json.loads(
+        handle_function_call(
+            "prepare_current_ticket_execution",
+            {
+                "human_request_text": "Prepara P18.9.1 para ejecucion",
+                "project_id": "PEPPER",
+                "ticket_id": "P18.9.1",
+                "next_action_id": "P18_9_1_APPROVED_NO_EXECUTION",
+            },
+        )
+    )
+
+    diagnostics = result["profile_assignment_diagnostics"]
+    assert result["success"] is False
+    assert result["blocker_code"] == "IMPLEMENTATION_WORKER_WRITE_CAPABILITY_GAP"
+    assert diagnostics["required_role"] == "implementation_product"
+    assert diagnostics["candidate_profiles"] == []
+    assert diagnostics["role_candidate_profiles"] == [_IMPLEMENTATION_PROFILE]
+    assert "implementation_profile_read_only" in diagnostics[
+        "rejection_reasons_by_profile"
+    ][_IMPLEMENTATION_PROFILE]
+
+
 def test_current_ticket_start_blocks_when_executor_provider_unconfigured(
     projection_home,
     monkeypatch,
 ) -> None:
-    _install_execution_profile(monkeypatch, projection_home)
+    _install_execution_profile(monkeypatch, projection_home, model_config=False)
     _approve_current_ticket()
     projected = _project_via_runtime()
 
@@ -1290,6 +1907,9 @@ def test_exact_dispatch_passes_non_secret_governed_worker_overlay(
 
     from hermes_cli import kanban_db
     from hermes_cli.agent_platform import product_runtime as pr
+    from hermes_cli.agent_platform.worker_credentials import (
+        PEPPER_GOVERNED_CREDENTIAL_POLICY_REVISION,
+    )
 
     captured = {}
 
@@ -1313,6 +1933,30 @@ def test_exact_dispatch_passes_non_secret_governed_worker_overlay(
     )
     assert overlay["HERMES_AGENT_PLATFORM_WORKER_PROFILE_ID"] == (
         "worker.openai-codex.chatgpt-oauth.gpt-5.5.single-request.v1"
+    )
+    assert overlay["HERMES_AGENT_PLATFORM_WORKPACKET_ID"] == projected["work_packet_id"]
+    assert overlay["HERMES_AGENT_PLATFORM_WORKPACKET_SHA256"] == projected["work_packet_SHA256"]
+    assert overlay["HERMES_AGENT_PLATFORM_TICKET_SPEC_SHA256"] == projected["ticket_spec_SHA256"]
+    assert overlay["HERMES_AGENT_PLATFORM_KANBAN_PROJECTION_SHA256"] == (
+        projected["authority"]["projection_SHA256"]
+    )
+    assert overlay["HERMES_AGENT_PLATFORM_CREDENTIAL_POLICY_REVISION"] == (
+        PEPPER_GOVERNED_CREDENTIAL_POLICY_REVISION
+    )
+    assert overlay["HERMES_AGENT_PLATFORM_PROFILE_ASSIGNMENT_POLICY_ID"] == (
+        projection.PEPPER_EXECUTION_PROFILES_POLICY_ID
+    )
+    assert overlay["HERMES_AGENT_PLATFORM_PROFILE_ASSIGNMENT_POLICY_REVISION"] == (
+        projection.PEPPER_EXECUTION_PROFILES_POLICY_REVISION
+    )
+    assert overlay["HERMES_AGENT_PLATFORM_GENERATION_RECORD_PATH"] == str(
+        bridge.generation_record_path_for_ticket(projected["ticket_id"])
+    )
+    assert overlay["HERMES_AGENT_PLATFORM_APPROVAL_DECISION_RECORD_PATH"] == str(
+        bridge.approval_decision_record_path_for_ticket(projected["ticket_id"])
+    )
+    assert overlay["HERMES_AGENT_PLATFORM_KANBAN_PROJECTION_RECORD_PATH"] == str(
+        projection.kanban_projection_record_path_for_ticket(projected["ticket_id"])
     )
     joined = json.dumps(overlay, sort_keys=True)
     assert "access_token" not in joined

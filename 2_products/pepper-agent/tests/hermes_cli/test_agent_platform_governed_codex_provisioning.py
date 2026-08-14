@@ -15,6 +15,9 @@ from hermes_cli.agent_platform.provider_credentials.contracts import (
     OPENAI_CODEX_INTERNAL_LABEL,
     OPENAI_CODEX_PROVIDER_ENDPOINT,
 )
+from hermes_cli.agent_platform.execution_profile_provisioning import (
+    PEPPER_IMPLEMENTATION_PRODUCT_PROFILE_NAME,
+)
 from hermes_cli.agent_platform.provider_credentials.provisioning import (
     OPENAI_CODEX_PRIMARY_PROVISION_COMMAND,
     provision_openai_codex_primary,
@@ -159,3 +162,23 @@ def test_agent_platform_parser_accepts_only_governed_codex_profile() -> None:
     assert OPENAI_CODEX_PRIMARY_PROVISION_COMMAND == (
         "hermes agent-platform auth add openai-codex.primary"
     )
+
+
+def test_agent_platform_parser_accepts_governed_implementation_profile() -> None:
+    parser = argparse.ArgumentParser(prog="hermes")
+    subparsers = parser.add_subparsers(dest="command")
+    build_agent_platform_parser(subparsers, cmd_agent_platform=agent_platform_command)
+
+    args = parser.parse_args(
+        [
+            "agent-platform",
+            "profile",
+            "status",
+            "pepper-implementation-product",
+        ]
+    )
+
+    assert args.command == "agent-platform"
+    assert args.agent_platform_action == "profile"
+    assert args.agent_platform_profile_action == "status"
+    assert args.profile == PEPPER_IMPLEMENTATION_PRODUCT_PROFILE_NAME

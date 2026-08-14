@@ -8,6 +8,8 @@ from hermes_cli.agent_platform.provider_credentials.contracts import (
     OPENAI_CODEX_CREDENTIAL_STORE_ID,
 )
 
+_PEPPER_IMPLEMENTATION_PRODUCT_PROFILE_NAME = "pepper-implementation-product"
+
 
 def build_agent_platform_parser(subparsers, *, cmd_agent_platform: Callable) -> None:
     """Attach Pepper agent-platform governance commands to ``subparsers``."""
@@ -47,6 +49,36 @@ def build_agent_platform_parser(subparsers, *, cmd_agent_platform: Callable) -> 
     auth_status.set_defaults(func=cmd_agent_platform)
 
     auth_parser.set_defaults(func=cmd_agent_platform)
+
+    profile_parser = agent_platform_subparsers.add_parser(
+        "profile",
+        help="Manage governed agent-platform execution profiles",
+    )
+    profile_subparsers = profile_parser.add_subparsers(dest="agent_platform_profile_action")
+
+    profile_status = profile_subparsers.add_parser(
+        "status",
+        help="Show governed execution profile status",
+    )
+    profile_status.add_argument(
+        "profile",
+        choices=[_PEPPER_IMPLEMENTATION_PRODUCT_PROFILE_NAME],
+        help="Governed execution profile id",
+    )
+    profile_status.set_defaults(func=cmd_agent_platform)
+
+    profile_provision = profile_subparsers.add_parser(
+        "provision",
+        help="Provision a governed execution profile",
+    )
+    profile_provision.add_argument(
+        "profile",
+        choices=[_PEPPER_IMPLEMENTATION_PRODUCT_PROFILE_NAME],
+        help="Governed execution profile id",
+    )
+    profile_provision.set_defaults(func=cmd_agent_platform)
+
+    profile_parser.set_defaults(func=cmd_agent_platform)
     parser.set_defaults(func=cmd_agent_platform)
 
 

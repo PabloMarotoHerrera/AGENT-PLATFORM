@@ -7,7 +7,12 @@ from types import SimpleNamespace
 import pytest
 
 
-def _install_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def _install_repo(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    stub_git_snapshot: bool = True,
+):
     import tools.pepper_repository_tools as repo_tools
 
     repo = tmp_path / "AGENT PLATFORM"
@@ -15,11 +20,12 @@ def _install_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     (repo / "2_products" / "pepper-agent").mkdir(parents=True)
     (repo / "Contexto Módulos Siamese").mkdir(parents=True)
     monkeypatch.setattr(repo_tools, "_REPOSITORY_ROOT", repo)
-    monkeypatch.setattr(
-        repo_tools,
-        "_git_snapshot",
-        lambda _root: {"available": True, "read_only": True, "status_entries": []},
-    )
+    if stub_git_snapshot:
+        monkeypatch.setattr(
+            repo_tools,
+            "_git_snapshot",
+            lambda _root: {"available": True, "read_only": True, "status_entries": []},
+        )
     return repo, repo_tools
 
 
@@ -236,7 +242,7 @@ def test_repository_read_rejects_redirect_detected_by_containment_helper(
 
 
 def test_repository_git_snapshot_uses_only_fixed_read_only_argv(tmp_path, monkeypatch) -> None:
-    repo, repo_tools = _install_repo(tmp_path, monkeypatch)
+    repo, repo_tools = _install_repo(tmp_path, monkeypatch, stub_git_snapshot=False)
     calls = []
     monkeypatch.setenv("OPENAI_API_KEY", "must-not-be-forwarded")
 

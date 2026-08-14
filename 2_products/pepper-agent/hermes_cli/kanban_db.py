@@ -8536,9 +8536,19 @@ _WORKER_ENV_OVERLAY_ALLOWED_KEYS = frozenset(
         "HERMES_AGENT_PLATFORM_CREDENTIAL_STORE_ID",
         "HERMES_AGENT_PLATFORM_PROVIDER_RUNTIME_PROFILE_ID",
         "HERMES_AGENT_PLATFORM_WORKER_PROFILE_ID",
+        "HERMES_AGENT_PLATFORM_CREDENTIAL_POLICY_REVISION",
         "HERMES_AGENT_PLATFORM_PROVIDER_RUNTIME_ID",
         "HERMES_AGENT_PLATFORM_PROVIDER_CORRELATION_ID",
         "HERMES_AGENT_PLATFORM_PROVIDER_LEASE_ID",
+        "HERMES_AGENT_PLATFORM_PROFILE_ASSIGNMENT_POLICY_ID",
+        "HERMES_AGENT_PLATFORM_PROFILE_ASSIGNMENT_POLICY_REVISION",
+        "HERMES_AGENT_PLATFORM_WORKPACKET_ID",
+        "HERMES_AGENT_PLATFORM_WORKPACKET_SHA256",
+        "HERMES_AGENT_PLATFORM_TICKET_SPEC_SHA256",
+        "HERMES_AGENT_PLATFORM_KANBAN_PROJECTION_SHA256",
+        "HERMES_AGENT_PLATFORM_GENERATION_RECORD_PATH",
+        "HERMES_AGENT_PLATFORM_APPROVAL_DECISION_RECORD_PATH",
+        "HERMES_AGENT_PLATFORM_KANBAN_PROJECTION_RECORD_PATH",
     }
 )
 
@@ -8555,7 +8565,8 @@ def _apply_worker_env_overlay(env: dict[str, str], overlay: dict[str, str]) -> N
             raise ValueError("worker env overlay contains unsupported key")
         if any(ord(ch) < 32 or ord(ch) == 127 for ch in value_text):
             raise ValueError("worker env overlay value contains control characters")
-        if len(value_text) > 512:
+        max_value_length = 2048 if key_text.endswith("_PATH") else 512
+        if len(value_text) > max_value_length:
             raise ValueError("worker env overlay value exceeds bounded length")
         env[key_text] = value_text
 

@@ -3318,7 +3318,7 @@ def _print_loopback_ssh_hint(redirect_uri: str, *, docs_url: str | None = None) 
 
 def _read_codex_tokens(*, _lock: bool = True) -> Dict[str, Any]:
     """Read Codex OAuth tokens from Hermes auth store (~/.hermes/auth.json).
-    
+
     Returns dict with 'tokens' (access_token, refresh_token) and 'last_refresh'.
     Raises AuthError if no Codex tokens are stored.
     """
@@ -3649,7 +3649,7 @@ def _refresh_codex_auth_tokens(
     timeout_seconds: float,
 ) -> Dict[str, str]:
     """Refresh Codex access token using the refresh token.
-    
+
     Saves the new tokens to Hermes auth store automatically.
     """
     try:
@@ -3690,7 +3690,7 @@ def _refresh_codex_auth_tokens(
 
 def _import_codex_cli_tokens() -> Optional[Dict[str, str]]:
     """Try to read tokens from ~/.codex/auth.json (Codex CLI shared file).
-    
+
     Returns tokens dict if valid and not expired, None otherwise.
     Does NOT write to the shared file.
     """
@@ -3875,7 +3875,7 @@ def _resolve_agent_platform_governed_codex_credentials() -> Optional[Dict[str, A
         category = getattr(exc, "validation_category", exc.__class__.__name__)
         raise AuthError(
             f"{PEPPER_GOVERNED_WORKER_BLOCKER_CODE}: governed "
-            "openai-codex.primary credential resolution failed "
+            "worker credential resolution failed "
             f"(validation_category={category}).",
             provider="openai-codex",
             code=PEPPER_GOVERNED_WORKER_AUTH_ERROR_CODE,
@@ -6282,7 +6282,7 @@ def get_nous_session_validity() -> str:
 
 def get_codex_auth_status() -> Dict[str, Any]:
     """Status snapshot for Codex auth.
-    
+
     Checks the credential pool first (where `hermes auth` stores credentials),
     then falls back to the legacy provider state.
     """

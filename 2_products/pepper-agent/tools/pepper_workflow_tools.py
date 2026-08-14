@@ -14,7 +14,6 @@ TOOLSET = "pepper_workflow"
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 100
 CURRENT_TICKET_APPROVAL_ID = "P18.9.0"
-CURRENT_TICKET_PROJECTION_NEXT_ACTION_ID = "P18_9_0_APPROVED_NO_EXECUTION"
 CURRENT_TICKET_START_NEXT_ACTION_ID = "START_P18_9_0_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION"
 CURRENT_TICKET_RECOVERY_NEXT_ACTION_ID = "RECOVER_P18_9_0_EXECUTION"
 CURRENT_TICKET_RETRY_START_NEXT_ACTION_ID = "START_P18_9_0_RETRY_REQUIRES_HUMAN_AUTHORIZATION"
@@ -202,7 +201,7 @@ def _validate_current_ticket_identity_context(context: dict[str, Any]) -> None:
         raise ValueError("no current active ticket")
 
 
-def _validate_explicit_projection_request(value: object) -> str:
+def _validate_explicit_projection_request(value: object, *, current_ticket_id: str) -> str:
     raw = str(value or "").strip()
     if not raw:
         raise ValueError("human_request_text is required")
@@ -210,7 +209,7 @@ def _validate_explicit_projection_request(value: object) -> str:
     if "?" in raw or "¿" in raw:
         raise ValueError("projection request text must not be a question")
     ticket_ids = _mentioned_ticket_ids(normalized)
-    if ticket_ids and CURRENT_TICKET_APPROVAL_ID not in ticket_ids:
+    if ticket_ids and current_ticket_id not in ticket_ids:
         raise ValueError("projection request text targets a different ticket")
     if not re.search(r"\b(prepara|preparar|prepare|project|proyecta|proyectar|kanban|ejecucion|execution)\b", normalized):
         raise ValueError("explicit preparation/projection request text is required")
@@ -723,8 +722,13 @@ def _reconcile_invalid_current_generation_authority(args: dict[str, Any], **_kwa
 def _prepare_current_ticket_execution(args: dict[str, Any], **_kwargs) -> str:
     pr = _runtime()
     try:
+        context = pr.build_lead_agent_operational_context()
+        current_ticket_id = str(context.get("current_ticket_id") or "").strip()
+        if not current_ticket_id:
+            raise ValueError("no current approved governed ticket is active")
         human_request_text = _validate_explicit_projection_request(
-            args.get("human_request_text")
+            args.get("human_request_text"),
+            current_ticket_id=current_ticket_id,
         )
         result = pr.project_current_approved_workpacket_to_kanban(
             project_id=str(args.get("project_id") or "").strip() or None,
@@ -733,7 +737,14 @@ def _prepare_current_ticket_execution(args: dict[str, Any], **_kwargs) -> str:
         )
         updated_context = pr.build_lead_agent_operational_context()
     except Exception as exc:
-        return tool_error(str(exc) or "current approved WorkPacket projection failed", success=False)
+        extra = {"success": False}
+        blocker_code = getattr(exc, "blocker_code", None)
+        diagnostics = getattr(exc, "diagnostics", None)
+        if blocker_code:
+            extra["blocker_code"] = blocker_code
+        if isinstance(diagnostics, dict) and diagnostics:
+            extra["profile_assignment_diagnostics"] = diagnostics
+        return tool_error(str(exc) or "current approved WorkPacket projection failed", **extra)
     return _result({
         "source_tool": "prepare_current_ticket_execution",
         "human_request_text": human_request_text,
@@ -1031,7 +1042,7 @@ _PREPARE_CURRENT_TICKET_EXECUTION_SCHEMA = {
     "properties": {
         "human_request_text": {
             "type": "string",
-            "description": "Exact user phrase explicitly asking to prepare/project P18.9.0 for execution.",
+            "description": "Exact user phrase explicitly asking to prepare/project the current approved governed ticket for execution.",
         },
         "project_id": {
             "type": "string",
@@ -1039,11 +1050,11 @@ _PREPARE_CURRENT_TICKET_EXECUTION_SCHEMA = {
         },
         "ticket_id": {
             "type": "string",
-            "description": "Optional governed ticket guard. Must be P18.9.0 if supplied.",
+            "description": "Optional governed ticket guard. Must equal the current approved ticket if supplied.",
         },
         "next_action_id": {
             "type": "string",
-            "description": "Optional next-action guard. Must be P18_9_0_APPROVED_NO_EXECUTION if supplied.",
+            "description": "Optional next-action guard. Must equal <current-ticket-token>_APPROVED_NO_EXECUTION if supplied.",
         },
     },
     "required": ["human_request_text"],
@@ -1263,7 +1274,7 @@ registry.register(
     schema={
         "name": "prepare_current_ticket_execution",
         "description": (
-            "Project only the current approved P18.9.0 WorkPacket to a Hermes Kanban "
+            "Project only the current approved governed WorkPacket to a Hermes Kanban "
             "task for future execution preparation. Does not dispatch, execute, create a "
             "workspace, mutate Git, invoke Docker, or invoke Graphify."
         ),

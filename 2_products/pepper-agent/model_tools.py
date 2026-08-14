@@ -34,9 +34,24 @@ from toolsets import resolve_toolset, validate_toolset
 
 logger = logging.getLogger(__name__)
 
+_GOVERNED_WORKER_ENV = "HERMES_AGENT_PLATFORM_GOVERNED_WORKER"
+_GOVERNED_WORKER_MODE = "pepper-kanban-worker"
+
 # Tracks platform-bundle names already flagged in disabled_toolsets so the
 # advisory (#33924) is logged once per name, not on every tool recompute.
 _WARNED_DISABLED_BUNDLES: set = set()
+
+
+def _governed_workpacket_validation_fingerprint() -> tuple[str, str, str] | None:
+    raw = str(os.environ.get(_GOVERNED_WORKER_ENV, "") or "")
+    mode = raw.strip().lower().replace("_", "-")
+    if mode != _GOVERNED_WORKER_MODE:
+        return None
+    return (
+        mode,
+        str(os.environ.get("HERMES_AGENT_PLATFORM_WORKPACKET_ID", "") or ""),
+        str(os.environ.get("HERMES_AGENT_PLATFORM_WORKPACKET_SHA256", "") or ""),
+    )
 
 
 # =============================================================================
@@ -322,6 +337,7 @@ def get_tool_definitions(
             registry._generation,
             cfg_fp,
             bool(os.environ.get("HERMES_KANBAN_TASK")),
+            _governed_workpacket_validation_fingerprint(),
             bool(skip_tool_search_assembly),
         )
         cached = _tool_defs_cache.get(cache_key)
@@ -373,6 +389,15 @@ def _compute_tool_definitions(
             # (for token/cost reasons), but that should not strip the kanban
             # worker's completion/block/heartbeat surface.
             effective_enabled_toolsets.append("kanban")
+        if (
+            _governed_workpacket_validation_fingerprint() is not None
+            and "pepper_validation" not in effective_enabled_toolsets
+        ):
+            # Governed Pepper implementation workers get only the bounded
+            # WorkPacket validation command surface, never generic terminal or
+            # process tools. The tool itself fails closed against active
+            # WorkPacket authority and accepts command IDs, not shell text.
+            effective_enabled_toolsets.append("pepper_validation")
         for toolset_name in effective_enabled_toolsets:
             if validate_toolset(toolset_name):
                 resolved = resolve_toolset(toolset_name)

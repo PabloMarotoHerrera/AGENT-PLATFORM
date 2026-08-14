@@ -1,4 +1,4 @@
-"""P18.9.0 approved WorkPacket to Hermes Kanban projection.
+"""Approved Pepper WorkPacket to Hermes Kanban projection.
 
 This bridge treats Hermes Kanban as a provisional execution substrate and keeps
 P16/P17/P18 as the canonical Pepper authority. It creates no dispatcher run,
@@ -39,15 +39,14 @@ from hermes_cli.agent_platform.workflow.governed_state_machine import (
     validate_governed_workflow_transition_request,
 )
 from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
-    CANONICAL_APPROVAL_ID,
-    CANONICAL_MACROPROJECT_ID,
     CANONICAL_PROJECT_ID,
     CANONICAL_TICKET_ID,
-    CANONICAL_TICKET_TITLE,
-    load_p18_9_0_approval_decision_record,
-    load_p18_9_0_generation_record,
-    validate_p18_9_0_approval_decision_record,
-    validate_p18_9_0_generation_record,
+    TicketArchitectBridgeError,
+    approved_no_execution_action_id,
+    load_approval_decision_record,
+    load_generation_record,
+    validate_approval_decision_record,
+    validate_generation_record,
 )
 from hermes_cli.profiles import list_profiles, normalize_profile_name
 
@@ -56,6 +55,7 @@ WORK_PACKET_KANBAN_PROJECTION_SCHEMA_VERSION = 1
 WORK_PACKET_KANBAN_PROJECTION_POLICY_ID = "pepper-workpacket-kanban-projection-v1"
 PEPPER_EXECUTION_PROFILES_SCHEMA_VERSION = 1
 PEPPER_EXECUTION_PROFILES_POLICY_ID = "pepper-execution-profiles-v1"
+PEPPER_EXECUTION_PROFILES_POLICY_REVISION = "01U"
 WORK_PACKET_KANBAN_PROJECTION_DIGEST_ALGORITHM = (
     "agent-platform-workpacket-kanban-projection-sha256-v1"
 )
@@ -64,7 +64,6 @@ _STORE_LOCK = threading.Lock()
 _STORE_DIR = Path("agent-platform") / "pepper-workpacket-kanban-projection"
 _STORE_FILE = "P18.9.0.kanban-projection.json"
 _KANBAN_BOARD = "default"
-_IDEMPOTENCY_PREFIX = "pepper:P18.9.0:workpacket-kanban-projection"
 _WORKSPACE_KIND = "scratch"
 _TASK_SKILLS: tuple[str, ...] = ()
 _LEGACY_SEMANTIC_TASK_SKILLS = ("codebase-inspection",)
@@ -72,13 +71,23 @@ _TASK_MAX_RETRIES = 1
 _MAX_CONCURRENT_WORKERS_FOR_TICKET = 1
 _PROFILE_TEXT_TOKEN = re.compile(r"[a-z0-9]+")
 _PEPPER_EXECUTION_PROFILE_ROLE = "architecture_product"
+_PEPPER_IMPLEMENTATION_EXECUTION_PROFILE_ROLE = "implementation_product"
 _PEPPER_LEAD_AGENT_ROLE = "lead_agent"
 _PEPPER_TICKET_ARCHITECT_ROLE = "ticket_architect"
 _PEPPER_DEFAULT_PROFILE_ROLE = "default_control_profile"
 _PEPPER_UNCLASSIFIED_PROFILE_ROLE = "unclassified"
 _PEPPER_EXECUTION_PROFILE_REQUIRED_TOOLSETS = ("pepper_repository",)
+_PEPPER_IMPLEMENTATION_EXECUTION_PROFILE_REQUIRED_TOOLSETS = (
+    "pepper_repository",
+    "file",
+)
+_PEPPER_IMPLEMENTATION_EXECUTION_PROFILE_REQUIRED_WRITE_TOOLSETS = ("file",)
 _PEPPER_EXECUTION_PROFILE_REQUIRED_SENTINELS = ("no_mcp",)
 _PEPPER_SEMANTIC_CAPABILITIES = ("codebase-inspection",)
+_PEPPER_IMPLEMENTATION_SEMANTIC_CAPABILITIES = (
+    "codebase-inspection",
+    "codebase-edit",
+)
 _PEPPER_CAPABILITY_RESOLUTION_POLICY = "semantic_capability_to_profile_toolset"
 _PEPPER_CAPABILITY_RESOLUTION = (
     {
@@ -87,6 +96,27 @@ _PEPPER_CAPABILITY_RESOLUTION = (
         "toolset": "pepper_repository",
         "hermes_task_skill": None,
     },
+)
+_PEPPER_IMPLEMENTATION_CAPABILITY_RESOLUTION = (
+    *_PEPPER_CAPABILITY_RESOLUTION,
+    {
+        "semantic_capability": "codebase-edit",
+        "resolved_surface": "profile_toolset",
+        "toolset": "file",
+        "hermes_task_skill": None,
+    },
+)
+_PEPPER_REQUIRED_CAPABILITY_LABELS = (
+    "codebase-inspection",
+    "governed repository read",
+    "architecture and product analysis",
+    "Ticket/IA documentation authority",
+)
+_PEPPER_IMPLEMENTATION_REQUIRED_CAPABILITY_LABELS = (
+    "codebase-inspection",
+    "governed repository read",
+    "bounded file write/patch authority",
+    "product implementation authority",
 )
 PEPPER_EXECUTION_PROFILE_TAXONOMY = {
     _PEPPER_LEAD_AGENT_ROLE: {
@@ -103,12 +133,19 @@ PEPPER_EXECUTION_PROFILE_TAXONOMY = {
         "required_toolsets": _PEPPER_EXECUTION_PROFILE_REQUIRED_TOOLSETS,
         "required_sentinels": _PEPPER_EXECUTION_PROFILE_REQUIRED_SENTINELS,
     },
+    _PEPPER_IMPLEMENTATION_EXECUTION_PROFILE_ROLE: {
+        "worker_assignable": True,
+        "authority": "bounded_product_implementation_execution_profile",
+        "required_toolsets": _PEPPER_IMPLEMENTATION_EXECUTION_PROFILE_REQUIRED_TOOLSETS,
+        "required_write_toolsets": _PEPPER_IMPLEMENTATION_EXECUTION_PROFILE_REQUIRED_WRITE_TOOLSETS,
+        "required_sentinels": _PEPPER_EXECUTION_PROFILE_REQUIRED_SENTINELS,
+    },
 }
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
 
 class WorkPacketKanbanProjectionError(ValueError):
-    """Base error for P18.9.0 WorkPacket/Kanban projection failures."""
+    """Base error for WorkPacket/Kanban projection failures."""
 
 
 class WorkPacketKanbanProjectionInputError(WorkPacketKanbanProjectionError):
@@ -122,6 +159,16 @@ class WorkPacketKanbanProjectionConflict(WorkPacketKanbanProjectionError):
 class WorkPacketKanbanProjectionProfileGap(WorkPacketKanbanProjectionError):
     """Raised when no existing Hermes profile can own the projected task."""
 
+    def __init__(
+        self,
+        blocker_code: str = "PROFILE_ASSIGNMENT_GAP",
+        *,
+        diagnostics: dict[str, Any] | None = None,
+    ) -> None:
+        self.blocker_code = blocker_code
+        self.diagnostics = diagnostics or {}
+        super().__init__(blocker_code)
+
 
 class WorkPacketKanbanProjectionProfileSelectionRequired(
     WorkPacketKanbanProjectionProfileGap
@@ -133,10 +180,34 @@ class WorkPacketKanbanProjectionBlocked(WorkPacketKanbanProjectionError):
     """Raised when dependency admission blocks projection."""
 
 
+def _safe_ticket_id(value: object) -> str:
+    ticket_id = str(value or "").strip()
+    if not _SAFE_ID.fullmatch(ticket_id):
+        raise WorkPacketKanbanProjectionInputError("ticket id is invalid")
+    return ticket_id
+
+
+def _ticket_action_token(ticket_id: str) -> str:
+    return _safe_ticket_id(ticket_id).replace(".", "_").replace("-", "_").upper()
+
+
+def execution_start_action_id(ticket_id: str) -> str:
+    return f"START_{_ticket_action_token(ticket_id)}_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION"
+
+
 def kanban_projection_record_path() -> Path:
     """Return the profile-scoped P18.9.0 Kanban projection authority path."""
 
     return get_hermes_home() / _STORE_DIR / _STORE_FILE
+
+
+def kanban_projection_record_path_for_ticket(ticket_id: str) -> Path:
+    """Return the profile-scoped Kanban projection authority path for one ticket."""
+
+    safe_ticket_id = _safe_ticket_id(ticket_id)
+    if safe_ticket_id == CANONICAL_TICKET_ID:
+        return kanban_projection_record_path()
+    return get_hermes_home() / _STORE_DIR / f"{safe_ticket_id}.json"
 
 
 def load_p18_9_0_kanban_projection_record(
@@ -146,17 +217,34 @@ def load_p18_9_0_kanban_projection_record(
 ) -> dict[str, Any] | None:
     """Load and validate the persisted P18.9.0 Kanban projection, if present."""
 
-    path = kanban_projection_record_path()
+    return load_kanban_projection_record(
+        ticket_id=CANONICAL_TICKET_ID,
+        generation_record=generation_record,
+        decision_record=decision_record,
+    )
+
+
+def load_kanban_projection_record(
+    *,
+    ticket_id: str,
+    generation_record: dict[str, Any] | None = None,
+    decision_record: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Load and validate the persisted Kanban projection for one ticket."""
+
+    safe_ticket_id = _safe_ticket_id(ticket_id)
+    path = kanban_projection_record_path_for_ticket(safe_ticket_id)
     if not path.exists():
         return None
     try:
         record = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise WorkPacketKanbanProjectionConflict(
-            "P18.9.0 Kanban projection record is unreadable"
+            f"{safe_ticket_id} Kanban projection record is unreadable"
         ) from exc
-    return validate_p18_9_0_kanban_projection_record(
+    return validate_kanban_projection_record(
         record,
+        ticket_id=safe_ticket_id,
         generation_record=generation_record,
         decision_record=decision_record,
     )
@@ -170,29 +258,70 @@ def validate_p18_9_0_kanban_projection_record(
 ) -> dict[str, Any]:
     """Validate projection mapping without touching dispatcher or execution."""
 
+    return validate_kanban_projection_record(
+        record,
+        ticket_id=CANONICAL_TICKET_ID,
+        generation_record=generation_record,
+        decision_record=decision_record,
+    )
+
+
+def validate_kanban_projection_record(
+    record: dict[str, Any],
+    *,
+    ticket_id: str,
+    generation_record: dict[str, Any] | None = None,
+    decision_record: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Validate projection mapping without touching dispatcher or execution."""
+
     if not isinstance(record, dict):
         raise WorkPacketKanbanProjectionConflict("Kanban projection record must be an object")
     if record.get("projection_SHA256") != _projection_record_digest(record):
         raise WorkPacketKanbanProjectionConflict("Kanban projection record digest mismatch")
+    safe_ticket_id = _safe_ticket_id(ticket_id)
     generation = (
-        validate_p18_9_0_generation_record(generation_record)
+        validate_generation_record(generation_record)
         if generation_record is not None
-        else load_p18_9_0_generation_record()
+        else load_generation_record(ticket_id=safe_ticket_id)
     )
     if generation is None:
         raise WorkPacketKanbanProjectionConflict("projection has no generated WorkPacket authority")
-    decision = (
-        validate_p18_9_0_approval_decision_record(
-            decision_record,
-            generation_record=generation,
-        )
-        if decision_record is not None
-        else load_p18_9_0_approval_decision_record(generation_record=generation)
+    if generation.get("ticket_id") != safe_ticket_id:
+        raise WorkPacketKanbanProjectionConflict("projection generated ticket mismatch")
+    decision = _approval_decision_authority(
+        ticket_id=safe_ticket_id,
+        generation_record=generation,
+        decision_record=decision_record,
     )
     if decision is None:
         raise WorkPacketKanbanProjectionConflict("projection has no approval decision authority")
     _require_projection_identity(record, generation, decision)
     return record
+
+
+def _approval_decision_authority(
+    *,
+    ticket_id: str,
+    generation_record: dict[str, Any],
+    decision_record: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    safe_ticket_id = _safe_ticket_id(ticket_id)
+    try:
+        if decision_record is not None:
+            return validate_approval_decision_record(
+                decision_record,
+                ticket_id=safe_ticket_id,
+                generation_record=generation_record,
+            )
+        return load_approval_decision_record(
+            ticket_id=safe_ticket_id,
+            generation_record=generation_record,
+        )
+    except TicketArchitectBridgeError as exc:
+        raise WorkPacketKanbanProjectionConflict(
+            f"{safe_ticket_id} approval decision authority is invalid"
+        ) from exc
 
 
 def project_approved_p18_9_0_workpacket_to_kanban(
@@ -204,36 +333,63 @@ def project_approved_p18_9_0_workpacket_to_kanban(
 ) -> dict[str, Any]:
     """Project the approved P18.9.0 WorkPacket into Hermes Kanban without dispatch."""
 
-    _validate_requested_identity(
+    return project_current_approved_workpacket_to_kanban(
+        workflow=workflow,
         requested_project_id=requested_project_id,
         requested_ticket_id=requested_ticket_id,
         requested_next_action_id=requested_next_action_id,
     )
+
+
+def project_current_approved_workpacket_to_kanban(
+    *,
+    workflow: dict[str, Any],
+    requested_project_id: str | None = None,
+    requested_ticket_id: str | None = None,
+    requested_next_action_id: str | None = None,
+) -> dict[str, Any]:
+    """Project the current approved Pepper WorkPacket into Kanban without dispatch."""
+
+    target = resolve_current_approved_workpacket_projection(
+        workflow=workflow,
+        requested_project_id=requested_project_id,
+        requested_ticket_id=requested_ticket_id,
+        requested_next_action_id=requested_next_action_id,
+    )
+    ticket_id = str(target["ticket_id"])
     with _STORE_LOCK:
-        generation = load_p18_9_0_generation_record()
+        generation = load_generation_record(ticket_id=ticket_id)
         if generation is None:
-            raise WorkPacketKanbanProjectionConflict("P18.9.0 has no generated WorkPacket")
-        decision = load_p18_9_0_approval_decision_record(generation_record=generation)
+            raise WorkPacketKanbanProjectionConflict(f"{ticket_id} has no generated WorkPacket")
+        decision = _approval_decision_authority(
+            ticket_id=ticket_id,
+            generation_record=generation,
+        )
         if decision is None or decision.get("decision") != "approve":
-            raise WorkPacketKanbanProjectionConflict("P18.9.0 is not approved")
-        existing = load_p18_9_0_kanban_projection_record(
+            raise WorkPacketKanbanProjectionConflict(f"{ticket_id} is not approved")
+        _require_resolved_authority_matches(target, generation, decision)
+        existing = load_kanban_projection_record(
+            ticket_id=ticket_id,
             generation_record=generation,
             decision_record=decision,
         )
         if existing is not None:
             _require_existing_task_matches(existing)
             return _operational_result(existing, idempotent_replay=True)
+        if target["workflow_status"] == "queued":
+            raise WorkPacketKanbanProjectionConflict(
+                f"{ticket_id} workflow is queued but projection authority is absent"
+            )
 
-        _validate_workflow_eligibility(workflow)
         dependency_plan = TicketDependencyPlan.model_validate(generation["dependency_plan"])
         admission = derive_dependency_queue_admission_for_ticket(
             dependency_plan=dependency_plan,
-            ticket_id=CANONICAL_TICKET_ID,
+            ticket_id=ticket_id,
         )
         if admission["decision"] != DependencyAwareQueueDecision.ADMIT.value:
             raise WorkPacketKanbanProjectionBlocked("DEPENDENCY_ADMISSION_BLOCKED")
-        profile = resolve_p18_9_0_execution_profile()
-        transitions = _build_projection_transitions(decision, admission)
+        profile = resolve_execution_profile_for_ticket(generation)
+        transitions = _build_projection_transitions(generation, decision, admission)
         task_id, task_status = _project_task(generation, decision, admission, profile)
         record = _build_projection_record(
             generation=generation,
@@ -244,8 +400,9 @@ def project_approved_p18_9_0_workpacket_to_kanban(
             task_id=task_id,
             task_status=task_status,
         )
-        validate_p18_9_0_kanban_projection_record(
+        validate_kanban_projection_record(
             record,
+            ticket_id=ticket_id,
             generation_record=generation,
             decision_record=decision,
         )
@@ -253,46 +410,306 @@ def project_approved_p18_9_0_workpacket_to_kanban(
     return _operational_result(record, idempotent_replay=False)
 
 
+def resolve_current_approved_workpacket_projection(
+    *,
+    workflow: dict[str, Any],
+    requested_project_id: str | None = None,
+    requested_ticket_id: str | None = None,
+    requested_next_action_id: str | None = None,
+) -> dict[str, Any]:
+    """Resolve the single current approved generated WorkPacket projection target."""
+
+    workflow_state = _validate_workflow_eligibility(workflow)
+    ticket_id = workflow_state["ticket_id"]
+    _validate_requested_identity_for_ticket(
+        requested_project_id=requested_project_id,
+        requested_ticket_id=requested_ticket_id,
+        requested_next_action_id=requested_next_action_id,
+        ticket_id=ticket_id,
+    )
+    generation = load_generation_record(ticket_id=ticket_id)
+    if generation is None:
+        raise WorkPacketKanbanProjectionConflict(f"{ticket_id} has no generated WorkPacket")
+    decision = _approval_decision_authority(ticket_id=ticket_id, generation_record=generation)
+    if decision is None or decision.get("decision") != "approve":
+        raise WorkPacketKanbanProjectionConflict(f"{ticket_id} is not approved")
+    return {
+        "ticket_id": ticket_id,
+        "project_id": generation["project_id"],
+        "macroproject_id": generation["macroproject_id"],
+        "ticket_spec_SHA256": generation["ticket_spec_SHA256"],
+        "work_packet_id": generation["work_packet_id"],
+        "work_packet_SHA256": generation["work_packet_SHA256"],
+        "WorkPacket_compilation_count": generation["WorkPacket_compilation_count"],
+        "approval_publication_SHA256": decision["approval_publication_SHA256"],
+        "approval_decision": decision["decision"],
+        "approval_status": decision["status"],
+        "workflow_status": workflow_state["workflow_status"],
+    }
+
+
+def _require_resolved_authority_matches(
+    target: dict[str, Any],
+    generation: dict[str, Any],
+    decision: dict[str, Any],
+) -> None:
+    expected = {
+        "ticket_id": generation.get("ticket_id"),
+        "project_id": generation.get("project_id"),
+        "macroproject_id": generation.get("macroproject_id"),
+        "ticket_spec_SHA256": generation.get("ticket_spec_SHA256"),
+        "work_packet_id": generation.get("work_packet_id"),
+        "work_packet_SHA256": generation.get("work_packet_SHA256"),
+        "WorkPacket_compilation_count": generation.get("WorkPacket_compilation_count"),
+        "approval_publication_SHA256": decision.get("approval_publication_SHA256"),
+        "approval_decision": decision.get("decision"),
+        "approval_status": decision.get("status"),
+    }
+    for key, value in expected.items():
+        if target.get(key) != value:
+            raise WorkPacketKanbanProjectionConflict(f"resolved {key} mismatch")
+
+
 def resolve_p18_9_0_execution_profile() -> dict[str, Any]:
     """Resolve the existing governed Hermes assignee for P18.9.0."""
+
+    return _resolve_execution_profile(required_role=_PEPPER_EXECUTION_PROFILE_ROLE)
+
+
+def resolve_execution_profile_for_ticket(generation_record: dict[str, Any]) -> dict[str, Any]:
+    """Resolve the governed Hermes assignee for the generated ticket type."""
+
+    return _resolve_execution_profile(
+        required_role=_required_execution_profile_role(generation_record),
+        generation_record=generation_record,
+    )
+
+
+def _required_execution_profile_role(generation_record: dict[str, Any]) -> str:
+    ticket_spec = generation_record.get("ticket_spec") if isinstance(generation_record, dict) else None
+    ticket_type = str(
+        ticket_spec.get("ticket_type") if isinstance(ticket_spec, dict) else ""
+    ).strip().lower()
+    if ticket_type == "implementation":
+        return _PEPPER_IMPLEMENTATION_EXECUTION_PROFILE_ROLE
+    return _PEPPER_EXECUTION_PROFILE_ROLE
+
+
+def _execution_profile_requirements(required_role: str) -> dict[str, Any]:
+    if required_role == _PEPPER_IMPLEMENTATION_EXECUTION_PROFILE_ROLE:
+        return {
+            "role": required_role,
+            "required_toolsets": list(_PEPPER_IMPLEMENTATION_EXECUTION_PROFILE_REQUIRED_TOOLSETS),
+            "allowed_toolsets": list(_PEPPER_IMPLEMENTATION_EXECUTION_PROFILE_REQUIRED_TOOLSETS),
+            "required_sentinels": list(_PEPPER_EXECUTION_PROFILE_REQUIRED_SENTINELS),
+            "required_write_toolsets": list(
+                _PEPPER_IMPLEMENTATION_EXECUTION_PROFILE_REQUIRED_WRITE_TOOLSETS
+            ),
+            "semantic_capabilities": list(_PEPPER_IMPLEMENTATION_SEMANTIC_CAPABILITIES),
+            "capability_resolution_policy": _PEPPER_CAPABILITY_RESOLUTION_POLICY,
+            "capability_resolution": _role_capability_resolution(required_role),
+            "required_capability_labels": list(
+                _PEPPER_IMPLEMENTATION_REQUIRED_CAPABILITY_LABELS
+            ),
+        }
+    return {
+        "role": _PEPPER_EXECUTION_PROFILE_ROLE,
+        "required_toolsets": list(_PEPPER_EXECUTION_PROFILE_REQUIRED_TOOLSETS),
+        "allowed_toolsets": list(_PEPPER_EXECUTION_PROFILE_REQUIRED_TOOLSETS),
+        "required_sentinels": list(_PEPPER_EXECUTION_PROFILE_REQUIRED_SENTINELS),
+        "required_write_toolsets": [],
+        "semantic_capabilities": list(_PEPPER_SEMANTIC_CAPABILITIES),
+        "capability_resolution_policy": _PEPPER_CAPABILITY_RESOLUTION_POLICY,
+        "capability_resolution": _role_capability_resolution(_PEPPER_EXECUTION_PROFILE_ROLE),
+        "required_capability_labels": list(_PEPPER_REQUIRED_CAPABILITY_LABELS),
+    }
+
+
+def _ticket_execution_requirements(
+    required_role: str,
+    generation_record: dict[str, Any] | None,
+) -> dict[str, Any]:
+    ticket_spec = generation_record.get("ticket_spec") if isinstance(generation_record, dict) else None
+    ticket_type = str(
+        ticket_spec.get("ticket_type") if isinstance(ticket_spec, dict) else ""
+    ).strip().lower()
+    return {
+        "schema_version": PEPPER_EXECUTION_PROFILES_SCHEMA_VERSION,
+        "policy_id": PEPPER_EXECUTION_PROFILES_POLICY_ID,
+        "policy_revision": PEPPER_EXECUTION_PROFILES_POLICY_REVISION,
+        "ticket_id": str(generation_record.get("ticket_id") or "") if isinstance(generation_record, dict) else "",
+        "ticket_type": ticket_type,
+        **_execution_profile_requirements(required_role),
+    }
+
+
+def _resolve_execution_profile(
+    *,
+    required_role: str,
+    generation_record: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if required_role not in {
+        _PEPPER_EXECUTION_PROFILE_ROLE,
+        _PEPPER_IMPLEMENTATION_EXECUTION_PROFILE_ROLE,
+    }:
+        diagnostics = _profile_assignment_diagnostics(
+            required_role=required_role,
+            generation_record=generation_record,
+            roster=[],
+            candidates=[],
+            blocker_code="PROFILE_ASSIGNMENT_GAP",
+            selected_profile=None,
+        )
+        raise WorkPacketKanbanProjectionProfileGap(
+            "PROFILE_ASSIGNMENT_GAP",
+            diagnostics=diagnostics,
+        )
 
     try:
         profiles = list_profiles()
     except Exception as exc:
-        raise WorkPacketKanbanProjectionProfileGap("PROFILE_ASSIGNMENT_GAP") from exc
+        diagnostics = _profile_assignment_diagnostics(
+            required_role=required_role,
+            generation_record=generation_record,
+            roster=[],
+            candidates=[],
+            blocker_code="PROFILE_ASSIGNMENT_GAP",
+            selected_profile=None,
+        )
+        raise WorkPacketKanbanProjectionProfileGap(
+            "PROFILE_ASSIGNMENT_GAP",
+            diagnostics=diagnostics,
+        ) from exc
     roster = [classify_pepper_execution_profile(profile) for profile in profiles]
     if not roster:
-        raise WorkPacketKanbanProjectionProfileGap("PROFILE_ASSIGNMENT_GAP")
+        diagnostics = _profile_assignment_diagnostics(
+            required_role=required_role,
+            generation_record=generation_record,
+            roster=roster,
+            candidates=[],
+            blocker_code="PROFILE_ASSIGNMENT_GAP",
+            selected_profile=None,
+        )
+        raise WorkPacketKanbanProjectionProfileGap(
+            "PROFILE_ASSIGNMENT_GAP",
+            diagnostics=diagnostics,
+        )
     candidates = [
         item for item in roster
-        if item["role"] == _PEPPER_EXECUTION_PROFILE_ROLE
+        if item["role"] == required_role
         and item["worker_assignable"] is True
     ]
     if len(candidates) > 1:
+        diagnostics = _profile_assignment_diagnostics(
+            required_role=required_role,
+            generation_record=generation_record,
+            roster=roster,
+            candidates=candidates,
+            blocker_code="HUMAN_PROFILE_SELECTION_REQUIRED",
+            selected_profile=None,
+        )
         raise WorkPacketKanbanProjectionProfileSelectionRequired(
-            "HUMAN_PROFILE_SELECTION_REQUIRED"
+            "HUMAN_PROFILE_SELECTION_REQUIRED",
+            diagnostics=diagnostics,
         )
     if candidates:
         selected = candidates[0]
+        requirements = _ticket_execution_requirements(required_role, generation_record)
+        diagnostics = _profile_assignment_diagnostics(
+            required_role=required_role,
+            generation_record=generation_record,
+            roster=roster,
+            candidates=candidates,
+            blocker_code=None,
+            selected_profile=selected["canonical_name"],
+        )
         return {
             "assignee_profile": selected["canonical_name"],
             "selected_profile": selected["canonical_name"],
             "profile_assignment_policy_id": PEPPER_EXECUTION_PROFILES_POLICY_ID,
+            "profile_assignment_policy_revision": PEPPER_EXECUTION_PROFILES_POLICY_REVISION,
             "profile_assignment_basis": "governed_role_taxonomy",
             "selection_rationale": "deterministic_single_governed_role_match",
             "candidate_profiles": [item["canonical_name"] for item in candidates],
             "profile_assignment_gap": False,
-            "execution_profile_role": _PEPPER_EXECUTION_PROFILE_ROLE,
-            "selected_role": _PEPPER_EXECUTION_PROFILE_ROLE,
+            "execution_profile_role": required_role,
+            "selected_role": required_role,
             "profile_classification_basis": selected["classification_basis"],
             "profile_toolsets": selected["cli_toolsets"],
             "profile_toolset_policy": "explicit_bounded_cli_toolsets",
+            "required_profile_toolsets": requirements["required_toolsets"],
+            "required_profile_sentinels": requirements["required_sentinels"],
+            "required_write_toolsets": requirements["required_write_toolsets"],
+            "required_capabilities": requirements["semantic_capabilities"],
+            "ticket_execution_requirements": requirements,
+            "profile_assignment_diagnostics": diagnostics,
             "lead_agent_auto_assigned": False,
             "ticket_architect_executor_distinct": True,
             "human_profile_selection_required": False,
             "available_profiles": roster,
         }
-    raise WorkPacketKanbanProjectionProfileGap("PROFILE_ASSIGNMENT_GAP")
+    blocker_code = _profile_assignment_blocker_code(required_role, roster)
+    diagnostics = _profile_assignment_diagnostics(
+        required_role=required_role,
+        generation_record=generation_record,
+        roster=roster,
+        candidates=candidates,
+        blocker_code=blocker_code,
+        selected_profile=None,
+    )
+    raise WorkPacketKanbanProjectionProfileGap(
+        blocker_code,
+        diagnostics=diagnostics,
+    )
+
+
+def _profile_assignment_blocker_code(required_role: str, roster: list[dict[str, Any]]) -> str:
+    if required_role != _PEPPER_IMPLEMENTATION_EXECUTION_PROFILE_ROLE:
+        return "PROFILE_ASSIGNMENT_GAP"
+    for item in roster:
+        if item.get("role") != required_role:
+            continue
+        reasons = set(item.get("rejection_reasons") or [])
+        if (
+            "implementation_profile_read_only" in reasons
+            or any(str(reason).startswith("missing_required_write_toolsets:") for reason in reasons)
+        ):
+            return "IMPLEMENTATION_WORKER_WRITE_CAPABILITY_GAP"
+    return "PROFILE_ASSIGNMENT_GAP"
+
+
+def _profile_assignment_diagnostics(
+    *,
+    required_role: str,
+    generation_record: dict[str, Any] | None,
+    roster: list[dict[str, Any]],
+    candidates: list[dict[str, Any]],
+    blocker_code: str | None,
+    selected_profile: str | None,
+) -> dict[str, Any]:
+    role_candidates = [item for item in roster if item.get("role") == required_role]
+    return {
+        "schema_version": PEPPER_EXECUTION_PROFILES_SCHEMA_VERSION,
+        "policy_id": PEPPER_EXECUTION_PROFILES_POLICY_ID,
+        "policy_revision": PEPPER_EXECUTION_PROFILES_POLICY_REVISION,
+        "profile_assignment_basis": "governed_role_taxonomy",
+        "blocker_code": blocker_code,
+        "selected_profile": selected_profile,
+        "required_role": required_role,
+        "ticket_execution_requirements": _ticket_execution_requirements(
+            required_role,
+            generation_record,
+        ),
+        "candidate_profiles": [item["canonical_name"] for item in candidates],
+        "role_candidate_profiles": [item["canonical_name"] for item in role_candidates],
+        "available_profile_count": len(roster),
+        "available_profiles": roster,
+        "rejection_reasons_by_profile": {
+            item["canonical_name"]: list(item.get("rejection_reasons") or [])
+            for item in roster
+        },
+        "human_profile_selection_required": blocker_code == "HUMAN_PROFILE_SELECTION_REQUIRED",
+    }
 
 
 def classify_pepper_execution_profile(profile: Any) -> dict[str, Any]:
@@ -322,13 +739,16 @@ def classify_pepper_execution_profile(profile: Any) -> dict[str, Any]:
     elif _is_architecture_product_execution_profile(words):
         role = _PEPPER_EXECUTION_PROFILE_ROLE
         basis = "product_architecture_role_terms"
+    elif _is_implementation_product_execution_profile(words):
+        role = _PEPPER_IMPLEMENTATION_EXECUTION_PROFILE_ROLE
+        basis = "product_implementation_role_terms"
     else:
         role = _PEPPER_UNCLASSIFIED_PROFILE_ROLE
         basis = "no_matching_execution_role_terms"
 
-    toolset_policy = _profile_toolset_policy(profile)
+    toolset_policy = _profile_toolset_policy(profile, role=role)
     rejection_reasons: list[str] = []
-    if role != _PEPPER_EXECUTION_PROFILE_ROLE:
+    if role not in {_PEPPER_EXECUTION_PROFILE_ROLE, _PEPPER_IMPLEMENTATION_EXECUTION_PROFILE_ROLE}:
         rejection_reasons.append(basis)
     if not toolset_policy["bounded"]:
         rejection_reasons.extend(toolset_policy["violations"])
@@ -341,12 +761,16 @@ def classify_pepper_execution_profile(profile: Any) -> dict[str, Any]:
         "role": role,
         "classification_basis": basis,
         "worker_assignable": (
-            role == _PEPPER_EXECUTION_PROFILE_ROLE
+            role in {_PEPPER_EXECUTION_PROFILE_ROLE, _PEPPER_IMPLEMENTATION_EXECUTION_PROFILE_ROLE}
             and toolset_policy["bounded"] is True
         ),
         "cli_toolsets": toolset_policy["cli_toolsets"],
         "toolset_source": toolset_policy["source"],
         "toolset_bounded": toolset_policy["bounded"],
+        "required_toolsets": toolset_policy["required_toolsets"],
+        "required_sentinels": toolset_policy["required_sentinels"],
+        "required_write_toolsets": toolset_policy["required_write_toolsets"],
+        "write_capable": toolset_policy["write_capable"],
         "rejection_reasons": rejection_reasons,
     }
 
@@ -389,39 +813,86 @@ def _is_architecture_product_execution_profile(words: tuple[str, ...]) -> bool:
     return bool(word_set & product_terms) and bool(word_set & architecture_terms)
 
 
-def _profile_toolset_policy(profile: Any) -> dict[str, Any]:
+def _is_implementation_product_execution_profile(words: tuple[str, ...]) -> bool:
+    word_set = set(words)
+    implementation_terms = {
+        "implementation",
+        "implement",
+        "frontend",
+        "front",
+        "ui",
+        "shell",
+        "routing",
+        "navigation",
+    }
+    product_surface_terms = {
+        "product",
+        "frontend",
+        "ui",
+        "shell",
+        "routing",
+        "navigation",
+        "surface",
+    }
+    return bool(word_set & implementation_terms) and bool(word_set & product_surface_terms)
+
+
+def _profile_toolset_policy(profile: Any, *, role: str) -> dict[str, Any]:
+    requirements = _execution_profile_requirements(role)
+    required_toolsets = tuple(requirements["required_toolsets"])
+    allowed_toolsets = tuple(requirements["allowed_toolsets"])
+    required_sentinels = tuple(requirements["required_sentinels"])
+    required_write_toolsets = tuple(requirements["required_write_toolsets"])
     raw_toolsets, source = _profile_explicit_cli_toolsets(profile)
     normalized = tuple(
         str(toolset).strip()
         for toolset in raw_toolsets
         if str(toolset).strip()
     )
-    actual = tuple(dict.fromkeys(
+    explicit_toolsets = tuple(dict.fromkeys(
         toolset for toolset in normalized
-        if toolset not in _PEPPER_EXECUTION_PROFILE_REQUIRED_SENTINELS
+        if toolset not in required_sentinels
     ))
+    actual = tuple(
+        toolset for toolset in required_toolsets
+        if toolset in explicit_toolsets
+    ) + tuple(
+        sorted(toolset for toolset in explicit_toolsets if toolset not in required_toolsets)
+    )
     violations: list[str] = []
     if source is None:
         violations.append("explicit_cli_toolsets_required")
-    missing = sorted(set(_PEPPER_EXECUTION_PROFILE_REQUIRED_TOOLSETS) - set(actual))
+    missing = sorted(set(required_toolsets) - set(actual))
     if missing:
         violations.append("missing_required_toolsets:" + ",".join(missing))
-    extra = sorted(set(actual) - set(_PEPPER_EXECUTION_PROFILE_REQUIRED_TOOLSETS))
+    extra = sorted(set(actual) - set(allowed_toolsets))
     if extra:
         violations.append("unbounded_toolsets:" + ",".join(extra))
+    missing_write = sorted(set(required_write_toolsets) - set(actual))
+    write_capable = not missing_write
+    if missing_write:
+        violations.append("missing_required_write_toolsets:" + ",".join(missing_write))
+        if role == _PEPPER_IMPLEMENTATION_EXECUTION_PROFILE_ROLE and set(actual) == set(
+            _PEPPER_EXECUTION_PROFILE_REQUIRED_TOOLSETS
+        ):
+            violations.append("implementation_profile_read_only")
     missing_sentinels = sorted(
-        set(_PEPPER_EXECUTION_PROFILE_REQUIRED_SENTINELS) - set(normalized)
+        set(required_sentinels) - set(normalized)
     )
     if missing_sentinels:
         violations.append("missing_required_sentinels:" + ",".join(missing_sentinels))
     if _profile_uses_nondefault_context_engine(profile):
         violations.append("nondefault_context_engine_not_bounded")
-    if _profile_disables_required_toolsets(profile):
+    if _profile_disables_required_toolsets(profile, required_toolsets=required_toolsets):
         violations.append("required_toolset_disabled")
     return {
         "source": source,
         "cli_toolsets": list(actual),
         "bounded": not violations,
+        "required_toolsets": list(required_toolsets),
+        "required_sentinels": list(required_sentinels),
+        "required_write_toolsets": list(required_write_toolsets),
+        "write_capable": write_capable,
         "violations": violations,
     }
 
@@ -465,7 +936,11 @@ def _profile_uses_nondefault_context_engine(profile: Any) -> bool:
     return bool(engine and engine != "compressor")
 
 
-def _profile_disables_required_toolsets(profile: Any) -> bool:
+def _profile_disables_required_toolsets(
+    profile: Any,
+    *,
+    required_toolsets: tuple[str, ...],
+) -> bool:
     config = _read_profile_config(profile)
     agent = config.get("agent") if isinstance(config, dict) else None
     if not isinstance(agent, dict):
@@ -474,17 +949,18 @@ def _profile_disables_required_toolsets(profile: Any) -> bool:
     if not isinstance(disabled, list):
         return False
     return bool(
-        set(_PEPPER_EXECUTION_PROFILE_REQUIRED_TOOLSETS) & {str(item) for item in disabled}
+        set(required_toolsets) & {str(item) for item in disabled}
     )
 
 
 def kanban_projection_to_workflow_overlay(record: dict[str, Any]) -> dict[str, Any]:
     """Return workflow-control fields implied by a validated Kanban projection."""
 
-    validated = validate_p18_9_0_kanban_projection_record(record)
+    ticket_id = _safe_ticket_id(record.get("ticket_id"))
+    validated = validate_kanban_projection_record(record, ticket_id=ticket_id)
     return {
         "readiness": "queued_not_executing",
-        "workflow_state": "P18.9.0-QUEUED-NOT-EXECUTING",
+        "workflow_state": f"{ticket_id}-QUEUED-NOT-EXECUTING",
         "workflow_status": "queued",
         "approval_state": "ticket_approved",
         "pending_ticket_approval_count": 0,
@@ -502,20 +978,24 @@ def kanban_projection_to_workflow_overlay(record: dict[str, Any]) -> dict[str, A
         "assignee_profile": validated["assignee_profile"],
         "selected_profile": validated["selected_profile"],
         "profile_assignment_policy_id": validated["profile_assignment_policy_id"],
+        "profile_assignment_policy_revision": validated.get("profile_assignment_policy_revision"),
         "selection_rationale": validated["selection_rationale"],
         "execution_profile_role": validated["execution_profile_role"],
         "selected_role": validated["selected_role"],
         "profile_toolsets": validated["profile_toolsets"],
+        "required_profile_toolsets": validated.get("required_profile_toolsets", []),
+        "required_write_toolsets": validated.get("required_write_toolsets", []),
+        "required_capabilities": validated.get("required_capabilities", []),
         "lead_agent_auto_assigned": validated["lead_agent_auto_assigned"],
         "ticket_architect_executor_distinct": validated["ticket_architect_executor_distinct"],
         "next_action": {
-            "id": "START_P18_9_0_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION",
+            "id": execution_start_action_id(ticket_id),
             "label": (
-                "P18.9.0 is projected to Kanban and ready for a separate explicit "
+                f"{ticket_id} is projected to Kanban and ready for a separate explicit "
                 "human authorization to start execution."
             ),
-            "target_ticket_id": CANONICAL_TICKET_ID,
-            "target_ticket_title": CANONICAL_TICKET_TITLE,
+            "target_ticket_id": ticket_id,
+            "target_ticket_title": validated["ticket_title"],
             "required_human_action": "execution_start_authorization",
         },
         "execution_started": False,
@@ -531,40 +1011,74 @@ def _validate_requested_identity(
     requested_ticket_id: str | None,
     requested_next_action_id: str | None,
 ) -> None:
+    _validate_requested_identity_for_ticket(
+        requested_project_id=requested_project_id,
+        requested_ticket_id=requested_ticket_id,
+        requested_next_action_id=requested_next_action_id,
+        ticket_id=CANONICAL_TICKET_ID,
+    )
+
+
+def _validate_requested_identity_for_ticket(
+    *,
+    requested_project_id: str | None,
+    requested_ticket_id: str | None,
+    requested_next_action_id: str | None,
+    ticket_id: str,
+) -> None:
+    safe_ticket_id = _safe_ticket_id(ticket_id)
+    expected_next_action_id = approved_no_execution_action_id(safe_ticket_id)
     if requested_project_id not in {None, "", CANONICAL_PROJECT_ID}:
         raise WorkPacketKanbanProjectionInputError("requested project is not PEPPER")
-    if requested_ticket_id not in {None, "", CANONICAL_TICKET_ID}:
-        raise WorkPacketKanbanProjectionInputError("requested ticket is not P18.9.0")
-    if requested_next_action_id not in {None, "", "P18_9_0_APPROVED_NO_EXECUTION"}:
+    if requested_ticket_id not in {None, "", safe_ticket_id}:
         raise WorkPacketKanbanProjectionInputError(
-            "requested next action is not P18_9_0_APPROVED_NO_EXECUTION"
+            f"requested ticket is not {safe_ticket_id}"
+        )
+    if requested_next_action_id not in {None, "", expected_next_action_id}:
+        raise WorkPacketKanbanProjectionInputError(
+            f"requested next action is not {expected_next_action_id}"
         )
 
 
-def _validate_workflow_eligibility(workflow: dict[str, Any]) -> None:
+def _validate_workflow_eligibility(workflow: dict[str, Any]) -> dict[str, str]:
     if not isinstance(workflow, dict):
         raise WorkPacketKanbanProjectionInputError("workflow state is unavailable")
     if workflow.get("project_id") != CANONICAL_PROJECT_ID:
         raise WorkPacketKanbanProjectionInputError("active governed project is not PEPPER")
-    if workflow.get("macroproject_id") != CANONICAL_MACROPROJECT_ID:
-        raise WorkPacketKanbanProjectionInputError("active macroproject is not P18.9")
-    if workflow.get("current_ticket_id") != CANONICAL_TICKET_ID:
-        raise WorkPacketKanbanProjectionInputError("active ticket is not P18.9.0")
-    if workflow.get("workflow_status") != "ticket_approved":
-        raise WorkPacketKanbanProjectionInputError("P18.9.0 is not ticket_approved")
+    ticket_id = _safe_ticket_id(workflow.get("current_ticket_id"))
     next_action = workflow.get("next_action")
     if not isinstance(next_action, dict):
         raise WorkPacketKanbanProjectionInputError("next action is unavailable")
-    if next_action.get("id") != "P18_9_0_APPROVED_NO_EXECUTION":
-        raise WorkPacketKanbanProjectionInputError("next action is not projection preparation")
-    if next_action.get("target_ticket_id") != CANONICAL_TICKET_ID:
-        raise WorkPacketKanbanProjectionInputError("next action does not target P18.9.0")
+    if next_action.get("target_ticket_id") != ticket_id:
+        raise WorkPacketKanbanProjectionInputError(f"next action does not target {ticket_id}")
+    workflow_status = str(workflow.get("workflow_status") or "").strip()
+    if workflow_status == "ticket_approved":
+        expected_next_action_id = approved_no_execution_action_id(ticket_id)
+        if next_action.get("id") != expected_next_action_id:
+            raise WorkPacketKanbanProjectionInputError("next action is not projection preparation")
+    elif workflow_status == "queued":
+        if workflow.get("queue_state") != "kanban_projection_ready_not_dispatched":
+            raise WorkPacketKanbanProjectionInputError("queue state is not projected")
+        if next_action.get("id") != execution_start_action_id(ticket_id):
+            raise WorkPacketKanbanProjectionInputError("next action is not execution start authorization")
+    elif workflow_status != "awaiting_ticket_approval":
+        raise WorkPacketKanbanProjectionInputError(f"{ticket_id} is not ticket_approved")
+    if int(workflow.get("pending_ticket_approval_count") or 0) != 0:
+        if workflow_status != "awaiting_ticket_approval":
+            raise WorkPacketKanbanProjectionInputError("pending ticket approvals remain")
+    if int(workflow.get("active_execution_count") or 0) != 0:
+        raise WorkPacketKanbanProjectionBlocked("EXECUTION_ALREADY_ACTIVE")
+    if workflow.get("execution_state") == "active_executions":
+        raise WorkPacketKanbanProjectionBlocked("EXECUTION_ALREADY_ACTIVE")
+    return {"ticket_id": ticket_id, "workflow_status": workflow_status}
 
 
 def _build_projection_transitions(
+    generation: dict[str, Any],
     decision: dict[str, Any],
     admission: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
+    ticket_id = _safe_ticket_id(generation.get("ticket_id"))
     approval_transition = GovernedWorkflowTransitionResult.model_validate(
         decision["workflow_transition_result"]
     )
@@ -602,7 +1116,7 @@ def _build_projection_transitions(
             runtime_kind=HermesWorkflowRuntimeKind.KANBAN_SWARM,
             runtime_state="todo",
             task_id=None,
-            board_or_queue_id="P18.9.0-kanban-projection",
+            board_or_queue_id=f"{ticket_id}-kanban-projection",
             worker_id_present=False,
             workspace_binding_present=False,
             dependency_blocked=not bool(admission["queue_admitted"]),
@@ -639,7 +1153,7 @@ def _project_task(
             return task.id, task.status
         task_id = kanban_db.create_task(
             conn,
-            title=f"{CANONICAL_TICKET_ID} {CANONICAL_TICKET_TITLE}",
+            title=f"{generation['ticket_id']} {generation['ticket_title']}",
             body=body,
             assignee=profile["assignee_profile"],
             created_by="pepper-workpacket-kanban-projection",
@@ -693,7 +1207,8 @@ def _require_existing_task_body_matches(
         payload = json.loads(task_row.get("body") or "{}")
     except json.JSONDecodeError as exc:
         raise WorkPacketKanbanProjectionConflict("existing Kanban task body is not projection JSON") from exc
-    if payload.get("ticket_id") != CANONICAL_TICKET_ID:
+    expected_ticket_id = authority.get("ticket_id") or authority.get("ticket_ID")
+    if payload.get("ticket_id") != expected_ticket_id:
         raise WorkPacketKanbanProjectionConflict("existing Kanban task ticket mismatch")
     if payload.get("WorkPacket_ID") != authority.get("work_packet_id", authority.get("WorkPacket_ID")):
         raise WorkPacketKanbanProjectionConflict("existing Kanban task WorkPacket ID mismatch")
@@ -726,19 +1241,21 @@ def _build_projection_record(
     task_id: str,
     task_status: str,
 ) -> dict[str, Any]:
+    ticket_id = _safe_ticket_id(generation["ticket_id"])
+    next_action_id = execution_start_action_id(ticket_id)
     record = {
         "schema_version": WORK_PACKET_KANBAN_PROJECTION_SCHEMA_VERSION,
         "policy_id": WORK_PACKET_KANBAN_PROJECTION_POLICY_ID,
         "created_at": _utc_now_iso(),
-        "project_id": CANONICAL_PROJECT_ID,
-        "macroproject_id": CANONICAL_MACROPROJECT_ID,
-        "ticket_id": CANONICAL_TICKET_ID,
-        "ticket_title": CANONICAL_TICKET_TITLE,
+        "project_id": generation["project_id"],
+        "macroproject_id": generation["macroproject_id"],
+        "ticket_id": ticket_id,
+        "ticket_title": generation["ticket_title"],
         "ticket_spec_SHA256": generation["ticket_spec_SHA256"],
         "work_packet_id": generation["work_packet_id"],
         "work_packet_SHA256": generation["work_packet_SHA256"],
         "WorkPacket_compilation_count": generation["WorkPacket_compilation_count"],
-        "approval_id": CANONICAL_APPROVAL_ID,
+        "approval_id": decision["approval_id"],
         "approval_status": decision["status"],
         "approval_decision": decision["decision"],
         "approval_publication_SHA256": decision["approval_publication_SHA256"],
@@ -762,6 +1279,7 @@ def _build_projection_record(
         "assignee_profile": profile["assignee_profile"],
         "selected_profile": profile["selected_profile"],
         "profile_assignment_policy_id": profile["profile_assignment_policy_id"],
+        "profile_assignment_policy_revision": profile["profile_assignment_policy_revision"],
         "profile_assignment_basis": profile["profile_assignment_basis"],
         "selection_rationale": profile["selection_rationale"],
         "candidate_profiles": profile["candidate_profiles"],
@@ -771,21 +1289,21 @@ def _build_projection_record(
         "profile_classification_basis": profile["profile_classification_basis"],
         "profile_toolsets": profile["profile_toolsets"],
         "profile_toolset_policy": profile["profile_toolset_policy"],
+        "required_profile_toolsets": profile["required_profile_toolsets"],
+        "required_profile_sentinels": profile["required_profile_sentinels"],
+        "required_write_toolsets": profile["required_write_toolsets"],
+        "required_capabilities": profile["required_capabilities"],
+        "ticket_execution_requirements": profile["ticket_execution_requirements"],
         "lead_agent_auto_assigned": profile["lead_agent_auto_assigned"],
         "ticket_architect_executor_distinct": profile["ticket_architect_executor_distinct"],
         "human_profile_selection_required": profile["human_profile_selection_required"],
         "concurrent_workers_for_ticket": _MAX_CONCURRENT_WORKERS_FOR_TICKET,
         "task_max_retries": _TASK_MAX_RETRIES,
         "task_skills": list(_TASK_SKILLS),
-        "semantic_capabilities": list(_PEPPER_SEMANTIC_CAPABILITIES),
+        "semantic_capabilities": _role_semantic_capabilities(profile["execution_profile_role"]),
         "capability_resolution_policy": _PEPPER_CAPABILITY_RESOLUTION_POLICY,
-        "capability_resolution": _capability_resolution(),
-        "required_capability_labels": [
-            "codebase-inspection",
-            "governed repository read",
-            "architecture and product analysis",
-            "Ticket/IA documentation authority",
-        ],
+        "capability_resolution": _capability_resolution(profile["execution_profile_role"]),
+        "required_capability_labels": _role_required_capability_labels(profile["execution_profile_role"]),
         "workspace_kind": _WORKSPACE_KIND,
         "workspace_created": False,
         "workspace_allocation_count": 0,
@@ -804,8 +1322,8 @@ def _build_projection_record(
         "rollback_count": 0,
         "Paperclip_calls": 0,
         "next_action": {
-            "id": "START_P18_9_0_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION",
-            "target_ticket_id": CANONICAL_TICKET_ID,
+            "id": next_action_id,
+            "target_ticket_id": ticket_id,
             "required_human_action": "execution_start_authorization",
         },
     }
@@ -825,14 +1343,14 @@ def _task_body(
         "projection": "Pepper approved WorkPacket to Hermes Kanban",
         "provisional_execution_projection": True,
         "Kanban_canonical_authority": False,
-        "project_id": CANONICAL_PROJECT_ID,
-        "macroproject_id": CANONICAL_MACROPROJECT_ID,
-        "ticket_id": CANONICAL_TICKET_ID,
-        "ticket_title": CANONICAL_TICKET_TITLE,
+        "project_id": generation["project_id"],
+        "macroproject_id": generation["macroproject_id"],
+        "ticket_id": generation["ticket_id"],
+        "ticket_title": generation["ticket_title"],
         "TicketSpec_SHA256": generation["ticket_spec_SHA256"],
         "WorkPacket_ID": generation["work_packet_id"],
         "WorkPacket_SHA256": generation["work_packet_SHA256"],
-        "approval_id": CANONICAL_APPROVAL_ID,
+        "approval_id": decision["approval_id"],
         "approval_publication_SHA256": decision["approval_publication_SHA256"],
         "dependency_plan_SHA256": generation["dependency_plan_SHA256"],
         "dependency_admission_policy_id": DEPENDENCY_AWARE_QUEUE_POLICY_ID,
@@ -840,20 +1358,24 @@ def _task_body(
         "assignee_profile": profile["assignee_profile"],
         "selected_profile": profile["selected_profile"],
         "profile_assignment_policy_id": profile["profile_assignment_policy_id"],
+        "profile_assignment_policy_revision": profile["profile_assignment_policy_revision"],
         "profile_assignment_basis": profile["profile_assignment_basis"],
         "selection_rationale": profile["selection_rationale"],
         "execution_profile_role": profile["execution_profile_role"],
         "selected_role": profile["selected_role"],
         "profile_toolsets": profile["profile_toolsets"],
         "profile_toolset_policy": profile["profile_toolset_policy"],
+        "required_profile_toolsets": profile["required_profile_toolsets"],
+        "required_write_toolsets": profile["required_write_toolsets"],
+        "required_capabilities": profile["required_capabilities"],
         "lead_agent_auto_assigned": profile["lead_agent_auto_assigned"],
         "ticket_architect_executor_distinct": profile["ticket_architect_executor_distinct"],
         "concurrent_workers_for_ticket": _MAX_CONCURRENT_WORKERS_FOR_TICKET,
         "task_max_retries": _TASK_MAX_RETRIES,
         "task_skills": list(_TASK_SKILLS),
-        "semantic_capabilities": list(_PEPPER_SEMANTIC_CAPABILITIES),
+        "semantic_capabilities": _role_semantic_capabilities(profile["execution_profile_role"]),
         "capability_resolution_policy": _PEPPER_CAPABILITY_RESOLUTION_POLICY,
-        "capability_resolution": _capability_resolution(),
+        "capability_resolution": _capability_resolution(profile["execution_profile_role"]),
         "task_id": task_id,
         "dispatch_performed": False,
         "execution_started": False,
@@ -869,14 +1391,16 @@ def _operational_result(record: dict[str, Any], *, idempotent_replay: bool) -> d
         "policy_id": WORK_PACKET_KANBAN_PROJECTION_POLICY_ID,
         "idempotent_replay": idempotent_replay,
         "projection_status": "projected",
-        "project_id": CANONICAL_PROJECT_ID,
-        "macroproject_id": CANONICAL_MACROPROJECT_ID,
-        "ticket_id": CANONICAL_TICKET_ID,
-        "ticket_title": CANONICAL_TICKET_TITLE,
+        "project_id": record["project_id"],
+        "macroproject_id": record["macroproject_id"],
+        "ticket_id": record["ticket_id"],
+        "ticket_title": record["ticket_title"],
         "ticket_spec_SHA256": record["ticket_spec_SHA256"],
         "work_packet_id": record["work_packet_id"],
         "work_packet_SHA256": record["work_packet_SHA256"],
         "WorkPacket_compilation_count": record["WorkPacket_compilation_count"],
+        "approval_publication_SHA256": record["approval_publication_SHA256"],
+        "ticket_approval_record_SHA256": record["ticket_approval_record_SHA256"],
         "dependency_admission": record["dependency_admission"],
         "kanban_board_slug": record["kanban_board_slug"],
         "kanban_task_id": record["kanban_task_id"],
@@ -885,12 +1409,18 @@ def _operational_result(record: dict[str, Any], *, idempotent_replay: bool) -> d
         "assignee_profile": record["assignee_profile"],
         "selected_profile": record["selected_profile"],
         "profile_assignment_policy_id": record["profile_assignment_policy_id"],
+        "profile_assignment_policy_revision": record.get("profile_assignment_policy_revision"),
         "profile_assignment_basis": record["profile_assignment_basis"],
         "selection_rationale": record["selection_rationale"],
         "execution_profile_role": record["execution_profile_role"],
         "selected_role": record["selected_role"],
         "profile_toolsets": record["profile_toolsets"],
         "profile_toolset_policy": record["profile_toolset_policy"],
+        "required_profile_toolsets": record.get("required_profile_toolsets", []),
+        "required_profile_sentinels": record.get("required_profile_sentinels", []),
+        "required_write_toolsets": record.get("required_write_toolsets", []),
+        "required_capabilities": record.get("required_capabilities", []),
+        "ticket_execution_requirements": record.get("ticket_execution_requirements", {}),
         "lead_agent_auto_assigned": record["lead_agent_auto_assigned"],
         "ticket_architect_executor_distinct": record["ticket_architect_executor_distinct"],
         "human_profile_selection_required": record["human_profile_selection_required"],
@@ -925,18 +1455,19 @@ def _require_projection_identity(
     generation: dict[str, Any],
     decision: dict[str, Any],
 ) -> None:
+    required_role = _required_execution_profile_role(generation)
     expected = {
         "schema_version": WORK_PACKET_KANBAN_PROJECTION_SCHEMA_VERSION,
         "policy_id": WORK_PACKET_KANBAN_PROJECTION_POLICY_ID,
-        "project_id": CANONICAL_PROJECT_ID,
-        "macroproject_id": CANONICAL_MACROPROJECT_ID,
-        "ticket_id": CANONICAL_TICKET_ID,
-        "ticket_title": CANONICAL_TICKET_TITLE,
+        "project_id": generation["project_id"],
+        "macroproject_id": generation["macroproject_id"],
+        "ticket_id": generation["ticket_id"],
+        "ticket_title": generation["ticket_title"],
         "ticket_spec_SHA256": generation["ticket_spec_SHA256"],
         "work_packet_id": generation["work_packet_id"],
         "work_packet_SHA256": generation["work_packet_SHA256"],
-        "WorkPacket_compilation_count": 1,
-        "approval_id": CANONICAL_APPROVAL_ID,
+        "WorkPacket_compilation_count": generation["WorkPacket_compilation_count"],
+        "approval_id": decision["approval_id"],
         "approval_status": "approved",
         "approval_decision": "approve",
         "approval_publication_SHA256": decision["approval_publication_SHA256"],
@@ -957,8 +1488,8 @@ def _require_projection_identity(
         "profile_assignment_basis": "governed_role_taxonomy",
         "selection_rationale": "deterministic_single_governed_role_match",
         "profile_assignment_gap": False,
-        "execution_profile_role": _PEPPER_EXECUTION_PROFILE_ROLE,
-        "selected_role": _PEPPER_EXECUTION_PROFILE_ROLE,
+        "execution_profile_role": required_role,
+        "selected_role": required_role,
         "profile_toolset_policy": "explicit_bounded_cli_toolsets",
         "lead_agent_auto_assigned": False,
         "ticket_architect_executor_distinct": True,
@@ -983,6 +1514,11 @@ def _require_projection_identity(
     for key, value in expected.items():
         if record.get(key) != value:
             raise WorkPacketKanbanProjectionConflict(f"projection {key} mismatch")
+    if record.get("profile_assignment_policy_revision") not in {
+        None,
+        PEPPER_EXECUTION_PROFILES_POLICY_REVISION,
+    }:
+        raise WorkPacketKanbanProjectionConflict("projection profile assignment revision mismatch")
     if not _SAFE_ID.fullmatch(str(record.get("kanban_task_id") or "")):
         raise WorkPacketKanbanProjectionConflict("projection Kanban task id is invalid")
     if record.get("selected_profile") != record.get("assignee_profile"):
@@ -1000,23 +1536,55 @@ def _require_projection_identity(
         raise WorkPacketKanbanProjectionConflict("dependency admission must be queue_admitted")
     if record.get("task_skills") not in _accepted_task_skill_lists():
         raise WorkPacketKanbanProjectionConflict("projection task skills mismatch")
-    if record.get("profile_toolsets") != list(_PEPPER_EXECUTION_PROFILE_REQUIRED_TOOLSETS):
+    requirements = _execution_profile_requirements(required_role)
+    if record.get("profile_toolsets") != requirements["required_toolsets"]:
         raise WorkPacketKanbanProjectionConflict("projection profile toolsets mismatch")
+    required_profile_toolsets = record.get("required_profile_toolsets")
+    if (
+        required_profile_toolsets is not None
+        and required_profile_toolsets != requirements["required_toolsets"]
+    ):
+        raise WorkPacketKanbanProjectionConflict("projection required profile toolsets mismatch")
+    required_write_toolsets = record.get("required_write_toolsets")
+    if (
+        required_write_toolsets is not None
+        and required_write_toolsets != requirements["required_write_toolsets"]
+    ):
+        raise WorkPacketKanbanProjectionConflict("projection required write toolsets mismatch")
 
 
 def _accepted_task_skill_lists() -> list[list[str]]:
     return [list(_TASK_SKILLS), list(_LEGACY_SEMANTIC_TASK_SKILLS)]
 
 
-def _capability_resolution() -> list[dict[str, Any]]:
+def _role_semantic_capabilities(role: str) -> list[str]:
+    if role == _PEPPER_IMPLEMENTATION_EXECUTION_PROFILE_ROLE:
+        return list(_PEPPER_IMPLEMENTATION_SEMANTIC_CAPABILITIES)
+    return list(_PEPPER_SEMANTIC_CAPABILITIES)
+
+
+def _role_capability_resolution(role: str) -> list[dict[str, Any]]:
+    if role == _PEPPER_IMPLEMENTATION_EXECUTION_PROFILE_ROLE:
+        return [dict(item) for item in _PEPPER_IMPLEMENTATION_CAPABILITY_RESOLUTION]
     return [dict(item) for item in _PEPPER_CAPABILITY_RESOLUTION]
 
 
+def _role_required_capability_labels(role: str) -> list[str]:
+    if role == _PEPPER_IMPLEMENTATION_EXECUTION_PROFILE_ROLE:
+        return list(_PEPPER_IMPLEMENTATION_REQUIRED_CAPABILITY_LABELS)
+    return list(_PEPPER_REQUIRED_CAPABILITY_LABELS)
+
+
+def _capability_resolution(role: str = _PEPPER_EXECUTION_PROFILE_ROLE) -> list[dict[str, Any]]:
+    return _role_capability_resolution(role)
+
+
 def _persist_projection_record(record: dict[str, Any]) -> None:
-    path = kanban_projection_record_path()
+    ticket_id = _safe_ticket_id(record.get("ticket_id"))
+    path = kanban_projection_record_path_for_ticket(ticket_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
-        existing = load_p18_9_0_kanban_projection_record()
+        existing = load_kanban_projection_record(ticket_id=ticket_id)
         if existing is not None:
             return
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -1026,14 +1594,18 @@ def _persist_projection_record(record: dict[str, Any]) -> None:
 
 
 def _projection_authority(record: dict[str, Any]) -> dict[str, Any]:
+    ticket_id = _safe_ticket_id(record.get("ticket_id"))
+    path = kanban_projection_record_path_for_ticket(ticket_id)
+    relative = path.relative_to(get_hermes_home())
     return {
-        "authority_record": str(_STORE_DIR / _STORE_FILE).replace("\\", "/"),
+        "authority_record": str(relative).replace("\\", "/"),
         "projection_SHA256": record["projection_SHA256"],
         "kanban_task_id": record["kanban_task_id"],
         "kanban_task_idempotency_key": record["kanban_task_idempotency_key"],
         "assignee_profile": record["assignee_profile"],
         "selected_profile": record["selected_profile"],
         "profile_assignment_policy_id": record["profile_assignment_policy_id"],
+        "profile_assignment_policy_revision": record.get("profile_assignment_policy_revision"),
         "selection_rationale": record["selection_rationale"],
         "execution_profile_role": record["execution_profile_role"],
         "selected_role": record["selected_role"],
@@ -1048,7 +1620,7 @@ def _projection_authority(record: dict[str, Any]) -> dict[str, Any]:
 
 def _idempotency_key(generation: dict[str, Any]) -> str:
     return ":".join((
-        _IDEMPOTENCY_PREFIX,
+        f"pepper:{_safe_ticket_id(generation['ticket_id'])}:workpacket-kanban-projection",
         generation["work_packet_id"],
         generation["work_packet_SHA256"],
     ))
@@ -1088,6 +1660,7 @@ __all__ = (
     "WORK_PACKET_KANBAN_PROJECTION_POLICY_ID",
     "PEPPER_EXECUTION_PROFILES_SCHEMA_VERSION",
     "PEPPER_EXECUTION_PROFILES_POLICY_ID",
+    "PEPPER_EXECUTION_PROFILES_POLICY_REVISION",
     "PEPPER_EXECUTION_PROFILE_TAXONOMY",
     "WorkPacketKanbanProjectionError",
     "WorkPacketKanbanProjectionInputError",
@@ -1096,10 +1669,17 @@ __all__ = (
     "WorkPacketKanbanProjectionProfileSelectionRequired",
     "WorkPacketKanbanProjectionBlocked",
     "kanban_projection_record_path",
+    "kanban_projection_record_path_for_ticket",
+    "load_kanban_projection_record",
     "load_p18_9_0_kanban_projection_record",
+    "validate_kanban_projection_record",
     "validate_p18_9_0_kanban_projection_record",
+    "resolve_current_approved_workpacket_projection",
+    "project_current_approved_workpacket_to_kanban",
     "project_approved_p18_9_0_workpacket_to_kanban",
+    "resolve_execution_profile_for_ticket",
     "resolve_p18_9_0_execution_profile",
     "classify_pepper_execution_profile",
+    "execution_start_action_id",
     "kanban_projection_to_workflow_overlay",
 )

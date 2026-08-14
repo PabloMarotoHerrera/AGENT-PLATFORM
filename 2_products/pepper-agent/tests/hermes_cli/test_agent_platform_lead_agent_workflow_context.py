@@ -340,6 +340,8 @@ def test_lead_agent_prompt_requires_tool_backed_state() -> None:
     assert "decide_pending_approval" in prompt
     assert "APPROVE_<current-ticket>" in prompt
     assert "current pending governed ticket approval" in prompt
+    assert "<current-ticket-token>_APPROVED_NO_EXECUTION" in prompt
+    assert "current approved governed WorkPacket" in prompt
     assert "start_current_ticket_execution" in prompt
     assert "recover_current_ticket_execution" in prompt
     assert "prepare_current_ticket_review" in prompt

@@ -265,7 +265,13 @@ TOOLSETS = {
         ],
         "includes": []
     },
-    
+
+    "pepper_validation": {
+        "description": "Pepper governed WorkPacket validation command execution",
+        "tools": ["workpacket_validation"],
+        "includes": []
+    },
+
     "clarify": {
         "description": "Ask the user clarifying questions (multiple-choice or open-ended)",
         "tools": ["clarify"],

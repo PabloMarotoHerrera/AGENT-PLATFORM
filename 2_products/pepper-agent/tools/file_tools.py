@@ -599,15 +599,34 @@ def _check_sensitive_path(filepath: str, task_id: str = "default") -> str | None
         resolved = str(_resolve_path_for_task(filepath, task_id))
     except (OSError, ValueError):
         resolved = filepath
-    normalized = os.path.normpath(_expand_tilde(filepath))
+    expanded = _expand_tilde(filepath)
+    normalized = os.path.normpath(expanded)
+    normalized_forms = {resolved, normalized}
+    for candidate in (filepath, expanded, resolved):
+        candidate_text = str(candidate or "")
+        if not candidate_text:
+            continue
+        normalized_forms.add(os.path.normpath(candidate_text))
+        normalized_forms.add(posixpath.normpath(candidate_text.replace("\\", "/")))
+        if sys.platform == "win32":
+            normalized_forms.add(os.path.normpath(candidate_text.replace("/", "\\")))
+    sensitive_prefixes = set(_SENSITIVE_PATH_PREFIXES)
+    sensitive_exact_paths = set(_SENSITIVE_EXACT_PATHS)
+    if sys.platform == "win32":
+        sensitive_prefixes.update(
+            prefix.replace("/", "\\") for prefix in _SENSITIVE_PATH_PREFIXES
+        )
+        sensitive_exact_paths.update(
+            path.replace("/", "\\") for path in _SENSITIVE_EXACT_PATHS
+        )
     _err = (
         f"Refusing to write to sensitive system path: {filepath}\n"
         "Use the terminal tool with sudo if you need to modify system files."
     )
-    for prefix in _SENSITIVE_PATH_PREFIXES:
-        if resolved.startswith(prefix) or normalized.startswith(prefix):
+    for prefix in sensitive_prefixes:
+        if any(candidate.startswith(prefix) for candidate in normalized_forms):
             return _err
-    if resolved in _SENSITIVE_EXACT_PATHS or normalized in _SENSITIVE_EXACT_PATHS:
+    if any(candidate in sensitive_exact_paths for candidate in normalized_forms):
         return _err
     # Prevent agents from modifying the Hermes config file directly.
     # approvals.mode and other security settings live here; a malicious or
@@ -715,6 +734,41 @@ def _check_cross_profile_path(filepath: str, task_id: str = "default") -> str | 
         resolved,
         mirror_prefix=_get_container_mirror_prefix_for_task(task_id),
     )
+
+
+def _governed_workpacket_write_error(
+    filepath: str,
+    *,
+    resolved_path: str | None = None,
+) -> str | None:
+    try:
+        from tools.governed_workpacket_file_guard import governed_write_denial
+
+        return governed_write_denial(filepath, resolved_path=resolved_path)
+    except Exception as exc:
+        if _governed_workpacket_enabled_from_env():
+            return f"WORKPACKET_WRITE_AUTHORITY_UNAVAILABLE: {exc}"
+        return None
+
+
+def _governed_workpacket_patch_error(
+    paths: list[str],
+    *,
+    resolved_paths: dict[str, str | None],
+) -> str | None:
+    try:
+        from tools.governed_workpacket_file_guard import governed_patch_denial
+
+        return governed_patch_denial(paths, resolved_paths=resolved_paths)
+    except Exception as exc:
+        if _governed_workpacket_enabled_from_env():
+            return f"WORKPACKET_WRITE_AUTHORITY_UNAVAILABLE: {exc}"
+        return None
+
+
+def _governed_workpacket_enabled_from_env() -> bool:
+    raw = str(os.environ.get("HERMES_AGENT_PLATFORM_GOVERNED_WORKER", "") or "")
+    return raw.strip().lower().replace("_", "-") == "pepper-kanban-worker"
 
 
 def _is_expected_write_exception(exc: Exception) -> bool:
@@ -1602,6 +1656,10 @@ def write_file_tool(path: str, content: str, task_id: str = "default",
         except Exception:
             _resolved = None
 
+        governed_error = _governed_workpacket_write_error(path, resolved_path=_resolved)
+        if governed_error:
+            return tool_error(governed_error)
+
         if _resolved is None:
             stale_warning = _check_file_staleness(path, task_id)
             file_ops = _get_file_ops(task_id)
@@ -1667,7 +1725,6 @@ def patch_tool(mode: str = "replace", path: str = None, old_string: str = None,
     if path:
         _paths_to_check.append(path)
     if mode == "patch" and patch:
-        import re as _re
         from tools.path_security import has_traversal_component
         def _reject_v4a_traversal(v4a_path: str) -> str | None:
             # V4A path headers come from patch CONTENT, not the explicit
@@ -1687,22 +1744,16 @@ def patch_tool(mode: str = "replace", path: str = None, old_string: str = None,
                 )
             return None
 
-        # ``\s*`` (not ``\s+``) after ``***`` matches patch_parser leniency:
-        # it accepts ``***Update File:`` with no space after the asterisks
-        # (patch_parser.py uses ``\*\*\*\s*Update\s+File:``). Requiring a space
-        # here let a no-space header parse + apply while skipping this check.
-        for _m in _re.finditer(r'^\*\*\*\s*(?:Update|Add|Delete)\s+File:\s*(.+)$', patch, _re.MULTILINE):
-            v4a_path = _m.group(1).strip()
-            _err = _reject_v4a_traversal(v4a_path)
-            if _err:
-                return _err
-            _paths_to_check.append(v4a_path)
-        # ``*** Move File: src -> dst`` is a valid V4A op (patch_parser.py:114)
-        # but was never extracted, so a Move targeting /etc/crontab skipped the
-        # sensitive-path pre-check. Check BOTH endpoints, and run them through
-        # the same ``..`` traversal rejection as the other headers.
-        for _m in _re.finditer(r'^\*\*\*\s*Move\s+File:\s*(.+?)\s*->\s*(.+)$', patch, _re.MULTILINE):
-            for v4a_path in (_m.group(1).strip(), _m.group(2).strip()):
+        from tools.patch_parser import parse_v4a_patch
+
+        operations, parse_error = parse_v4a_patch(patch)
+        if parse_error:
+            return tool_error(f"Failed to parse patch: {parse_error}")
+        for operation in operations:
+            operation_paths = [operation.file_path]
+            if operation.new_path:
+                operation_paths.append(operation.new_path)
+            for v4a_path in operation_paths:
                 _err = _reject_v4a_traversal(v4a_path)
                 if _err:
                     return _err
@@ -1721,15 +1772,24 @@ def patch_tool(mode: str = "replace", path: str = None, old_string: str = None,
         # multi-file V4A patches.
         _resolved_paths: list[str] = []
         _seen: set[str] = set()
+        _path_to_resolved: dict[str, str | None] = {}
         for _p in _paths_to_check:
             try:
                 _r = str(_resolve_path_for_task(_p, task_id))
             except Exception:
                 _r = None
+            _path_to_resolved[_p] = _r
             if _r and _r not in _seen:
                 _resolved_paths.append(_r)
                 _seen.add(_r)
         _resolved_paths.sort()
+
+        governed_error = _governed_workpacket_patch_error(
+            _paths_to_check,
+            resolved_paths=_path_to_resolved,
+        )
+        if governed_error:
+            return tool_error(governed_error)
 
         # Acquire per-path locks in sorted order via ExitStack.  On single
         # path this degenerates to one lock; on empty list (unresolvable)
@@ -1742,13 +1802,8 @@ def patch_tool(mode: str = "replace", path: str = None, old_string: str = None,
             # Collect warnings — cross-agent registry first (names sibling),
             # then per-task tracker as a fallback.
             stale_warnings: list[str] = []
-            _path_to_resolved: dict[str, str] = {}
             for _p in _paths_to_check:
-                try:
-                    _r = str(_resolve_path_for_task(_p, task_id))
-                except Exception:
-                    _r = None
-                _path_to_resolved[_p] = _r
+                _r = _path_to_resolved.get(_p)
                 _cross = file_state.check_stale(task_id, _r) if _r else None
                 _sw = _cross or _check_file_staleness(_p, task_id)
                 if not _sw and _r:

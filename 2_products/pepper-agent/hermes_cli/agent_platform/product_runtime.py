@@ -659,14 +659,9 @@ def _p18_9_0_generation_overlay() -> tuple[dict[str, Any] | None, dict[str, Any]
         if record is None:
             return None, None
         overlay = generated_record_to_workflow_overlay(record)
-        from hermes_cli.agent_platform.workflow.work_packet_kanban_projection import (
-            kanban_projection_to_workflow_overlay,
-            load_p18_9_0_kanban_projection_record,
-        )
-
-        projection = load_p18_9_0_kanban_projection_record(generation_record=record)
+        projection = _projection_record_for_generated_ticket(record)
         if projection is not None:
-            overlay.update(kanban_projection_to_workflow_overlay(projection))
+            overlay.update(_projection_overlay_for_record(projection))
             start_overlay, start_blocker = _p18_9_0_execution_start_overlay(projection)
             if start_overlay is not None:
                 overlay.update(start_overlay)
@@ -687,6 +682,9 @@ def _p18_9_0_generation_overlay() -> tuple[dict[str, Any] | None, dict[str, Any]
                                 next_record = load_generation_record(ticket_id=str(next_ticket_id))
                                 if next_record is not None:
                                     overlay.update(generated_record_to_workflow_overlay(next_record))
+                                    next_projection = _projection_record_for_generated_ticket(next_record)
+                                    if next_projection is not None:
+                                        overlay.update(_projection_overlay_for_record(next_projection))
                         if review_blocker is not None:
                             return overlay, review_blocker
                     return overlay, retry_start_blocker
@@ -714,6 +712,9 @@ def _p18_9_0_generation_overlay() -> tuple[dict[str, Any] | None, dict[str, Any]
                             next_record = load_generation_record(ticket_id=str(next_ticket_id))
                             if next_record is not None:
                                 overlay.update(generated_record_to_workflow_overlay(next_record))
+                                next_projection = _projection_record_for_generated_ticket(next_record)
+                                if next_projection is not None:
+                                    overlay.update(_projection_overlay_for_record(next_projection))
                     if review_blocker is not None:
                         return overlay, review_blocker
             if start_blocker is not None:
@@ -725,6 +726,25 @@ def _p18_9_0_generation_overlay() -> tuple[dict[str, Any] | None, dict[str, Any]
             "status": "blocked_by_invalid_generated_ticket_authority",
             "evidence": _safe_text(exc, limit=300),
         }
+
+
+def _projection_record_for_generated_ticket(record: dict[str, Any]) -> dict[str, Any] | None:
+    from hermes_cli.agent_platform.workflow.work_packet_kanban_projection import (
+        load_kanban_projection_record,
+    )
+
+    return load_kanban_projection_record(
+        ticket_id=str(record["ticket_id"]),
+        generation_record=record,
+    )
+
+
+def _projection_overlay_for_record(record: dict[str, Any]) -> dict[str, Any]:
+    from hermes_cli.agent_platform.workflow.work_packet_kanban_projection import (
+        kanban_projection_to_workflow_overlay,
+    )
+
+    return kanban_projection_to_workflow_overlay(record)
 
 
 def _approval_operational_summary() -> dict[str, Any]:
@@ -1523,10 +1543,10 @@ def project_current_approved_workpacket_to_kanban(
     """Project the current approved Pepper WorkPacket to Kanban without dispatch."""
 
     from hermes_cli.agent_platform.workflow.work_packet_kanban_projection import (
-        project_approved_p18_9_0_workpacket_to_kanban,
+        project_current_approved_workpacket_to_kanban as project_workpacket,
     )
 
-    return project_approved_p18_9_0_workpacket_to_kanban(
+    return project_workpacket(
         workflow=build_workflow_control_snapshot(),
         requested_project_id=project_id,
         requested_ticket_id=ticket_id,
@@ -3464,228 +3484,74 @@ def _kanban_start_preflight_blocker(
 
 
 def _executor_provider_readiness(profile_name: str) -> dict[str, Any]:
-    authority = _executor_profile_authority(profile_name)
-    if not authority.get("ok"):
-        return authority
-    profile_dir = Path(str(authority["profile_path"]))
-    launch_config = _executor_profile_launch_config(profile_dir)
-    if not launch_config.get("ok"):
-        return launch_config
-    observed = datetime.now(timezone.utc)
     try:
-        status = _read_executor_governed_credential_status(profile_dir, now=observed)
-    except Exception as exc:
-        return {
-            "ok": False,
-            "blocker_code": "EXECUTOR_PROVIDER_RESOLUTION_GAP",
-            "blocker_detail": f"executor governed credential status unavailable: {_safe_text(exc, limit=200)}",
-        }
-    if not bool(getattr(status, "configured", False)):
-        return {
-            "ok": False,
-            "blocker_code": "EXECUTOR_PROVIDER_RESOLUTION_GAP",
-            "blocker_detail": "executor profile lacks governed openai-codex.primary credentials",
-            "credential_profile_id": "openai-codex.primary",
-            "credential_resolution_source": "canonical_governed_home",
-            "durable_store_valid": bool(getattr(status, "durable_store_valid", False)),
-            "token_pair_present": bool(getattr(status, "token_pair_present", False)),
-            "legacy_auth_json_used": False,
-            "API_key_fallback_used": False,
-            "governed_refresh_path": "provider_worker_resolution_no_refresh",
-            "legacy_refresh_fallback": False,
-        }
-    try:
-        from hermes_cli.agent_platform.provider_credentials.contracts import (
-            MAX_PROVIDER_CREDENTIAL_LEASE_TTL_MS,
-            OPENAI_CODEX_CREDENTIAL_STORE_ID,
-            ProviderCredentialDeliveryLease,
-        )
-        from hermes_cli.agent_platform.provider_runtime.contracts import (
-            ProviderRuntimeResolutionRequest,
-        )
-        from hermes_cli.agent_platform.provider_worker.contracts import (
-            OPENAI_CODEX_PROVIDER_RUNTIME_PROFILE_ID,
-            OPENAI_CODEX_PROVIDER_WORKER_PROFILE_ID,
-            ProviderWorkerResolutionRequest,
-        )
-        from hermes_cli.agent_platform.provider_worker.resolution import (
-            resolve_provider_worker_profile,
+        from hermes_cli.agent_platform.worker_credentials import (
+            probe_pepper_governed_executor_profile_readiness,
         )
 
-        lease = ProviderCredentialDeliveryLease(
-            lease_id="lease.pepper-worker-start-readiness",
-            runtime_id="runtime.pepper-worker-start",
-            correlation_id="P18.9.0:worker-start",
-            created_at_utc=observed,
-            expires_at_utc=observed
-            + timedelta(milliseconds=MAX_PROVIDER_CREDENTIAL_LEASE_TTL_MS),
-        )
-        provider_request = ProviderRuntimeResolutionRequest(
-            profile_id=OPENAI_CODEX_PROVIDER_RUNTIME_PROFILE_ID,
-            runtime_id="runtime.pepper-worker-start",
-            correlation_id="P18.9.0:worker-start",
-            requested_by="pepper-worker-start-action",
-            evaluated_at_utc=observed,
-            credential_status=status,
-            credential_lease_ref=lease,
-        )
-        resolve_provider_worker_profile(
-            ProviderWorkerResolutionRequest(
-                worker_profile_id=OPENAI_CODEX_PROVIDER_WORKER_PROFILE_ID,
-                provider_resolution_request=provider_request,
-                evaluated_at_utc=observed,
-            )
-        )
+        return probe_pepper_governed_executor_profile_readiness(profile_name)
     except Exception as exc:
         category = getattr(exc, "validation_category", exc.__class__.__name__)
         return {
             "ok": False,
             "blocker_code": "EXECUTOR_PROVIDER_RESOLUTION_GAP",
-            "blocker_detail": f"executor provider-worker resolution failed: {_safe_text(category, limit=200)}",
+            "blocker_detail": f"executor provider resolution failed: {_safe_text(category, limit=200)}",
+            "validation_category": _safe_text(category, limit=200),
+            "legacy_auth_json_used": False,
+            "API_key_fallback_used": False,
+            "credential_pool_fallback_used": False,
+            "governed_refresh_path": "provider_worker_resolution_no_refresh",
+            "legacy_refresh_fallback": False,
         }
-    return {
-        "ok": True,
-        "provider": PEPPER_GOVERNED_EXECUTOR_PROVIDER,
-        "model": PEPPER_GOVERNED_EXECUTOR_MODEL,
-        "api_mode": PEPPER_GOVERNED_EXECUTOR_API_MODE,
-        "credential_profile_id": OPENAI_CODEX_CREDENTIAL_STORE_ID,
-        "provider_runtime_profile_id": OPENAI_CODEX_PROVIDER_RUNTIME_PROFILE_ID,
-        "worker_profile_id": OPENAI_CODEX_PROVIDER_WORKER_PROFILE_ID,
-        "source": "pepper-governed-openai-codex-oauth",
-        "credential_resolution_source": "canonical_governed_home",
-        "durable_store_valid": bool(getattr(status, "durable_store_valid", False)),
-        "token_pair_present": bool(getattr(status, "token_pair_present", False)),
-        "legacy_auth_json_used": False,
-        "API_key_fallback_used": False,
-        "governed_refresh_path": "provider_worker_resolution_no_refresh",
-        "legacy_refresh_fallback": False,
-        "credential_refresh_calls_per_request_maximum": 0,
-        "executor_profile": profile_name,
-        "executor_config_source": launch_config["executor_config_source"],
-    }
-
-
-def _executor_profile_authority(profile_name: str) -> dict[str, Any]:
-    from hermes_cli.agent_platform.workflow.work_packet_kanban_projection import (
-        classify_pepper_execution_profile,
-    )
-    from hermes_cli.profiles import list_profiles, normalize_profile_name
-
-    canonical = normalize_profile_name(profile_name)
-    try:
-        profiles = list_profiles()
-    except Exception as exc:
-        return {
-            "ok": False,
-            "blocker_code": "PROFILE_ASSIGNMENT_GAP",
-            "blocker_detail": f"executor profile roster unavailable: {_safe_text(exc, limit=200)}",
-        }
-    for profile in profiles:
-        try:
-            candidate = normalize_profile_name(str(getattr(profile, "name", "")))
-        except Exception:
-            continue
-        if candidate != canonical:
-            continue
-        classification = classify_pepper_execution_profile(profile)
-        if classification.get("worker_assignable") is not True:
-            return {
-                "ok": False,
-                "blocker_code": "PROFILE_ASSIGNMENT_GAP",
-                "blocker_detail": "executor profile is no longer bounded worker-assignable",
-                "classification": classification,
-            }
-        return {
-            "ok": True,
-            "profile_path": str(getattr(profile, "path")),
-            "classification": classification,
-        }
-    return {
-        "ok": False,
-        "blocker_code": "PROFILE_ASSIGNMENT_GAP",
-        "blocker_detail": "executor profile does not exist",
-    }
-
-
-def _executor_profile_launch_config(profile_dir: Path) -> dict[str, Any]:
-    config = _read_executor_profile_config(profile_dir)
-    model_cfg = config.get("model") if isinstance(config, dict) else None
-    provider = ""
-    model = ""
-    api_mode = ""
-    if isinstance(model_cfg, dict):
-        provider = str(model_cfg.get("provider") or "").strip().lower()
-        model = str(model_cfg.get("default") or model_cfg.get("model") or "").strip()
-        api_mode = str(model_cfg.get("api_mode") or "").strip().lower()
-    elif isinstance(model_cfg, str):
-        model = model_cfg.strip()
-    if provider != PEPPER_GOVERNED_EXECUTOR_PROVIDER or model != PEPPER_GOVERNED_EXECUTOR_MODEL:
-        return {
-            "ok": False,
-            "blocker_code": "EXECUTOR_PROVIDER_RESOLUTION_GAP",
-            "blocker_detail": (
-                "executor profile must explicitly set model.provider=openai-codex "
-                "and model.default=gpt-5.5"
-            ),
-            "configured_provider": provider or None,
-            "configured_model": model or None,
-        }
-    if api_mode and api_mode != PEPPER_GOVERNED_EXECUTOR_API_MODE:
-        return {
-            "ok": False,
-            "blocker_code": "EXECUTOR_PROVIDER_RESOLUTION_GAP",
-            "blocker_detail": "executor profile model.api_mode must be codex_responses when set",
-            "configured_api_mode": api_mode,
-        }
-    return {
-        "ok": True,
-        "provider": provider,
-        "model": model,
-        "api_mode": api_mode or PEPPER_GOVERNED_EXECUTOR_API_MODE,
-        "executor_config_source": "executor_profile_config_yaml",
-    }
-
-
-def _read_executor_profile_config(profile_dir: Path) -> dict[str, Any]:
-    config_path = profile_dir / "config.yaml"
-    if not config_path.is_file():
-        return {}
-    try:
-        import yaml
-
-        with open(config_path, "r", encoding="utf-8") as stream:
-            loaded = yaml.safe_load(stream) or {}
-        return loaded if isinstance(loaded, dict) else {}
-    except Exception:
-        return {}
-
-
-def _read_executor_governed_credential_status(
-    _profile_dir: Path,
-    *,
-    now: datetime,
-) -> Any:
-    from hermes_constants import get_default_hermes_root
-    from hermes_cli.agent_platform.provider_credentials.store import (
-        default_openai_codex_credential_store_root,
-        read_openai_codex_credential_status,
-    )
-
-    store_root = default_openai_codex_credential_store_root(
-        hermes_home=get_default_hermes_root()
-    )
-    return read_openai_codex_credential_status(store_root, now=now)
 
 
 def _pepper_governed_worker_env_overlay(projection: dict[str, Any]) -> dict[str, str]:
-    from hermes_cli.agent_platform.worker_credentials import pepper_governed_worker_env
-
-    return pepper_governed_worker_env(
-        project_id=PEPPER_GOVERNED_PROJECT_ID,
-        ticket_id=PEPPER_NEXT_TICKET_ID,
-        task_id=str(projection["kanban_task_id"]),
-        executor_profile=str(projection["assignee_profile"]),
+    from hermes_cli.agent_platform.worker_credentials import (
+        build_pepper_governed_worker_credential_binding,
+        pepper_governed_worker_env,
     )
+    from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
+        approval_decision_record_path_for_ticket,
+        generation_record_path_for_ticket,
+    )
+    from hermes_cli.agent_platform.workflow.work_packet_kanban_projection import (
+        kanban_projection_record_path_for_ticket,
+    )
+
+    ticket_id = _safe_text(projection.get("ticket_id") or PEPPER_NEXT_TICKET_ID, limit=128)
+    authority = projection.get("authority") if isinstance(projection.get("authority"), dict) else {}
+    projection_sha256 = str(projection.get("projection_SHA256") or authority.get("projection_SHA256") or "")
+    if not projection_sha256:
+        raise ProductRuntimeConflict("Kanban projection digest is unavailable for worker env overlay")
+    binding = build_pepper_governed_worker_credential_binding(
+        project_id=str(projection.get("project_id") or PEPPER_GOVERNED_PROJECT_ID),
+        ticket_id=ticket_id,
+        work_packet_id=str(projection["work_packet_id"]),
+        work_packet_SHA256=str(projection["work_packet_SHA256"]),
+        ticket_spec_SHA256=str(projection["ticket_spec_SHA256"]),
+        kanban_task_id=str(projection["kanban_task_id"]),
+        executor_profile=str(projection["assignee_profile"]),
+        projection_SHA256=projection_sha256,
+        profile_assignment_policy_id=str(projection.get("profile_assignment_policy_id") or ""),
+        profile_assignment_policy_revision=str(projection.get("profile_assignment_policy_revision") or ""),
+    )
+    overlay = pepper_governed_worker_env(binding=binding)
+    overlay.update({
+        "HERMES_AGENT_PLATFORM_WORKPACKET_ID": str(projection["work_packet_id"]),
+        "HERMES_AGENT_PLATFORM_WORKPACKET_SHA256": str(projection["work_packet_SHA256"]),
+        "HERMES_AGENT_PLATFORM_TICKET_SPEC_SHA256": str(projection["ticket_spec_SHA256"]),
+        "HERMES_AGENT_PLATFORM_KANBAN_PROJECTION_SHA256": projection_sha256,
+        "HERMES_AGENT_PLATFORM_GENERATION_RECORD_PATH": str(
+            generation_record_path_for_ticket(ticket_id)
+        ),
+        "HERMES_AGENT_PLATFORM_APPROVAL_DECISION_RECORD_PATH": str(
+            approval_decision_record_path_for_ticket(ticket_id)
+        ),
+        "HERMES_AGENT_PLATFORM_KANBAN_PROJECTION_RECORD_PATH": str(
+            kanban_projection_record_path_for_ticket(ticket_id)
+        ),
+    })
+    return overlay
 
 
 def _pepper_governed_worker_probe_env(projection: dict[str, Any]) -> dict[str, str]:
@@ -3727,9 +3593,13 @@ def _preflight_pepper_governed_worker_credentials(
             "model": probe.get("model"),
             "api_mode": probe.get("api_mode"),
             "credential_profile_id": probe.get("credential_profile_id"),
+            "credential_policy_revision": probe.get("credential_policy_revision"),
             "credential_resolution_source": probe.get("credential_resolution_source"),
             "provider_runtime_profile_id": probe.get("provider_runtime_profile_id"),
             "worker_profile_id": probe.get("worker_profile_id"),
+            "executor_profile": probe.get("executor_profile"),
+            "work_packet_id": probe.get("work_packet_id"),
+            "work_packet_SHA256": probe.get("work_packet_SHA256"),
             "runtime_id": probe.get("runtime_id"),
             "correlation_id": probe.get("correlation_id"),
             "lease_id": probe.get("lease_id"),
@@ -3935,6 +3805,7 @@ def _build_execution_start_authorization_record(
         "model": provider_readiness["model"],
         "api_mode": provider_readiness["api_mode"],
         "credential_profile_id": provider_readiness["credential_profile_id"],
+        "credential_policy_revision": provider_readiness.get("credential_policy_revision"),
         "provider_runtime_profile_id": provider_readiness["provider_runtime_profile_id"],
         "worker_profile_id": provider_readiness["worker_profile_id"],
         "executor_config_source": provider_readiness["executor_config_source"],
@@ -4137,6 +4008,7 @@ def _build_retry_start_authorization_record(
         "model": provider_readiness["model"],
         "api_mode": provider_readiness["api_mode"],
         "credential_profile_id": provider_readiness["credential_profile_id"],
+        "credential_policy_revision": provider_readiness.get("credential_policy_revision"),
         "provider_runtime_profile_id": provider_readiness["provider_runtime_profile_id"],
         "worker_profile_id": provider_readiness["worker_profile_id"],
         "executor_config_source": provider_readiness["executor_config_source"],
@@ -4634,6 +4506,7 @@ def _retry_start_operational_result(
         "model": record["model"],
         "api_mode": record["api_mode"],
         "credential_profile_id": record["credential_profile_id"],
+        "credential_policy_revision": record.get("credential_policy_revision"),
         "provider_runtime_profile_id": record["provider_runtime_profile_id"],
         "worker_profile_id": record["worker_profile_id"],
         "kanban_board_slug": record["kanban_board_slug"],
@@ -4758,6 +4631,7 @@ def _execution_start_operational_result(
         "model": record["model"],
         "api_mode": record["api_mode"],
         "credential_profile_id": record["credential_profile_id"],
+        "credential_policy_revision": record.get("credential_policy_revision"),
         "provider_runtime_profile_id": record["provider_runtime_profile_id"],
         "worker_profile_id": record["worker_profile_id"],
         "kanban_board_slug": record["kanban_board_slug"],
