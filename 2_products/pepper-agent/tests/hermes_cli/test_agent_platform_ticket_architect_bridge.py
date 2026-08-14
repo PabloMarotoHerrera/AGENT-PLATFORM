@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 
 import pytest
@@ -101,6 +102,54 @@ def _synthetic_roadmap_items() -> tuple[dict[str, object], ...]:
     )
 
 
+def _synthetic_implementation_contract(label: str) -> dict[str, object]:
+    return {
+        "ticket_type": "implementation",
+        "objective": f"Implement synthetic governed surface {label}.",
+        "predecessor_evidence": ["Synthetic predecessor accepted IA handoff."],
+        "information_architecture": [f"CONTROL: Synthetic {label}"],
+        "required_surfaces": [f"Synthetic surface {label}"],
+        "allowed_paths": ["2_products/pepper-agent/web/src/agent-platform/shell/**"],
+        "allowed_actions": ["Reuse existing synthetic shell seam."],
+        "constraints": ["Do not create a second synthetic router."],
+        "tasks": [f"Implement synthetic task {label} through the existing seam."],
+        "acceptance_criteria": [f"Synthetic surface {label} is implemented through the existing seam."],
+        "validation_steps": [
+            f"V1: Human review confirms synthetic contract {label} => The generated TicketSpec is implementation-oriented.",
+        ],
+        "completion_verdict": f"synthetic_{label.lower()}_implementation_ready",
+    }
+
+
+def _synthetic_implementation_target(
+    ticket_id: str,
+    title: str,
+    *,
+    contract: dict[str, object],
+    dependencies: tuple[str, ...] = (),
+) -> bridge.GovernedTicketGenerationTarget:
+    return bridge.GovernedTicketGenerationTarget(
+        project_id="PEPPER",
+        project_name="Pepper",
+        macroproject_id="P99",
+        macroproject_title="Synthetic Implementation Macroproject",
+        ticket_id=ticket_id,
+        ticket_title=title,
+        next_action_id=bridge.canonical_generation_action_id(ticket_id),
+        approval_next_action_id=bridge.approval_action_id(ticket_id),
+        approved_no_execution_next_action_id=bridge.approved_no_execution_action_id(ticket_id),
+        revise_next_action_id=bridge.revise_action_id(ticket_id),
+        canonical_roadmap_authority="synthetic_test_roadmap",
+        roadmap_authority_path="synthetic-roadmap.md",
+        roadmap_authority_section="Synthetic roadmap",
+        dependency_ticket_ids=dependencies,
+        predecessor_ticket_id=dependencies[-1] if dependencies else None,
+        readiness_state="synthetic_ready",
+        authority_source="synthetic_contract_fixture",
+        ticket_contract=contract,
+    )
+
+
 @pytest.fixture
 def bridge_home(tmp_path, monkeypatch):
     home = tmp_path / "hermes-home"
@@ -116,7 +165,9 @@ def _chat_tool_result(name: str, args: dict | None = None) -> dict:
 
 
 def _write_generation_record(record: dict) -> None:
-    bridge.generation_record_path_for_ticket(record["ticket_id"]).write_text(
+    path = bridge.generation_record_path_for_ticket(record["ticket_id"])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
         json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
@@ -148,6 +199,25 @@ def test_generate_p18_9_0_bridge_success_and_persists(bridge_home) -> None:
     assert bridge.generation_record_path().exists()
     assert record is not None
     assert record["ticket_spec"]["title"] == bridge.CANONICAL_TICKET_TITLE
+    assert record["ticket_spec"]["objective"] == (
+        "Inventory Pepper product surfaces, make the first information-architecture "
+        "decision, and define the acceptance contract for P18.9 personalization."
+    )
+    assert record["ticket_spec"]["context"] == [
+        "The active governed project is PEPPER, while P18.9 is the macroproject identifier.",
+        "P18.9.0 is the first governed ticket after P18/P18.R closure.",
+        "The stale Product UX / IA Baseline label is non-authoritative and must not override the approved roadmap title.",
+        "Execution remains blocked until the generated ticket is explicitly approved by a human.",
+    ]
+    assert record["ticket_spec"]["tasks"] == [
+        "Inventory Pepper product surfaces relevant to product personalization and identify the authority for each surface.",
+        "Decide the initial information architecture boundary for P18.9 personalization work.",
+        "Define acceptance criteria for the product inventory, IA decision, and downstream implementation handoff.",
+        "Record unresolved product questions without dispatching workers or creating Kanban tasks.",
+    ]
+    assert record["ticket_spec"]["recommended_commit_message"] == (
+        "P18.9.0 Define product inventory IA acceptance contract"
+    )
     assert record["lint_report"]["disposition"] == TicketLintDisposition.PASS.value
     assert record["WorkPacket_compilation_count"] == 1
     assert record["work_packet_compilation_result"]["work_packet"]["execution_ready"] is False
@@ -194,8 +264,11 @@ def test_stale_workflow_title_does_not_override_canonical_roadmap(bridge_home) -
     assert result["ticket_title"] == bridge.CANONICAL_TICKET_TITLE
     assert record is not None
     assert record["ticket_spec"]["title"] == bridge.CANONICAL_TICKET_TITLE
-    serialized = json.dumps(record)
-    assert "Product UX / IA Baseline" not in serialized
+    assert record["ticket_title"] == bridge.CANONICAL_TICKET_TITLE
+    assert result["next_action"]["target_ticket_title"] == bridge.CANONICAL_TICKET_TITLE
+    assert record["ticket_spec"]["context"].count(
+        "The stale Product UX / IA Baseline label is non-authoritative and must not override the approved roadmap title."
+    ) == 1
     assert record["canonical_roadmap_authority"] == "human-approved-p18.9-roadmap"
 
 
@@ -251,6 +324,42 @@ def test_generic_generation_resolves_canonical_next_ticket_from_roadmap(bridge_h
     assert record["work_packet_compilation_result"]["work_packet"]["execution_ready"] is False
     assert record["WorkPacket_compilation_count"] == 1
     assert record["workflow_transition_result"]["transition"]["transition_id"] == "GWT-002"
+
+
+def test_p18_9_1_materializes_implementation_contract_into_ticket_and_work_packet(bridge_home) -> None:
+    bridge.generate_current_ticket(workflow=_next_ticket_workflow())
+    record = bridge.load_generation_record(ticket_id="P18.9.1")
+    assert record is not None
+
+    ticket_spec = record["ticket_spec"]
+    work_packet = record["work_packet_compilation_result"]["work_packet"]
+    contract_text = json.dumps(ticket_spec, sort_keys=True)
+
+    assert ticket_spec["ticket_type"] == "implementation"
+    assert ticket_spec["objective"].startswith("Implement the first coherent Pepper control-plane shell")
+    assert "Define the governed product architecture" not in ticket_spec["objective"]
+    assert ticket_spec["dependencies"] == []
+    assert record["dependency_plan"]["edges"] == []
+    assert record["ticket_contract_SHA256"] == record["canonical_next_ticket_authority"]["ticket_contract_SHA256"]
+    assert work_packet["source_ticket"] == ticket_spec
+    assert work_packet["response_contract"]["completion_verdict"] == (
+        "p18_9_1_shell_routing_navigation_implementation_ready"
+    )
+    assert "Roadmap dependencies: P18.9.0." in contract_text
+    assert "CONTROL: Overview, Lead Agent" in contract_text
+    assert "WORK: Projects, Approvals, Executions" in contract_text
+    assert "AGENTS: Agents" in contract_text
+    assert "AUTOMATION: Automation, Integrations" in contract_text
+    assert "RESOURCES: Resources" in contract_text
+    assert "SYSTEM: Settings" in contract_text
+    assert "Protected `/agent-platform/*` route namespace" in contract_text
+    assert "Dynamic plugin collision protection" in contract_text
+    assert "Do not create a second router" in contract_text
+    assert "No permanent top-level `Legacy Hermes Tools` product domain" in contract_text
+    assert "Contextual/detail routes remain contextual" in contract_text
+    assert "Preserve route compatibility" in contract_text
+    assert "No backend API, provider, worker, Kanban, Docker, Graphify, or Git authority changes" in contract_text
+    assert "P18.9.12 - Pepper Visual Identity and Design System" in contract_text
 
 
 def test_future_generation_rejects_stale_roadmap_authority_record(bridge_home) -> None:
@@ -372,6 +481,68 @@ def test_stale_future_authority_can_be_reconciled_without_generation(bridge_home
     assert workflow_tool["current_ticket_id"] is None
     assert next_action_tool["next_action"]["id"] == "GENERATE_P18_9_1_REQUIRES_SEPARATE_HUMAN_ACTION"
     assert next_action_tool["next_ticket_id"] == "P18.9.1"
+
+
+def test_contract_free_future_authority_can_be_reconciled_without_generation(bridge_home) -> None:
+    bridge.generate_current_ticket(workflow=_next_ticket_workflow())
+    record = bridge.load_generation_record(ticket_id="P18.9.1")
+    assert record is not None
+
+    record.pop("ticket_contract", None)
+    record.pop("ticket_contract_SHA256", None)
+    record["canonical_next_ticket_authority"].pop("ticket_contract", None)
+    record["canonical_next_ticket_authority"].pop("ticket_contract_SHA256", None)
+    record["bridge_SHA256"] = bridge._record_digest(record)
+    _write_generation_record(record)
+
+    before = bridge.inspect_invalid_future_ticket_authority(ticket_id="P18.9.1")
+    result = bridge.reconcile_invalid_future_ticket_authority(ticket_id="P18.9.1")
+
+    assert before["classification"] == "unaccepted_partial_failed_future_ticket_authority"
+    assert before["reconcilable"] is True
+    assert (
+        "ticket_contract" in before["validation_error"]
+        or "canonical_next_ticket_authority" in before["validation_error"]
+    )
+    assert before["human_ticket_approval_present"] is False
+    assert before["Kanban_dispatch"] is False
+    assert before["worker_execution"] is False
+    assert before["Git_mutation"] is False
+    assert result["reconciled"] is True
+    assert result["ticket_generated"] is False
+    assert result["fresh_generation_required"] is True
+    assert bridge.load_generation_record(ticket_id="P18.9.1") is None
+    assert bridge.quarantined_generation_record_path(
+        ticket_id="P18.9.1",
+        bridge_sha256=record["bridge_SHA256"],
+    ).exists()
+
+
+def test_same_id_generation_is_possible_after_superseded_preapproval_reconciliation(bridge_home) -> None:
+    workflow = _next_ticket_workflow()
+    stale_target = replace(
+        bridge.resolve_generation_target_from_workflow(workflow),
+        ticket_contract=None,
+    )
+    stale = bridge._build_generation_record(workflow, target=stale_target)
+    _write_generation_record(stale)
+
+    before = bridge.inspect_invalid_future_ticket_authority(ticket_id="P18.9.1")
+    reconciled = bridge.reconcile_invalid_future_ticket_authority(ticket_id="P18.9.1")
+    regenerated = bridge.generate_current_ticket(workflow=workflow)
+    fresh = bridge.load_generation_record(ticket_id="P18.9.1")
+
+    assert before["validation_error"] == "generated authority canonical_next_ticket_authority mismatch"
+    assert reconciled["reconciled"] is True
+    assert reconciled["ticket_generated"] is False
+    assert fresh is not None
+    assert regenerated["idempotent_replay"] is False
+    assert fresh["ticket_id"] == stale["ticket_id"] == "P18.9.1"
+    assert fresh["bridge_SHA256"] != stale["bridge_SHA256"]
+    assert fresh["ticket_spec_SHA256"] != stale["ticket_spec_SHA256"]
+    assert fresh["work_packet_id"] != stale["work_packet_id"]
+    assert fresh["ticket_spec"]["ticket_type"] == "implementation"
+    assert fresh["ticket_contract_SHA256"] == fresh["canonical_next_ticket_authority"]["ticket_contract_SHA256"]
 
 
 def test_runtime_and_chat_tool_reconcile_stale_current_generation_authority(
@@ -688,6 +859,49 @@ def test_synthetic_successor_fixture_proves_generic_next_ticket_authority() -> N
             requested_next_action_id="GENERATE_TEST_3_REQUIRES_SEPARATE_HUMAN_ACTION",
             target=authority.generation_target(),
         )
+
+
+def test_synthetic_implementation_contracts_materialize_generically() -> None:
+    first = _synthetic_implementation_target(
+        "P99.1",
+        "Synthetic Shell One",
+        contract=_synthetic_implementation_contract("One"),
+    )
+    second = _synthetic_implementation_target(
+        "P99.2",
+        "Synthetic Shell Two",
+        contract=_synthetic_implementation_contract("Two"),
+        dependencies=("P99.1",),
+    )
+
+    first_spec = bridge._build_ticket_spec(first)
+    second_spec = bridge._build_ticket_spec(second)
+
+    assert first_spec.ticket_type.value == "implementation"
+    assert second_spec.ticket_type.value == "implementation"
+    assert first_spec.objective == "Implement synthetic governed surface One."
+    assert second_spec.objective == "Implement synthetic governed surface Two."
+    assert first_spec.dependencies == ()
+    assert second_spec.dependencies == ()
+    assert any("Synthetic surface One" in task for task in first_spec.tasks)
+    assert any("Synthetic surface Two" in task for task in second_spec.tasks)
+    assert any("Roadmap dependencies: P99.1." in item for item in second_spec.context)
+    assert first_spec.response_contract.completion_verdict == "synthetic_one_implementation_ready"
+    assert second_spec.response_contract.completion_verdict == "synthetic_two_implementation_ready"
+
+
+def test_implementation_contract_missing_accepted_ia_handoff_fails_closed() -> None:
+    incomplete = _synthetic_implementation_contract("Gap")
+    incomplete.pop("predecessor_evidence")
+    incomplete.pop("information_architecture")
+    target = _synthetic_implementation_target(
+        "P99.3",
+        "Synthetic Gap",
+        contract=incomplete,
+    )
+
+    with pytest.raises(bridge.TicketArchitectBridgeInputError, match="P18_9_0_ACCEPTED_IA_HANDOFF_GAP"):
+        bridge._build_ticket_spec(target)
 
 
 @pytest.mark.parametrize(

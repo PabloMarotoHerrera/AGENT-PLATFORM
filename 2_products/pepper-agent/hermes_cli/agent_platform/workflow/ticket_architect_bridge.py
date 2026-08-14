@@ -105,6 +105,9 @@ TICKET_APPROVAL_PUBLICATION_DIGEST_ALGORITHM = (
 TICKET_ARCHITECT_RECONCILIATION_DIGEST_ALGORITHM = (
     "agent-platform-ticket-architect-stale-authority-reconciliation-sha256-v1"
 )
+TICKET_ARCHITECT_CONTRACT_DIGEST_ALGORITHM = (
+    "agent-platform-ticket-architect-roadmap-contract-sha256-v1"
+)
 
 CANONICAL_PROJECT_ID = "PEPPER"
 CANONICAL_PROJECT_NAME = "Pepper"
@@ -164,6 +167,36 @@ _REQUIRED_FORBIDDEN_ACTIONS = (
     "worker execution",
     "runtime execution",
 )
+_CONTRACT_LIST_FIELDS = frozenset(
+    (
+        "context",
+        "predecessor_evidence",
+        "dependency_context",
+        "information_architecture",
+        "required_surfaces",
+        "allowed_paths",
+        "forbidden_paths",
+        "allowed_actions",
+        "forbidden_actions",
+        "constraints",
+        "non_goals",
+        "risk",
+        "tasks",
+        "acceptance_criteria",
+        "expected_artifacts",
+        "validation_steps",
+        "required_response_sections",
+    )
+)
+_CONTRACT_SINGLE_FIELDS = frozenset(
+    (
+        "ticket_type",
+        "objective",
+        "parallelization_hint",
+        "completion_verdict",
+        "recommended_commit_message",
+    )
+)
 
 
 @dataclass(frozen=True)
@@ -187,6 +220,7 @@ class GovernedTicketGenerationTarget:
     predecessor_ticket_id: str | None = None
     readiness_state: str | None = None
     authority_source: str | None = None
+    ticket_contract: dict[str, Any] | None = None
 
     @property
     def action_token(self) -> str:
@@ -215,6 +249,7 @@ class CanonicalNextTicketAuthority:
     predecessor_ticket_id: str | None
     readiness_state: str
     authority_source: str
+    ticket_contract: dict[str, Any] | None = None
 
     def generation_target(self) -> GovernedTicketGenerationTarget:
         return GovernedTicketGenerationTarget(
@@ -235,10 +270,11 @@ class CanonicalNextTicketAuthority:
             predecessor_ticket_id=self.predecessor_ticket_id,
             readiness_state=self.readiness_state,
             authority_source=self.authority_source,
+            ticket_contract=self.ticket_contract,
         )
 
     def asdict(self) -> dict[str, Any]:
-        return {
+        record: dict[str, Any] = {
             "project_id": self.project_id,
             "project_name": self.project_name,
             "macroproject_id": self.macroproject_id,
@@ -254,6 +290,10 @@ class CanonicalNextTicketAuthority:
             "readiness_state": self.readiness_state,
             "authority_source": self.authority_source,
         }
+        if self.ticket_contract:
+            record["ticket_contract"] = _json_ready_contract(self.ticket_contract)
+            record["ticket_contract_SHA256"] = _ticket_contract_digest(self.ticket_contract)
+        return record
 
 
 def generation_action_id(ticket_id: str) -> str:
@@ -347,6 +387,7 @@ def _target_from_record(record: dict[str, Any]) -> GovernedTicketGenerationTarge
         predecessor_ticket_id=str(record.get("predecessor_ticket_id") or "") or None,
         readiness_state=str(canonical_authority.get("readiness_state") or "") or None,
         authority_source=str(canonical_authority.get("authority_source") or "") or None,
+        ticket_contract=_contract_from_authority_item(authority),
     )
 
 
@@ -431,6 +472,7 @@ def resolve_canonical_next_ticket(
         predecessor_ticket_id=predecessor_ticket_id,
         readiness_state=readiness_state,
         authority_source=authority_source,
+        ticket_contract=_contract_from_authority_item(authority),
     )
 
 
@@ -577,7 +619,7 @@ def _resolve_implementation_roadmap_ticket_authorities() -> tuple[dict[str, Any]
         return ()
     in_section = False
     section_seen = False
-    items: list[dict[str, Any]] = []
+    section_lines: list[str] = []
     for line in text.splitlines():
         stripped = line.strip()
         if re.fullmatch(
@@ -589,10 +631,30 @@ def _resolve_implementation_roadmap_ticket_authorities() -> tuple[dict[str, Any]
             continue
         if in_section and stripped.startswith("## "):
             break
-        if not in_section or "|" not in stripped:
+        if in_section:
+            section_lines.append(line)
+    if not section_seen:
+        return ()
+
+    items: list[dict[str, Any]] = []
+    contracts: dict[str, dict[str, Any]] = {}
+    current_table: str | None = None
+    for line in section_lines:
+        stripped = line.strip()
+        if "|" not in stripped:
+            current_table = None
             continue
-        cells = [cell.strip().strip("`") for cell in stripped.strip("|").split("|")]
-        if len(cells) >= 3 and _is_safe_ticket_id(cells[0]):
+        cells = [_clean_markdown_table_cell(cell) for cell in stripped.strip("|").split("|")]
+        if _is_markdown_separator_row(cells):
+            continue
+        header = tuple(cell.lower() for cell in cells)
+        if len(header) >= 4 and header[:4] == ("ticket", "title", "dependencies", "purpose"):
+            current_table = "sequence"
+            continue
+        if len(header) >= 3 and header[:3] == ("ticket", "field", "value"):
+            current_table = "contract"
+            continue
+        if current_table == "sequence" and len(cells) >= 3 and _is_safe_ticket_id(cells[0]):
             ticket_id = _safe_ticket_id(cells[0])
             ticket_title = str(cells[1]).strip()
             dependency_ticket_ids = _parse_roadmap_dependency_ticket_ids(cells[2])
@@ -613,10 +675,98 @@ def _resolve_implementation_roadmap_ticket_authorities() -> tuple[dict[str, Any]
                 "next_action_id": _roadmap_generation_action_id(ticket_id),
                 "dependency_ticket_ids": dependency_ticket_ids,
             })
-    if not section_seen:
-        return ()
+        elif current_table == "contract" and len(cells) >= 3 and _is_safe_ticket_id(cells[0]):
+            _append_roadmap_ticket_contract(contracts, cells)
+    for item in items:
+        contract = contracts.get(str(item["ticket_id"]))
+        if contract:
+            _validate_roadmap_ticket_contract(str(item["ticket_id"]), contract)
+            item["ticket_contract"] = _json_ready_contract(contract)
     _validate_roadmap_ticket_items(items)
     return tuple(items)
+
+
+def _clean_markdown_table_cell(value: object) -> str:
+    text = str(value or "").strip()
+    if "<br" not in text.lower() and text.startswith("`") and text.endswith("`") and len(text) >= 2:
+        text = text[1:-1]
+    return text.strip()
+
+
+def _is_markdown_separator_row(cells: list[str]) -> bool:
+    return bool(cells) and all(re.fullmatch(r":?-{3,}:?", cell.strip()) for cell in cells)
+
+
+def _append_roadmap_ticket_contract(
+    contracts: dict[str, dict[str, Any]],
+    cells: list[str],
+) -> None:
+    ticket_id = _safe_ticket_id(cells[0])
+    field_name = _normalize_contract_field(cells[1])
+    if field_name not in _CONTRACT_LIST_FIELDS and field_name not in _CONTRACT_SINGLE_FIELDS:
+        raise TicketArchitectBridgeInputError("roadmap ticket contract contains unknown field")
+    contract = contracts.setdefault(ticket_id, {})
+    if field_name in _CONTRACT_LIST_FIELDS:
+        existing = list(contract.get(field_name) or ())
+        existing.extend(_split_contract_items(cells[2]))
+        contract[field_name] = existing
+        return
+    if field_name in contract:
+        raise TicketArchitectBridgeInputError("roadmap ticket contract contains duplicate field")
+    contract[field_name] = _clean_markdown_table_cell(cells[2])
+
+
+def _normalize_contract_field(value: object) -> str:
+    text = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    return re.sub(r"[^a-z0-9_]+", "", text)
+
+
+def _split_contract_items(value: object) -> tuple[str, ...]:
+    text = str(value or "").strip()
+    if not text:
+        return ()
+    parts = re.split(r"\s*<br\s*/?>\s*", text, flags=re.IGNORECASE)
+    return tuple(_clean_markdown_table_cell(part) for part in parts if part.strip())
+
+
+def _validate_roadmap_ticket_contract(ticket_id: str, contract: dict[str, Any]) -> None:
+    ticket_type = str(contract.get("ticket_type") or "").strip().lower()
+    if ticket_type and ticket_type not in {item.value for item in TicketType}:
+        raise TicketArchitectBridgeInputError("roadmap ticket contract contains invalid ticket_type")
+    if ticket_type != TicketType.IMPLEMENTATION.value:
+        return
+    required_fields = (
+        "objective",
+        "predecessor_evidence",
+        "information_architecture",
+        "required_surfaces",
+        "tasks",
+        "acceptance_criteria",
+    )
+    missing = tuple(field for field in required_fields if not contract.get(field))
+    if missing:
+        raise TicketArchitectBridgeInputError(
+            "P18_9_0_ACCEPTED_IA_HANDOFF_GAP: "
+            f"{ticket_id} implementation contract is missing {', '.join(missing)}"
+        )
+
+
+def _contract_from_authority_item(item: dict[str, Any]) -> dict[str, Any] | None:
+    contract = item.get("ticket_contract")
+    if not isinstance(contract, dict) or not contract:
+        return None
+    return _json_ready_contract(contract)
+
+
+def _json_ready_contract(contract: dict[str, Any]) -> dict[str, Any]:
+    ready: dict[str, Any] = {}
+    for key, value in sorted(contract.items()):
+        field_name = _normalize_contract_field(key)
+        if field_name in _CONTRACT_LIST_FIELDS:
+            ready[field_name] = [str(item).strip() for item in value or () if str(item).strip()]
+        elif field_name in _CONTRACT_SINGLE_FIELDS:
+            ready[field_name] = str(value or "").strip()
+    return ready
 
 
 def _resolve_advisory_roadmap_ticket_authorities() -> tuple[dict[str, Any], ...]:
@@ -896,6 +1046,8 @@ def validate_generation_record(
         raise TicketArchitectBridgeConflict(f"TicketSpec must bind {resolved_target.ticket_id}")
     if ticket_spec.title != resolved_target.ticket_title:
         raise TicketArchitectBridgeConflict("TicketSpec title conflicts with roadmap")
+    if ticket_spec != _build_ticket_spec(resolved_target):
+        raise TicketArchitectBridgeConflict("TicketSpec conflicts with roadmap contract")
     if context_pack.ticket_id != resolved_target.ticket_id:
         raise TicketArchitectBridgeConflict(f"ContextPack must bind {resolved_target.ticket_id}")
     if dependency_plan.ticket_ids != (resolved_target.ticket_id,):
@@ -1499,6 +1651,9 @@ def _build_generation_record(
         "Graphify_commands_executed": 0,
         "WorkPacket_compilation_count": 1,
     }
+    if target.ticket_contract:
+        record["ticket_contract"] = _json_ready_contract(target.ticket_contract)
+        record["ticket_contract_SHA256"] = _ticket_contract_digest(target.ticket_contract)
     if target.ticket_id != CANONICAL_TICKET_ID:
         record["predecessor_ticket_id"] = target.predecessor_ticket_id
         record["canonical_next_ticket_authority"] = _canonical_next_ticket_authority_projection(
@@ -1549,6 +1704,120 @@ def _build_project_spec(target: GovernedTicketGenerationTarget) -> ProjectSpec:
 
 
 def _build_ticket_spec(target: GovernedTicketGenerationTarget) -> TicketSpec:
+    if target.ticket_id == CANONICAL_TICKET_ID:
+        return _build_p18_9_0_ticket_spec(target)
+    contract = target.ticket_contract or {}
+    if contract:
+        return _build_contract_ticket_spec(target, contract=contract)
+    return _build_default_ticket_spec(target)
+
+
+def _build_p18_9_0_ticket_spec(target: GovernedTicketGenerationTarget) -> TicketSpec:
+    return TicketSpec(
+        project_id=target.project_id,
+        ticket_id=target.ticket_id,
+        title=target.ticket_title,
+        ticket_type=TicketType.ARCHITECTURE,
+        objective=(
+            "Inventory Pepper product surfaces, make the first information-architecture "
+            "decision, and define the acceptance contract for P18.9 personalization."
+        ),
+        context=(
+            "The active governed project is PEPPER, while P18.9 is the macroproject identifier.",
+            "P18.9.0 is the first governed ticket after P18/P18.R closure.",
+            "The stale Product UX / IA Baseline label is non-authoritative and must not override the approved roadmap title.",
+            "Execution remains blocked until the generated ticket is explicitly approved by a human.",
+        ),
+        authority_references=(
+            AuthorityReferenceSpec(
+                kind=AuthorityReferenceKind.EXTERNAL_SOURCE,
+                value=target.canonical_roadmap_authority,
+                rationale="Human instruction identifies the approved P18.9.0 roadmap title.",
+            ),
+            AuthorityReferenceSpec(
+                kind=AuthorityReferenceKind.TICKET,
+                value="P18.8",
+                rationale="Accepted controlled default-mode cutover is historical prerequisite evidence.",
+            ),
+            AuthorityReferenceSpec(
+                kind=AuthorityReferenceKind.TICKET,
+                value="P18.R",
+                rationale="Accepted workflow migration closure authorizes the P18.9 handoff.",
+            ),
+            AuthorityReferenceSpec(
+                kind=AuthorityReferenceKind.GOVERNANCE_RECORD,
+                value="HUMAN_P18_8_CUTOVER_SMOKE_PASS",
+                rationale="Human smoke evidence confirms default-mode control before P18.9.",
+            ),
+        ),
+        dependencies=(),
+        parallelization_hint=ParallelizationHint.UNSPECIFIED,
+        scope=RepositoryScopeSpec(
+            allowed_paths=(
+                "0_architecture/**",
+                "2_products/pepper-agent/docs/**",
+                "2_products/pepper-agent/hermes_cli/agent_platform/**",
+                "2_products/pepper-agent/tools/pepper_workflow_tools.py",
+                "2_products/pepper-agent/toolsets.py",
+                "2_products/pepper-agent/tests/hermes_cli/**",
+                "2_products/pepper-agent/web/src/agent-platform/**",
+                "2_products/pepper-agent/AGENT_PLATFORM_MODIFICATIONS.tsv",
+                "2_products/pepper-agent/AGENT_PLATFORM_IMPORT_MANIFEST.tsv",
+            ),
+            forbidden_paths=(
+                ".git/**",
+                ".opencode/**",
+                "graphify-out/**",
+                "4_external/sources/**",
+                "2_products/pepper-agent/AGENT_PLATFORM_UPSTREAM_BASELINE.json",
+            ),
+            allowed_actions=(
+                "inspect bounded Pepper product runtime, dashboard, repository-context, and workflow-control evidence",
+                "document product inventory and information architecture decisions",
+                "define acceptance contracts and unresolved product questions",
+                "add focused non-executing tests for the P18.9.0 contract if needed",
+            ),
+            forbidden_actions=_REQUIRED_FORBIDDEN_ACTIONS,
+        ),
+        constraints=(
+            "Separate product identity PEPPER from repository and macroproject identifiers.",
+            "Inventory and IA decisions must cite bounded repository or governance evidence.",
+            "Acceptance criteria must be testable before any implementation ticket executes.",
+            "Rollback posture: remove only the P18.9.0 inventory, IA, and acceptance-contract changes if superseded.",
+            "No provider dispatch, model inference, Kanban dispatch, worker execution, Docker, Graphify, or Git mutation is authorized.",
+        ),
+        tasks=(
+            "Inventory Pepper product surfaces relevant to product personalization and identify the authority for each surface.",
+            "Decide the initial information architecture boundary for P18.9 personalization work.",
+            "Define acceptance criteria for the product inventory, IA decision, and downstream implementation handoff.",
+            "Record unresolved product questions without dispatching workers or creating Kanban tasks.",
+        ),
+        acceptance_criteria=(
+            "The product inventory distinguishes current product runtime, dashboard, repository-context, and workflow-control surfaces.",
+            "The IA decision names the first personalization boundary and the evidence that supports it.",
+            "The acceptance contract states what must be true before any downstream P18.9 implementation ticket executes.",
+            "The result explicitly reports no worker execution, no Kanban dispatch, no Docker, no Graphify, and no Git mutation.",
+        ),
+        validation_steps=(
+            TicketValidationStepSpec(
+                validation_id="V1",
+                description="Human review confirms P18.9.0 inventory, IA decision, and acceptance contract are present.",
+                command=None,
+                expected_result=(
+                    "The reviewer can identify the inventory, IA decision, acceptance contract, "
+                    "and preserved execution boundary in the P18.9.0 result."
+                ),
+            ),
+        ),
+        response_contract=TicketResponseContractSpec(
+            required_sections=_REQUIRED_RESPONSE_SECTIONS,
+            completion_verdict="p18_9_0_inventory_ia_acceptance_contract_ready",
+        ),
+        recommended_commit_message="P18.9.0 Define product inventory IA acceptance contract",
+    )
+
+
+def _build_default_ticket_spec(target: GovernedTicketGenerationTarget) -> TicketSpec:
     return TicketSpec(
         project_id=target.project_id,
         ticket_id=target.ticket_id,
@@ -1608,7 +1877,94 @@ def _build_ticket_spec(target: GovernedTicketGenerationTarget) -> TicketSpec:
     )
 
 
-def _scope() -> RepositoryScopeSpec:
+def _build_contract_ticket_spec(
+    target: GovernedTicketGenerationTarget,
+    *,
+    contract: dict[str, Any],
+) -> TicketSpec:
+    _validate_roadmap_ticket_contract(target.ticket_id, contract)
+    dependency_context = _roadmap_dependency_context(target)
+    context = _dedupe_texts(
+        (
+            "The active governed project is PEPPER, while P18.9 is the macroproject identifier.",
+            f"{target.ticket_id} is resolved from canonical roadmap authority, not user-supplied arbitrary ticket text.",
+            "Execution remains blocked until the generated ticket is explicitly approved by a human.",
+        )
+        + _contract_items(contract, "context")
+        + _contract_items(contract, "predecessor_evidence")
+        + _contract_items(contract, "dependency_context")
+        + _contract_items(contract, "information_architecture")
+        + ((dependency_context,) if dependency_context else ())
+    )
+    constraints = _dedupe_texts(
+        _contract_items(contract, "constraints")
+        + tuple(f"Non-goal: {item}" for item in _contract_items(contract, "non_goals"))
+        + tuple(f"Risk: {item}" for item in _contract_items(contract, "risk"))
+        + (
+            "Roadmap dependencies are preserved as roadmap metadata and context only; they must not create compile-only dependency-plan edges unless the full collection is generated.",
+            "No provider dispatch, model inference, Kanban dispatch, worker execution, Docker, Graphify, or Git mutation is authorized by Ticket Architect generation.",
+            f"Rollback posture: remove only {target.ticket_id} changes if superseded.",
+        )
+    )
+    tasks = _dedupe_texts(
+        tuple(f"Implement required surface: {item}" for item in _contract_items(contract, "required_surfaces"))
+        + _contract_items(contract, "tasks")
+        + tuple(f"Produce expected artifact: {item}" for item in _contract_items(contract, "expected_artifacts"))
+    )
+    acceptance_criteria = _dedupe_texts(_contract_items(contract, "acceptance_criteria"))
+    if not tasks or not acceptance_criteria:
+        raise TicketArchitectBridgeInputError(
+            "P18_9_0_ACCEPTED_IA_HANDOFF_GAP: implementation contract is incomplete"
+        )
+    completion_verdict = _contract_text(contract, "completion_verdict") or _ticket_verdict_token(
+        target.ticket_id,
+        "implementation_ready",
+    )
+    return TicketSpec(
+        project_id=target.project_id,
+        ticket_id=target.ticket_id,
+        title=target.ticket_title,
+        ticket_type=_contract_ticket_type(contract),
+        objective=_contract_text(contract, "objective")
+        or f"Implement the governed product work for {target.ticket_title}.",
+        context=context,
+        authority_references=_authority_references(target),
+        dependencies=(),
+        parallelization_hint=_contract_parallelization_hint(contract),
+        scope=_scope(contract),
+        constraints=constraints,
+        tasks=tasks,
+        acceptance_criteria=acceptance_criteria,
+        validation_steps=_contract_validation_steps(target, contract),
+        response_contract=TicketResponseContractSpec(
+            required_sections=_contract_response_sections(contract),
+            completion_verdict=completion_verdict,
+        ),
+        recommended_commit_message=(
+            _contract_text(contract, "recommended_commit_message")
+            or f"{_ticket_commit_slug(target.ticket_id)} Implement {target.ticket_title}"
+        ),
+    )
+
+
+def _scope(contract: dict[str, Any] | None = None) -> RepositoryScopeSpec:
+    if contract:
+        allowed_paths = _contract_items(contract, "allowed_paths")
+        allowed_actions = _contract_items(contract, "allowed_actions")
+        if allowed_paths and allowed_actions:
+            return RepositoryScopeSpec(
+                allowed_paths=allowed_paths,
+                forbidden_paths=_contract_items(contract, "forbidden_paths") or (
+                    ".git/**",
+                    ".opencode/**",
+                    "graphify-out/**",
+                    "4_external/sources/**",
+                    "2_products/pepper-agent/AGENT_PLATFORM_UPSTREAM_BASELINE.json",
+                ),
+                allowed_actions=allowed_actions,
+                forbidden_actions=_contract_items(contract, "forbidden_actions")
+                or _REQUIRED_FORBIDDEN_ACTIONS,
+            )
     return RepositoryScopeSpec(
         allowed_paths=(
             "0_architecture/**",
@@ -1636,6 +1992,105 @@ def _scope() -> RepositoryScopeSpec:
         ),
         forbidden_actions=_REQUIRED_FORBIDDEN_ACTIONS,
     )
+
+
+def _contract_text(contract: dict[str, Any], field_name: str) -> str | None:
+    value = contract.get(field_name)
+    if isinstance(value, str):
+        return value.strip() or None
+    return None
+
+
+def _contract_items(contract: dict[str, Any], field_name: str) -> tuple[str, ...]:
+    value = contract.get(field_name)
+    if not isinstance(value, list | tuple):
+        return ()
+    return tuple(str(item).strip() for item in value if str(item).strip())
+
+
+def _contract_ticket_type(contract: dict[str, Any]) -> TicketType:
+    value = (_contract_text(contract, "ticket_type") or TicketType.ARCHITECTURE.value).lower()
+    try:
+        return TicketType(value)
+    except ValueError as exc:
+        raise TicketArchitectBridgeInputError(
+            "roadmap ticket contract contains invalid ticket_type"
+        ) from exc
+
+
+def _contract_parallelization_hint(contract: dict[str, Any]) -> ParallelizationHint:
+    value = _contract_text(contract, "parallelization_hint")
+    if value is None:
+        return ParallelizationHint.UNSPECIFIED
+    try:
+        return ParallelizationHint(value)
+    except ValueError as exc:
+        raise TicketArchitectBridgeInputError(
+            "roadmap ticket contract contains invalid parallelization_hint"
+        ) from exc
+
+
+def _contract_response_sections(contract: dict[str, Any]) -> tuple[str, ...]:
+    sections = _contract_items(contract, "required_response_sections")
+    return sections or _REQUIRED_RESPONSE_SECTIONS
+
+
+def _contract_validation_steps(
+    target: GovernedTicketGenerationTarget,
+    contract: dict[str, Any],
+) -> tuple[TicketValidationStepSpec, ...]:
+    steps = _contract_items(contract, "validation_steps")
+    if not steps:
+        return (
+            TicketValidationStepSpec(
+                validation_id="V1",
+                description=f"Human review confirms {target.ticket_id} implementation contract is present.",
+                command=None,
+                expected_result=(
+                    f"The reviewer can identify the roadmap-derived implementation scope, "
+                    f"acceptance criteria, and preserved execution boundary in {target.ticket_id}."
+                ),
+            ),
+        )
+    parsed: list[TicketValidationStepSpec] = []
+    for index, raw_step in enumerate(steps, start=1):
+        description, expected_result = _parse_contract_validation_step(raw_step)
+        parsed.append(
+            TicketValidationStepSpec(
+                validation_id=f"V{index}",
+                description=description,
+                command=None,
+                expected_result=expected_result,
+            )
+        )
+    return tuple(parsed)
+
+
+def _parse_contract_validation_step(value: str) -> tuple[str, str]:
+    text = value.strip()
+    text = re.sub(r"^V[1-9][0-9]*:\s*", "", text)
+    if "=>" in text:
+        description, expected = text.split("=>", 1)
+        return description.strip(), expected.strip()
+    return text, "The reviewer can verify the stated validation condition from generated evidence."
+
+
+def _roadmap_dependency_context(target: GovernedTicketGenerationTarget) -> str | None:
+    if not target.dependency_ticket_ids:
+        return None
+    return "Roadmap dependencies: " + ", ".join(target.dependency_ticket_ids) + "."
+
+
+def _dedupe_texts(values: tuple[str, ...]) -> tuple[str, ...]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value or "").strip()
+        if not text or text in seen:
+            continue
+        deduped.append(text)
+        seen.add(text)
+    return tuple(deduped)
 
 
 def _authority_references(
@@ -1777,7 +2232,7 @@ def _compile_work_packet(
         project_spec=project_spec,
         ticket_spec=ticket_spec,
         context_pack=context_pack,
-        roles=(TicketGeneratorRole.ARCHITECTURE, TicketGeneratorRole.GOVERNANCE),
+        roles=_generator_roles_for_ticket_type(ticket_spec.ticket_type),
     )
     assignments = prepare_ticket_generator_assignments(generation_request)
     proposals = tuple(
@@ -1868,6 +2323,28 @@ def _compile_work_packet(
         )
     )
     return approval_record, publication_result, compilation
+
+
+def _generator_roles_for_ticket_type(ticket_type: TicketType) -> tuple[TicketGeneratorRole, ...]:
+    if ticket_type is TicketType.IMPLEMENTATION:
+        return (
+            TicketGeneratorRole.ARCHITECTURE,
+            TicketGeneratorRole.IMPLEMENTATION,
+            TicketGeneratorRole.VALIDATION,
+        )
+    if ticket_type is TicketType.REFACTOR:
+        return (TicketGeneratorRole.ARCHITECTURE, TicketGeneratorRole.IMPLEMENTATION)
+    if ticket_type is TicketType.TEST:
+        return (TicketGeneratorRole.IMPLEMENTATION, TicketGeneratorRole.VALIDATION)
+    if ticket_type is TicketType.BUGFIX:
+        return (TicketGeneratorRole.IMPLEMENTATION, TicketGeneratorRole.VALIDATION)
+    if ticket_type is TicketType.INTEGRATION:
+        return (TicketGeneratorRole.ARCHITECTURE, TicketGeneratorRole.INTEGRATION)
+    if ticket_type is TicketType.DOCUMENTATION:
+        return (TicketGeneratorRole.DOCUMENTATION, TicketGeneratorRole.GOVERNANCE)
+    if ticket_type is TicketType.CLOSURE:
+        return (TicketGeneratorRole.INTEGRATION, TicketGeneratorRole.GOVERNANCE)
+    return (TicketGeneratorRole.ARCHITECTURE, TicketGeneratorRole.GOVERNANCE)
 
 
 def _build_workflow_transition(
@@ -2534,7 +3011,7 @@ def _authority_projection(record: dict[str, Any]) -> dict[str, Any]:
 def _canonical_next_ticket_authority_projection(
     target: GovernedTicketGenerationTarget,
 ) -> dict[str, Any]:
-    return {
+    record: dict[str, Any] = {
         "project_id": target.project_id,
         "project_name": target.project_name,
         "macroproject_id": target.macroproject_id,
@@ -2550,6 +3027,10 @@ def _canonical_next_ticket_authority_projection(
         "readiness_state": target.readiness_state,
         "authority_source": target.authority_source,
     }
+    if target.ticket_contract:
+        record["ticket_contract"] = _json_ready_contract(target.ticket_contract)
+        record["ticket_contract_SHA256"] = _ticket_contract_digest(target.ticket_contract)
+    return record
 
 
 def _approval_decision_projection(record: dict[str, Any]) -> dict[str, Any]:
@@ -2600,6 +3081,9 @@ def _require_identity(
         expected["canonical_next_ticket_authority"] = _canonical_next_ticket_authority_projection(
             target
         )
+    if target.ticket_contract:
+        expected["ticket_contract"] = _json_ready_contract(target.ticket_contract)
+        expected["ticket_contract_SHA256"] = _ticket_contract_digest(target.ticket_contract)
     for key, value in expected.items():
         if record.get(key) != value:
             raise TicketArchitectBridgeConflict(f"generated authority {key} mismatch")
@@ -2636,6 +3120,19 @@ def _record_digest(record: dict[str, Any]) -> str:
     payload = {key: value for key, value in record.items() if key != "bridge_SHA256"}
     encoded = json.dumps(
         {"algorithm": TICKET_ARCHITECT_BRIDGE_DIGEST_ALGORITHM, "record": _normalize(payload)},
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _ticket_contract_digest(contract: dict[str, Any]) -> str:
+    encoded = json.dumps(
+        {
+            "algorithm": TICKET_ARCHITECT_CONTRACT_DIGEST_ALGORITHM,
+            "contract": _normalize(_json_ready_contract(contract)),
+        },
         ensure_ascii=False,
         separators=(",", ":"),
         sort_keys=True,

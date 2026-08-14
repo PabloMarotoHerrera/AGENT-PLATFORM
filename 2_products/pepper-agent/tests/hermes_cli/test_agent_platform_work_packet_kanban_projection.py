@@ -2471,6 +2471,30 @@ def test_accept_current_ticket_review_closes_p18_9_0_and_exposes_next_ticket(
     assert workflow["next_action"]["id"] == "GENERATE_P18_9_1_REQUIRES_SEPARATE_HUMAN_ACTION"
     assert workflow["blocker_count"] == 0
 
+    import tools.pepper_workflow_tools as pepper_tools
+
+    current_ticket = json.loads(pepper_tools._get_current_ticket({}))
+    pending_approvals = json.loads(pepper_tools._get_pending_approvals({}))
+    workflow_control = json.loads(pepper_tools._get_workflow_control({}))
+    next_action = json.loads(pepper_tools._get_next_action({}))
+
+    assert current_ticket["success"] is True
+    assert current_ticket["current_ticket_id"] is None
+    assert current_ticket["message"] == "no active governed ticket"
+    assert pending_approvals["success"] is True
+    assert pending_approvals["pending_approval_count"] == 0
+    assert workflow_control["success"] is True
+    assert workflow_control["current_ticket_id"] is None
+    assert workflow_control["pending_approval_count"] == 0
+    assert workflow_control["active_execution_count"] == 0
+    assert workflow_control["next_ticket_id"] == "P18.9.1"
+    assert workflow_control["next_ticket_title"] == "Pepper Shell, Routing, and Compact Navigation"
+    assert next_action["success"] is True
+    assert next_action["current_ticket_id"] is None
+    assert next_action["next_ticket_id"] == "P18.9.1"
+    assert next_action["next_ticket_title"] == "Pepper Shell, Routing, and Compact Navigation"
+    assert next_action["next_action"]["id"] == "GENERATE_P18_9_1_REQUIRES_SEPARATE_HUMAN_ACTION"
+
     replay = pr.accept_current_ticket_review(
         human_acceptance_text=pr.PEPPER_CURRENT_REVIEW_ACCEPTANCE_TEXT,
         project_id="PEPPER",
