@@ -829,14 +829,17 @@ def _timestamp_from_source(value: Any) -> float:
 
 def _p18_9_0_pending_ticket_approval_record() -> dict[str, Any] | None:
     from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
-        load_p18_9_0_approval_decision_record,
+        load_approval_decision_record,
         load_p18_9_0_generation_record,
     )
 
     record = load_p18_9_0_generation_record()
     if record is None:
         return None
-    decision = load_p18_9_0_approval_decision_record(generation_record=record)
+    decision = load_approval_decision_record(
+        ticket_id=str(record["ticket_id"]),
+        generation_record=record,
+    )
     return None if decision is not None else record
 
 
@@ -848,6 +851,7 @@ def _current_pending_ticket_approval_record() -> dict[str, Any] | None:
         from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
             CANONICAL_TICKET_ID,
             generation_record_path_for_ticket,
+            load_approval_decision_record,
             load_generation_record,
         )
 
@@ -860,7 +864,12 @@ def _current_pending_ticket_approval_record() -> dict[str, Any] | None:
                 record = load_generation_record(ticket_id=path.stem)
             except Exception:
                 continue
-            if record is not None and record.get("human_ticket_approval_present") is not True:
+            if record is None or record.get("human_ticket_approval_present") is True:
+                continue
+            if load_approval_decision_record(
+                ticket_id=str(record["ticket_id"]),
+                generation_record=record,
+            ) is None:
                 records.append(record)
     except Exception:
         return None
@@ -906,7 +915,7 @@ def _p18_9_0_ticket_approval_summary(record: dict[str, Any]) -> dict[str, Any]:
     return _ticket_approval_summary(record)
 
 
-def _p18_9_0_ticket_approval_evidence(record: dict[str, Any]) -> list[dict[str, str]]:
+def _ticket_approval_evidence(record: dict[str, Any]) -> list[dict[str, str]]:
     approval_id = _safe_id(record.get("ticket_id"))
     return [
         {
@@ -981,7 +990,7 @@ def build_approval_detail_source(approval_id: str) -> dict[str, Any]:
             "source_authority": "pepper-ticket-architect-bridge-authority",
             "canonical_approval_authority": "pepper-controlled-human-decision-v1",
             "approval": summary,
-            "evidence": _p18_9_0_ticket_approval_evidence(record),
+            "evidence": _ticket_approval_evidence(record),
             "decisions": [],
         }
 
@@ -1006,24 +1015,30 @@ def build_approval_detail_source(approval_id: str) -> dict[str, Any]:
     }
 
 
-def _p18_9_0_resolved_ticket_approval_decision(
+def _resolved_ticket_approval_decision(
     approval_id: str,
     request: ApprovalDecisionRequest,
 ) -> dict[str, Any] | None:
     from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
-        CANONICAL_APPROVAL_ID,
         TicketArchitectBridgeConflict,
-        load_p18_9_0_approval_decision_record,
-        load_p18_9_0_generation_record,
+        TicketArchitectBridgeInputError,
+        load_approval_decision_record,
+        load_generation_record,
     )
 
-    if approval_id != CANONICAL_APPROVAL_ID:
+    ticket_id = _safe_id(approval_id)
+    if not ticket_id:
         return None
     try:
-        generation = load_p18_9_0_generation_record()
+        generation = load_generation_record(ticket_id=ticket_id)
         if generation is None:
             return None
-        decision = load_p18_9_0_approval_decision_record(generation_record=generation)
+        decision = load_approval_decision_record(
+            ticket_id=ticket_id,
+            generation_record=generation,
+        )
+    except TicketArchitectBridgeInputError:
+        return None
     except TicketArchitectBridgeConflict as exc:
         raise ProductRuntimeConflict(str(exc) or "ticket approval authority conflict") from exc
     if decision is None:
@@ -1061,7 +1076,7 @@ def apply_approval_decision(
     from tools import write_approval as wa
 
     approval_id = _safe_id(approval_id)
-    resolved_ticket_decision = _p18_9_0_resolved_ticket_approval_decision(
+    resolved_ticket_decision = _resolved_ticket_approval_decision(
         approval_id,
         request,
     )
@@ -1069,16 +1084,18 @@ def apply_approval_decision(
         return resolved_ticket_decision
 
     subsystem, record = _find_pending(approval_id)
-    if subsystem == _P18_9_0_TICKET_APPROVAL_KIND:
-        if record.get("ticket_id") != "P18.9.0":
-            raise ProductRuntimeConflict("generic ticket approval requires separate human approval support")
+    if subsystem == _TICKET_APPROVAL_KIND:
         from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
             TicketArchitectBridgeConflict,
-            apply_p18_9_0_approval_decision,
+            apply_ticket_approval_decision,
         )
 
+        ticket_id = _safe_id(record.get("ticket_id"))
+        if approval_id != ticket_id:
+            raise ProductRuntimeConflict("approval id does not match pending ticket authority")
         try:
-            result = apply_p18_9_0_approval_decision(
+            result = apply_ticket_approval_decision(
+                ticket_id=ticket_id,
                 decision=request.decision,
                 actor=request.actor,
                 decided_at=time.time(),

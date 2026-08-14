@@ -338,6 +338,8 @@ def test_lead_agent_prompt_requires_tool_backed_state() -> None:
     assert "current canonical next governed ticket" in prompt
     assert "P18.9.0 TicketSpec/WorkPacket bridge" not in prompt
     assert "decide_pending_approval" in prompt
+    assert "APPROVE_<current-ticket>" in prompt
+    assert "current pending governed ticket approval" in prompt
     assert "start_current_ticket_execution" in prompt
     assert "recover_current_ticket_execution" in prompt
     assert "prepare_current_ticket_review" in prompt
@@ -348,7 +350,7 @@ def test_lead_agent_prompt_requires_tool_backed_state() -> None:
     assert "KANBAN_COMPLETION_RESULT_DETAIL_GAP" in prompt
     assert "START_P18_9_0_RETRY_REQUIRES_HUMAN_AUTHORIZATION" in prompt
     assert "Autorizo explícitamente el retry de P18.9.0." in prompt
-    assert "questions, hypotheticals, readiness checks, or ambiguous language" in prompt
+    assert "questions, hypotheticals, readiness checks, ambiguous language, or non-current ticket IDs" in prompt
     assert "get_repository_context" in prompt
     assert "resolve_repository_authority" in prompt
     assert "Do not infer the active governed project from cwd" in prompt

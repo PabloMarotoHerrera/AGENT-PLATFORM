@@ -362,10 +362,23 @@ def _target_from_record(record: dict[str, Any]) -> GovernedTicketGenerationTarge
     ticket_id = _safe_ticket_id(record.get("ticket_id"))
     if ticket_id == CANONICAL_TICKET_ID:
         return p18_9_0_generation_target()
-    authority = resolve_roadmap_ticket_authority(ticket_id)
     canonical_authority = record.get("canonical_next_ticket_authority")
     if not isinstance(canonical_authority, dict):
         canonical_authority = {}
+    try:
+        authority = resolve_roadmap_ticket_authority(ticket_id)
+    except TicketArchitectBridgeInputError:
+        if not canonical_authority or record.get("macroproject_id") == CANONICAL_MACROPROJECT_ID:
+            raise
+        authority = {
+            "ticket_id": ticket_id,
+            "ticket_title": record.get("ticket_title"),
+            "authority_type": record.get("canonical_roadmap_authority"),
+            "authority_path": record.get("roadmap_authority_path"),
+            "authority_section": record.get("roadmap_authority_section"),
+            "dependency_ticket_ids": tuple(record.get("roadmap_dependency_ticket_ids") or ()),
+            "ticket_contract": record.get("ticket_contract"),
+        }
     return GovernedTicketGenerationTarget(
         project_id=str(record.get("project_id") or CANONICAL_PROJECT_ID),
         project_name=str(record.get("project_name") or CANONICAL_PROJECT_NAME),
@@ -947,7 +960,14 @@ def quarantined_generation_record_path(*, ticket_id: str, bridge_sha256: str) ->
 def approval_decision_record_path() -> Path:
     """Return the profile-scoped P18.9.0 human decision authority path."""
 
-    return get_hermes_home() / _STORE_DIR / _APPROVAL_DECISION_STORE_FILE
+    return approval_decision_record_path_for_ticket(CANONICAL_TICKET_ID)
+
+
+def approval_decision_record_path_for_ticket(ticket_id: str) -> Path:
+    """Return the profile-scoped human decision authority path for one ticket."""
+
+    safe_ticket_id = _safe_ticket_id(ticket_id)
+    return get_hermes_home() / _STORE_DIR / f"{safe_ticket_id}.approval-decision.json"
 
 
 def load_p18_9_0_generation_record() -> dict[str, Any] | None:
@@ -984,17 +1004,32 @@ def load_p18_9_0_approval_decision_record(
 ) -> dict[str, Any] | None:
     """Load and validate the persisted P18.9.0 human decision, if present."""
 
-    path = approval_decision_record_path()
+    return load_approval_decision_record(
+        ticket_id=CANONICAL_TICKET_ID,
+        generation_record=generation_record,
+    )
+
+
+def load_approval_decision_record(
+    *,
+    ticket_id: str,
+    generation_record: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Load and validate the persisted human decision for one generated ticket."""
+
+    safe_ticket_id = _safe_ticket_id(ticket_id)
+    path = approval_decision_record_path_for_ticket(safe_ticket_id)
     if not path.exists():
         return None
     try:
         record = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise TicketArchitectBridgeConflict(
-            "P18.9.0 approval decision record is unreadable"
+            f"{safe_ticket_id} approval decision record is unreadable"
         ) from exc
-    return validate_p18_9_0_approval_decision_record(
+    return validate_approval_decision_record(
         record,
+        ticket_id=safe_ticket_id,
         generation_record=generation_record,
     )
 
@@ -1233,17 +1268,35 @@ def validate_p18_9_0_approval_decision_record(
 ) -> dict[str, Any]:
     """Validate persisted human decision evidence without recompiling work."""
 
+    return validate_approval_decision_record(
+        record,
+        ticket_id=CANONICAL_TICKET_ID,
+        generation_record=generation_record,
+    )
+
+
+def validate_approval_decision_record(
+    record: dict[str, Any],
+    *,
+    ticket_id: str,
+    generation_record: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Validate persisted human decision evidence for one generated ticket."""
+
     if not isinstance(record, dict):
         raise TicketArchitectBridgeConflict("approval decision record must be an object")
     if record.get("approval_publication_SHA256") != _approval_decision_record_digest(record):
         raise TicketArchitectBridgeConflict("approval decision record digest mismatch")
+    safe_ticket_id = _safe_ticket_id(ticket_id)
     generation = (
-        validate_p18_9_0_generation_record(generation_record)
+        validate_generation_record(generation_record)
         if generation_record is not None
-        else load_p18_9_0_generation_record()
+        else load_generation_record(ticket_id=safe_ticket_id)
     )
     if generation is None:
         raise TicketArchitectBridgeConflict("approval decision has no generated authority")
+    if generation.get("ticket_id") != safe_ticket_id:
+        raise TicketArchitectBridgeConflict("approval decision generation ticket mismatch")
     _require_approval_decision_identity(record, generation)
 
     decision = record.get("decision")
@@ -1264,8 +1317,8 @@ def validate_p18_9_0_approval_decision_record(
 
     if approval_record.project_id != CANONICAL_PROJECT_ID:
         raise TicketArchitectBridgeConflict("approval record must bind PEPPER")
-    if approval_record.ticket_id != CANONICAL_TICKET_ID:
-        raise TicketArchitectBridgeConflict("approval record must bind P18.9.0")
+    if approval_record.ticket_id != generation["ticket_id"]:
+        raise TicketArchitectBridgeConflict("approval record must bind generated ticket")
     if approval_record.decision.value != decision:
         raise TicketArchitectBridgeConflict("approval record decision mismatch")
     if decision == HumanApprovalDecision.APPROVE.value:
@@ -1330,13 +1383,34 @@ def apply_p18_9_0_approval_decision(
 ) -> dict[str, Any]:
     """Persist one explicit human approve/reject decision for generated P18.9.0."""
 
+    return apply_ticket_approval_decision(
+        ticket_id=CANONICAL_TICKET_ID,
+        decision=decision,
+        actor=actor,
+        decided_at=decided_at,
+    )
+
+
+def apply_ticket_approval_decision(
+    *,
+    ticket_id: str,
+    decision: str,
+    actor: str,
+    decided_at: float | None = None,
+) -> dict[str, Any]:
+    """Persist one explicit human approve/reject decision for one generated ticket."""
+
     if decision not in {HumanApprovalDecision.APPROVE.value, HumanApprovalDecision.REJECT.value}:
         raise TicketArchitectBridgeInputError("approval decision must be approve or reject")
+    safe_ticket_id = _safe_ticket_id(ticket_id)
     with _STORE_LOCK:
-        generation = load_p18_9_0_generation_record()
+        generation = load_generation_record(ticket_id=safe_ticket_id)
         if generation is None:
-            raise TicketArchitectBridgeConflict("P18.9.0 has no generated ticket to approve")
-        existing = load_p18_9_0_approval_decision_record(generation_record=generation)
+            raise TicketArchitectBridgeConflict(f"{safe_ticket_id} has no generated ticket to approve")
+        existing = load_approval_decision_record(
+            ticket_id=safe_ticket_id,
+            generation_record=generation,
+        )
         if existing is not None:
             if existing.get("decision") == decision:
                 return _approval_decision_operational_result(
@@ -1344,7 +1418,7 @@ def apply_p18_9_0_approval_decision(
                     idempotent_replay=True,
                 )
             raise TicketArchitectBridgeConflict(
-                "P18.9.0 ticket approval is already decided with the opposite decision"
+                f"{safe_ticket_id} ticket approval is already decided with the opposite decision"
             )
         record = _build_approval_decision_record(
             generation,
@@ -1352,7 +1426,11 @@ def apply_p18_9_0_approval_decision(
             actor=actor,
             decided_at=decided_at,
         )
-        validate_p18_9_0_approval_decision_record(record, generation_record=generation)
+        validate_approval_decision_record(
+            record,
+            ticket_id=safe_ticket_id,
+            generation_record=generation,
+        )
         _persist_approval_decision_record(record)
     return _approval_decision_operational_result(record)
 
@@ -1452,10 +1530,9 @@ def generated_record_to_workflow_overlay(record: dict[str, Any]) -> dict[str, An
 
     target = _target_from_record(record)
     validated = validate_generation_record(record, target=target)
-    decision = (
-        load_p18_9_0_approval_decision_record(generation_record=validated)
-        if target.ticket_id == CANONICAL_TICKET_ID
-        else None
+    decision = load_approval_decision_record(
+        ticket_id=target.ticket_id,
+        generation_record=validated,
     )
     if decision is not None:
         return _decided_record_to_workflow_overlay(validated, decision)
@@ -2422,6 +2499,7 @@ def _build_approval_decision_record(
 ) -> dict[str, Any]:
     project_spec = ProjectSpec.model_validate(generation["project_spec"])
     ticket_spec = TicketSpec.model_validate(generation["ticket_spec"])
+    target = _target_from_record(generation)
     reviewer_id = _reviewer_id_from_actor(actor)
     approval_decision = HumanApprovalDecision(decision)
     approval_record = build_ticket_approval_record(
@@ -2433,10 +2511,10 @@ def _build_approval_decision_record(
             conflict_resolutions=(),
             approval_evidence=HumanApprovalEvidence(
                 reviewer_id=reviewer_id,
-                decision_reference=f"P18.9.0 human ticket decision by {reviewer_id}.",
+                decision_reference=f"{target.ticket_id} human ticket decision by {reviewer_id}.",
                 rationale=(
                     "Record the explicit human ticket decision for the existing "
-                    "generated P18.9.0 TicketSpec without granting execution authority."
+                    f"generated {target.ticket_id} TicketSpec without granting execution authority."
                 ),
             ),
             manual_replacement=None,
@@ -2453,9 +2531,11 @@ def _build_approval_decision_record(
                 approval_record=approval_record,
                 publication_evidence=TicketPublicationEvidence(
                     publisher_id=reviewer_id,
-                    publication_reference="P18.9.0 human-approved canonical TicketSpec publication.",
+                    publication_reference=(
+                        f"{target.ticket_id} human-approved canonical TicketSpec publication."
+                    ),
                     rationale=(
-                        "Logical publication records the human-approved P18.9.0 "
+                        f"Logical publication records the human-approved {target.ticket_id} "
                         "TicketSpec and grants no execution authority."
                     ),
                 ),
@@ -2471,17 +2551,17 @@ def _build_approval_decision_record(
     record = {
         "schema_version": TICKET_ARCHITECT_BRIDGE_SCHEMA_VERSION,
         "policy_id": TICKET_APPROVAL_PUBLICATION_POLICY_ID,
-        "approval_id": CANONICAL_APPROVAL_ID,
+        "approval_id": target.ticket_id,
         "created_at": _utc_from_timestamp(decided_at_value),
         "decided_at": decided_at_value,
         "actor": str(actor or "pepper-dashboard-human").strip() or "pepper-dashboard-human",
         "reviewer_id": reviewer_id,
         "decision": approval_decision.value,
         "status": "approved" if approval_decision is HumanApprovalDecision.APPROVE else "rejected",
-        "project_id": CANONICAL_PROJECT_ID,
-        "macroproject_id": CANONICAL_MACROPROJECT_ID,
-        "ticket_id": CANONICAL_TICKET_ID,
-        "ticket_title": CANONICAL_TICKET_TITLE,
+        "project_id": target.project_id,
+        "macroproject_id": target.macroproject_id,
+        "ticket_id": target.ticket_id,
+        "ticket_title": target.ticket_title,
         "bridge_SHA256": generation["bridge_SHA256"],
         "ticket_spec_SHA256": generation["ticket_spec_SHA256"],
         "work_packet_id": generation["work_packet_id"],
@@ -2523,11 +2603,12 @@ def _rebuild_synthesis_review_for_record(generation: dict[str, Any]):
     context_pack = ContextPack.model_validate(generation["context_pack"])
     lint_report = TicketLintReport.model_validate(generation["lint_report"])
     dependency_plan = TicketDependencyPlan.model_validate(generation["dependency_plan"])
+    target = _target_from_record(generation)
     generation_request = TicketGenerationRequest(
         project_spec=project_spec,
         ticket_spec=ticket_spec,
         context_pack=context_pack,
-        roles=(TicketGeneratorRole.ARCHITECTURE, TicketGeneratorRole.GOVERNANCE),
+        roles=_generator_roles_for_ticket_type(ticket_spec.ticket_type),
     )
     assignments = prepare_ticket_generator_assignments(generation_request)
     proposals = tuple(
@@ -2535,8 +2616,8 @@ def _rebuild_synthesis_review_for_record(generation: dict[str, Any]):
             assignment=assignment,
             proposed_ticket=ticket_spec,
             rationale=(
-                "P18.9.0 TicketSpec is generated deterministically from the approved "
-                "P18.9 roadmap item and bounded Pepper workflow evidence."
+                f"{target.ticket_id} TicketSpec is generated deterministically from "
+                "canonical roadmap authority and bounded Pepper workflow evidence."
             ),
             evidence_source_ids=tuple(item.source_id for item in context_pack.items),
             assumptions=(),
@@ -2570,11 +2651,13 @@ def _fresh_planning_evidence_for_record(generation: dict[str, Any]) -> FreshDepe
         policy=ParallelPlanningPolicy(),
     )
     if build_ticket_dependency_plan(planning_request) != dependency_plan:
-        raise TicketArchitectBridgeConflict("P18.9.0 dependency plan cannot be recomputed")
+        raise TicketArchitectBridgeConflict(
+            f"{ticket_spec.ticket_id} dependency plan cannot be recomputed"
+        )
     return FreshDependencyPlanningEvidence(
         planning_request=planning_request,
         dependency_plan=dependency_plan,
-        evidence_reference="P18.9.0 approval validates generated dependency evidence.",
+        evidence_reference=f"{ticket_spec.ticket_id} approval validates generated dependency evidence.",
         rationale="Human ticket approval preserves the dependency plan bound by generation.",
     )
 
@@ -2583,6 +2666,7 @@ def _build_approval_transition(
     generation: dict[str, Any],
     decision: HumanApprovalDecision,
 ) -> GovernedWorkflowTransitionResult:
+    target = _target_from_record(generation)
     generated_transition = GovernedWorkflowTransitionResult.model_validate(
         generation["workflow_transition_result"]
     )
@@ -2601,9 +2685,9 @@ def _build_approval_transition(
         runtime_projection=build_hermes_workflow_projection(
             runtime_kind=HermesWorkflowRuntimeKind.GOVERNANCE_ONLY,
             runtime_state=(
-                "pepper:p18_9_0_ticket_approved"
+                f"pepper:{_ticket_action_token(target.ticket_id).lower()}_ticket_approved"
                 if approval_granted
-                else "pepper:p18_9_0_awaiting_correction"
+                else f"pepper:{_ticket_action_token(target.ticket_id).lower()}_awaiting_correction"
             ),
             task_id=None,
             board_or_queue_id=None,
@@ -2617,7 +2701,7 @@ def _build_approval_transition(
     validate_governed_workflow_transition_request(transition_request)
     transition_result = build_governed_workflow_transition(transition_request)
     if not transition_result.accepted:
-        raise TicketArchitectBridgeConflict("P18.9.0 approval transition rejected")
+        raise TicketArchitectBridgeConflict(f"{target.ticket_id} approval transition rejected")
     return transition_result
 
 
@@ -2703,10 +2787,11 @@ def _persist_generation_record(record: dict[str, Any]) -> None:
 
 
 def _persist_approval_decision_record(record: dict[str, Any]) -> None:
-    path = approval_decision_record_path()
+    ticket_id = _safe_ticket_id(record.get("ticket_id"))
+    path = approval_decision_record_path_for_ticket(ticket_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
-        existing = load_p18_9_0_approval_decision_record()
+        existing = load_approval_decision_record(ticket_id=ticket_id)
         if existing is not None:
             return
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -2971,11 +3056,11 @@ def _approval_decision_operational_result(
         "schema_version": TICKET_ARCHITECT_BRIDGE_SCHEMA_VERSION,
         "policy_id": TICKET_APPROVAL_PUBLICATION_POLICY_ID,
         "idempotent_replay": idempotent_replay,
-        "approval_id": CANONICAL_APPROVAL_ID,
-        "project_id": CANONICAL_PROJECT_ID,
-        "macroproject_id": CANONICAL_MACROPROJECT_ID,
-        "ticket_id": CANONICAL_TICKET_ID,
-        "ticket_title": CANONICAL_TICKET_TITLE,
+        "approval_id": record["approval_id"],
+        "project_id": record["project_id"],
+        "macroproject_id": record["macroproject_id"],
+        "ticket_id": record["ticket_id"],
+        "ticket_title": record["ticket_title"],
         "decision": record["decision"],
         "status": record["status"],
         "actor": record["actor"],
@@ -3034,8 +3119,11 @@ def _canonical_next_ticket_authority_projection(
 
 
 def _approval_decision_projection(record: dict[str, Any]) -> dict[str, Any]:
+    ticket_id = _safe_ticket_id(record.get("ticket_id"))
     return {
-        "authority_record": str(_STORE_DIR / _APPROVAL_DECISION_STORE_FILE).replace("\\", "/"),
+        "authority_record": str(
+            _STORE_DIR / f"{ticket_id}.approval-decision.json"
+        ).replace("\\", "/"),
         "approval_id": record["approval_id"],
         "approval_publication_SHA256": record["approval_publication_SHA256"],
         "decision": record["decision"],
@@ -3093,14 +3181,15 @@ def _require_approval_decision_identity(
     record: dict[str, Any],
     generation: dict[str, Any],
 ) -> None:
+    target = _target_from_record(generation)
     expected = {
         "schema_version": TICKET_ARCHITECT_BRIDGE_SCHEMA_VERSION,
         "policy_id": TICKET_APPROVAL_PUBLICATION_POLICY_ID,
-        "approval_id": CANONICAL_APPROVAL_ID,
-        "project_id": CANONICAL_PROJECT_ID,
-        "macroproject_id": CANONICAL_MACROPROJECT_ID,
-        "ticket_id": CANONICAL_TICKET_ID,
-        "ticket_title": CANONICAL_TICKET_TITLE,
+        "approval_id": target.ticket_id,
+        "project_id": target.project_id,
+        "macroproject_id": target.macroproject_id,
+        "ticket_id": target.ticket_id,
+        "ticket_title": target.ticket_title,
         "bridge_SHA256": generation["bridge_SHA256"],
         "ticket_spec_SHA256": generation["ticket_spec_SHA256"],
         "work_packet_id": generation["work_packet_id"],
@@ -3226,11 +3315,14 @@ __all__ = (
     "reconciliation_history_path_for_ticket",
     "quarantined_generation_record_path",
     "approval_decision_record_path",
+    "approval_decision_record_path_for_ticket",
     "load_generation_record",
     "load_p18_9_0_generation_record",
+    "load_approval_decision_record",
     "load_p18_9_0_approval_decision_record",
     "validate_generation_record",
     "validate_p18_9_0_generation_record",
+    "validate_approval_decision_record",
     "validate_p18_9_0_approval_decision_record",
     "inspect_invalid_future_ticket_authority",
     "reconcile_invalid_future_ticket_authority",
@@ -3239,5 +3331,6 @@ __all__ = (
     "resolve_canonical_next_ticket",
     "resolve_generation_target_from_workflow",
     "generated_record_to_workflow_overlay",
+    "apply_ticket_approval_decision",
     "apply_p18_9_0_approval_decision",
 )

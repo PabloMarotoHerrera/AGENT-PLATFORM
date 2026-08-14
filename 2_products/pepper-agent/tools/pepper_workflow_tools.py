@@ -14,7 +14,6 @@ TOOLSET = "pepper_workflow"
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 100
 CURRENT_TICKET_APPROVAL_ID = "P18.9.0"
-CURRENT_TICKET_APPROVAL_NEXT_ACTION_ID = "APPROVE_P18_9_0"
 CURRENT_TICKET_PROJECTION_NEXT_ACTION_ID = "P18_9_0_APPROVED_NO_EXECUTION"
 CURRENT_TICKET_START_NEXT_ACTION_ID = "START_P18_9_0_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION"
 CURRENT_TICKET_RECOVERY_NEXT_ACTION_ID = "RECOVER_P18_9_0_EXECUTION"
@@ -70,7 +69,20 @@ def _mentioned_ticket_ids(text: str) -> set[str]:
     }
 
 
-def _validate_explicit_human_decision(*, decision: str, human_decision_text: object) -> str:
+def _ticket_action_token(ticket_id: str) -> str:
+    return str(ticket_id or "").strip().replace(".", "_").upper()
+
+
+def _approval_action_id(ticket_id: str) -> str:
+    return f"APPROVE_{_ticket_action_token(ticket_id)}"
+
+
+def _validate_explicit_human_decision(
+    *,
+    decision: str,
+    human_decision_text: object,
+    current_ticket_id: str,
+) -> str:
     raw = str(human_decision_text or "").strip()
     if not raw:
         raise ValueError("human_decision_text is required")
@@ -95,7 +107,7 @@ def _validate_explicit_human_decision(*, decision: str, human_decision_text: obj
         raise ValueError("approval decision text is ambiguous")
 
     ticket_ids = _mentioned_ticket_ids(normalized)
-    if ticket_ids and CURRENT_TICKET_APPROVAL_ID not in ticket_ids:
+    if ticket_ids and current_ticket_id not in ticket_ids:
         raise ValueError("approval decision text targets a different ticket")
 
     approval_intent = bool(
@@ -113,18 +125,39 @@ def _validate_explicit_human_decision(*, decision: str, human_decision_text: obj
     return raw
 
 
-def _validate_optional_current_approval_guards(args: dict[str, Any]) -> str:
-    approval_id = str(args.get("approval_id") or CURRENT_TICKET_APPROVAL_ID).strip()
-    if approval_id != CURRENT_TICKET_APPROVAL_ID:
-        raise ValueError("decide_pending_approval is bounded to approval P18.9.0")
+def _validate_optional_current_approval_guards(args: dict[str, Any], context: dict[str, Any]) -> str:
+    current_ticket_id = str(context.get("current_ticket_id") or "").strip()
+    if not current_ticket_id:
+        raise ValueError("no current pending ticket approval is active")
+    approval_id = str(args.get("approval_id") or current_ticket_id).strip()
+    if approval_id != current_ticket_id:
+        raise ValueError("approval guard does not match the current pending ticket")
     if str(args.get("project_id") or CURRENT_PROJECT_ID).strip() != CURRENT_PROJECT_ID:
         raise ValueError("active governed project must be PEPPER")
-    if str(args.get("ticket_id") or CURRENT_TICKET_APPROVAL_ID).strip() != CURRENT_TICKET_APPROVAL_ID:
-        raise ValueError("active governed ticket must be P18.9.0")
-    next_action_id = str(args.get("next_action_id") or CURRENT_TICKET_APPROVAL_NEXT_ACTION_ID).strip()
-    if next_action_id != CURRENT_TICKET_APPROVAL_NEXT_ACTION_ID:
-        raise ValueError("approval next action must be APPROVE_P18_9_0")
+    if str(args.get("ticket_id") or current_ticket_id).strip() != current_ticket_id:
+        raise ValueError("ticket guard does not match the current pending ticket")
+    expected_next_action = _approval_action_id(current_ticket_id)
+    next_action_id = str(args.get("next_action_id") or expected_next_action).strip()
+    if next_action_id != expected_next_action:
+        raise ValueError(f"approval next action must be {expected_next_action}")
     return approval_id
+
+
+def _validate_optional_current_ticket_digests(args: dict[str, Any], context: dict[str, Any]) -> None:
+    authority = context.get("workflow_control", {}).get("generated_ticket_authority")
+    if not isinstance(authority, dict):
+        authority = context.get("generated_ticket_authority")
+    if not isinstance(authority, dict):
+        raise ValueError("current generated ticket authority is unavailable")
+    checks = (
+        ("ticket_spec_sha256", "ticket_spec_SHA256", "TicketSpec digest"),
+        ("work_packet_id", "work_packet_id", "WorkPacket ID"),
+        ("work_packet_sha256", "work_packet_SHA256", "WorkPacket digest"),
+    )
+    for arg_name, authority_name, label in checks:
+        supplied = str(args.get(arg_name) or "").strip()
+        if supplied and supplied != str(authority.get(authority_name) or "").strip():
+            raise ValueError(f"{label} does not match current pending ticket authority")
 
 
 def _validate_pending_current_ticket_approval(
@@ -136,16 +169,18 @@ def _validate_pending_current_ticket_approval(
         raise ValueError("current project is not PEPPER")
     if context.get("macroproject_id") != "P18.9":
         raise ValueError("current macroproject is not P18.9")
-    if context.get("current_ticket_id") != CURRENT_TICKET_APPROVAL_ID:
-        raise ValueError("current active ticket is not P18.9.0")
+    current_ticket_id = str(context.get("current_ticket_id") or "").strip()
+    if not current_ticket_id:
+        raise ValueError("no current active ticket approval")
     next_action = context.get("next_action")
     if not isinstance(next_action, dict):
         raise ValueError("current next action is unavailable")
-    if next_action.get("id") != CURRENT_TICKET_APPROVAL_NEXT_ACTION_ID:
-        raise ValueError("current next action is not APPROVE_P18_9_0")
-    if next_action.get("target_ticket_id") != CURRENT_TICKET_APPROVAL_ID:
-        raise ValueError("current next action does not target P18.9.0")
-    if approval.get("id") != CURRENT_TICKET_APPROVAL_ID:
+    expected_next_action = _approval_action_id(current_ticket_id)
+    if next_action.get("id") != expected_next_action:
+        raise ValueError(f"current next action is not {expected_next_action}")
+    if next_action.get("target_ticket_id") != current_ticket_id:
+        raise ValueError(f"current next action does not target {current_ticket_id}")
+    if approval.get("id") != current_ticket_id:
         raise ValueError("approval target mismatch")
     if approval.get("status") != "pending":
         raise ValueError("approval is not pending")
@@ -154,8 +189,8 @@ def _validate_pending_current_ticket_approval(
     target = approval.get("target")
     if not isinstance(target, dict):
         raise ValueError("approval target is unavailable")
-    if CURRENT_TICKET_APPROVAL_ID not in str(target.get("label") or ""):
-        raise ValueError("approval target does not match P18.9.0")
+    if current_ticket_id not in str(target.get("label") or ""):
+        raise ValueError(f"approval target does not match {current_ticket_id}")
 
 
 def _validate_current_ticket_identity_context(context: dict[str, Any]) -> None:
@@ -163,8 +198,8 @@ def _validate_current_ticket_identity_context(context: dict[str, Any]) -> None:
         raise ValueError("current project is not PEPPER")
     if context.get("macroproject_id") != "P18.9":
         raise ValueError("current macroproject is not P18.9")
-    if context.get("current_ticket_id") != CURRENT_TICKET_APPROVAL_ID:
-        raise ValueError("current active ticket is not P18.9.0")
+    if not str(context.get("current_ticket_id") or "").strip():
+        raise ValueError("no current active ticket")
 
 
 def _validate_explicit_projection_request(value: object) -> str:
@@ -500,13 +535,15 @@ def _decide_pending_approval(args: dict[str, Any], **_kwargs) -> str:
     if decision not in {"approve", "reject"}:
         return tool_error("decision must be approve or reject", success=False)
     try:
-        approval_id = _validate_optional_current_approval_guards(args)
+        context = pr.build_lead_agent_operational_context()
+        _validate_current_ticket_identity_context(context)
+        approval_id = _validate_optional_current_approval_guards(args, context)
         human_decision_text = _validate_explicit_human_decision(
             decision=decision,
             human_decision_text=args.get("human_decision_text"),
+            current_ticket_id=str(context["current_ticket_id"]),
         )
-        context = pr.build_lead_agent_operational_context()
-        _validate_current_ticket_identity_context(context)
+        _validate_optional_current_ticket_digests(args, context)
         approvals = context.get("approvals", {}).get("items", [])
         if not isinstance(approvals, list):
             approvals = []
@@ -522,6 +559,8 @@ def _decide_pending_approval(args: dict[str, Any], **_kwargs) -> str:
                 context=context,
                 approval=pending_match,
             )
+        elif context.get("workflow_status") not in {"ticket_approved", "awaiting_correction"}:
+            raise ValueError("current pending ticket approval is unavailable")
         result = pr.apply_approval_decision(
             approval_id,
             pr.ApprovalDecisionRequest(
@@ -947,7 +986,7 @@ _DECIDE_PENDING_APPROVAL_SCHEMA = {
         "decision": {
             "type": "string",
             "enum": ["approve", "reject"],
-            "description": "Explicit human decision for the current P18.9.0 ticket approval.",
+            "description": "Explicit human decision for the current governed ticket approval.",
         },
         "human_decision_text": {
             "type": "string",
@@ -955,7 +994,7 @@ _DECIDE_PENDING_APPROVAL_SCHEMA = {
         },
         "approval_id": {
             "type": "string",
-            "description": "Optional approval guard. Must be P18.9.0 if supplied.",
+            "description": "Optional approval guard. Must equal the current pending ticket approval if supplied.",
         },
         "project_id": {
             "type": "string",
@@ -963,11 +1002,23 @@ _DECIDE_PENDING_APPROVAL_SCHEMA = {
         },
         "ticket_id": {
             "type": "string",
-            "description": "Optional governed ticket guard. Must be P18.9.0 if supplied.",
+            "description": "Optional governed ticket guard. Must equal the current pending ticket if supplied.",
         },
         "next_action_id": {
             "type": "string",
-            "description": "Optional next-action guard. Must be APPROVE_P18_9_0 if supplied.",
+            "description": "Optional next-action guard. Must equal APPROVE_<current-ticket-token> if supplied.",
+        },
+        "ticket_spec_sha256": {
+            "type": "string",
+            "description": "Optional TicketSpec SHA256 guard. Must match the current generated ticket authority if supplied.",
+        },
+        "work_packet_id": {
+            "type": "string",
+            "description": "Optional WorkPacket ID guard. Must match the current generated ticket authority if supplied.",
+        },
+        "work_packet_sha256": {
+            "type": "string",
+            "description": "Optional WorkPacket SHA256 guard. Must match the current generated ticket authority if supplied.",
         },
     },
     "required": ["decision", "human_decision_text"],

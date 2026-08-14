@@ -393,6 +393,25 @@ def test_future_generation_rejects_stale_roadmap_authority_record(bridge_home) -
         bridge.load_generation_record(ticket_id="P18.9.1")
 
 
+def test_canonical_macroproject_generation_fails_closed_without_roadmap_authority(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    bridge.generate_current_ticket(workflow=_next_ticket_workflow())
+    record = bridge.load_generation_record(ticket_id="P18.9.1")
+    assert record is not None
+
+    def missing_roadmap_authority(_ticket_id: str) -> dict:
+        raise bridge.TicketArchitectBridgeInputError("roadmap authority missing")
+
+    monkeypatch.setattr(bridge, "resolve_roadmap_ticket_authority", missing_roadmap_authority)
+
+    with pytest.raises(bridge.TicketArchitectBridgeInputError, match="roadmap authority missing"):
+        bridge.load_generation_record(ticket_id="P18.9.1")
+    with pytest.raises(bridge.TicketArchitectBridgeInputError, match="roadmap authority missing"):
+        bridge.generated_record_to_workflow_overlay(record)
+
+
 def test_future_generation_rejects_stale_source_next_action_record(bridge_home) -> None:
     bridge.generate_current_ticket(workflow=_next_ticket_workflow())
     record = bridge.load_generation_record(ticket_id="P18.9.1")
@@ -970,6 +989,219 @@ def test_product_runtime_projects_generic_generation_to_pending_approval(bridge_
     assert overlay["Git_mutation"] is False
     assert [item["id"] for item in inbox["approvals"]] == ["P18.9.1"]
     assert inbox["approvals"][0]["request_type"] == "ticket_approval"
+
+
+def test_chat_explicit_current_ticket_approval_uses_authority(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    def workflow_snapshot() -> dict:
+        record = bridge.load_generation_record(ticket_id="P18.9.1")
+        if record is None:
+            return _next_ticket_workflow()
+        return {
+            **_next_ticket_workflow(),
+            **bridge.generated_record_to_workflow_overlay(record),
+        }
+
+    monkeypatch.setattr(pr, "build_workflow_control_snapshot", workflow_snapshot)
+    bridge.generate_current_ticket(workflow=_next_ticket_workflow())
+    generated = bridge.load_generation_record(ticket_id="P18.9.1")
+    assert generated is not None
+
+    result = _chat_tool_result(
+        "decide_pending_approval",
+        {
+            "decision": "approve",
+            "human_decision_text": "Apruebo P18.9.1",
+            "approval_id": "P18.9.1",
+            "project_id": "PEPPER",
+            "ticket_id": "P18.9.1",
+            "next_action_id": "APPROVE_P18_9_1",
+            "ticket_spec_sha256": generated["ticket_spec_SHA256"],
+            "work_packet_id": generated["work_packet_id"],
+            "work_packet_sha256": generated["work_packet_SHA256"],
+        },
+    )
+    replay = _chat_tool_result(
+        "decide_pending_approval",
+        {"decision": "approve", "human_decision_text": "Apruebo P18.9.1"},
+    )
+    opposite = _chat_tool_result(
+        "decide_pending_approval",
+        {"decision": "reject", "human_decision_text": "Reject P18.9.1"},
+    )
+    decision = bridge.load_approval_decision_record(
+        ticket_id="P18.9.1",
+        generation_record=generated,
+    )
+    workflow = pr.build_workflow_control_snapshot()
+
+    assert result["success"] is True
+    assert result["approval_id"] == "P18.9.1"
+    assert result["status"] == "approved"
+    assert result["workflow_transition_id"] == "GWT-003"
+    assert result["workflow_status"] == "ticket_approved"
+    assert result["pending_ticket_approval_count"] == 0
+    assert result["next_action"]["id"] == "P18_9_1_APPROVED_NO_EXECUTION"
+    assert result["WorkPacket_compilation_count"] == 1
+    assert result["WorkPacket_recompile_required"] is False
+    assert result["worker_execution"] is False
+    assert result["Kanban_dispatch"] is False
+    assert result["Git_mutation"] is False
+    assert replay["status"] == "approved"
+    assert replay["idempotent_replay"] is True
+    assert replay["applied"] is False
+    assert opposite["success"] is False
+    assert "opposite" in opposite["error"]
+    assert decision is not None
+    assert decision["approval_id"] == "P18.9.1"
+    assert decision["decision"] == "approve"
+    assert decision["ticket_spec_SHA256"] == generated["ticket_spec_SHA256"]
+    assert decision["work_packet_id"] == generated["work_packet_id"]
+    assert decision["work_packet_SHA256"] == generated["work_packet_SHA256"]
+    assert decision["worker_execution"] is False
+    assert decision["Kanban_dispatch"] is False
+    assert decision["Git_mutation"] is False
+    assert decision["provider_dispatch_count"] == 0
+    assert decision["model_inference_count"] == 0
+    assert decision["Docker_commands_executed"] == 0
+    assert decision["Graphify_commands_executed"] == 0
+    assert workflow["current_ticket_id"] == "P18.9.1"
+    assert workflow["workflow_status"] == "ticket_approved"
+    assert workflow["next_action"]["id"] == "P18_9_1_APPROVED_NO_EXECUTION"
+
+
+@pytest.mark.parametrize(
+    "guard, value, message",
+    [
+        ("ticket_id", "P18.9.0", "ticket guard"),
+        ("next_action_id", "APPROVE_P18_9_0", "approval next action"),
+        ("ticket_spec_sha256", "0" * 64, "TicketSpec digest"),
+        ("work_packet_id", "WP-WRONG", "WorkPacket ID"),
+        ("work_packet_sha256", "1" * 64, "WorkPacket digest"),
+    ],
+)
+def test_chat_current_ticket_approval_rejects_wrong_p18_9_1_guards(
+    bridge_home,
+    monkeypatch,
+    guard,
+    value,
+    message,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    def workflow_snapshot() -> dict:
+        record = bridge.load_generation_record(ticket_id="P18.9.1")
+        assert record is not None
+        return {
+            **_next_ticket_workflow(),
+            **bridge.generated_record_to_workflow_overlay(record),
+        }
+
+    monkeypatch.setattr(pr, "build_workflow_control_snapshot", workflow_snapshot)
+    bridge.generate_current_ticket(workflow=_next_ticket_workflow())
+
+    result = _chat_tool_result(
+        "decide_pending_approval",
+        {
+            "decision": "approve",
+            "human_decision_text": "Apruebo P18.9.1",
+            guard: value,
+        },
+    )
+
+    assert result["success"] is False
+    assert message in result["error"]
+    assert bridge.load_approval_decision_record(ticket_id="P18.9.1") is None
+
+
+def test_chat_current_ticket_approval_rejects_non_current_ticket_text(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    def workflow_snapshot() -> dict:
+        record = bridge.load_generation_record(ticket_id="P18.9.1")
+        assert record is not None
+        return {
+            **_next_ticket_workflow(),
+            **bridge.generated_record_to_workflow_overlay(record),
+        }
+
+    monkeypatch.setattr(pr, "build_workflow_control_snapshot", workflow_snapshot)
+    bridge.generate_current_ticket(workflow=_next_ticket_workflow())
+
+    result = _chat_tool_result(
+        "decide_pending_approval",
+        {"decision": "approve", "human_decision_text": "Apruebo P18.9.0"},
+    )
+
+    assert result["success"] is False
+    assert "different ticket" in result["error"]
+    assert bridge.load_approval_decision_record(ticket_id="P18.9.1") is None
+
+
+def test_synthetic_ticket_approval_decision_uses_generic_bridge_path(bridge_home) -> None:
+    target = _synthetic_implementation_target(
+        "P99.4",
+        "Synthetic Approval Surface",
+        contract=_synthetic_implementation_contract("Approval"),
+    )
+    target = replace(
+        target,
+        macroproject_id="P999",
+        macroproject_title="Synthetic Approval Macroproject",
+    )
+    workflow = {
+        "project_id": target.project_id,
+        "project_name": target.project_name,
+        "macroproject_id": target.macroproject_id,
+        "macroproject_title": target.macroproject_title,
+        "current_ticket_id": None,
+        "next_ticket_id": target.ticket_id,
+        "next_ticket_title": target.ticket_title,
+        "workflow_status": "completed",
+        "P18_9_ready": True,
+        "next_action": {
+            "id": target.next_action_id,
+            "target_ticket_id": target.ticket_id,
+            "target_ticket_title": target.ticket_title,
+        },
+    }
+    bridge.generate_current_ticket(workflow=workflow, target=target)
+
+    result = bridge.apply_ticket_approval_decision(
+        ticket_id=target.ticket_id,
+        decision="reject",
+        actor="synthetic-human",
+    )
+    replay = bridge.apply_ticket_approval_decision(
+        ticket_id=target.ticket_id,
+        decision="reject",
+        actor="synthetic-human",
+    )
+    decision = bridge.load_approval_decision_record(ticket_id=target.ticket_id)
+    overlay = bridge.generated_record_to_workflow_overlay(
+        bridge.load_generation_record(ticket_id=target.ticket_id)
+    )
+
+    assert result["approval_id"] == target.ticket_id
+    assert result["status"] == "rejected"
+    assert result["workflow_transition_id"] == "GWT-025"
+    assert result["worker_execution"] is False
+    assert result["Kanban_dispatch"] is False
+    assert result["Git_mutation"] is False
+    assert replay["idempotent_replay"] is True
+    assert decision is not None
+    assert decision["ticket_id"] == target.ticket_id
+    assert decision["decision"] == "reject"
+    assert overlay["current_ticket_id"] == target.ticket_id
+    assert overlay["workflow_status"] == "awaiting_correction"
+    assert overlay["next_action"]["id"] == "REVISE_P99_4"
 
 
 def test_chat_tool_requires_explicit_generation_request_and_routes_generic_ticket(

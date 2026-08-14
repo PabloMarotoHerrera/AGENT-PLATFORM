@@ -202,6 +202,75 @@ def test_controlled_approval_routes_publish_generated_ticket_and_approve(dashboa
     assert workflow["pending_ticket_approval_count"] == 0
 
 
+def test_controlled_approval_routes_approve_generic_generated_ticket(dashboard_client):
+    from hermes_cli.agent_platform.workflow import ticket_architect_bridge as bridge
+
+    bridge.generate_current_ticket(
+        workflow={
+            "project_id": "PEPPER",
+            "project_name": "Pepper",
+            "macroproject_id": "P18.9",
+            "macroproject_title": "Pepper Product Personalization",
+            "current_ticket_id": None,
+            "next_ticket_id": "P18.9.1",
+            "next_ticket_title": "Pepper Shell, Routing, and Compact Navigation",
+            "workflow_state": "P18.9.0-COMPLETED",
+            "workflow_status": "completed",
+            "P18_9_ready": True,
+            "P18_9_ticket_generated": True,
+            "P18_9_0_closed": True,
+            "next_ticket_ready": True,
+            "next_ticket_generated": False,
+            "next_action": {
+                "id": "GENERATE_P18_9_1_REQUIRES_SEPARATE_HUMAN_ACTION",
+                "target_ticket_id": "P18.9.1",
+                "target_ticket_title": "Pepper Shell, Routing, and Compact Navigation",
+                "required_human_action": "ticket_generation",
+            },
+        }
+    )
+
+    list_response = dashboard_client.get(
+        "/api/agent-platform/approvals",
+        headers=_auth_headers(),
+    )
+    assert list_response.status_code == 200
+    assert [item["id"] for item in list_response.json()["approvals"]] == ["P18.9.1"]
+
+    detail_response = dashboard_client.get(
+        "/api/agent-platform/approvals/P18.9.1",
+        headers=_auth_headers(),
+    )
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["approval"]["id"] == "P18.9.1"
+    assert {item["id"] for item in detail["evidence"]} == {
+        "P18.9.1:bridge",
+        "P18.9.1:ticket_spec",
+        "P18.9.1:work_packet",
+        "P18.9.1:workflow",
+    }
+
+    decision_response = dashboard_client.post(
+        "/api/agent-platform/approvals/P18.9.1/decision",
+        headers=_auth_headers(),
+        json={"decision": "approve", "actor": "human.p18.9"},
+    )
+    assert decision_response.status_code == 200
+    decision = decision_response.json()
+    decision_record = bridge.load_approval_decision_record(ticket_id="P18.9.1")
+
+    assert decision["status"] == "approved"
+    assert decision["workflow_transition_id"] == "GWT-003"
+    assert decision["worker_execution"] is False
+    assert decision["Kanban_dispatch"] is False
+    assert decision["Git_mutation"] is False
+    assert decision_record is not None
+    assert decision_record["approval_id"] == "P18.9.1"
+    assert decision_record["WorkPacket_compilation_count"] == 1
+    assert decision_record["WorkPacket_recompile_required"] is False
+
+
 def test_controlled_execution_routes_project_universal_and_exact_sources(dashboard_client):
     from hermes_cli import kanban_db
 
