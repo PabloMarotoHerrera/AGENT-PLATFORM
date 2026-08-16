@@ -350,8 +350,9 @@ def test_lead_agent_prompt_requires_tool_backed_state() -> None:
     assert "AWAIT_HUMAN_P18_9_0_REVIEW_ACCEPTANCE" in prompt
     assert "Acepto explícitamente la review de P18.9.0" in prompt
     assert "KANBAN_COMPLETION_RESULT_DETAIL_GAP" in prompt
-    assert "START_P18_9_0_RETRY_REQUIRES_HUMAN_AUTHORIZATION" in prompt
-    assert "Autorizo explícitamente el retry de P18.9.0." in prompt
+    assert "START_<current-ticket>_RETRY_REQUIRES_HUMAN_AUTHORIZATION" in prompt
+    assert "explicitly authorizes retrying that same current ticket" in prompt
+    assert "Autorizo explícitamente el retry de P18.9.0." not in prompt
     assert "questions, hypotheticals, readiness checks, ambiguous language, or non-current ticket IDs" in prompt
     assert "get_repository_context" in prompt
     assert "resolve_repository_authority" in prompt

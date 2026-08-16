@@ -1939,6 +1939,173 @@ def test_current_ticket_start_binds_generic_projection_and_record_path(
     assert record["assignee_profile"] == _IMPLEMENTATION_PROFILE
 
 
+def test_current_ticket_start_p18_9_1_consent_reaches_provider_preflight_without_spawn(
+    projection_home,
+    monkeypatch,
+) -> None:
+    _install_implementation_profile(monkeypatch, projection_home, model_config=False)
+    _approve_next_ticket()
+    projected = _project_next_ticket_direct()
+
+    from hermes_cli import kanban_db
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    monkeypatch.setattr(
+        pr,
+        "build_workflow_control_snapshot",
+        lambda: _queued_workflow_for_projection(projected),
+    )
+
+    result = pr.start_current_ticket_execution(
+        human_authorization_text="Start P18.9.1 execution now",
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+        next_action_id="START_P18_9_1_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION",
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("provider preflight must block before spawn"),
+    )
+
+    assert result["start_status"] == "blocked"
+    assert result["blocker_code"] == "EXECUTOR_PROVIDER_RESOLUTION_GAP"
+    assert result["authorization_diagnostics"] is None
+    assert result["execution_authorization_recorded"] is False
+    assert result["dispatch_performed"] is False
+    assert result["execution_started"] is False
+    assert result["worker_process_started"] is False
+    assert not pr.execution_start_record_path_for_ticket("P18.9.1").exists()
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        task = kanban_db.get_task(conn, projected["kanban_task_id"])
+        assert task is not None
+        assert task.status == "ready"
+        assert task.current_run_id is None
+        assert kanban_db.list_runs(conn, task.id) == []
+    finally:
+        conn.close()
+
+
+def test_initial_start_rejects_retry_text_for_current_p18_9_1(
+    projection_home,
+    monkeypatch,
+) -> None:
+    _install_implementation_profile(monkeypatch, projection_home)
+    _approve_next_ticket()
+    projected = _project_next_ticket_direct()
+
+    from hermes_cli import kanban_db
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    monkeypatch.setattr(
+        pr,
+        "build_workflow_control_snapshot",
+        lambda: _queued_workflow_for_projection(projected),
+    )
+
+    result = pr.start_current_ticket_execution(
+        human_authorization_text="Retry P18.9.1 execution now",
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+        next_action_id="START_P18_9_1_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION",
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("retry text must not start initial execution"),
+    )
+
+    diagnostics = result["authorization_diagnostics"]
+    assert result["start_status"] == "blocked"
+    assert result["blocker_code"] == "EXECUTION_AUTHORIZATION_KIND_MISMATCH"
+    assert "initial execution start authorization" in result["blocker_detail"]
+    assert diagnostics["current_ticket_id"] == "P18.9.1"
+    assert diagnostics["requested_ticket_id"] == "P18.9.1"
+    assert diagnostics["current_next_action_id"] == "START_P18_9_1_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION"
+    assert diagnostics["requested_next_action_id"] == "START_P18_9_1_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION"
+    assert diagnostics["authorization_kind"] == "execution_retry_authorization"
+    assert diagnostics["expected_authorization_kind"] == "execution_start_authorization"
+    assert result["dispatch_performed"] is False
+    assert result["execution_started"] is False
+    assert not pr.execution_start_record_path_for_ticket("P18.9.1").exists()
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        task = kanban_db.get_task(conn, projected["kanban_task_id"])
+        assert task is not None
+        assert task.status == "ready"
+        assert kanban_db.list_runs(conn, task.id) == []
+    finally:
+        conn.close()
+
+
+def test_historical_retry_text_cannot_authorize_current_p18_9_1_initial_start(
+    projection_home,
+    monkeypatch,
+) -> None:
+    _install_implementation_profile(monkeypatch, projection_home)
+    _approve_next_ticket()
+    projected = _project_next_ticket_direct()
+
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    monkeypatch.setattr(
+        pr,
+        "build_workflow_control_snapshot",
+        lambda: _queued_workflow_for_projection(projected),
+    )
+
+    result = pr.start_current_ticket_execution(
+        human_authorization_text="Autorizo explícitamente el retry de P18.9.0.",
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+        next_action_id="START_P18_9_1_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION",
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("historical retry text must not spawn current ticket"),
+    )
+
+    diagnostics = result["authorization_diagnostics"]
+    assert result["start_status"] == "blocked"
+    assert result["blocker_code"] == "EXECUTION_AUTHORIZATION_TICKET_MISMATCH"
+    assert diagnostics["current_ticket_id"] == "P18.9.1"
+    assert diagnostics["requested_ticket_id"] == "P18.9.1"
+    assert diagnostics["mentioned_ticket_ids"] == ["P18.9.0"]
+    assert result["dispatch_performed"] is False
+    assert result["execution_started"] is False
+    assert not pr.execution_start_record_path_for_ticket("P18.9.1").exists()
+
+
+def test_current_ticket_start_rejects_stale_next_action_before_authorization_record(
+    projection_home,
+    monkeypatch,
+) -> None:
+    _install_implementation_profile(monkeypatch, projection_home)
+    _approve_next_ticket()
+    projected = _project_next_ticket_direct()
+
+    from hermes_cli import kanban_db
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    monkeypatch.setattr(
+        pr,
+        "build_workflow_control_snapshot",
+        lambda: _queued_workflow_for_projection(projected),
+    )
+
+    with pytest.raises(pr.ProductRuntimeConflict) as excinfo:
+        pr.start_current_ticket_execution(
+            human_authorization_text="Start P18.9.1 execution now",
+            project_id="PEPPER",
+            ticket_id="P18.9.1",
+            next_action_id="START_P18_9_0_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION",
+            spawn_fn=lambda *_args, **_kwargs: pytest.fail("stale action must not spawn"),
+        )
+
+    assert "execution start requires START_P18_9_1_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION" in str(
+        excinfo.value
+    )
+    assert not pr.execution_start_record_path_for_ticket("P18.9.1").exists()
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        task = kanban_db.get_task(conn, projected["kanban_task_id"])
+        assert task is not None
+        assert task.status == "ready"
+        assert kanban_db.list_runs(conn, task.id) == []
+    finally:
+        conn.close()
+
+
 def test_historical_p18_9_0_start_authority_does_not_replay_for_next_ticket(
     projection_home,
     monkeypatch,
@@ -2672,14 +2839,31 @@ def test_start_current_ticket_execution_starts_retry_run_2_from_retry_pending(
     )
     assert recovery["recovery_status"] == "retry_pending"
 
-    with pytest.raises(pr.ProductRuntimeDecisionFailed):
-        pr.start_current_ticket_execution(
-            human_authorization_text=pr.PEPPER_CURRENT_EXECUTION_RECOVERY_AUTHORIZATION_TEXT,
-            project_id="PEPPER",
-            ticket_id="P18.9.0",
-            next_action_id="START_P18_9_0_RETRY_REQUIRES_HUMAN_AUTHORIZATION",
-            spawn_fn=lambda *_args, **_kwargs: pytest.fail("recovery text must not start retry"),
-        )
+    recovery_text_retry = pr.start_current_ticket_execution(
+        human_authorization_text=pr.PEPPER_CURRENT_EXECUTION_RECOVERY_AUTHORIZATION_TEXT,
+        project_id="PEPPER",
+        ticket_id="P18.9.0",
+        next_action_id="START_P18_9_0_RETRY_REQUIRES_HUMAN_AUTHORIZATION",
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("recovery text must not start retry"),
+    )
+    assert recovery_text_retry["retry_start_status"] == "blocked"
+    assert recovery_text_retry["blocker_code"] == "EXECUTION_AUTHORIZATION_KIND_MISMATCH"
+    assert recovery_text_retry["authorization_diagnostics"]["authorization_kind"] == (
+        "execution_recovery_authorization"
+    )
+
+    initial_text_retry = pr.start_current_ticket_execution(
+        human_authorization_text="Start P18.9.0 execution now",
+        project_id="PEPPER",
+        ticket_id="P18.9.0",
+        next_action_id="START_P18_9_0_RETRY_REQUIRES_HUMAN_AUTHORIZATION",
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("initial text must not start retry"),
+    )
+    assert initial_text_retry["retry_start_status"] == "blocked"
+    assert initial_text_retry["blocker_code"] == "EXECUTION_AUTHORIZATION_KIND_MISMATCH"
+    assert initial_text_retry["authorization_diagnostics"]["authorization_kind"] == (
+        "execution_start_authorization"
+    )
 
     monkeypatch.setattr(
         pr,
@@ -4362,6 +4546,54 @@ def test_chat_tool_rejects_stale_ticket_start_when_context_is_generic_current(
     assert "targets a different ticket" in result["error"]
 
 
+def test_chat_tool_rejects_retry_text_for_initial_current_ticket_generically(
+    monkeypatch,
+) -> None:
+    import tools.pepper_workflow_tools  # noqa: F401
+    from hermes_cli.agent_platform import product_runtime as pr
+    from model_tools import handle_function_call
+
+    monkeypatch.setattr(
+        pr,
+        "start_current_ticket_execution",
+        lambda **_kwargs: pytest.fail("start backend must not be called"),
+    )
+    monkeypatch.setattr(
+        pr,
+        "build_lead_agent_operational_context",
+        lambda: {
+            "current_ticket_id": "P18.9.1",
+            "workflow_state": "P18.9.1-QUEUED-NOT-EXECUTING",
+            "workflow_status": "queued",
+            "approval_state": "ticket_approved",
+            "pending_approval_count": 0,
+            "pending_ticket_approval_count": 0,
+            "queue_state": "kanban_projection_ready_not_dispatched",
+            "execution_state": "not_started",
+            "next_action": {
+                "id": "START_P18_9_1_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION",
+                "target_ticket_id": "P18.9.1",
+            },
+        },
+    )
+
+    result = json.loads(
+        handle_function_call(
+            "start_current_ticket_execution",
+            {
+                "human_authorization_text": "Retry P18.9.1 execution now",
+                "project_id": "PEPPER",
+                "ticket_id": "P18.9.1",
+                "next_action_id": "START_P18_9_1_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION",
+            },
+        )
+    )
+
+    assert result["success"] is False
+    assert "initial execution start authorization must not be retry authorization" in result["error"]
+    assert "P18.9.0 retry-start" not in result["error"]
+
+
 @pytest.mark.parametrize(
     "human_text",
     [
@@ -4637,7 +4869,7 @@ def test_chat_tool_rejects_missing_or_unsafe_user_task_recovery_authorization(
         ("¿Está listo para retry?", "must not be a question"),
         ("Tal vez iniciar P18.9.0", "ambiguous"),
         ("Parece que ya se puede volver a ejecutar.", "ambiguous"),
-        ("Reintenta P18.9.0, por favor", "exact explicit P18.9.0 retry-start"),
+        ("Reintenta P18.9.0, por favor", "initial execution start authorization must not be retry authorization"),
         (
             "Autorizo explícitamente la recuperación de la ejecución fallida de P18.9.0.",
             "must not be recovery authorization",
@@ -4659,6 +4891,24 @@ def test_chat_tool_rejects_missing_or_unsafe_user_task_start_authorization(
         "start_current_ticket_execution",
         lambda **_kwargs: pytest.fail("start backend must not be called"),
     )
+    monkeypatch.setattr(
+        pr,
+        "build_lead_agent_operational_context",
+        lambda: {
+            "current_ticket_id": "P18.9.0",
+            "workflow_state": "P18.9.0-QUEUED-NOT-EXECUTING",
+            "workflow_status": "queued",
+            "approval_state": "ticket_approved",
+            "pending_approval_count": 0,
+            "pending_ticket_approval_count": 0,
+            "queue_state": "kanban_projection_ready_not_dispatched",
+            "execution_state": "not_started",
+            "next_action": {
+                "id": "START_P18_9_0_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION",
+                "target_ticket_id": "P18.9.0",
+            },
+        },
+    )
 
     result = json.loads(
         handle_function_call(
@@ -4672,9 +4922,26 @@ def test_chat_tool_rejects_missing_or_unsafe_user_task_start_authorization(
     assert expected_error in result["error"]
 
 
-def test_chat_tool_rejects_ambiguous_execution_start_question() -> None:
+def test_chat_tool_rejects_ambiguous_execution_start_question(monkeypatch) -> None:
     import tools.pepper_workflow_tools  # noqa: F401
+    from hermes_cli.agent_platform import product_runtime as pr
     from model_tools import handle_function_call
+
+    monkeypatch.setattr(
+        pr,
+        "build_lead_agent_operational_context",
+        lambda: {
+            "current_ticket_id": "P18.9.0",
+            "workflow_state": "P18.9.0-QUEUED-NOT-EXECUTING",
+            "workflow_status": "queued",
+            "queue_state": "kanban_projection_ready_not_dispatched",
+            "execution_state": "not_started",
+            "next_action": {
+                "id": "START_P18_9_0_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION",
+                "target_ticket_id": "P18.9.0",
+            },
+        },
+    )
 
     result = json.loads(
         handle_function_call(

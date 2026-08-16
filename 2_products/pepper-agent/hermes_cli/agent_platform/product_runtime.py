@@ -48,13 +48,7 @@ PEPPER_BOOTSTRAP_NEXT_TICKET_TITLE = "Product Inventory, IA Decision, and Accept
 PEPPER_NEXT_TICKET_ID = PEPPER_BOOTSTRAP_NEXT_TICKET_ID
 PEPPER_NEXT_TICKET_TITLE = PEPPER_BOOTSTRAP_NEXT_TICKET_TITLE
 PEPPER_WORKFLOW_CONTEXT_SOURCE_SYSTEM = "pepper-lead-agent-governed-context"
-PEPPER_CURRENT_EXECUTION_START_NEXT_ACTION_ID = (
-    "START_P18_9_0_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION"
-)
 PEPPER_CURRENT_EXECUTION_RECOVERY_NEXT_ACTION_ID = "RECOVER_P18_9_0_EXECUTION"
-PEPPER_CURRENT_RETRY_START_NEXT_ACTION_ID = (
-    "START_P18_9_0_RETRY_REQUIRES_HUMAN_AUTHORIZATION"
-)
 PEPPER_CURRENT_EXECUTION_RECOVERY_AUTHORIZATION_TEXT = (
     "Autorizo explícitamente la recuperación de la ejecución fallida de P18.9.0."
 )
@@ -114,12 +108,6 @@ PEPPER_REVIEW_HUMAN_ACCEPTANCE_READY_MARKER = (
 PEPPER_CURRENT_REVIEW_ACCEPTANCE_TEXT = (
     "Acepto explícitamente la review de P18.9.0 y el resultado preparado para aceptación humana."
 )
-PEPPER_CURRENT_RETRY_START_AUTHORIZATION_TEXTS = frozenset({
-    "Autorizo explícitamente el retry de P18.9.0.",
-    "Reintenta P18.9.0.",
-    "Inicia el segundo intento de P18.9.0.",
-})
-
 PEPPER_GOVERNED_EXECUTOR_PROVIDER = "openai-codex"
 PEPPER_GOVERNED_EXECUTOR_MODEL = "gpt-5.5"
 PEPPER_GOVERNED_EXECUTOR_API_MODE = "codex_responses"
@@ -2095,7 +2083,7 @@ def validate_p18_9_0_retry_start_record(
         recovery = load_p18_9_0_recovery_action_record(projection_record=projection)
     if recovery is None:
         raise ProductRuntimeConflict("retry-start record requires recovery authority")
-    _binding, identity = _current_ticket_identity_fields(projection)
+    binding, identity = _current_ticket_identity_fields(projection)
     expected = {
         "schema_version": PEPPER_RETRY_START_ACTION_SCHEMA_VERSION,
         "policy_id": PEPPER_RETRY_START_ACTION_POLICY_ID,
@@ -2123,8 +2111,19 @@ def validate_p18_9_0_retry_start_record(
     for key, value in expected.items():
         if record.get(key) != value:
             raise ProductRuntimeConflict(f"retry-start record {key} mismatch")
-    if record.get("human_authorization_text") not in PEPPER_CURRENT_RETRY_START_AUTHORIZATION_TEXTS:
-        raise ProductRuntimeConflict("retry-start record human authorization text mismatch")
+    authorization_diagnostics = execution_human_authorization_text_diagnostics(
+        str(record.get("human_authorization_text") or ""),
+        current_ticket_id=binding.ticket_id,
+        requested_ticket_id=record.get("ticket_id"),
+        current_next_action_id=binding.retry_start_next_action_id,
+        requested_next_action_id=binding.retry_start_next_action_id,
+        expected_authorization_kind="execution_retry_authorization",
+    )
+    if authorization_diagnostics is not None:
+        raise ProductRuntimeConflict(
+            "retry-start record human authorization text mismatch: "
+            f"{authorization_diagnostics['blocker_detail']}"
+        )
     if int(record.get("previous_attempt_count") or 0) != int(recovery["observed_attempt_count"]):
         raise ProductRuntimeConflict("retry-start record previous_attempt_count mismatch")
     if int(record.get("next_attempt_number") or 0) != int(recovery["next_attempt_number"]):
@@ -2606,12 +2605,21 @@ def start_current_ticket_execution(
             spawn_fn=spawn_fn,
         )
 
-    if request.human_authorization_text.strip() in PEPPER_CURRENT_RETRY_START_AUTHORIZATION_TEXTS:
+    authorization_diagnostics = execution_human_authorization_text_diagnostics(
+        request.human_authorization_text,
+        current_ticket_id=binding.ticket_id,
+        requested_ticket_id=request.ticket_id,
+        current_next_action_id=workflow_next_action_id,
+        requested_next_action_id=request.next_action_id,
+        expected_authorization_kind="execution_start_authorization",
+    )
+    if authorization_diagnostics is not None:
         return _blocked_current_execution_start_result(
             projection,
             request=request,
-            blocker_code="WORKFLOW_RETRY_START_ACTION_GAP",
-            blocker_detail="retry-start authorization was supplied but retry start is not the active next action",
+            blocker_code=str(authorization_diagnostics["blocker_code"]),
+            blocker_detail=str(authorization_diagnostics["blocker_detail"]),
+            authorization_diagnostics=authorization_diagnostics,
         )
 
     try:
@@ -2778,7 +2786,27 @@ def _start_current_ticket_retry_execution(
     workflow: dict[str, Any],
     spawn_fn: Any = None,
 ) -> dict[str, Any]:
-    _validate_execution_retry_start_authorization_text(request.human_authorization_text)
+    binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
+    workflow_next_action = workflow.get("next_action")
+    workflow_next_action_id = (
+        workflow_next_action.get("id") if isinstance(workflow_next_action, dict) else None
+    )
+    authorization_diagnostics = execution_human_authorization_text_diagnostics(
+        request.human_authorization_text,
+        current_ticket_id=binding.ticket_id,
+        requested_ticket_id=request.ticket_id,
+        current_next_action_id=workflow_next_action_id,
+        requested_next_action_id=request.next_action_id,
+        expected_authorization_kind="execution_retry_authorization",
+    )
+    if authorization_diagnostics is not None:
+        return _blocked_current_execution_retry_start_result(
+            projection,
+            request=request,
+            blocker_code=str(authorization_diagnostics["blocker_code"]),
+            blocker_detail=str(authorization_diagnostics["blocker_detail"]),
+            authorization_diagnostics=authorization_diagnostics,
+        )
     recovery_record = load_p18_9_0_recovery_action_record(projection_record=projection)
     if recovery_record is None:
         return _blocked_current_execution_retry_start_result(
@@ -2945,11 +2973,207 @@ def _validate_execution_start_request_guards(
         )
 
 
-def _validate_execution_retry_start_authorization_text(value: str) -> None:
-    if value.strip() not in PEPPER_CURRENT_RETRY_START_AUTHORIZATION_TEXTS:
-        raise ProductRuntimeDecisionFailed(
-            "exact explicit P18.9.0 retry-start authorization text is required"
+def execution_authorization_kind_for_action_id(
+    next_action_id: str | None,
+    *,
+    ticket_id: str,
+) -> str | None:
+    action_ids = governed_ticket_lifecycle_action_ids(ticket_id)
+    if next_action_id == action_ids["execution_start"]:
+        return "execution_start_authorization"
+    if next_action_id == action_ids["retry_start"]:
+        return "execution_retry_authorization"
+    return None
+
+
+def expected_execution_authorization_kind(
+    *,
+    ticket_id: str,
+    requested_next_action_id: str | None = None,
+    current_next_action_id: str | None = None,
+) -> str:
+    return (
+        execution_authorization_kind_for_action_id(
+            requested_next_action_id,
+            ticket_id=ticket_id,
         )
+        or execution_authorization_kind_for_action_id(
+            current_next_action_id,
+            ticket_id=ticket_id,
+        )
+        or "execution_start_authorization"
+    )
+
+
+def execution_human_authorization_text_diagnostics(
+    value: str,
+    *,
+    current_ticket_id: str,
+    requested_ticket_id: str | None = None,
+    current_next_action_id: str | None = None,
+    requested_next_action_id: str | None = None,
+    expected_authorization_kind: str | None = None,
+) -> dict[str, Any] | None:
+    expected_kind = expected_authorization_kind or expected_execution_authorization_kind(
+        ticket_id=current_ticket_id,
+        requested_next_action_id=requested_next_action_id,
+        current_next_action_id=current_next_action_id,
+    )
+    raw = str(value or "").strip()
+    normalized = _normalize_authorization_intent_text(raw)
+    observed_kind = _observed_execution_authorization_kind(normalized)
+    expected_next_action_id = (
+        governed_ticket_lifecycle_action_ids(current_ticket_id)["retry_start"]
+        if expected_kind == "execution_retry_authorization"
+        else governed_ticket_lifecycle_action_ids(current_ticket_id)["execution_start"]
+    )
+    base = {
+        "current_ticket_id": current_ticket_id,
+        "requested_ticket_id": requested_ticket_id,
+        "current_next_action_id": current_next_action_id,
+        "requested_next_action_id": requested_next_action_id,
+        "expected_next_action_id": expected_next_action_id,
+        "authorization_kind": observed_kind,
+        "expected_authorization_kind": expected_kind,
+    }
+
+    def blocked(code: str, detail: str) -> dict[str, Any]:
+        return {
+            **base,
+            "blocker_code": code,
+            "blocker_detail": detail,
+        }
+
+    if not raw:
+        return blocked(
+            "EXECUTION_HUMAN_AUTHORIZATION_TEXT_GAP",
+            "human_authorization_text is required",
+        )
+    if "?" in raw or "¿" in raw:
+        return blocked(
+            "EXECUTION_HUMAN_AUTHORIZATION_TEXT_GAP",
+            "execution authorization text must not be a question",
+        )
+    if _authorization_text_is_ambiguous(normalized):
+        return blocked(
+            "EXECUTION_HUMAN_AUTHORIZATION_TEXT_GAP",
+            "execution authorization text is ambiguous",
+        )
+    if _authorization_text_has_recovery_intent(normalized):
+        return blocked(
+            "EXECUTION_AUTHORIZATION_KIND_MISMATCH",
+            "execution authorization must not be recovery authorization",
+        )
+
+    mentioned_ticket_ids = _mentioned_authorization_ticket_ids(normalized)
+    base["mentioned_ticket_ids"] = sorted(mentioned_ticket_ids)
+    if not mentioned_ticket_ids:
+        return blocked(
+            "EXECUTION_HUMAN_AUTHORIZATION_TEXT_GAP",
+            "execution authorization text must name the current ticket",
+        )
+    if current_ticket_id.upper() not in mentioned_ticket_ids:
+        return blocked(
+            "EXECUTION_AUTHORIZATION_TICKET_MISMATCH",
+            "execution authorization targets a different ticket",
+        )
+
+    retry_intent = _authorization_text_has_retry_intent(normalized)
+    start_intent = _authorization_text_has_start_intent(normalized)
+    if expected_kind == "execution_start_authorization":
+        if retry_intent:
+            return blocked(
+                "EXECUTION_AUTHORIZATION_KIND_MISMATCH",
+                "initial execution start authorization must not be retry authorization",
+            )
+        if not start_intent:
+            return blocked(
+                "EXECUTION_HUMAN_AUTHORIZATION_TEXT_GAP",
+                "explicit execution start authorization text is required",
+            )
+        return None
+
+    if expected_kind == "execution_retry_authorization":
+        if not retry_intent:
+            return blocked(
+                "EXECUTION_AUTHORIZATION_KIND_MISMATCH",
+                "explicit execution retry authorization text is required",
+            )
+        return None
+
+    return blocked(
+        "EXECUTION_AUTHORIZATION_KIND_MISMATCH",
+        f"unsupported execution authorization kind {expected_kind}",
+    )
+
+
+def _normalize_authorization_intent_text(value: str) -> str:
+    text = unicodedata.normalize("NFKD", str(value or "").strip())
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return text.lower()
+
+
+def _mentioned_authorization_ticket_ids(normalized: str) -> set[str]:
+    return {match.group(0).upper() for match in re.finditer(r"\bP\d+(?:\.\d+)+\b", normalized, re.I)}
+
+
+def _authorization_text_is_ambiguous(normalized: str) -> bool:
+    return any(
+        phrase in normalized
+        for phrase in (
+            "creo que",
+            "pienso que",
+            "tal vez",
+            "parece que",
+            "quizas",
+            "quiza",
+            "maybe",
+            "probably",
+            "looks like",
+            "what if",
+            "que pasa si",
+            "si lo ejecuto",
+            "if i start",
+        )
+    )
+
+
+def _authorization_text_has_recovery_intent(normalized: str) -> bool:
+    return bool(
+        "recuperacion" in normalized
+        or "recuperar" in normalized
+        or re.search(r"\brecovery\b", normalized)
+    )
+
+
+def _authorization_text_has_retry_intent(normalized: str) -> bool:
+    return bool(
+        re.search(r"\b(retry|retries|retried|reintenta|reintentar|reintento)\b", normalized)
+        or "segundo intento" in normalized
+        or "volver a ejecutar" in normalized
+    )
+
+
+def _authorization_text_has_start_intent(normalized: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(start|execute|execution|dispatch|run|authorize|authorized|authorization|"
+            r"inicia|iniciar|inicio|ejecuta|ejecutar|ejecucion|despacha|despachar|"
+            r"lanza|lanzar|arranca|arrancar|autoriza|autorizo|autorizar|autorizado|"
+            r"autorizacion)\b",
+            normalized,
+        )
+    )
+
+
+def _observed_execution_authorization_kind(normalized: str) -> str:
+    if _authorization_text_has_recovery_intent(normalized):
+        return "execution_recovery_authorization"
+    if _authorization_text_has_retry_intent(normalized):
+        return "execution_retry_authorization"
+    if _authorization_text_has_start_intent(normalized):
+        return "execution_start_authorization"
+    return "unknown"
 
 
 def _validate_execution_start_authority(projection: dict[str, Any]) -> None:
@@ -4250,6 +4474,7 @@ def _blocked_current_execution_start_result(
     blocker_detail: str,
     provider_readiness: dict[str, Any] | None = None,
     authorization_mismatch: dict[str, Any] | None = None,
+    authorization_diagnostics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "source_system": PEPPER_WORKER_START_ACTION_SOURCE_SYSTEM,
@@ -4279,6 +4504,7 @@ def _blocked_current_execution_start_result(
         "auto_rollback": False,
         "provider_readiness": provider_readiness,
         "authorization_mismatch": authorization_mismatch,
+        "authorization_diagnostics": authorization_diagnostics,
     }
 
 
@@ -4342,6 +4568,7 @@ def _blocked_current_execution_retry_start_result(
     recovery_record: dict[str, Any] | None = None,
     retry_source: dict[str, Any] | None = None,
     provider_readiness: dict[str, Any] | None = None,
+    authorization_diagnostics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "source_system": PEPPER_RETRY_START_ACTION_SOURCE_SYSTEM,
@@ -4390,6 +4617,7 @@ def _blocked_current_execution_retry_start_result(
         "auto_rollback": False,
         "retry_source": retry_source,
         "provider_readiness": provider_readiness,
+        "authorization_diagnostics": authorization_diagnostics,
     }
 
 

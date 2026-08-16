@@ -14,9 +14,7 @@ TOOLSET = "pepper_workflow"
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 100
 CURRENT_TICKET_APPROVAL_ID = "P18.9.0"
-CURRENT_TICKET_START_NEXT_ACTION_ID = "START_P18_9_0_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION"
 CURRENT_TICKET_RECOVERY_NEXT_ACTION_ID = "RECOVER_P18_9_0_EXECUTION"
-CURRENT_TICKET_RETRY_START_NEXT_ACTION_ID = "START_P18_9_0_RETRY_REQUIRES_HUMAN_AUTHORIZATION"
 CURRENT_TICKET_REVIEW_PREPARE_NEXT_ACTION_ID = "PREPARE_P18_9_0_REVIEW"
 CURRENT_TICKET_REVIEW_ACCEPTANCE_NEXT_ACTION_ID = "AWAIT_HUMAN_P18_9_0_REVIEW_ACCEPTANCE"
 CURRENT_TICKET_RECOVERY_AUTHORIZATION_TEXT = (
@@ -25,11 +23,6 @@ CURRENT_TICKET_RECOVERY_AUTHORIZATION_TEXT = (
 CURRENT_TICKET_REVIEW_ACCEPTANCE_TEXT = (
     "Acepto explícitamente la review de P18.9.0 y el resultado preparado para aceptación humana."
 )
-CURRENT_TICKET_RETRY_START_AUTHORIZATION_TEXTS = frozenset({
-    "Autorizo explícitamente el retry de P18.9.0.",
-    "Reintenta P18.9.0.",
-    "Inicia el segundo intento de P18.9.0.",
-})
 CURRENT_PROJECT_ID = "PEPPER"
 
 
@@ -257,50 +250,32 @@ def _validate_explicit_start_request(
     value: object,
     *,
     current_ticket_id: str | None = None,
+    requested_ticket_id: str | None = None,
+    current_next_action_id: str | None = None,
+    requested_next_action_id: str | None = None,
 ) -> str:
     raw = str(value or "").strip()
     if not raw:
         raise ValueError("human_authorization_text is required")
-    normalized = _normalize_intent_text(raw)
-    if "?" in raw or "¿" in raw:
-        raise ValueError("execution start authorization text must not be a question")
-    if any(
-        phrase in normalized
-        for phrase in (
-            "creo que",
-            "pienso que",
-            "tal vez",
-            "parece que",
-            "quizas",
-            "quiza",
-            "maybe",
-            "probably",
-            "looks like",
-            "what if",
-            "que pasa si",
-            "si lo ejecuto",
-            "if i start",
-        )
-    ):
-        raise ValueError("execution start authorization text is ambiguous")
-    expected_ticket_id = str(current_ticket_id or CURRENT_TICKET_APPROVAL_ID).strip()
-    ticket_ids = _mentioned_ticket_ids(normalized)
-    if ticket_ids and expected_ticket_id.upper() not in ticket_ids:
-        raise ValueError("execution start authorization targets a different ticket")
-    if "recuperacion" in normalized or "recuperar" in normalized or "recovery" in normalized:
-        raise ValueError("execution start authorization must not be recovery authorization")
-    retry_intent = bool(
-        re.search(r"\b(retry|reintenta|reintentar|reintento)\b", normalized)
-        or "segundo intento" in normalized
-        or "volver a ejecutar" in normalized
+    expected_ticket_id = str(current_ticket_id or requested_ticket_id or "").strip()
+    if not expected_ticket_id:
+        raise ValueError("current ticket is unavailable for execution authorization")
+    pr = _runtime()
+    expected_kind = pr.expected_execution_authorization_kind(
+        ticket_id=expected_ticket_id,
+        requested_next_action_id=requested_next_action_id,
+        current_next_action_id=current_next_action_id,
     )
-    if retry_intent and raw not in CURRENT_TICKET_RETRY_START_AUTHORIZATION_TEXTS:
-        raise ValueError("exact explicit P18.9.0 retry-start authorization text is required")
-    if not re.search(
-        r"\b(start|execute|execution|dispatch|run|retry|authorize|authorized|authorization|inicia|iniciar|inicio|ejecuta|ejecutar|ejecucion|despacha|despachar|lanza|lanzar|arranca|arrancar|autoriza|autorizo|autorizar|autorizado|autorizacion|reintenta|reintentar|reintento)\b",
-        normalized,
-    ):
-        raise ValueError("explicit execution start authorization text is required")
+    diagnostics = pr.execution_human_authorization_text_diagnostics(
+        raw,
+        current_ticket_id=expected_ticket_id,
+        requested_ticket_id=requested_ticket_id,
+        current_next_action_id=current_next_action_id,
+        requested_next_action_id=requested_next_action_id,
+        expected_authorization_kind=expected_kind,
+    )
+    if diagnostics is not None:
+        raise ValueError(str(diagnostics["blocker_detail"]))
     return raw
 
 
@@ -778,16 +753,25 @@ def _start_current_ticket_execution(args: dict[str, Any], **_kwargs) -> str:
         current_ticket_id = str(
             context.get("current_ticket_id") or args.get("ticket_id") or ""
         ).strip()
+        next_action = context.get("next_action")
+        current_next_action_id = (
+            next_action.get("id") if isinstance(next_action, dict) else None
+        )
+        requested_ticket_id = str(args.get("ticket_id") or "").strip() or None
+        requested_next_action_id = str(args.get("next_action_id") or "").strip() or None
         human_authorization_text = _validate_explicit_start_request(
             _start_authorization_text_from_args_or_user_task(args, _kwargs),
             current_ticket_id=current_ticket_id,
+            requested_ticket_id=requested_ticket_id,
+            current_next_action_id=current_next_action_id,
+            requested_next_action_id=requested_next_action_id,
         )
         result = pr.start_current_ticket_execution(
             human_authorization_text=human_authorization_text,
             authorizer_id="pepper-chat-human",
             project_id=str(args.get("project_id") or "").strip() or None,
-            ticket_id=str(args.get("ticket_id") or "").strip() or None,
-            next_action_id=str(args.get("next_action_id") or "").strip() or None,
+            ticket_id=requested_ticket_id,
+            next_action_id=requested_next_action_id,
         )
         updated_context = pr.build_lead_agent_operational_context()
     except Exception as exc:
