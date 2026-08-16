@@ -253,7 +253,11 @@ def _validate_explicit_reconciliation_request(value: object) -> str:
     return raw
 
 
-def _validate_explicit_start_request(value: object) -> str:
+def _validate_explicit_start_request(
+    value: object,
+    *,
+    current_ticket_id: str | None = None,
+) -> str:
     raw = str(value or "").strip()
     if not raw:
         raise ValueError("human_authorization_text is required")
@@ -279,8 +283,9 @@ def _validate_explicit_start_request(value: object) -> str:
         )
     ):
         raise ValueError("execution start authorization text is ambiguous")
+    expected_ticket_id = str(current_ticket_id or CURRENT_TICKET_APPROVAL_ID).strip()
     ticket_ids = _mentioned_ticket_ids(normalized)
-    if ticket_ids and CURRENT_TICKET_APPROVAL_ID not in ticket_ids:
+    if ticket_ids and expected_ticket_id.upper() not in ticket_ids:
         raise ValueError("execution start authorization targets a different ticket")
     if "recuperacion" in normalized or "recuperar" in normalized or "recovery" in normalized:
         raise ValueError("execution start authorization must not be recovery authorization")
@@ -769,8 +774,13 @@ def _prepare_current_ticket_execution(args: dict[str, Any], **_kwargs) -> str:
 def _start_current_ticket_execution(args: dict[str, Any], **_kwargs) -> str:
     pr = _runtime()
     try:
+        context = _context()
+        current_ticket_id = str(
+            context.get("current_ticket_id") or args.get("ticket_id") or ""
+        ).strip()
         human_authorization_text = _validate_explicit_start_request(
-            _start_authorization_text_from_args_or_user_task(args, _kwargs)
+            _start_authorization_text_from_args_or_user_task(args, _kwargs),
+            current_ticket_id=current_ticket_id,
         )
         result = pr.start_current_ticket_execution(
             human_authorization_text=human_authorization_text,
@@ -1067,7 +1077,7 @@ _START_CURRENT_TICKET_EXECUTION_SCHEMA = {
     "properties": {
         "human_authorization_text": {
             "type": "string",
-            "description": "Exact user phrase explicitly authorizing start/dispatch of P18.9.0 execution or the accepted retry-start phrase when retry is pending.",
+            "description": "Exact user phrase explicitly authorizing start/dispatch of the current governed ticket execution or the accepted retry-start phrase when retry is pending.",
         },
         "project_id": {
             "type": "string",
@@ -1075,11 +1085,11 @@ _START_CURRENT_TICKET_EXECUTION_SCHEMA = {
         },
         "ticket_id": {
             "type": "string",
-            "description": "Optional governed ticket guard. Must be P18.9.0 if supplied.",
+            "description": "Optional governed ticket guard. Must equal the current governed ticket if supplied.",
         },
         "next_action_id": {
             "type": "string",
-            "description": "Optional next-action guard. Must be START_P18_9_0_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION or START_P18_9_0_RETRY_REQUIRES_HUMAN_AUTHORIZATION if supplied.",
+            "description": "Optional next-action guard. Must equal the current ticket execution-start or retry-start authorization action if supplied.",
         },
     },
     "required": ["human_authorization_text"],

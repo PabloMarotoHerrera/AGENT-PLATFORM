@@ -213,6 +213,14 @@ class ProductRuntimeConflict(ProductRuntimeError):
     """Raised when a source-local identifier is ambiguous."""
 
 
+class ProductRuntimeAuthorityMismatch(ProductRuntimeConflict):
+    """Raised when a persisted authority no longer matches current identity."""
+
+    def __init__(self, message: str, *, diagnostics: dict[str, Any]) -> None:
+        self.diagnostics = diagnostics
+        super().__init__(message)
+
+
 class ProductRuntimeDecisionFailed(ProductRuntimeError):
     """Raised when an approval decision cannot be applied safely."""
 
@@ -496,12 +504,51 @@ def _current_generation_record_for_binding() -> dict[str, Any] | None:
         return None
 
 
+def _current_projected_ticket_id_from_records() -> str | None:
+    try:
+        from hermes_cli.agent_platform.workflow.work_packet_kanban_projection import (
+            kanban_projection_record_path,
+            load_kanban_projection_record,
+        )
+    except Exception:
+        return None
+
+    root = kanban_projection_record_path().parent
+    if not root.exists():
+        return None
+    candidates: list[Path] = []
+    try:
+        candidates = sorted(
+            root.glob("*.json"),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+    except OSError:
+        return None
+    canonical_name = kanban_projection_record_path().name
+    for path in candidates:
+        ticket_id = PEPPER_BOOTSTRAP_NEXT_TICKET_ID if path.name == canonical_name else path.stem
+        try:
+            projection = load_kanban_projection_record(ticket_id=ticket_id)
+        except Exception:
+            continue
+        if projection is not None:
+            return str(projection.get("ticket_id") or ticket_id)
+    return None
+
+
 def _current_projection_record_for_binding() -> dict[str, Any] | None:
     try:
         from hermes_cli.agent_platform.workflow.work_packet_kanban_projection import (
+            load_kanban_projection_record,
             load_p18_9_0_kanban_projection_record,
         )
 
+        ticket_id = _current_projected_ticket_id_from_records()
+        if ticket_id:
+            projection = load_kanban_projection_record(ticket_id=ticket_id)
+            if projection is not None:
+                return projection
         return load_p18_9_0_kanban_projection_record()
     except Exception:
         return None
@@ -520,7 +567,7 @@ def resolve_current_ticket_lifecycle_binding(
         projection = _current_projection_record_for_binding()
     if generation is None:
         generation = _current_generation_record_for_binding()
-    authority = generation if isinstance(generation, dict) else projection
+    authority = projection if isinstance(projection, dict) else generation
     authority = authority if isinstance(authority, dict) else {}
 
     ticket_id = _safe_text(authority.get("ticket_id") or PEPPER_NEXT_TICKET_ID, limit=128)
@@ -584,6 +631,24 @@ def governed_ticket_lifecycle_authority_path(
     )
     store_dir, suffix = _GOVERNED_TICKET_AUTHORITY_PATH_SPECS[kind]
     return get_hermes_home() / store_dir / f"{scoped_ticket_id}.{suffix}"
+
+
+def execution_start_record_path_for_ticket(ticket_id: str) -> Path:
+    """Return the profile-scoped execution-start authority path for one ticket."""
+
+    return governed_ticket_lifecycle_authority_path(
+        "execution_start",
+        ticket_id=ticket_id,
+    )
+
+
+def _execution_start_record_path_for_projection(
+    projection_record: dict[str, Any] | None = None,
+) -> Path:
+    if projection_record is not None:
+        return execution_start_record_path_for_ticket(str(projection_record["ticket_id"]))
+    projection = _load_current_projection_record()
+    return execution_start_record_path_for_ticket(str(projection["ticket_id"]))
 
 
 def _current_ticket_identity_fields(
@@ -1557,10 +1622,7 @@ def project_current_approved_workpacket_to_kanban(
 def p18_9_0_execution_start_record_path() -> Path:
     """Return the profile-scoped P18.9.0 execution-start authority path."""
 
-    return governed_ticket_lifecycle_authority_path(
-        "execution_start",
-        ticket_id=PEPPER_NEXT_TICKET_ID,
-    )
+    return execution_start_record_path_for_ticket(PEPPER_BOOTSTRAP_NEXT_TICKET_ID)
 
 
 def p18_9_0_recovery_action_record_path() -> Path:
@@ -1641,14 +1703,14 @@ def load_p18_9_0_execution_start_record(
 ) -> dict[str, Any] | None:
     """Load and validate the bounded P18.9.0 worker-start record, if present."""
 
-    path = p18_9_0_execution_start_record_path()
+    path = _execution_start_record_path_for_projection(projection_record)
     if not path.exists():
         return None
     try:
         record = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise ProductRuntimeConflict(
-            "P18.9.0 execution-start authorization record is unreadable"
+            "execution-start authorization record is unreadable"
         ) from exc
     return validate_p18_9_0_execution_start_record(
         record,
@@ -1886,8 +1948,27 @@ def validate_p18_9_0_execution_start_record(
         "auto_retry": False,
         "auto_rollback": False,
     }
+    authority_identity_fields = {
+        "ticket_id",
+        "ticket_spec_SHA256",
+        "work_packet_id",
+        "work_packet_SHA256",
+        "projection_SHA256",
+        "kanban_task_id",
+        "assignee_profile",
+        "selected_profile",
+    }
     for key, value in expected.items():
         if record.get(key) != value:
+            if key in authority_identity_fields:
+                raise ProductRuntimeAuthorityMismatch(
+                    f"execution-start record {key} mismatch",
+                    diagnostics=_execution_start_authority_mismatch_diagnostics(
+                        record,
+                        projection,
+                        mismatched_field=key,
+                    ),
+                )
             raise ProductRuntimeConflict(f"execution-start record {key} mismatch")
     return record
 
@@ -2481,8 +2562,8 @@ def start_current_ticket_execution(
         ticket_id=ticket_id,
         next_action_id=next_action_id,
     )
-    _validate_execution_start_request_guards(request)
     projection = _load_current_projection_record()
+    _validate_execution_start_request_guards(request, projection_record=projection)
     _validate_execution_start_authority(projection)
     binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
     workflow = build_workflow_control_snapshot()
@@ -2513,7 +2594,16 @@ def start_current_ticket_execution(
             blocker_detail="retry-start authorization was supplied but retry start is not the active next action",
         )
 
-    existing = load_p18_9_0_execution_start_record(projection_record=projection)
+    try:
+        existing = load_p18_9_0_execution_start_record(projection_record=projection)
+    except ProductRuntimeAuthorityMismatch as exc:
+        return _blocked_current_execution_start_result(
+            projection,
+            request=request,
+            blocker_code="EXECUTION_START_AUTHORITY_STALE",
+            blocker_detail=str(exc),
+            authorization_mismatch=exc.diagnostics,
+        )
     if existing is not None and bool(existing.get("execution_started")):
         return _execution_start_operational_result(existing, idempotent_replay=True)
 
@@ -2797,19 +2887,29 @@ def _start_current_ticket_retry_execution(
 
 def _load_current_projection_record() -> dict[str, Any]:
     from hermes_cli.agent_platform.workflow.work_packet_kanban_projection import (
+        load_kanban_projection_record,
         load_p18_9_0_kanban_projection_record,
     )
 
+    ticket_id = _current_projected_ticket_id_from_records()
+    if ticket_id:
+        projection = load_kanban_projection_record(ticket_id=ticket_id)
+        if projection is not None:
+            return projection
     projection = load_p18_9_0_kanban_projection_record()
     if projection is None:
-        raise ProductRuntimeNotFound("P18.9.0 Kanban projection not found")
+        raise ProductRuntimeNotFound("current Kanban projection not found")
     return projection
 
 
 def _validate_execution_start_request_guards(
     request: CurrentTicketExecutionStartRequest,
+    *,
+    projection_record: dict[str, Any] | None = None,
 ) -> None:
-    binding = resolve_current_ticket_lifecycle_binding()
+    binding = resolve_current_ticket_lifecycle_binding(
+        projection_record=projection_record,
+    )
     if request.project_id not in {None, binding.project_id}:
         raise ProductRuntimeConflict(f"execution start is bounded to project {binding.project_id}")
     if request.ticket_id not in {None, binding.ticket_id}:
@@ -4129,6 +4229,7 @@ def _blocked_current_execution_start_result(
     blocker_code: str,
     blocker_detail: str,
     provider_readiness: dict[str, Any] | None = None,
+    authorization_mismatch: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "source_system": PEPPER_WORKER_START_ACTION_SOURCE_SYSTEM,
@@ -4157,6 +4258,7 @@ def _blocked_current_execution_start_result(
         "auto_retry": False,
         "auto_rollback": False,
         "provider_readiness": provider_readiness,
+        "authorization_mismatch": authorization_mismatch,
     }
 
 
@@ -4407,7 +4509,7 @@ def _retry_start_operational_result(
         conn.close()
     task_visibility = None
     terminal_state = (
-        _p18_9_0_terminal_execution_state(task, runs)
+        _p18_9_0_terminal_execution_state(task, runs, ticket_id=str(record["ticket_id"]))
         if bool(record.get("execution_started"))
         else None
     )
@@ -4548,7 +4650,7 @@ def _retry_start_operational_result(
         "human_smoke_marker": record["human_smoke_marker"],
         "next_action": {
             "id": next_action_id,
-            "target_ticket_id": PEPPER_NEXT_TICKET_ID,
+            "target_ticket_id": record["ticket_id"],
         },
     }
 
@@ -4571,7 +4673,7 @@ def _execution_start_operational_result(
         conn.close()
     task_visibility = None
     terminal_state = (
-        _p18_9_0_terminal_execution_state(task, runs)
+        _p18_9_0_terminal_execution_state(task, runs, ticket_id=str(record["ticket_id"]))
         if bool(record.get("execution_started"))
         else None
     )
@@ -4656,18 +4758,24 @@ def _execution_start_operational_result(
         "runs": [_run_dict(run) for run in runs],
         "next_action": {
             "id": next_action_id,
-            "target_ticket_id": PEPPER_NEXT_TICKET_ID,
+            "target_ticket_id": record["ticket_id"],
         },
     }
 
 
-def _p18_9_0_terminal_execution_state(task: Any, runs: list[Any]) -> dict[str, Any] | None:
+def _p18_9_0_terminal_execution_state(
+    task: Any,
+    runs: list[Any],
+    *,
+    ticket_id: str = PEPPER_BOOTSTRAP_NEXT_TICKET_ID,
+) -> dict[str, Any] | None:
+    action_ids = governed_ticket_lifecycle_action_ids(ticket_id)
     if task is None:
         return {
             "start_status": "failed",
             "blocker_code": "KANBAN_TASK_GAP",
             "blocker_detail": "projected Kanban task is missing after execution start",
-            "next_action_id": "RECOVER_P18_9_0_EXECUTION",
+            "next_action_id": action_ids["execution_recovery"],
             "outcome": "task_missing",
             "failure_category": "task_missing",
             "failure_summary": "projected Kanban task is missing after execution start",
@@ -4683,7 +4791,7 @@ def _p18_9_0_terminal_execution_state(task: Any, runs: list[Any]) -> dict[str, A
             "start_status": "completed",
             "blocker_code": None,
             "blocker_detail": None,
-            "next_action_id": "PREPARE_P18_9_0_REVIEW",
+            "next_action_id": action_ids["review_prepare"],
             "outcome": "completed",
         }
     failure_outcome = outcome or run_status
@@ -4702,7 +4810,7 @@ def _p18_9_0_terminal_execution_state(task: Any, runs: list[Any]) -> dict[str, A
             "start_status": "failed",
             "blocker_code": "WORKER_LIFECYCLE_RECONCILIATION_REQUIRED",
             "blocker_detail": _safe_text(detail, limit=300),
-            "next_action_id": "RECOVER_P18_9_0_EXECUTION",
+            "next_action_id": action_ids["execution_recovery"],
             "outcome": failure_outcome or task_status,
             "failure_category": (
                 failure_fields.get("failure_category")
@@ -4721,7 +4829,7 @@ def _p18_9_0_terminal_execution_state(task: Any, runs: list[Any]) -> dict[str, A
             "start_status": "failed",
             "blocker_code": "WORKER_LIFECYCLE_RECONCILIATION_REQUIRED",
             "blocker_detail": f"Kanban run ended with status {run_status or 'unknown'}",
-            "next_action_id": "RECOVER_P18_9_0_EXECUTION",
+            "next_action_id": action_ids["execution_recovery"],
             "outcome": failure_outcome or "ended_without_outcome",
             "failure_category": (
                 failure_fields.get("failure_category")
@@ -4749,9 +4857,34 @@ def _execution_start_record_digest(record: dict[str, Any]) -> str:
     ).hexdigest()
 
 
+def _execution_start_authority_mismatch_diagnostics(
+    record: dict[str, Any],
+    projection: dict[str, Any],
+    *,
+    mismatched_field: str,
+) -> dict[str, Any]:
+    return {
+        "mismatched_field": mismatched_field,
+        "current_ticket_id": projection.get("ticket_id"),
+        "authorization_ticket_id": record.get("ticket_id"),
+        "expected_ticket_spec_SHA256": projection.get("ticket_spec_SHA256"),
+        "authorization_ticket_spec_SHA256": record.get("ticket_spec_SHA256"),
+        "expected_work_packet_id": projection.get("work_packet_id"),
+        "authorization_work_packet_id": record.get("work_packet_id"),
+        "expected_work_packet_SHA256": projection.get("work_packet_SHA256"),
+        "authorization_work_packet_SHA256": record.get("work_packet_SHA256"),
+        "expected_projection_SHA256": projection.get("projection_SHA256"),
+        "authorization_projection_SHA256": record.get("projection_SHA256"),
+        "expected_kanban_task_id": projection.get("kanban_task_id"),
+        "authorization_kanban_task_id": record.get("kanban_task_id"),
+        "expected_executor_profile": projection.get("assignee_profile"),
+        "authorization_executor_profile": record.get("assignee_profile"),
+    }
+
+
 def _persist_execution_start_record(record: dict[str, Any]) -> None:
     validate_p18_9_0_execution_start_record(record)
-    path = p18_9_0_execution_start_record_path()
+    path = execution_start_record_path_for_ticket(str(record["ticket_id"]))
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")

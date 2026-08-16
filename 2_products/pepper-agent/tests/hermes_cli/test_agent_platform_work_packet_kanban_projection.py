@@ -413,6 +413,26 @@ def _project_next_ticket_direct():
     )
 
 
+def _projection_authority_record(projected: dict) -> dict:
+    authority = projection.load_kanban_projection_record(
+        ticket_id=projected["ticket_id"],
+    )
+    assert authority is not None
+    return authority
+
+
+def _queued_workflow_for_projection(projected: dict) -> dict:
+    authority = _projection_authority_record(projected)
+    generation = bridge.load_generation_record(ticket_id=projected["ticket_id"])
+    assert generation is not None
+    workflow = _approved_workflow_for_record(generation)
+    workflow.update(projection.kanban_projection_to_workflow_overlay(authority))
+    workflow["active_execution_count"] = 0
+    workflow["remaining_blockers"] = []
+    workflow["blocker_count"] = 0
+    return workflow
+
+
 def _synthetic_implementation_contract(label: str) -> dict[str, object]:
     return {
         "ticket_type": "implementation",
@@ -1851,6 +1871,235 @@ def test_current_ticket_start_claims_only_projected_task(
     assert context["workflow_status"] == "executing"
     assert context["queue_state"] == "kanban_dispatched"
     assert context["next_action"]["id"] == "MONITOR_P18_9_0_EXECUTION"
+
+
+def test_current_ticket_start_binds_generic_projection_and_record_path(
+    projection_home,
+    monkeypatch,
+) -> None:
+    _install_implementation_profile(monkeypatch, projection_home)
+    generation, _decision = _approve_next_ticket()
+    projected = _project_next_ticket_direct()
+    authority = _projection_authority_record(projected)
+
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    monkeypatch.setattr(
+        pr,
+        "build_workflow_control_snapshot",
+        lambda: _queued_workflow_for_projection(projected),
+    )
+    monkeypatch.setattr(
+        pr,
+        "_executor_provider_readiness",
+        lambda profile_name: _ready_executor_provider_payload(profile_name),
+    )
+    monkeypatch.setattr(
+        pr,
+        "_preflight_pepper_governed_worker_credentials",
+        lambda _projection, *, enabled=True: _ready_worker_credential_probe(),
+    )
+
+    result = pr.start_current_ticket_execution(
+        human_authorization_text="Start P18.9.1 execution now",
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+        next_action_id="START_P18_9_1_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION",
+        spawn_fn=lambda _task, _workspace, board=None: 5321,
+    )
+
+    current_path = pr.execution_start_record_path_for_ticket("P18.9.1")
+    assert result["start_status"] == "started"
+    assert result["ticket_id"] == "P18.9.1"
+    assert result["ticket_spec_SHA256"] == generation["ticket_spec_SHA256"]
+    assert result["work_packet_id"] == authority["work_packet_id"]
+    assert result["work_packet_SHA256"] == authority["work_packet_SHA256"]
+    assert result["kanban_task_id"] == authority["kanban_task_id"]
+    assert result["assignee_profile"] == _IMPLEMENTATION_PROFILE
+    assert result["next_action"]["target_ticket_id"] == "P18.9.1"
+    assert current_path.exists()
+    assert not pr.p18_9_0_execution_start_record_path().exists()
+
+    record = pr.load_p18_9_0_execution_start_record(projection_record=authority)
+    assert record is not None
+    assert record["ticket_id"] == "P18.9.1"
+    assert record["projection_SHA256"] == authority["projection_SHA256"]
+    assert record["kanban_task_id"] == authority["kanban_task_id"]
+    assert record["assignee_profile"] == _IMPLEMENTATION_PROFILE
+
+
+def test_historical_p18_9_0_start_authority_does_not_replay_for_next_ticket(
+    projection_home,
+    monkeypatch,
+) -> None:
+    _install_execution_profile(monkeypatch, projection_home)
+    _approve_current_ticket()
+    historical_projection = _project_via_runtime()
+    historical_authority = _projection_authority_record(historical_projection)
+
+    from hermes_cli import kanban_db
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    monkeypatch.setattr(
+        pr,
+        "build_workflow_control_snapshot",
+        lambda: _queued_workflow_for_projection(historical_projection),
+    )
+    monkeypatch.setattr(
+        pr,
+        "_executor_provider_readiness",
+        lambda profile_name: _ready_executor_provider_payload(profile_name),
+    )
+    monkeypatch.setattr(
+        pr,
+        "_preflight_pepper_governed_worker_credentials",
+        lambda _projection, *, enabled=True: _ready_worker_credential_probe(),
+    )
+    historical = pr.start_current_ticket_execution(
+        human_authorization_text="Start P18.9.0 execution now",
+        project_id="PEPPER",
+        ticket_id="P18.9.0",
+        next_action_id="START_P18_9_0_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION",
+        spawn_fn=lambda _task, _workspace, board=None: 4321,
+    )
+    assert historical["execution_started"] is True
+    assert pr.p18_9_0_execution_start_record_path().exists()
+    conn = kanban_db.connect(board=historical_authority["kanban_board_slug"])
+    try:
+        assert kanban_db.complete_task(
+            conn,
+            historical_authority["kanban_task_id"],
+            summary=(
+                "Summary\nP18.9.0 historical execution completed for stale-authority regression.\n"
+                "Files inspected\n- none\nFiles modified\n- none\nTests/commands run\n- none\n"
+                "Decisions made\n- closed historical task\nLimitations\n- synthetic test fixture"
+            ),
+            expected_run_id=historical["kanban_run_id"],
+        )
+    finally:
+        conn.close()
+
+    _install_implementation_profile(monkeypatch, projection_home)
+    _approve_next_ticket()
+    current_projection = _project_next_ticket_direct()
+    current_authority = _projection_authority_record(current_projection)
+    monkeypatch.setattr(
+        pr,
+        "build_workflow_control_snapshot",
+        lambda: _queued_workflow_for_projection(current_projection),
+    )
+    current = pr.start_current_ticket_execution(
+        human_authorization_text="Start P18.9.1 execution now",
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+        next_action_id="START_P18_9_1_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION",
+        spawn_fn=lambda _task, _workspace, board=None: 5321,
+    )
+
+    assert current["start_status"] == "started"
+    assert current["idempotent_replay"] is False
+    assert current["ticket_id"] == "P18.9.1"
+    assert current["kanban_task_id"] == current_authority["kanban_task_id"]
+    historical_record = json.loads(
+        pr.p18_9_0_execution_start_record_path().read_text(encoding="utf-8")
+    )
+    assert pr.validate_p18_9_0_execution_start_record(
+        historical_record,
+        projection_record=historical_authority,
+    )["ticket_id"] == "P18.9.0"
+    current_record = pr.load_p18_9_0_execution_start_record(
+        projection_record=current_authority,
+    )
+    assert current_record is not None
+    assert current_record["ticket_id"] == "P18.9.1"
+    assert current_record["kanban_task_id"] == current_authority["kanban_task_id"]
+
+
+def test_current_ticket_start_blocks_mismatched_current_authorization_record(
+    projection_home,
+    monkeypatch,
+) -> None:
+    _install_implementation_profile(monkeypatch, projection_home)
+    _approve_next_ticket()
+    projected = _project_next_ticket_direct()
+    authority = _projection_authority_record(projected)
+
+    from hermes_cli import kanban_db
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    monkeypatch.setattr(
+        pr,
+        "build_workflow_control_snapshot",
+        lambda: _queued_workflow_for_projection(projected),
+    )
+    monkeypatch.setattr(
+        pr,
+        "_executor_provider_readiness",
+        lambda profile_name: _ready_executor_provider_payload(profile_name),
+    )
+    monkeypatch.setattr(
+        pr,
+        "_preflight_pepper_governed_worker_credentials",
+        lambda _projection, *, enabled=True: _ready_worker_credential_probe(),
+    )
+
+    stale = pr._build_execution_start_authorization_record(
+        request=pr.CurrentTicketExecutionStartRequest(
+            human_authorization_text="Start P18.9.0 execution now",
+            project_id="PEPPER",
+            ticket_id="P18.9.0",
+            next_action_id="START_P18_9_0_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION",
+        ),
+        projection=authority,
+        provider_readiness=_ready_executor_provider_payload(_IMPLEMENTATION_PROFILE),
+    )
+    stale["ticket_id"] = "P18.9.0"
+    stale["ticket_spec_SHA256"] = "0" * 64
+    stale["work_packet_id"] = "WP-P18-9-0-STALE"
+    stale["work_packet_SHA256"] = "1" * 64
+    stale["projection_SHA256"] = "2" * 64
+    stale["kanban_task_id"] = "t_stale"
+    stale["assignee_profile"] = "pepper-architecture-product"
+    stale["selected_profile"] = "pepper-architecture-product"
+    stale["start_authorization_SHA256"] = pr._execution_start_record_digest(stale)
+    path = pr.execution_start_record_path_for_ticket("P18.9.1")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(stale, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    result = pr.start_current_ticket_execution(
+        human_authorization_text="Start P18.9.1 execution now",
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+        next_action_id="START_P18_9_1_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION",
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("spawn must stay blocked"),
+    )
+
+    assert result["start_status"] == "blocked"
+    assert result["blocker_code"] == "EXECUTION_START_AUTHORITY_STALE"
+    assert result["execution_authorization_recorded"] is False
+    assert result["dispatch_performed"] is False
+    assert result["execution_started"] is False
+    mismatch = result["authorization_mismatch"]
+    assert mismatch["mismatched_field"] == "ticket_id"
+    assert mismatch["current_ticket_id"] == "P18.9.1"
+    assert mismatch["authorization_ticket_id"] == "P18.9.0"
+    assert mismatch["expected_projection_SHA256"] == authority["projection_SHA256"]
+    assert mismatch["authorization_projection_SHA256"] == "2" * 64
+    assert mismatch["expected_kanban_task_id"] == authority["kanban_task_id"]
+    assert mismatch["authorization_kanban_task_id"] == "t_stale"
+    assert mismatch["expected_executor_profile"] == _IMPLEMENTATION_PROFILE
+    assert mismatch["authorization_executor_profile"] == "pepper-architecture-product"
+
+    persisted = json.loads(path.read_text(encoding="utf-8"))
+    assert persisted["ticket_id"] == "P18.9.0"
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        task = kanban_db.get_task(conn, projected["kanban_task_id"])
+        assert task is not None
+        assert task.status == "ready"
+        assert kanban_db.list_runs(conn, task.id) == []
+    finally:
+        conn.close()
 
 
 def test_current_ticket_start_blocks_worker_credential_probe_before_claim(
@@ -3844,6 +4093,118 @@ def test_chat_tool_binds_current_user_task_as_start_authorization_when_arg_omitt
     assert captured["project_id"] == "PEPPER"
     assert captured["ticket_id"] == "P18.9.0"
     assert captured["next_action_id"] == "START_P18_9_0_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION"
+
+
+def test_chat_tool_binds_generic_current_ticket_start_authorization(
+    monkeypatch,
+) -> None:
+    import tools.pepper_workflow_tools  # noqa: F401
+    from hermes_cli.agent_platform import product_runtime as pr
+    from model_tools import handle_function_call
+
+    captured = {}
+    human_text = "Start P18.9.1 execution now"
+
+    def fake_start_current_ticket_execution(**kwargs):
+        captured.update(kwargs)
+        return {
+            "source_system": pr.PEPPER_WORKER_START_ACTION_SOURCE_SYSTEM,
+            "schema_version": 1,
+            "policy_id": pr.PEPPER_WORKER_START_ACTION_POLICY_ID,
+            "start_status": "started",
+            "ticket_id": "P18.9.1",
+            "dispatch_performed": True,
+            "execution_started": True,
+            "worker_execution": True,
+            "Kanban_dispatch": True,
+            "Git_mutation": False,
+            "auto_retry": False,
+            "auto_rollback": False,
+        }
+
+    monkeypatch.setattr(pr, "start_current_ticket_execution", fake_start_current_ticket_execution)
+    monkeypatch.setattr(
+        pr,
+        "build_lead_agent_operational_context",
+        lambda: {
+            "current_ticket_id": "P18.9.1",
+            "workflow_state": "P18.9.1-EXECUTING",
+            "workflow_status": "executing",
+            "approval_state": "ticket_approved",
+            "pending_approval_count": 0,
+            "pending_ticket_approval_count": 0,
+            "queue_state": "kanban_dispatched",
+            "execution_state": "active_executions",
+            "next_action": {"id": "MONITOR_P18_9_1_EXECUTION"},
+        },
+    )
+
+    result = json.loads(
+        handle_function_call(
+            "start_current_ticket_execution",
+            {
+                "project_id": "PEPPER",
+                "ticket_id": "P18.9.1",
+                "next_action_id": "START_P18_9_1_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION",
+            },
+            user_task=human_text,
+        )
+    )
+
+    assert result["success"] is True
+    assert result["human_authorization_text"] == human_text
+    assert result["ticket_id"] == "P18.9.1"
+    assert captured["human_authorization_text"] == human_text
+    assert captured["project_id"] == "PEPPER"
+    assert captured["ticket_id"] == "P18.9.1"
+    assert captured["next_action_id"] == "START_P18_9_1_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION"
+
+
+def test_chat_tool_rejects_stale_ticket_start_when_context_is_generic_current(
+    monkeypatch,
+) -> None:
+    import tools.pepper_workflow_tools  # noqa: F401
+    from hermes_cli.agent_platform import product_runtime as pr
+    from model_tools import handle_function_call
+
+    monkeypatch.setattr(
+        pr,
+        "start_current_ticket_execution",
+        lambda **_kwargs: pytest.fail("start backend must not be called"),
+    )
+    monkeypatch.setattr(
+        pr,
+        "build_lead_agent_operational_context",
+        lambda: {
+            "current_ticket_id": "P18.9.1",
+            "workflow_state": "P18.9.1-QUEUED-NOT-EXECUTING",
+            "workflow_status": "queued",
+            "approval_state": "ticket_approved",
+            "pending_approval_count": 0,
+            "pending_ticket_approval_count": 0,
+            "queue_state": "kanban_projection_ready_not_dispatched",
+            "execution_state": "not_started",
+            "next_action": {
+                "id": "START_P18_9_1_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION",
+                "target_ticket_id": "P18.9.1",
+            },
+        },
+    )
+
+    result = json.loads(
+        handle_function_call(
+            "start_current_ticket_execution",
+            {
+                "human_authorization_text": "Start P18.9.0 execution now",
+                "project_id": "PEPPER",
+                "ticket_id": "P18.9.1",
+                "next_action_id": "START_P18_9_1_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION",
+            },
+        )
+    )
+
+    assert result["success"] is False
+    assert "targets a different ticket" in result["error"]
 
 
 @pytest.mark.parametrize(
