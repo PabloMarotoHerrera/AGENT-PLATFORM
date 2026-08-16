@@ -603,6 +603,17 @@ def _prepare_completed_review_package(monkeypatch):
     return generation, projected, started, review
 
 
+def _drifted_acceptance_contract(pr, contract: dict) -> dict:
+    drifted = dict(contract)
+    drifted["acceptance_criteria"] = [
+        *contract["acceptance_criteria"],
+        "Synthetic current-builder-only criterion.",
+    ]
+    drifted["criteria_revision_SHA256"] = pr._criteria_revision_digest(drifted)
+    drifted["acceptance_contract_SHA256"] = pr._acceptance_contract_digest(drifted)
+    return drifted
+
+
 def test_projection_requires_approved_ticket(projection_home, monkeypatch) -> None:
     _install_execution_profile(monkeypatch, projection_home)
     bridge.generate_p18_9_0_ticket(workflow=_workflow())
@@ -3457,6 +3468,150 @@ def test_historical_review_acceptance_recomputes_current_next_ticket(
     assert workflow["next_ticket_title"] == "Pepper Shell, Routing, and Compact Navigation"
     assert workflow["next_action"]["target_ticket_title"] == (
         "Pepper Shell, Routing, and Compact Navigation"
+    )
+
+
+def test_closed_p18_9_0_with_queued_p18_9_1_reconstructs_current_ticket(
+    projection_home,
+    monkeypatch,
+) -> None:
+    _install_execution_profile(monkeypatch, projection_home)
+    _generation, _projected, _started, _review = _prepare_completed_review_package(monkeypatch)
+
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    accepted = pr.accept_current_ticket_review(
+        human_acceptance_text=pr.PEPPER_CURRENT_REVIEW_ACCEPTANCE_TEXT,
+        project_id="PEPPER",
+        ticket_id="P18.9.0",
+        next_action_id="AWAIT_HUMAN_P18_9_0_REVIEW_ACCEPTANCE",
+    )
+    assert accepted["P18_9_0_closed"] is True
+
+    _install_implementation_profile(monkeypatch, projection_home)
+    _approve_next_ticket()
+    projected_next = _project_next_ticket_direct()
+    next_authority = _projection_authority_record(projected_next)
+
+    projection.kanban_projection_record_path_for_ticket("P18.9.0").touch()
+    workflow = pr.build_workflow_control_snapshot()
+    binding = pr.resolve_current_ticket_lifecycle_binding()
+
+    assert workflow["P18_9_0_closed"] is True
+    assert workflow["P18_9_0_review_acceptance_present"] is True
+    assert workflow["current_ticket_id"] == "P18.9.1"
+    assert workflow["current_ticket_title"] == _P18_9_1_TITLE
+    assert workflow["workflow_status"] == "queued"
+    assert workflow["workflow_state"] == "P18.9.1-QUEUED-NOT-EXECUTING"
+    assert workflow["queue_state"] == "kanban_projection_ready_not_dispatched"
+    assert workflow["next_action"]["id"] == "START_P18_9_1_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION"
+    assert workflow["next_action"]["target_ticket_id"] == "P18.9.1"
+    assert workflow["kanban_projection_authority"]["projection_SHA256"] == (
+        next_authority["projection_SHA256"]
+    )
+    assert workflow["blocker_count"] == 0
+    assert workflow["remaining_blockers"] == []
+    assert binding.ticket_id == "P18.9.1"
+    assert binding.work_packet_id == next_authority["work_packet_id"]
+
+
+def test_terminal_acceptance_preserves_historical_review_prepare_contract(
+    projection_home,
+    monkeypatch,
+) -> None:
+    _install_execution_profile(monkeypatch, projection_home)
+    _generation, projected, _started, review = _prepare_completed_review_package(monkeypatch)
+
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    accepted = pr.accept_current_ticket_review(
+        human_acceptance_text=pr.PEPPER_CURRENT_REVIEW_ACCEPTANCE_TEXT,
+        project_id="PEPPER",
+        ticket_id="P18.9.0",
+        next_action_id="AWAIT_HUMAN_P18_9_0_REVIEW_ACCEPTANCE",
+    )
+    authority = _projection_authority_record(projected)
+    original_contract = dict(review["acceptance_contract"])
+    monkeypatch.setattr(
+        pr,
+        "_p18_9_0_acceptance_contract",
+        lambda: _drifted_acceptance_contract(pr, original_contract),
+    )
+
+    validated_prepare = pr.load_p18_9_0_review_prepare_record(projection_record=authority)
+    validated_acceptance = pr.load_p18_9_0_review_acceptance_record(
+        projection_record=authority,
+        review_prepare_record=validated_prepare,
+    )
+
+    assert validated_prepare is not None
+    assert validated_prepare["acceptance_contract_SHA256"] == review["acceptance_contract_SHA256"]
+    assert validated_prepare["acceptance_contract"] == original_contract
+    assert validated_acceptance is not None
+    assert validated_acceptance["review_acceptance_action_SHA256"] == (
+        accepted["review_acceptance_action_SHA256"]
+    )
+
+
+def test_historical_review_prepare_contract_requires_terminal_acceptance(
+    projection_home,
+    monkeypatch,
+) -> None:
+    _install_execution_profile(monkeypatch, projection_home)
+    _generation, projected, _started, review = _prepare_completed_review_package(monkeypatch)
+
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    authority = _projection_authority_record(projected)
+    original_contract = dict(review["acceptance_contract"])
+    monkeypatch.setattr(
+        pr,
+        "_p18_9_0_acceptance_contract",
+        lambda: _drifted_acceptance_contract(pr, original_contract),
+    )
+
+    with pytest.raises(pr.ProductRuntimeConflict) as excinfo:
+        pr.load_p18_9_0_review_prepare_record(projection_record=authority)
+
+    message = str(excinfo.value)
+    assert "review-preparation record acceptance_contract_SHA256 mismatch" in message
+    assert "expected_historical=" + review["acceptance_contract_SHA256"] in message
+
+
+def test_review_prepare_contract_tampering_still_blocks_with_terminal_acceptance(
+    projection_home,
+    monkeypatch,
+) -> None:
+    _install_execution_profile(monkeypatch, projection_home)
+    _generation, projected, _started, review = _prepare_completed_review_package(monkeypatch)
+
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    accepted = pr.accept_current_ticket_review(
+        human_acceptance_text=pr.PEPPER_CURRENT_REVIEW_ACCEPTANCE_TEXT,
+        project_id="PEPPER",
+        ticket_id="P18.9.0",
+        next_action_id="AWAIT_HUMAN_P18_9_0_REVIEW_ACCEPTANCE",
+    )
+    authority = _projection_authority_record(projected)
+    tampered = dict(pr.load_p18_9_0_review_prepare_record(projection_record=authority) or {})
+    tampered["acceptance_contract_SHA256"] = "f" * 64
+    tampered["review_prepare_action_SHA256"] = pr._review_prepare_record_digest(tampered)
+
+    with pytest.raises(pr.ProductRuntimeConflict) as excinfo:
+        pr.validate_p18_9_0_review_prepare_record(
+            tampered,
+            projection_record=authority,
+        )
+
+    message = str(excinfo.value)
+    assert "review-preparation record acceptance_contract_SHA256 mismatch" in message
+    assert "persisted=" + "f" * 64 in message
+    assert "expected_historical=" + review["acceptance_contract_SHA256"] in message
+    assert accepted["review_acceptance_action_SHA256"] == (
+        pr.load_p18_9_0_review_acceptance_record(projection_record=authority)[
+            "review_acceptance_action_SHA256"
+        ]
     )
 
 

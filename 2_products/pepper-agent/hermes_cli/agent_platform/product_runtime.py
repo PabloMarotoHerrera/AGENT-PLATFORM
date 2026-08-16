@@ -520,7 +520,14 @@ def _current_projected_ticket_id_from_records() -> str | None:
     try:
         candidates = sorted(
             root.glob("*.json"),
-            key=lambda path: path.stat().st_mtime,
+            key=lambda path: (
+                _governed_ticket_sequence_key(
+                    PEPPER_BOOTSTRAP_NEXT_TICKET_ID
+                    if path.name == kanban_projection_record_path().name
+                    else path.stem
+                ),
+                path.stat().st_mtime,
+            ),
             reverse=True,
         )
     except OSError:
@@ -535,6 +542,10 @@ def _current_projected_ticket_id_from_records() -> str | None:
         if projection is not None:
             return str(projection.get("ticket_id") or ticket_id)
     return None
+
+
+def _governed_ticket_sequence_key(ticket_id: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in re.findall(r"\d+", str(ticket_id or "")))
 
 
 def _current_projection_record_for_binding() -> dict[str, Any] | None:
@@ -567,7 +578,12 @@ def resolve_current_ticket_lifecycle_binding(
         projection = _current_projection_record_for_binding()
     if generation is None:
         generation = _current_generation_record_for_binding()
-    authority = projection if isinstance(projection, dict) else generation
+    if projection_record is not None and isinstance(projection, dict):
+        authority = projection
+    elif generation_record is not None and isinstance(generation, dict):
+        authority = generation
+    else:
+        authority = projection if isinstance(projection, dict) else generation
     authority = authority if isinstance(authority, dict) else {}
 
     ticket_id = _safe_text(authority.get("ticket_id") or PEPPER_NEXT_TICKET_ID, limit=128)
@@ -2136,7 +2152,11 @@ def validate_p18_9_0_review_prepare_record(
     completion = _kanban_completion_result_source(projection)
     if completion.get("blocker_code"):
         raise ProductRuntimeConflict(str(completion["blocker_code"]))
-    contract = _p18_9_0_acceptance_contract()
+    contract = _review_prepare_acceptance_contract_for_validation(
+        record,
+        projection=projection,
+        completion=completion,
+    )
     binding, identity = _current_ticket_identity_fields(projection)
     expected = {
         "schema_version": PEPPER_REVIEW_PREPARE_ACTION_SCHEMA_VERSION,
@@ -5029,6 +5049,166 @@ def _review_prepare_package_digest(
         ],
     }
     return _digest_payload(PEPPER_REVIEW_PREPARE_PACKAGE_DIGEST_ALGORITHM, payload)
+
+
+def _review_prepare_acceptance_contract_for_validation(
+    record: dict[str, Any],
+    *,
+    projection: dict[str, Any],
+    completion: dict[str, Any],
+) -> dict[str, Any]:
+    current_contract = _p18_9_0_acceptance_contract()
+    current_package_sha = _review_prepare_package_digest(
+        projection=projection,
+        completion=completion,
+        acceptance_contract=current_contract,
+    )
+    if _review_prepare_contract_fields_match(
+        record,
+        contract=current_contract,
+        review_package_sha=current_package_sha,
+    ):
+        return current_contract
+
+    historical_contract = record.get("acceptance_contract")
+    historical_package_sha = None
+    if isinstance(historical_contract, dict):
+        try:
+            historical_package_sha = _review_prepare_package_digest(
+                projection=projection,
+                completion=completion,
+                acceptance_contract=historical_contract,
+            )
+        except (KeyError, TypeError, ValueError):
+            historical_package_sha = None
+        if (
+            historical_package_sha is not None
+            and _review_prepare_contract_fields_match(
+                record,
+                contract=historical_contract,
+                review_package_sha=historical_package_sha,
+            )
+            and _terminal_review_acceptance_preserves_prepare_record(record)
+        ):
+            return historical_contract
+
+    diagnostics = _review_prepare_hash_mismatch_diagnostics(
+        record,
+        current_contract=current_contract,
+        current_package_sha=current_package_sha,
+        historical_contract=historical_contract,
+        historical_package_sha=historical_package_sha,
+    )
+    raise ProductRuntimeConflict(
+        "review-preparation record acceptance_contract_SHA256 mismatch; "
+        f"persisted={diagnostics['persisted_acceptance_contract_SHA256']} "
+        f"expected_historical={diagnostics['expected_historical_acceptance_contract_SHA256']} "
+        f"current={diagnostics['current_acceptance_contract_SHA256']} "
+        f"historical_revision={diagnostics['historical_contract_revision']}"
+    )
+
+
+def _review_prepare_contract_fields_match(
+    record: dict[str, Any],
+    *,
+    contract: dict[str, Any],
+    review_package_sha: str,
+) -> bool:
+    try:
+        if contract.get("criteria_revision_SHA256") != _criteria_revision_digest(contract):
+            return False
+        if contract.get("acceptance_contract_SHA256") != _acceptance_contract_digest(contract):
+            return False
+    except (KeyError, TypeError, ValueError):
+        return False
+    if record.get("criteria_revision_SHA256") != contract.get("criteria_revision_SHA256"):
+        return False
+    if record.get("acceptance_contract_SHA256") != contract.get("acceptance_contract_SHA256"):
+        return False
+    if record.get("review_package_SHA256") != review_package_sha:
+        return False
+    if record.get("acceptance_contract") != contract:
+        return False
+    return True
+
+
+def _terminal_review_acceptance_preserves_prepare_record(
+    review_prepare: dict[str, Any],
+) -> bool:
+    path = p18_9_0_review_acceptance_record_path()
+    if not path.exists():
+        return False
+    try:
+        acceptance = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(acceptance, dict):
+        return False
+    if acceptance.get("review_acceptance_action_SHA256") != _review_acceptance_record_digest(acceptance):
+        return False
+    expected = {
+        "ticket_id": review_prepare.get("ticket_id"),
+        "ticket_spec_SHA256": review_prepare.get("ticket_spec_SHA256"),
+        "work_packet_id": review_prepare.get("work_packet_id"),
+        "work_packet_SHA256": review_prepare.get("work_packet_SHA256"),
+        "projection_SHA256": review_prepare.get("projection_SHA256"),
+        "kanban_task_id": review_prepare.get("kanban_task_id"),
+        "review_prepare_action_SHA256": review_prepare.get("review_prepare_action_SHA256"),
+        "review_package_SHA256": review_prepare.get("review_package_SHA256"),
+        "acceptance_contract_SHA256": review_prepare.get("acceptance_contract_SHA256"),
+        "criteria_revision_SHA256": review_prepare.get("criteria_revision_SHA256"),
+        "kanban_completion_result_SHA256": review_prepare.get("kanban_completion_result_SHA256"),
+        "successful_run_id": review_prepare.get("successful_run_id"),
+    }
+    for key, value in expected.items():
+        if acceptance.get(key) != value:
+            return False
+    return (
+        acceptance.get("review_acceptance_status") == "accepted"
+        and acceptance.get("review_validation_state") == "completed"
+        and acceptance.get("validation_state") == "review_accepted"
+        and acceptance.get("review_state") == "accepted"
+        and acceptance.get("workflow_status") == "completed"
+        and acceptance.get("ticket_closed") is True
+        and acceptance.get("P18_9_0_closed") is True
+        and acceptance.get("P18_9_0_completed") is True
+        and acceptance.get("review_prepare_authority")
+        == _review_prepare_authority_projection(review_prepare)
+    )
+
+
+def _review_prepare_hash_mismatch_diagnostics(
+    record: dict[str, Any],
+    *,
+    current_contract: dict[str, Any],
+    current_package_sha: str,
+    historical_contract: Any,
+    historical_package_sha: str | None,
+) -> dict[str, Any]:
+    historical_contract_dict = historical_contract if isinstance(historical_contract, dict) else {}
+    expected_historical_sha = None
+    expected_historical_criteria_sha = None
+    if historical_contract_dict:
+        try:
+            expected_historical_sha = _acceptance_contract_digest(historical_contract_dict)
+            expected_historical_criteria_sha = _criteria_revision_digest(historical_contract_dict)
+        except (KeyError, TypeError, ValueError):
+            expected_historical_sha = None
+            expected_historical_criteria_sha = None
+    return {
+        "persisted_acceptance_contract_SHA256": record.get("acceptance_contract_SHA256"),
+        "persisted_criteria_revision_SHA256": record.get("criteria_revision_SHA256"),
+        "persisted_review_package_SHA256": record.get("review_package_SHA256"),
+        "expected_historical_acceptance_contract_SHA256": expected_historical_sha,
+        "expected_historical_criteria_revision_SHA256": expected_historical_criteria_sha,
+        "expected_historical_review_package_SHA256": historical_package_sha,
+        "current_acceptance_contract_SHA256": current_contract.get("acceptance_contract_SHA256"),
+        "current_criteria_revision_SHA256": current_contract.get("criteria_revision_SHA256"),
+        "current_review_package_SHA256": current_package_sha,
+        "historical_contract_revision": historical_contract_dict.get("schema_version"),
+        "historical_contract_source": historical_contract_dict.get("acceptance_contract_source"),
+        "current_contract_source": current_contract.get("acceptance_contract_source"),
+    }
 
 
 def _validate_review_acceptance_request_guards(
