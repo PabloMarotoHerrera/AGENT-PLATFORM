@@ -222,15 +222,17 @@ def _persist_started_execution_record(pr, projected, run_id: int) -> None:
             ticket_id=projected.get("ticket_id") or "P18.9.0"
         )
     assert authority is not None
+    ticket_id = authority["ticket_id"]
+    action_ids = pr.governed_ticket_lifecycle_action_ids(ticket_id)
     record = pr._build_execution_start_authorization_record(
         request=pr.CurrentTicketExecutionStartRequest(
-            human_authorization_text="Start P18.9.0 execution now",
+            human_authorization_text=f"Start {ticket_id} execution now",
             project_id="PEPPER",
-            ticket_id="P18.9.0",
-            next_action_id="START_P18_9_0_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION",
+            ticket_id=ticket_id,
+            next_action_id=action_ids["execution_start"],
         ),
         projection=authority,
-        provider_readiness=_ready_executor_provider_payload(),
+        provider_readiness=_ready_executor_provider_payload(authority["assignee_profile"]),
     )
     record = pr._finalize_execution_start_record(
         record,
@@ -419,6 +421,123 @@ def _projection_authority_record(projected: dict) -> dict:
     )
     assert authority is not None
     return authority
+
+
+def _closed_p18_9_0_with_projected_p18_9_1(projection_home, monkeypatch):
+    _install_execution_profile(monkeypatch, projection_home)
+    _generation, _projected, _started, _review = _prepare_completed_review_package(monkeypatch)
+
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    accepted = pr.accept_current_ticket_review(
+        human_acceptance_text=pr.PEPPER_CURRENT_REVIEW_ACCEPTANCE_TEXT,
+        project_id="PEPPER",
+        ticket_id="P18.9.0",
+        next_action_id="AWAIT_HUMAN_P18_9_0_REVIEW_ACCEPTANCE",
+    )
+    assert accepted["P18_9_0_closed"] is True
+
+    _install_implementation_profile(monkeypatch, projection_home)
+    _approve_next_ticket()
+    projected = _project_next_ticket_direct()
+    return pr, projected, _projection_authority_record(projected)
+
+
+def _start_p18_9_1_execution(pr, monkeypatch, *, pid: int = 5321) -> dict:
+    monkeypatch.setattr(
+        pr,
+        "_executor_provider_readiness",
+        lambda profile_name: _ready_executor_provider_payload(profile_name),
+    )
+    monkeypatch.setattr(
+        pr,
+        "_preflight_pepper_governed_worker_credentials",
+        lambda _projection_record, *, enabled=True: _ready_worker_credential_probe(),
+    )
+    result = pr.start_current_ticket_execution(
+        human_authorization_text="Start P18.9.1 execution now",
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+        next_action_id="START_P18_9_1_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION",
+        spawn_fn=lambda _task, _workspace, board=None: pid,
+    )
+    assert result["start_status"] == "started"
+    assert result["kanban_run_id"] is not None
+    return result
+
+
+def _claim_next_projected_run(kanban_db, projected: dict, *, pid: int) -> int:
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        task = kanban_db.get_task(conn, projected["kanban_task_id"])
+        assert task is not None
+        if task.status in {"blocked", "scheduled"}:
+            assert kanban_db.unblock_task(conn, projected["kanban_task_id"])
+        claimed = kanban_db.claim_task(
+            conn,
+            projected["kanban_task_id"],
+            claimer="pepper-worker-start-action",
+        )
+        assert claimed is not None
+        workspace = kanban_db.resolve_workspace(
+            claimed,
+            board=projected["kanban_board_slug"],
+        )
+        kanban_db.set_workspace_path(conn, claimed.id, str(workspace))
+        kanban_db._set_worker_pid(conn, claimed.id, pid)
+        return int(claimed.current_run_id)
+    finally:
+        conn.close()
+
+
+def _block_projected_run(
+    kanban_db,
+    projected: dict,
+    run_id: int,
+    *,
+    reason: str,
+    kind: str | None,
+) -> None:
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        assert kanban_db.block_task(
+            conn,
+            projected["kanban_task_id"],
+            reason=reason,
+            kind=kind,
+            expected_run_id=run_id,
+        )
+    finally:
+        conn.close()
+
+
+def _finish_projected_run_as_terminal(
+    kanban_db,
+    projected: dict,
+    run_id: int,
+    *,
+    status: str,
+    outcome: str,
+    summary: str,
+) -> None:
+    now = int(time.time())
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        conn.execute(
+            "UPDATE tasks SET status = 'blocked', current_run_id = NULL, "
+            "worker_pid = NULL, claim_lock = NULL, claim_expires = NULL, "
+            "last_failure_error = ? WHERE id = ? AND current_run_id = ?",
+            (summary, projected["kanban_task_id"], run_id),
+        )
+        conn.execute(
+            "UPDATE task_runs SET status = ?, outcome = ?, summary = ?, "
+            "error = ?, ended_at = ?, claim_lock = NULL, claim_expires = NULL, "
+            "worker_pid = NULL WHERE id = ?",
+            (status, outcome, summary, summary, now, run_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _queued_workflow_for_projection(projected: dict) -> dict:
@@ -3659,23 +3778,10 @@ def test_closed_p18_9_0_with_queued_p18_9_1_reconstructs_current_ticket(
     projection_home,
     monkeypatch,
 ) -> None:
-    _install_execution_profile(monkeypatch, projection_home)
-    _generation, _projected, _started, _review = _prepare_completed_review_package(monkeypatch)
-
-    from hermes_cli.agent_platform import product_runtime as pr
-
-    accepted = pr.accept_current_ticket_review(
-        human_acceptance_text=pr.PEPPER_CURRENT_REVIEW_ACCEPTANCE_TEXT,
-        project_id="PEPPER",
-        ticket_id="P18.9.0",
-        next_action_id="AWAIT_HUMAN_P18_9_0_REVIEW_ACCEPTANCE",
+    pr, projected_next, next_authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
     )
-    assert accepted["P18_9_0_closed"] is True
-
-    _install_implementation_profile(monkeypatch, projection_home)
-    _approve_next_ticket()
-    projected_next = _project_next_ticket_direct()
-    next_authority = _projection_authority_record(projected_next)
 
     projection.kanban_projection_record_path_for_ticket("P18.9.0").touch()
     workflow = pr.build_workflow_control_snapshot()
@@ -3697,6 +3803,251 @@ def test_closed_p18_9_0_with_queued_p18_9_1_reconstructs_current_ticket(
     assert workflow["remaining_blockers"] == []
     assert binding.ticket_id == "P18.9.1"
     assert binding.work_packet_id == next_authority["work_packet_id"]
+
+
+def test_closed_p18_9_0_with_active_p18_9_1_reconstructs_executing(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, projected, _authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
+    )
+
+    from hermes_cli import kanban_db
+
+    started = _start_p18_9_1_execution(pr, monkeypatch, pid=5321)
+    monkeypatch.setattr(kanban_db, "_pid_alive", lambda pid: int(pid) == 5321)
+
+    workflow = pr.build_workflow_control_snapshot()
+
+    assert workflow["current_ticket_id"] == "P18.9.1"
+    assert workflow["workflow_status"] == "executing"
+    assert workflow["workflow_state"] == "P18.9.1-EXECUTING"
+    assert workflow["queue_state"] == "kanban_dispatched"
+    assert workflow["execution_state"] == "active_executions"
+    assert workflow["active_execution_count"] == 1
+    assert workflow["review_state"] == "not_started_execution_in_progress"
+    assert workflow["next_action"]["id"] == "MONITOR_P18_9_1_EXECUTION"
+    assert workflow["next_action"]["target_ticket_id"] == "P18.9.1"
+
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        runs = kanban_db.list_runs(conn, projected["kanban_task_id"])
+        assert runs[-1].id == started["kanban_run_id"]
+        assert runs[-1].status == "running"
+    finally:
+        conn.close()
+
+
+def test_closed_p18_9_0_p18_9_1_latest_completed_run_prepares_review(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, projected, _authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
+    )
+
+    from hermes_cli import kanban_db
+
+    first = _start_p18_9_1_execution(pr, monkeypatch, pid=6101)
+    _block_projected_run(
+        kanban_db,
+        projected,
+        first["kanban_run_id"],
+        reason="synthetic first P18.9.1 attempt blocked before completion",
+        kind="needs_input",
+    )
+    latest_run_id = _claim_next_projected_run(kanban_db, projected, pid=6102)
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        assert kanban_db.complete_task(
+            conn,
+            projected["kanban_task_id"],
+            summary=(
+                "Summary\nP18.9.1 implementation completed after a prior blocked run.\n"
+                "Files inspected\n- synthetic\nFiles modified\n- synthetic\n"
+                "Tests/commands run\n- synthetic\nDecisions made\n- latest run wins\n"
+                "Limitations\n- awaits review"
+            ),
+            metadata={"files_modified": ["synthetic"], "Git_mutation": False},
+            expected_run_id=latest_run_id,
+        )
+    finally:
+        conn.close()
+
+    workflow = pr.build_workflow_control_snapshot()
+
+    assert workflow["current_ticket_id"] == "P18.9.1"
+    assert workflow["workflow_status"] == "execution_completed"
+    assert workflow["workflow_state"] == "P18.9.1-EXECUTION-COMPLETED"
+    assert workflow["queue_state"] == "kanban_execution_terminal"
+    assert workflow["execution_state"] == "no_active_executions"
+    assert workflow["validation_state"] == "execution_completed_pending_validation"
+    assert workflow["review_state"] == "ready_for_review_validation"
+    assert workflow["next_action"]["id"] == "PREPARE_P18_9_1_REVIEW"
+    assert workflow["next_action"]["target_ticket_id"] == "P18.9.1"
+    assert workflow["blocker_count"] == 0
+
+
+@pytest.mark.parametrize(
+    ("status", "outcome", "expected_category"),
+    (
+        ("failed", "failed", "failed"),
+        ("cancelled", "cancelled", "cancelled"),
+    ),
+)
+def test_closed_p18_9_0_p18_9_1_terminal_run_requires_recovery(
+    projection_home,
+    monkeypatch,
+    status,
+    outcome,
+    expected_category,
+) -> None:
+    pr, projected, _authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
+    )
+
+    from hermes_cli import kanban_db
+
+    started = _start_p18_9_1_execution(pr, monkeypatch, pid=6201)
+    _finish_projected_run_as_terminal(
+        kanban_db,
+        projected,
+        started["kanban_run_id"],
+        status=status,
+        outcome=outcome,
+        summary=f"synthetic P18.9.1 terminal {outcome} outcome",
+    )
+
+    workflow = pr.build_workflow_control_snapshot()
+
+    assert workflow["current_ticket_id"] == "P18.9.1"
+    assert workflow["workflow_status"] == "execution_failed"
+    assert workflow["workflow_state"] == "P18.9.1-EXECUTION-FAILED-RECOVERY-REQUIRED"
+    assert workflow["execution_state"] == "no_active_executions"
+    assert workflow["review_state"] == "not_started_execution_failed"
+    assert workflow["recovery_state"] == "recovery_required"
+    assert workflow["failure_category"] == expected_category
+    assert workflow["next_action"]["id"] == "RECOVER_P18_9_1_EXECUTION"
+    assert workflow["next_action"]["target_ticket_id"] == "P18.9.1"
+    assert workflow["blocker_count"] == 1
+
+
+def test_closed_p18_9_0_p18_9_1_run_without_start_authority_stays_queued(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, projected, _authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
+    )
+
+    from hermes_cli import kanban_db
+
+    run_id = _claim_next_projected_run(kanban_db, projected, pid=6301)
+    _block_projected_run(
+        kanban_db,
+        projected,
+        run_id,
+        reason="ungoverned projected task run must not override missing start authority",
+        kind="needs_input",
+    )
+
+    workflow = pr.build_workflow_control_snapshot()
+
+    assert not pr.execution_start_record_path_for_ticket("P18.9.1").exists()
+    assert workflow["current_ticket_id"] == "P18.9.1"
+    assert workflow["workflow_status"] == "queued"
+    assert workflow["workflow_state"] == "P18.9.1-QUEUED-NOT-EXECUTING"
+    assert workflow["queue_state"] == "kanban_projection_ready_not_dispatched"
+    assert workflow["next_action"]["id"] == "START_P18_9_1_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION"
+    assert workflow["blocker_count"] == 0
+
+
+def test_closed_p18_9_0_p18_9_1_run_4_blocked_reconstructs_tool_surfaces(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, projected, _authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
+    )
+
+    from hermes_cli import kanban_db
+    import tools.pepper_workflow_tools as pepper_tools
+
+    first = _start_p18_9_1_execution(pr, monkeypatch, pid=6401)
+    _block_projected_run(
+        kanban_db,
+        projected,
+        first["kanban_run_id"],
+        reason="synthetic P18.9.1 run 2 blocked",
+        kind="needs_input",
+    )
+    run_3 = _claim_next_projected_run(kanban_db, projected, pid=6402)
+    _block_projected_run(
+        kanban_db,
+        projected,
+        run_3,
+        reason="synthetic P18.9.1 run 3 blocked",
+        kind="capability",
+    )
+    run_4 = _claim_next_projected_run(kanban_db, projected, pid=6403)
+    assert run_4 == 4
+    _block_projected_run(
+        kanban_db,
+        projected,
+        run_4,
+        reason="WORKSPACE_PATH_ESCAPE: worker workspace path escaped canonical repo",
+        kind="transient",
+    )
+
+    workflow = pr.build_workflow_control_snapshot()
+    context = pr.build_lead_agent_operational_context()
+    execution_status = json.loads(pepper_tools._get_execution_status({}))
+    workflow_control = json.loads(pepper_tools._get_workflow_control({}))
+    review_status = json.loads(pepper_tools._get_review_status({}))
+    next_action = json.loads(pepper_tools._get_next_action({}))
+    replay = pr.start_current_ticket_execution(
+        human_authorization_text="Start P18.9.1 execution now",
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+        next_action_id="START_P18_9_1_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION",
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("initial start must replay, not dispatch again"),
+    )
+
+    assert workflow["current_ticket_id"] == "P18.9.1"
+    assert workflow["workflow_status"] == "execution_failed"
+    assert workflow["execution_state"] == "no_active_executions"
+    assert workflow["active_execution_count"] == 0
+    assert workflow["recovery_state"] == "recovery_required"
+    assert workflow["failure_category"] == "blocked"
+    assert "WORKSPACE_PATH_ESCAPE" in workflow["failure_summary"]
+    assert workflow["worker_lifecycle"]["runs"][-1]["id"] == run_4
+    assert workflow["next_action"]["id"] == "RECOVER_P18_9_1_EXECUTION"
+
+    assert context["workflow_status"] == "execution_failed"
+    assert context["current_ticket_id"] == "P18.9.1"
+    assert context["next_action"]["id"] == "RECOVER_P18_9_1_EXECUTION"
+    assert execution_status["execution_state"] == "no_active_executions"
+    assert execution_status["active_execution_count"] == 0
+    assert execution_status["recent_executions"][0]["id"] == run_4
+    assert execution_status["recent_executions"][0]["status"] == "blocked"
+    assert execution_status["recent_executions"][0]["failure_category"] == "blocked"
+    assert workflow_control["workflow_status"] == "execution_failed"
+    assert workflow_control["recovery_state"] == "recovery_required"
+    assert workflow_control["next_action"]["id"] == "RECOVER_P18_9_1_EXECUTION"
+    assert review_status["review_state"] == "not_started_execution_failed"
+    assert review_status["recovery_state"] == "recovery_required"
+    assert next_action["workflow_status"] == "execution_failed"
+    assert next_action["recovery_state"] == "recovery_required"
+    assert next_action["next_action"]["id"] == "RECOVER_P18_9_1_EXECUTION"
+    assert replay["idempotent_replay"] is True
+    assert replay["start_status"] == "failed"
+    assert replay["dispatch_performed"] is True
 
 
 def test_terminal_acceptance_preserves_historical_review_prepare_contract(

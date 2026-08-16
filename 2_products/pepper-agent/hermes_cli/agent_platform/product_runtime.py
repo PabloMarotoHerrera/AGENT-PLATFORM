@@ -731,7 +731,7 @@ def _p18_9_0_generation_overlay() -> tuple[dict[str, Any] | None, dict[str, Any]
         projection = _projection_record_for_generated_ticket(record)
         if projection is not None:
             overlay.update(_projection_overlay_for_record(projection))
-            start_overlay, start_blocker = _p18_9_0_execution_start_overlay(projection)
+            start_overlay, start_blocker = _current_ticket_execution_start_overlay(projection)
             if start_overlay is not None:
                 overlay.update(start_overlay)
                 retry_start_overlay, retry_start_blocker = _p18_9_0_retry_start_overlay(
@@ -754,6 +754,15 @@ def _p18_9_0_generation_overlay() -> tuple[dict[str, Any] | None, dict[str, Any]
                                     next_projection = _projection_record_for_generated_ticket(next_record)
                                     if next_projection is not None:
                                         overlay.update(_projection_overlay_for_record(next_projection))
+                                        next_start_overlay, next_start_blocker = (
+                                            _current_ticket_execution_start_overlay(
+                                                next_projection,
+                                            )
+                                        )
+                                        if next_start_overlay is not None:
+                                            overlay.update(next_start_overlay)
+                                        if next_start_blocker is not None:
+                                            return overlay, next_start_blocker
                         if review_blocker is not None:
                             return overlay, review_blocker
                     return overlay, retry_start_blocker
@@ -784,6 +793,15 @@ def _p18_9_0_generation_overlay() -> tuple[dict[str, Any] | None, dict[str, Any]
                                 next_projection = _projection_record_for_generated_ticket(next_record)
                                 if next_projection is not None:
                                     overlay.update(_projection_overlay_for_record(next_projection))
+                                    next_start_overlay, next_start_blocker = (
+                                        _current_ticket_execution_start_overlay(
+                                            next_projection,
+                                        )
+                                    )
+                                    if next_start_overlay is not None:
+                                        overlay.update(next_start_overlay)
+                                    if next_start_blocker is not None:
+                                        return overlay, next_start_blocker
                     if review_blocker is not None:
                         return overlay, review_blocker
             if start_blocker is not None:
@@ -6484,14 +6502,15 @@ def _p18_9_0_review_acceptance_overlay(
     }, None
 
 
-def _p18_9_0_execution_start_overlay(
+def _current_ticket_execution_start_overlay(
     projection: dict[str, Any],
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
     try:
         record = load_p18_9_0_execution_start_record(projection_record=projection)
     except Exception as exc:  # pragma: no cover - defensive live-state guard
         return None, {
-            "id": "P18-9-0-EXECUTION-START-AUTHORITY",
+            "id": f"{binding.ticket_hyphen_token}-EXECUTION-START-AUTHORITY",
             "status": "blocked_by_invalid_execution_start_authority",
             "evidence": _safe_text(exc, limit=300),
         }
@@ -6505,20 +6524,24 @@ def _p18_9_0_execution_start_overlay(
         return None, None
     try:
         task, runs = _p18_9_0_live_kanban_execution(projection)
-        terminal_state = _p18_9_0_terminal_execution_state(task, runs)
+        terminal_state = _p18_9_0_terminal_execution_state(
+            task,
+            runs,
+            ticket_id=binding.ticket_id,
+        )
     except Exception as exc:  # pragma: no cover - defensive live-state guard
         terminal_state = {
             "start_status": "failed",
             "blocker_code": "WORKER_LIFECYCLE_RECONCILIATION_REQUIRED",
             "blocker_detail": f"Kanban execution state unavailable: {_safe_text(exc, limit=200)}",
-            "next_action_id": "RECOVER_P18_9_0_EXECUTION",
+            "next_action_id": binding.execution_recovery_next_action_id,
             "outcome": "state_unavailable",
         }
         task = None
         runs = []
     if terminal_state is not None and terminal_state["start_status"] != "completed":
         blocker = {
-            "id": "P18-9-0-WORKER-LIFECYCLE",
+            "id": f"{binding.ticket_hyphen_token}-WORKER-LIFECYCLE",
             "status": "blocked_by_worker_lifecycle_failure",
             "evidence": terminal_state["blocker_detail"],
             "outcome": terminal_state.get("outcome"),
@@ -6527,7 +6550,7 @@ def _p18_9_0_execution_start_overlay(
         }
         return {
             "readiness": "execution_failed_recovery_required",
-            "workflow_state": "P18.9.0-EXECUTION-FAILED-RECOVERY-REQUIRED",
+            "workflow_state": f"{binding.ticket_id}-EXECUTION-FAILED-RECOVERY-REQUIRED",
             "workflow_status": "execution_failed",
             "queue_state": "kanban_execution_terminal",
             "execution_state": "no_active_executions",
@@ -6560,17 +6583,20 @@ def _p18_9_0_execution_start_overlay(
                 "runs": [_run_dict(run) for run in runs],
             },
             "next_action": {
-                "id": "RECOVER_P18_9_0_EXECUTION",
-                "label": "P18.9.0 worker start failed; governed recovery authorization is required before retry.",
-                "target_ticket_id": PEPPER_NEXT_TICKET_ID,
-                "target_ticket_title": PEPPER_NEXT_TICKET_TITLE,
+                "id": binding.execution_recovery_next_action_id,
+                "label": (
+                    f"{binding.ticket_id} worker start failed; governed recovery "
+                    "authorization is required before retry."
+                ),
+                "target_ticket_id": binding.ticket_id,
+                "target_ticket_title": binding.ticket_title,
             },
             "Git_mutation": False,
         }, blocker
     if terminal_state is not None and terminal_state["start_status"] == "completed":
         return {
             "readiness": "execution_completed",
-            "workflow_state": "P18.9.0-EXECUTION-COMPLETED",
+            "workflow_state": f"{binding.ticket_id}-EXECUTION-COMPLETED",
             "workflow_status": "execution_completed",
             "queue_state": "kanban_execution_terminal",
             "execution_state": "no_active_executions",
@@ -6591,16 +6617,16 @@ def _p18_9_0_execution_start_overlay(
                 "kanban_run_id": record.get("kanban_run_id"),
             },
             "next_action": {
-                "id": "PREPARE_P18_9_0_REVIEW",
-                "label": "P18.9.0 execution completed; prepare review validation.",
-                "target_ticket_id": PEPPER_NEXT_TICKET_ID,
-                "target_ticket_title": PEPPER_NEXT_TICKET_TITLE,
+                "id": binding.review_prepare_next_action_id,
+                "label": f"{binding.ticket_id} execution completed; prepare review validation.",
+                "target_ticket_id": binding.ticket_id,
+                "target_ticket_title": binding.ticket_title,
             },
             "Git_mutation": False,
         }, None
     return {
         "readiness": "execution_started",
-        "workflow_state": "P18.9.0-EXECUTING",
+        "workflow_state": f"{binding.ticket_id}-EXECUTING",
         "workflow_status": "executing",
         "queue_state": "kanban_dispatched",
         "execution_state": "active_executions",
@@ -6621,13 +6647,22 @@ def _p18_9_0_execution_start_overlay(
             "kanban_run_id": record.get("kanban_run_id"),
         },
         "next_action": {
-            "id": "MONITOR_P18_9_0_EXECUTION",
-            "label": "P18.9.0 execution has started; monitor the Kanban run and await worker completion.",
-            "target_ticket_id": PEPPER_NEXT_TICKET_ID,
-            "target_ticket_title": PEPPER_NEXT_TICKET_TITLE,
+            "id": binding.monitor_execution_next_action_id,
+            "label": (
+                f"{binding.ticket_id} execution has started; monitor the Kanban run "
+                "and await worker completion."
+            ),
+            "target_ticket_id": binding.ticket_id,
+            "target_ticket_title": binding.ticket_title,
         },
         "Git_mutation": False,
     }, None
+
+
+def _p18_9_0_execution_start_overlay(
+    projection: dict[str, Any],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    return _current_ticket_execution_start_overlay(projection)
 
 
 def _p18_9_0_recovery_overlay(
