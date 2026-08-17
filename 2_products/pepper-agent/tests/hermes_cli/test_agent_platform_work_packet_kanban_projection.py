@@ -596,6 +596,35 @@ def _finish_projected_run_as_terminal(
         conn.close()
 
 
+def _force_p18_9_1_blocked_run_4(pr, kanban_db, projected: dict, monkeypatch) -> int:
+    first = _start_p18_9_1_execution(pr, monkeypatch, pid=6401)
+    _block_projected_run(
+        kanban_db,
+        projected,
+        first["kanban_run_id"],
+        reason="synthetic P18.9.1 run 2 blocked",
+        kind="needs_input",
+    )
+    run_3 = _claim_next_projected_run(kanban_db, projected, pid=6402)
+    _block_projected_run(
+        kanban_db,
+        projected,
+        run_3,
+        reason="synthetic P18.9.1 run 3 blocked",
+        kind="capability",
+    )
+    run_4 = _claim_next_projected_run(kanban_db, projected, pid=6403)
+    assert run_4 == 4
+    _block_projected_run(
+        kanban_db,
+        projected,
+        run_4,
+        reason="WORKSPACE_PATH_ESCAPE: worker workspace path escaped canonical repo",
+        kind="transient",
+    )
+    return run_4
+
+
 def _queued_workflow_for_projection(projected: dict) -> dict:
     authority = _projection_authority_record(projected)
     generation = bridge.load_generation_record(ticket_id=projected["ticket_id"])
@@ -4597,6 +4626,226 @@ def test_closed_p18_9_0_p18_9_1_run_4_blocked_reconstructs_tool_surfaces(
     assert replay["dispatch_performed"] is True
 
 
+def test_current_p18_9_1_recovery_records_retry_pending_without_run_5(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, projected, authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
+    )
+
+    from hermes_cli import kanban_db
+
+    run_4 = _force_p18_9_1_blocked_run_4(pr, kanban_db, projected, monkeypatch)
+    failed = pr.build_workflow_control_snapshot()
+    assert failed["workflow_status"] == "execution_failed"
+    assert failed["recovery_state"] == "recovery_required"
+    assert failed["active_execution_count"] == 0
+    assert failed["next_action"]["id"] == "RECOVER_P18_9_1_EXECUTION"
+
+    recovery_text = pr.governed_ticket_recovery_authorization_text("P18.9.1")
+    retry_with_recovery_text = pr.start_current_ticket_execution(
+        human_authorization_text=recovery_text,
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+        next_action_id="START_P18_9_1_RETRY_REQUIRES_HUMAN_AUTHORIZATION",
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("recovery text must not start retry"),
+    )
+    assert retry_with_recovery_text["retry_start_status"] == "blocked"
+    assert retry_with_recovery_text["blocker_code"] == "EXECUTION_AUTHORIZATION_KIND_MISMATCH"
+
+    retry_text_recovery = "Autorizo explícitamente el retry de P18.9.1."
+    with pytest.raises(pr.ProductRuntimeDecisionFailed):
+        pr.recover_current_ticket_execution(
+            human_authorization_text=retry_text_recovery,
+            project_id="PEPPER",
+            ticket_id="P18.9.1",
+            next_action_id="RECOVER_P18_9_1_EXECUTION",
+        )
+
+    result = pr.recover_current_ticket_execution(
+        human_authorization_text=recovery_text,
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+        next_action_id="RECOVER_P18_9_1_EXECUTION",
+    )
+
+    assert result["recovery_status"] == "retry_pending"
+    assert result["ticket_id"] == "P18.9.1"
+    assert result["latest_failed_run_id"] == run_4
+    assert result["observed_attempt_count"] == 3
+    assert result["next_attempt_number"] == 4
+    assert result["recovery_authorization_recorded"] is True
+    assert result["future_retry_requires_separate_start_authorization"] is True
+    assert result["dispatch_performed"] is False
+    assert result["execution_started"] is False
+    assert result["worker_execution"] is False
+    assert result["Kanban_dispatch"] is False
+    assert result["retry_execution_started"] is False
+    assert result["retry_execution_count"] == 0
+    assert result["auto_retry"] is False
+    assert result["auto_rollback"] is False
+    assert result["Git_mutation"] is False
+    assert result["kanban_run_count"] == 3
+    assert result["second_run_started"] is False
+    assert pr.recovery_action_record_path_for_ticket("P18.9.1").exists()
+    assert not pr.p18_9_0_recovery_action_record_path().exists()
+    record = pr.load_current_ticket_recovery_action_record(projection_record=authority)
+    assert record is not None
+    assert record["ticket_id"] == "P18.9.1"
+    assert record["human_authorization_text"] == recovery_text
+    assert record["latest_failed_run_id"] == run_4
+
+    workflow = pr.build_workflow_control_snapshot()
+    assert workflow["workflow_status"] == "retry_pending"
+    assert workflow["workflow_state"] == "P18.9.1-RETRY-PENDING-NOT-DISPATCHED"
+    assert workflow["recovery_state"] == "retry_pending"
+    assert workflow["next_action"]["id"] == "START_P18_9_1_RETRY_REQUIRES_HUMAN_AUTHORIZATION"
+
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        task = kanban_db.get_task(conn, projected["kanban_task_id"])
+        runs = kanban_db.list_runs(conn, projected["kanban_task_id"])
+        assert task is not None
+        assert task.status == "blocked"
+        assert task.current_run_id is None
+        assert runs[-1].id == run_4
+        assert all(run.id <= run_4 for run in runs)
+        assert all(run.id != 5 for run in runs)
+        assert runs[-1].status == "blocked"
+    finally:
+        conn.close()
+
+
+def test_current_p18_9_1_recovery_rejects_wrong_ticket_guard(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, projected, _authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
+    )
+
+    from hermes_cli import kanban_db
+
+    _force_p18_9_1_blocked_run_4(pr, kanban_db, projected, monkeypatch)
+    with pytest.raises(pr.ProductRuntimeConflict) as excinfo:
+        pr.recover_current_ticket_execution(
+            human_authorization_text=pr.governed_ticket_recovery_authorization_text("P18.9.1"),
+            project_id="PEPPER",
+            ticket_id="P18.9.0",
+            next_action_id="RECOVER_P18_9_1_EXECUTION",
+        )
+
+    assert "bounded to ticket P18.9.1" in str(excinfo.value)
+    assert not pr.recovery_action_record_path_for_ticket("P18.9.1").exists()
+
+
+def test_current_p18_9_1_retry_start_rejects_superseded_recovery_run(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, projected, authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
+    )
+
+    from hermes_cli import kanban_db
+
+    run_4 = _force_p18_9_1_blocked_run_4(pr, kanban_db, projected, monkeypatch)
+    recovery = pr.recover_current_ticket_execution(
+        human_authorization_text=pr.governed_ticket_recovery_authorization_text("P18.9.1"),
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+        next_action_id="RECOVER_P18_9_1_EXECUTION",
+    )
+    assert recovery["latest_failed_run_id"] == run_4
+
+    run_5 = _claim_next_projected_run(kanban_db, projected, pid=6505)
+    _block_projected_run(
+        kanban_db,
+        projected,
+        run_5,
+        reason="synthetic P18.9.1 later run superseded prior recovery",
+        kind="transient",
+    )
+    monkeypatch.setattr(pr, "_executor_provider_readiness", _ready_executor_provider_payload)
+    monkeypatch.setattr(
+        pr,
+        "_preflight_pepper_governed_worker_credentials",
+        lambda projection, enabled=True: _ready_worker_credential_probe(),
+    )
+
+    result = pr.start_current_ticket_execution(
+        human_authorization_text="Autorizo explícitamente el retry de P18.9.1.",
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+        next_action_id="START_P18_9_1_RETRY_REQUIRES_HUMAN_AUTHORIZATION",
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("superseded recovery must not spawn"),
+    )
+
+    assert result["retry_start_status"] == "blocked"
+    assert result["blocker_code"] == "KANBAN_RETRY_SOURCE_GAP"
+    assert "latest failed run no longer matches" in result["blocker_detail"]
+    assert result["retry_source"]["latest_run_id"] == run_5
+    assert pr.load_current_ticket_recovery_action_record(projection_record=authority)[
+        "latest_failed_run_id"
+    ] == run_4
+
+
+def test_current_p18_9_1_recovery_blocks_completed_or_active_execution(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, projected, _authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
+    )
+
+    from hermes_cli import kanban_db
+
+    active = _start_p18_9_1_execution(pr, monkeypatch, pid=6601)
+    monkeypatch.setattr(kanban_db, "_pid_alive", lambda pid: int(pid) == 6601)
+    active_result = pr.recover_current_ticket_execution(
+        human_authorization_text=pr.governed_ticket_recovery_authorization_text("P18.9.1"),
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+        next_action_id="RECOVER_P18_9_1_EXECUTION",
+    )
+    assert active_result["recovery_status"] == "blocked"
+    assert active_result["blocker_code"] == "WORKFLOW_RECOVERY_ACTION_GAP"
+    assert active_result["execution_started"] is False
+    assert not pr.recovery_action_record_path_for_ticket("P18.9.1").exists()
+
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        assert kanban_db.complete_task(
+            conn,
+            projected["kanban_task_id"],
+            summary=(
+                "Summary\nP18.9.1 implementation completed.\nFiles inspected\n- synthetic\n"
+                "Files modified\n- synthetic\nTests/commands run\n- synthetic\n"
+                "Decisions made\n- synthetic\nLimitations\n- awaits review"
+            ),
+            metadata={"files_modified": ["synthetic"], "Git_mutation": False},
+            expected_run_id=active["kanban_run_id"],
+        )
+    finally:
+        conn.close()
+
+    completed = pr.recover_current_ticket_execution(
+        human_authorization_text=pr.governed_ticket_recovery_authorization_text("P18.9.1"),
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+        next_action_id="RECOVER_P18_9_1_EXECUTION",
+    )
+    assert completed["recovery_status"] == "blocked"
+    assert completed["blocker_code"] == "WORKFLOW_RECOVERY_ACTION_GAP"
+    assert completed["execution_started"] is False
+    assert not pr.recovery_action_record_path_for_ticket("P18.9.1").exists()
+
+
 def test_terminal_acceptance_preserves_historical_review_prepare_contract(
     projection_home,
     monkeypatch,
@@ -5722,13 +5971,85 @@ def test_chat_tool_binds_current_user_task_as_recovery_authorization_when_arg_om
     assert captured["next_action_id"] == "RECOVER_P18_9_0_EXECUTION"
 
 
+def test_chat_tool_recovers_current_p18_9_1_execution_with_generic_authorization(
+    monkeypatch,
+) -> None:
+    import tools.pepper_workflow_tools  # noqa: F401
+    from hermes_cli.agent_platform import product_runtime as pr
+    from model_tools import handle_function_call
+
+    captured = {}
+    human_text = pr.governed_ticket_recovery_authorization_text("P18.9.1")
+
+    def fake_recover_current_ticket_execution(**kwargs):
+        captured.update(kwargs)
+        return {
+            "source_system": pr.PEPPER_RECOVERY_ACTION_SOURCE_SYSTEM,
+            "schema_version": 1,
+            "policy_id": pr.PEPPER_RECOVERY_ACTION_POLICY_ID,
+            "recovery_status": "retry_pending",
+            "ticket_id": "P18.9.1",
+            "future_retry_prepared": True,
+            "dispatch_performed": False,
+            "execution_started": False,
+            "worker_execution": False,
+            "Kanban_dispatch": False,
+            "Git_mutation": False,
+            "auto_retry": False,
+            "auto_rollback": False,
+        }
+
+    monkeypatch.setattr(pr, "recover_current_ticket_execution", fake_recover_current_ticket_execution)
+    monkeypatch.setattr(
+        pr,
+        "build_lead_agent_operational_context",
+        lambda: {
+            "current_ticket_id": "P18.9.1",
+            "workflow_state": "P18.9.1-EXECUTION-FAILED-RECOVERY-REQUIRED",
+            "workflow_status": "execution_failed",
+            "approval_state": "ticket_approved",
+            "pending_approval_count": 0,
+            "pending_ticket_approval_count": 0,
+            "queue_state": "kanban_execution_terminal",
+            "execution_state": "no_active_executions",
+            "recovery_state": "recovery_required",
+            "failure_category": "blocked",
+            "failure_summary": "WORKSPACE_PATH_ESCAPE",
+            "next_action": {"id": "RECOVER_P18_9_1_EXECUTION"},
+        },
+    )
+
+    result = json.loads(
+        handle_function_call(
+            "recover_current_ticket_execution",
+            {
+                "human_authorization_text": human_text,
+                "project_id": "PEPPER",
+                "ticket_id": "P18.9.1",
+                "next_action_id": "RECOVER_P18_9_1_EXECUTION",
+            },
+        )
+    )
+
+    assert result["success"] is True
+    assert result["source_tool"] == "recover_current_ticket_execution"
+    assert result["ticket_id"] == "P18.9.1"
+    assert captured["human_authorization_text"] == human_text
+    assert captured["project_id"] == "PEPPER"
+    assert captured["ticket_id"] == "P18.9.1"
+    assert captured["next_action_id"] == "RECOVER_P18_9_1_EXECUTION"
+
+
 @pytest.mark.parametrize(
     ("user_task", "expected_error"),
     [
         (None, "human_authorization_text is required"),
         ("¿Autorizo recuperar P18.9.0?", "must not be a question"),
-        ("Autorizo recuperar P18.9.0", "exact explicit P18.9.0 recovery"),
-        ("Autorizo explícitamente la recuperación de la ejecución fallida de P18.9.1.", "exact explicit P18.9.0 recovery"),
+        ("Autorizo iniciar P18.9.0", "explicit execution recovery authorization text is required"),
+        (
+            "Autorizo explícitamente la recuperación de la ejecución fallida de P18.9.1.",
+            "targets a different ticket",
+        ),
     ],
 )
 def test_chat_tool_rejects_missing_or_unsafe_user_task_recovery_authorization(
@@ -5744,6 +6065,24 @@ def test_chat_tool_rejects_missing_or_unsafe_user_task_recovery_authorization(
         pr,
         "recover_current_ticket_execution",
         lambda **_kwargs: pytest.fail("recovery backend must not be called"),
+    )
+    monkeypatch.setattr(
+        pr,
+        "build_lead_agent_operational_context",
+        lambda: {
+            "current_ticket_id": "P18.9.0",
+            "workflow_state": "P18.9.0-EXECUTION-FAILED-RECOVERY-REQUIRED",
+            "workflow_status": "execution_failed",
+            "approval_state": "ticket_approved",
+            "pending_approval_count": 0,
+            "pending_ticket_approval_count": 0,
+            "queue_state": "kanban_execution_terminal",
+            "execution_state": "no_active_executions",
+            "recovery_state": "recovery_required",
+            "failure_category": "worker_bootstrap_failure",
+            "failure_summary": "worker exited during bootstrap",
+            "next_action": {"id": "RECOVER_P18_9_0_EXECUTION"},
+        },
     )
 
     result = json.loads(

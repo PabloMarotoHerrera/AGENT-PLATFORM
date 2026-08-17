@@ -14,12 +14,8 @@ TOOLSET = "pepper_workflow"
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 100
 CURRENT_TICKET_APPROVAL_ID = "P18.9.0"
-CURRENT_TICKET_RECOVERY_NEXT_ACTION_ID = "RECOVER_P18_9_0_EXECUTION"
 CURRENT_TICKET_REVIEW_PREPARE_NEXT_ACTION_ID = "PREPARE_P18_9_0_REVIEW"
 CURRENT_TICKET_REVIEW_ACCEPTANCE_NEXT_ACTION_ID = "AWAIT_HUMAN_P18_9_0_REVIEW_ACCEPTANCE"
-CURRENT_TICKET_RECOVERY_AUTHORIZATION_TEXT = (
-    "Autorizo explícitamente la recuperación de la ejecución fallida de P18.9.0."
-)
 CURRENT_TICKET_REVIEW_ACCEPTANCE_TEXT = (
     "Acepto explícitamente la review de P18.9.0 y el resultado preparado para aceptación humana."
 )
@@ -279,16 +275,25 @@ def _validate_explicit_start_request(
     return raw
 
 
-def _validate_explicit_recovery_request(value: object) -> str:
+def _validate_explicit_recovery_request(
+    value: object,
+    *,
+    current_ticket_id: str | None = None,
+    requested_ticket_id: str | None = None,
+    current_next_action_id: str | None = None,
+    requested_next_action_id: str | None = None,
+) -> str:
     raw = str(value or "").strip()
-    if not raw:
-        raise ValueError("human_authorization_text is required")
-    if "?" in raw or "¿" in raw:
-        raise ValueError("execution recovery authorization text must not be a question")
-    if raw != CURRENT_TICKET_RECOVERY_AUTHORIZATION_TEXT:
-        raise ValueError(
-            "exact explicit P18.9.0 recovery authorization text is required"
-        )
+    pr = _runtime()
+    diagnostics = pr.execution_recovery_authorization_text_diagnostics(
+        raw,
+        current_ticket_id=str(current_ticket_id or requested_ticket_id or "").strip(),
+        requested_ticket_id=requested_ticket_id,
+        current_next_action_id=current_next_action_id,
+        requested_next_action_id=requested_next_action_id,
+    )
+    if diagnostics is not None:
+        raise ValueError(str(diagnostics["blocker_detail"]))
     return raw
 
 
@@ -798,15 +803,29 @@ def _start_current_ticket_execution(args: dict[str, Any], **_kwargs) -> str:
 def _recover_current_ticket_execution(args: dict[str, Any], **_kwargs) -> str:
     pr = _runtime()
     try:
+        context = _context()
+        current_ticket_id = str(
+            context.get("current_ticket_id") or args.get("ticket_id") or ""
+        ).strip()
+        next_action = context.get("next_action")
+        current_next_action_id = (
+            next_action.get("id") if isinstance(next_action, dict) else None
+        )
+        requested_ticket_id = str(args.get("ticket_id") or "").strip() or None
+        requested_next_action_id = str(args.get("next_action_id") or "").strip() or None
         human_authorization_text = _validate_explicit_recovery_request(
-            _recovery_authorization_text_from_args_or_user_task(args, _kwargs)
+            _recovery_authorization_text_from_args_or_user_task(args, _kwargs),
+            current_ticket_id=current_ticket_id,
+            requested_ticket_id=requested_ticket_id,
+            current_next_action_id=current_next_action_id,
+            requested_next_action_id=requested_next_action_id,
         )
         result = pr.recover_current_ticket_execution(
             human_authorization_text=human_authorization_text,
             authorizer_id="pepper-chat-human",
             project_id=str(args.get("project_id") or "").strip() or None,
-            ticket_id=str(args.get("ticket_id") or "").strip() or None,
-            next_action_id=str(args.get("next_action_id") or "").strip() or None,
+            ticket_id=requested_ticket_id,
+            next_action_id=requested_next_action_id,
         )
         updated_context = pr.build_lead_agent_operational_context()
     except Exception as exc:
@@ -1087,8 +1106,9 @@ _RECOVER_CURRENT_TICKET_EXECUTION_SCHEMA = {
         "human_authorization_text": {
             "type": "string",
             "description": (
-                "Exact human phrase authorizing recovery: "
-                f"{CURRENT_TICKET_RECOVERY_AUTHORIZATION_TEXT}"
+                "Exact human phrase explicitly authorizing recovery of the failed "
+                "execution for the current governed ticket. Must name that ticket "
+                "and must not authorize retry start."
             ),
         },
         "project_id": {
@@ -1097,11 +1117,11 @@ _RECOVER_CURRENT_TICKET_EXECUTION_SCHEMA = {
         },
         "ticket_id": {
             "type": "string",
-            "description": "Optional governed ticket guard. Must be P18.9.0 if supplied.",
+            "description": "Optional governed ticket guard. Must equal the current governed ticket if supplied.",
         },
         "next_action_id": {
             "type": "string",
-            "description": "Optional next-action guard. Must be RECOVER_P18_9_0_EXECUTION if supplied.",
+            "description": "Optional next-action guard. Must equal the current ticket recovery action if supplied.",
         },
     },
     "required": ["human_authorization_text"],
@@ -1286,7 +1306,7 @@ registry.register(
         "name": "start_current_ticket_execution",
         "description": (
             "Apply a separate explicit human authorization to start only the current "
-            "Pepper P18.9.0 Kanban worker or retry run 2 when retry is pending. Validates provider, profile, workspace, "
+            "Pepper governed Kanban worker or retry run when retry is pending. Validates provider, profile, workspace, "
             "dependency, and concurrency gates before dispatch; no Git, Docker, "
             "Graphify, automatic retry, or rollback."
         ),
@@ -1303,8 +1323,8 @@ registry.register(
     schema={
         "name": "recover_current_ticket_execution",
         "description": (
-            "Record the exact explicit human recovery authorization for failed Pepper "
-            "P18.9.0 and prepare retry-pending governance. Does not start run 2, "
+            "Record explicit human recovery authorization for the failed current Pepper "
+            "ticket and prepare retry-pending governance. Does not start a retry run, "
             "requeue or reclaim Kanban, create a new task, mutate Git, invoke Docker, "
             "or invoke Graphify."
         ),

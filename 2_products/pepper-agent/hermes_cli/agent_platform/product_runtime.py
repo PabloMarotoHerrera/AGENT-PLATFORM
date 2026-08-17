@@ -491,6 +491,12 @@ def governed_ticket_lifecycle_action_ids(ticket_id: str) -> dict[str, str]:
     }
 
 
+def governed_ticket_recovery_authorization_text(ticket_id: str) -> str:
+    """Return the canonical explicit recovery authorization phrase for a ticket."""
+
+    return f"Autorizo explícitamente la recuperación de la ejecución fallida de {ticket_id}."
+
+
 def _int_or_none(value: object) -> int | None:
     try:
         return int(value) if value not in {None, ""} else None
@@ -778,6 +784,24 @@ def _p18_9_0_generation_overlay() -> tuple[dict[str, Any] | None, dict[str, Any]
                                         )
                                         if next_start_overlay is not None:
                                             overlay.update(next_start_overlay)
+                                            next_retry_start_overlay, next_retry_start_blocker = (
+                                                _p18_9_0_retry_start_overlay(next_projection)
+                                            )
+                                            if next_retry_start_overlay is not None:
+                                                overlay.update(next_retry_start_overlay)
+                                            if next_retry_start_blocker is not None:
+                                                return overlay, next_retry_start_blocker
+                                            if next_retry_start_overlay is None:
+                                                next_recovery_overlay, next_recovery_blocker = (
+                                                    _p18_9_0_recovery_overlay(
+                                                        next_projection,
+                                                        start_overlay=next_start_overlay,
+                                                    )
+                                                )
+                                                if next_recovery_overlay is not None:
+                                                    overlay.update(next_recovery_overlay)
+                                                if next_recovery_blocker is not None:
+                                                    return overlay, next_recovery_blocker
                                         if next_start_blocker is not None:
                                             return overlay, next_start_blocker
                         if review_blocker is not None:
@@ -817,6 +841,24 @@ def _p18_9_0_generation_overlay() -> tuple[dict[str, Any] | None, dict[str, Any]
                                     )
                                     if next_start_overlay is not None:
                                         overlay.update(next_start_overlay)
+                                        next_retry_start_overlay, next_retry_start_blocker = (
+                                            _p18_9_0_retry_start_overlay(next_projection)
+                                        )
+                                        if next_retry_start_overlay is not None:
+                                            overlay.update(next_retry_start_overlay)
+                                        if next_retry_start_blocker is not None:
+                                            return overlay, next_retry_start_blocker
+                                        if next_retry_start_overlay is None:
+                                            next_recovery_overlay, next_recovery_blocker = (
+                                                _p18_9_0_recovery_overlay(
+                                                    next_projection,
+                                                    start_overlay=next_start_overlay,
+                                                )
+                                            )
+                                            if next_recovery_overlay is not None:
+                                                overlay.update(next_recovery_overlay)
+                                            if next_recovery_blocker is not None:
+                                                return overlay, next_recovery_blocker
                                     if next_start_blocker is not None:
                                         return overlay, next_start_blocker
                     if review_blocker is not None:
@@ -1667,36 +1709,60 @@ def p18_9_0_execution_start_record_path() -> Path:
 def p18_9_0_recovery_action_record_path() -> Path:
     """Return the profile-scoped P18.9.0 recovery authority path."""
 
-    return governed_ticket_lifecycle_authority_path(
-        "recovery_action",
-        ticket_id=PEPPER_NEXT_TICKET_ID,
-    )
+    return recovery_action_record_path_for_ticket(PEPPER_BOOTSTRAP_NEXT_TICKET_ID)
 
 
 def p18_9_0_recovery_action_history_path() -> Path:
     """Return the append-only P18.9.0 recovery authority history path."""
 
-    return governed_ticket_lifecycle_authority_path(
-        "recovery_action_history",
-        ticket_id=PEPPER_NEXT_TICKET_ID,
-    )
+    return recovery_action_history_path_for_ticket(PEPPER_BOOTSTRAP_NEXT_TICKET_ID)
 
 
 def p18_9_0_retry_start_record_path() -> Path:
     """Return the profile-scoped P18.9.0 retry-start authority path."""
 
-    return governed_ticket_lifecycle_authority_path(
-        "retry_start",
-        ticket_id=PEPPER_NEXT_TICKET_ID,
-    )
+    return retry_start_record_path_for_ticket(PEPPER_BOOTSTRAP_NEXT_TICKET_ID)
 
 
 def p18_9_0_retry_start_history_path() -> Path:
     """Return the append-only P18.9.0 retry-start authority history path."""
 
+    return retry_start_history_path_for_ticket(PEPPER_BOOTSTRAP_NEXT_TICKET_ID)
+
+
+def recovery_action_record_path_for_ticket(ticket_id: str) -> Path:
+    """Return the profile-scoped recovery authority path for one ticket."""
+
+    return governed_ticket_lifecycle_authority_path(
+        "recovery_action",
+        ticket_id=ticket_id,
+    )
+
+
+def recovery_action_history_path_for_ticket(ticket_id: str) -> Path:
+    """Return the append-only recovery authority history path for one ticket."""
+
+    return governed_ticket_lifecycle_authority_path(
+        "recovery_action_history",
+        ticket_id=ticket_id,
+    )
+
+
+def retry_start_record_path_for_ticket(ticket_id: str) -> Path:
+    """Return the profile-scoped retry-start authority path for one ticket."""
+
+    return governed_ticket_lifecycle_authority_path(
+        "retry_start",
+        ticket_id=ticket_id,
+    )
+
+
+def retry_start_history_path_for_ticket(ticket_id: str) -> Path:
+    """Return the append-only retry-start authority history path for one ticket."""
+
     return governed_ticket_lifecycle_authority_path(
         "retry_start_history",
-        ticket_id=PEPPER_NEXT_TICKET_ID,
+        ticket_id=ticket_id,
     )
 
 
@@ -1757,6 +1823,63 @@ def load_p18_9_0_execution_start_record(
     )
 
 
+def _bootstrap_projection_record_for_validation() -> dict[str, Any]:
+    from hermes_cli.agent_platform.workflow.work_packet_kanban_projection import (
+        load_p18_9_0_kanban_projection_record,
+    )
+
+    projection = load_p18_9_0_kanban_projection_record()
+    if projection is None:
+        projection = _load_current_projection_record()
+    return projection
+
+
+def _recovery_action_record_path_for_projection(
+    projection_record: dict[str, Any] | None = None,
+) -> Path:
+    projection = projection_record if projection_record is not None else _load_current_projection_record()
+    return recovery_action_record_path_for_ticket(str(projection["ticket_id"]))
+
+
+def _retry_start_record_path_for_projection(
+    projection_record: dict[str, Any] | None = None,
+) -> Path:
+    projection = projection_record if projection_record is not None else _load_current_projection_record()
+    return retry_start_record_path_for_ticket(str(projection["ticket_id"]))
+
+
+def _load_recovery_action_record_from_path(
+    path: Path,
+    *,
+    projection_record: dict[str, Any],
+) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ProductRuntimeConflict(
+            "execution recovery action record is unreadable"
+        ) from exc
+    return validate_p18_9_0_recovery_action_record(
+        record,
+        projection_record=projection_record,
+    )
+
+
+def load_current_ticket_recovery_action_record(
+    *,
+    projection_record: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Load and validate the current ticket recovery record, if present."""
+
+    projection = projection_record if projection_record is not None else _load_current_projection_record()
+    return _load_recovery_action_record_from_path(
+        recovery_action_record_path_for_ticket(str(projection["ticket_id"])),
+        projection_record=projection,
+    )
+
+
 def load_p18_9_0_recovery_action_record(
     *,
     projection_record: dict[str, Any] | None = None,
@@ -1766,15 +1889,87 @@ def load_p18_9_0_recovery_action_record(
     path = p18_9_0_recovery_action_record_path()
     if not path.exists():
         return None
+    projection = (
+        projection_record
+        if projection_record is not None
+        else _bootstrap_projection_record_for_validation()
+    )
+    return _load_recovery_action_record_from_path(
+        path,
+        projection_record=projection,
+    )
+
+
+def _load_retry_start_record_from_path(
+    path: Path,
+    *,
+    projection_record: dict[str, Any],
+    recovery_record: dict[str, Any] | None = None,
+    allow_historical_mismatch: bool = False,
+) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
     try:
         record = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise ProductRuntimeConflict(
-            "P18.9.0 recovery action record is unreadable"
+            "execution retry-start authorization record is unreadable"
         ) from exc
-    return validate_p18_9_0_recovery_action_record(
-        record,
-        projection_record=projection_record,
+    try:
+        return validate_p18_9_0_retry_start_record(
+            record,
+            projection_record=projection_record,
+            recovery_record=recovery_record,
+        )
+    except ProductRuntimeConflict:
+        if not allow_historical_mismatch:
+            raise
+        if record.get("retry_start_authorization_SHA256") != _retry_start_record_digest(record):
+            raise
+        recovery = recovery_record
+        if recovery is None:
+            recovery = load_current_ticket_recovery_action_record(
+                projection_record=projection_record,
+            )
+        if recovery is None:
+            raise
+        same_recovery_authority = (
+            record.get("recovery_action_SHA256") == recovery.get("recovery_action_SHA256")
+        )
+        same_recovery_cycle = (
+            _retry_start_record_cycle_id(record, recovery, projection_record)
+            == _recovery_record_cycle_id(recovery, projection_record)
+        )
+        if same_recovery_authority and same_recovery_cycle:
+            raise
+        historical_recovery = dict(recovery)
+        historical_recovery["recovery_action_SHA256"] = record.get("recovery_action_SHA256")
+        historical_recovery["observed_attempt_count"] = record.get("previous_attempt_count")
+        historical_recovery["next_attempt_number"] = record.get("next_attempt_number")
+        historical_recovery["max_attempts"] = record.get("max_attempts")
+        historical_recovery["latest_failed_run_id"] = record.get("latest_failed_run_id")
+        validate_p18_9_0_retry_start_record(
+            record,
+            projection_record=projection_record,
+            recovery_record=historical_recovery,
+        )
+        return record
+
+
+def load_current_ticket_retry_start_record(
+    *,
+    projection_record: dict[str, Any] | None = None,
+    recovery_record: dict[str, Any] | None = None,
+    allow_historical_mismatch: bool = False,
+) -> dict[str, Any] | None:
+    """Load and validate the current ticket retry-start record, if present."""
+
+    projection = projection_record if projection_record is not None else _load_current_projection_record()
+    return _load_retry_start_record_from_path(
+        retry_start_record_path_for_ticket(str(projection["ticket_id"])),
+        projection_record=projection,
+        recovery_record=recovery_record,
+        allow_historical_mismatch=allow_historical_mismatch,
     )
 
 
@@ -1789,51 +1984,17 @@ def load_p18_9_0_retry_start_record(
     path = p18_9_0_retry_start_record_path()
     if not path.exists():
         return None
-    try:
-        record = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ProductRuntimeConflict(
-            "P18.9.0 retry-start authorization record is unreadable"
-        ) from exc
-    try:
-        return validate_p18_9_0_retry_start_record(
-            record,
-            projection_record=projection_record,
-            recovery_record=recovery_record,
-        )
-    except ProductRuntimeConflict:
-        if not allow_historical_mismatch:
-            raise
-        if record.get("retry_start_authorization_SHA256") != _retry_start_record_digest(record):
-            raise
-        projection = projection_record if projection_record is not None else _load_current_projection_record()
-        _validate_execution_start_authority(projection)
-        recovery = recovery_record
-        if recovery is None:
-            recovery = load_p18_9_0_recovery_action_record(projection_record=projection)
-        if recovery is None:
-            raise
-        same_recovery_authority = (
-            record.get("recovery_action_SHA256") == recovery.get("recovery_action_SHA256")
-        )
-        same_recovery_cycle = (
-            _retry_start_record_cycle_id(record, recovery, projection)
-            == _recovery_record_cycle_id(recovery, projection)
-        )
-        if same_recovery_authority and same_recovery_cycle:
-            raise
-        historical_recovery = dict(recovery)
-        historical_recovery["recovery_action_SHA256"] = record.get("recovery_action_SHA256")
-        historical_recovery["observed_attempt_count"] = record.get("previous_attempt_count")
-        historical_recovery["next_attempt_number"] = record.get("next_attempt_number")
-        historical_recovery["max_attempts"] = record.get("max_attempts")
-        historical_recovery["latest_failed_run_id"] = record.get("latest_failed_run_id")
-        validate_p18_9_0_retry_start_record(
-            record,
-            projection_record=projection,
-            recovery_record=historical_recovery,
-        )
-        return record
+    projection = (
+        projection_record
+        if projection_record is not None
+        else _bootstrap_projection_record_for_validation()
+    )
+    return _load_retry_start_record_from_path(
+        path,
+        projection_record=projection,
+        recovery_record=recovery_record,
+        allow_historical_mismatch=allow_historical_mismatch,
+    )
 
 
 def load_p18_9_0_review_prepare_record(
@@ -1880,7 +2041,7 @@ def load_p18_9_0_review_acceptance_record(
     )
 
 
-def _p18_9_0_recovery_cycle_id(
+def _governed_ticket_recovery_cycle_id(
     *,
     projection: dict[str, Any],
     latest_failed_run_id: Any,
@@ -1888,9 +2049,10 @@ def _p18_9_0_recovery_cycle_id(
     failure_category: Any = None,
     failure_summary: Any = None,
 ) -> str:
+    ticket_id = str(projection.get("ticket_id") or PEPPER_NEXT_TICKET_ID)
     payload = {
         "project_id": PEPPER_GOVERNED_PROJECT_ID,
-        "ticket_id": PEPPER_NEXT_TICKET_ID,
+        "ticket_id": ticket_id,
         "work_packet_id": projection.get("work_packet_id"),
         "work_packet_SHA256": projection.get("work_packet_SHA256"),
         "projection_SHA256": projection.get("projection_SHA256"),
@@ -1902,7 +2064,29 @@ def _p18_9_0_recovery_cycle_id(
         "failure_summary": _safe_text(failure_summary, limit=300),
     }
     data = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.sha256(f"pepper-p18-9-0-recovery-cycle-v1\n{data}".encode("utf-8")).hexdigest()
+    algorithm = (
+        "pepper-p18-9-0-recovery-cycle-v1"
+        if ticket_id == PEPPER_BOOTSTRAP_NEXT_TICKET_ID
+        else "pepper-current-ticket-recovery-cycle-v1"
+    )
+    return hashlib.sha256(f"{algorithm}\n{data}".encode("utf-8")).hexdigest()
+
+
+def _p18_9_0_recovery_cycle_id(
+    *,
+    projection: dict[str, Any],
+    latest_failed_run_id: Any,
+    observed_attempt_count: Any,
+    failure_category: Any = None,
+    failure_summary: Any = None,
+) -> str:
+    return _governed_ticket_recovery_cycle_id(
+        projection=projection,
+        latest_failed_run_id=latest_failed_run_id,
+        observed_attempt_count=observed_attempt_count,
+        failure_category=failure_category,
+        failure_summary=failure_summary,
+    )
 
 
 def _recovery_record_cycle_id(record: dict[str, Any], projection: dict[str, Any]) -> str:
@@ -2025,7 +2209,7 @@ def validate_p18_9_0_recovery_action_record(
         raise ProductRuntimeConflict("recovery action record digest mismatch")
     projection = projection_record if projection_record is not None else _load_current_projection_record()
     _validate_execution_start_authority(projection)
-    _binding, identity = _current_ticket_identity_fields(projection)
+    binding, identity = _current_ticket_identity_fields(projection)
     expected = {
         "schema_version": PEPPER_RECOVERY_ACTION_SCHEMA_VERSION,
         "policy_id": PEPPER_RECOVERY_ACTION_POLICY_ID,
@@ -2078,8 +2262,18 @@ def validate_p18_9_0_recovery_action_record(
         raise ProductRuntimeConflict("recovery action max_attempts mismatch")
     if int(record.get("next_attempt_number") or 0) != int(record["observed_attempt_count"]) + 1:
         raise ProductRuntimeConflict("recovery action next_attempt_number mismatch")
-    if record.get("human_authorization_text") != PEPPER_CURRENT_EXECUTION_RECOVERY_AUTHORIZATION_TEXT:
-        raise ProductRuntimeConflict("recovery action human authorization text mismatch")
+    authorization_diagnostics = execution_recovery_authorization_text_diagnostics(
+        str(record.get("human_authorization_text") or ""),
+        current_ticket_id=binding.ticket_id,
+        requested_ticket_id=record.get("ticket_id"),
+        current_next_action_id=binding.execution_recovery_next_action_id,
+        requested_next_action_id=binding.execution_recovery_next_action_id,
+    )
+    if authorization_diagnostics is not None:
+        raise ProductRuntimeConflict(
+            "recovery action human authorization text mismatch: "
+            f"{authorization_diagnostics['blocker_detail']}"
+        )
     try:
         from hermes_cli.agent_platform.workflow.retry_incident_rollback import (
             RetryIncidentRollbackHumanAuthorization,
@@ -2115,7 +2309,7 @@ def validate_p18_9_0_retry_start_record(
     _validate_execution_start_authority(projection)
     recovery = recovery_record
     if recovery is None:
-        recovery = load_p18_9_0_recovery_action_record(projection_record=projection)
+        recovery = load_current_ticket_recovery_action_record(projection_record=projection)
     if recovery is None:
         raise ProductRuntimeConflict("retry-start record requires recovery authority")
     binding, identity = _current_ticket_identity_fields(projection)
@@ -2758,21 +2952,27 @@ def recover_current_ticket_execution(
         ticket_id=ticket_id,
         next_action_id=next_action_id,
     )
-    _validate_execution_recovery_request_guards(request)
-    _validate_execution_recovery_authorization_text(request.human_authorization_text)
     projection = _load_current_projection_record()
+    binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
+    _validate_execution_recovery_request_guards(request, projection_record=projection)
+    _validate_execution_recovery_authorization_text(
+        request.human_authorization_text,
+        current_ticket_id=binding.ticket_id,
+        requested_ticket_id=request.ticket_id,
+        requested_next_action_id=request.next_action_id,
+    )
     _validate_execution_start_authority(projection)
-    existing = load_p18_9_0_recovery_action_record(projection_record=projection)
+    existing = load_current_ticket_recovery_action_record(projection_record=projection)
     if existing is not None and _recovery_record_matches_current_failure(projection, existing):
         if existing.get("human_authorization_text") != request.human_authorization_text:
             raise ProductRuntimeConflict(
-                "P18.9.0 recovery was already recorded with different authorization text"
+                f"{binding.ticket_id} recovery was already recorded with different authorization text"
             )
         return _recovery_action_operational_result(existing, idempotent_replay=True)
     if existing is not None:
         _archive_existing_authority_record(
-            p18_9_0_recovery_action_record_path(),
-            p18_9_0_recovery_action_history_path(),
+            recovery_action_record_path_for_ticket(binding.ticket_id),
+            recovery_action_history_path_for_ticket(binding.ticket_id),
             reason="superseded_recovery_cycle",
         )
     workflow = build_workflow_control_snapshot()
@@ -2800,7 +3000,7 @@ def recover_current_ticket_execution(
             projection,
             request=request,
             blocker_code="RETRY_BUDGET_EXHAUSTED",
-            blocker_detail="P18.9.0 retry budget is exhausted",
+            blocker_detail=f"{binding.ticket_id} retry budget is exhausted",
             retry_source=retry_source,
         )
 
@@ -2842,15 +3042,18 @@ def _start_current_ticket_retry_execution(
             blocker_detail=str(authorization_diagnostics["blocker_detail"]),
             authorization_diagnostics=authorization_diagnostics,
         )
-    recovery_record = load_p18_9_0_recovery_action_record(projection_record=projection)
+    recovery_record = load_current_ticket_recovery_action_record(projection_record=projection)
     if recovery_record is None:
         return _blocked_current_execution_retry_start_result(
             projection,
             request=request,
             blocker_code="RECOVERY_AUTHORITY_GAP",
-            blocker_detail="P18.9.0 retry start requires a persisted retry-pending recovery authority",
+            blocker_detail=(
+                f"{binding.ticket_id} retry start requires a persisted "
+                "retry-pending recovery authority"
+            ),
         )
-    existing = load_p18_9_0_retry_start_record(
+    existing = load_current_ticket_retry_start_record(
         projection_record=projection,
         recovery_record=recovery_record,
         allow_historical_mismatch=True,
@@ -2863,8 +3066,8 @@ def _start_current_ticket_retry_execution(
         current_cycle_id = _recovery_record_cycle_id(recovery_record, projection)
         if (not same_recovery_authority) or existing_cycle_id != current_cycle_id:
             _archive_existing_authority_record(
-                p18_9_0_retry_start_record_path(),
-                p18_9_0_retry_start_history_path(),
+                retry_start_record_path_for_ticket(binding.ticket_id),
+                retry_start_history_path_for_ticket(binding.ticket_id),
                 reason="superseded_recovery_cycle",
             )
             existing = None
@@ -3142,6 +3345,91 @@ def execution_human_authorization_text_diagnostics(
     )
 
 
+def execution_recovery_authorization_text_diagnostics(
+    value: str,
+    *,
+    current_ticket_id: str,
+    requested_ticket_id: str | None = None,
+    current_next_action_id: str | None = None,
+    requested_next_action_id: str | None = None,
+) -> dict[str, Any] | None:
+    raw = str(value or "").strip()
+    expected_ticket_id = str(current_ticket_id or "").strip()
+    expected_next_action_id = (
+        governed_ticket_lifecycle_action_ids(expected_ticket_id)["execution_recovery"]
+        if expected_ticket_id
+        else None
+    )
+    normalized = _normalize_authorization_intent_text(raw)
+    observed_kind = _observed_execution_authorization_kind(normalized)
+    base = {
+        "current_ticket_id": expected_ticket_id or None,
+        "requested_ticket_id": requested_ticket_id,
+        "current_next_action_id": current_next_action_id,
+        "requested_next_action_id": requested_next_action_id,
+        "expected_next_action_id": expected_next_action_id,
+        "authorization_kind": observed_kind,
+        "expected_authorization_kind": "execution_recovery_authorization",
+    }
+
+    def blocked(code: str, detail: str) -> dict[str, Any]:
+        return {
+            **base,
+            "blocker_code": code,
+            "blocker_detail": detail,
+        }
+
+    if not expected_ticket_id:
+        return blocked(
+            "EXECUTION_RECOVERY_AUTHORITY_GAP",
+            "current ticket is unavailable for execution recovery authorization",
+        )
+    if requested_next_action_id not in {None, expected_next_action_id}:
+        return blocked(
+            "EXECUTION_RECOVERY_ACTION_MISMATCH",
+            f"execution recovery authorization requires {expected_next_action_id}",
+        )
+    if not raw:
+        return blocked(
+            "EXECUTION_RECOVERY_HUMAN_AUTHORIZATION_TEXT_GAP",
+            "human_authorization_text is required",
+        )
+    if "?" in raw or "¿" in raw:
+        return blocked(
+            "EXECUTION_RECOVERY_HUMAN_AUTHORIZATION_TEXT_GAP",
+            "execution recovery authorization text must not be a question",
+        )
+    if _authorization_text_is_ambiguous(normalized):
+        return blocked(
+            "EXECUTION_RECOVERY_HUMAN_AUTHORIZATION_TEXT_GAP",
+            "execution recovery authorization text is ambiguous",
+        )
+
+    mentioned_ticket_ids = _mentioned_authorization_ticket_ids(normalized)
+    base["mentioned_ticket_ids"] = sorted(mentioned_ticket_ids)
+    if not mentioned_ticket_ids:
+        return blocked(
+            "EXECUTION_RECOVERY_HUMAN_AUTHORIZATION_TEXT_GAP",
+            "execution recovery authorization text must name the current ticket",
+        )
+    if expected_ticket_id.upper() not in mentioned_ticket_ids:
+        return blocked(
+            "EXECUTION_RECOVERY_AUTHORIZATION_TICKET_MISMATCH",
+            "execution recovery authorization targets a different ticket",
+        )
+    if not _authorization_text_has_recovery_intent(normalized):
+        return blocked(
+            "EXECUTION_AUTHORIZATION_KIND_MISMATCH",
+            "explicit execution recovery authorization text is required",
+        )
+    if _authorization_text_has_retry_intent(normalized):
+        return blocked(
+            "EXECUTION_AUTHORIZATION_KIND_MISMATCH",
+            "execution recovery authorization must not be retry-start authorization",
+        )
+    return None
+
+
 def _normalize_authorization_intent_text(value: str) -> str:
     text = unicodedata.normalize("NFKD", str(value or "").strip())
     text = "".join(ch for ch in text if not unicodedata.combining(ch))
@@ -3260,8 +3548,12 @@ def validate_governed_ticket_lifecycle_projection_authority(
 
 def _validate_execution_recovery_request_guards(
     request: CurrentTicketExecutionRecoveryRequest,
+    *,
+    projection_record: dict[str, Any] | None = None,
 ) -> None:
-    binding = resolve_current_ticket_lifecycle_binding()
+    binding = resolve_current_ticket_lifecycle_binding(
+        projection_record=projection_record,
+    )
     if request.project_id not in {None, binding.project_id}:
         raise ProductRuntimeConflict(f"execution recovery is bounded to project {binding.project_id}")
     if request.ticket_id not in {None, binding.ticket_id}:
@@ -3272,11 +3564,23 @@ def _validate_execution_recovery_request_guards(
         )
 
 
-def _validate_execution_recovery_authorization_text(value: str) -> None:
-    if value.strip() != PEPPER_CURRENT_EXECUTION_RECOVERY_AUTHORIZATION_TEXT:
-        raise ProductRuntimeDecisionFailed(
-            "exact explicit P18.9.0 recovery authorization text is required"
-        )
+def _validate_execution_recovery_authorization_text(
+    value: str,
+    *,
+    current_ticket_id: str,
+    requested_ticket_id: str | None = None,
+    current_next_action_id: str | None = None,
+    requested_next_action_id: str | None = None,
+) -> None:
+    diagnostics = execution_recovery_authorization_text_diagnostics(
+        value,
+        current_ticket_id=current_ticket_id,
+        requested_ticket_id=requested_ticket_id,
+        current_next_action_id=current_next_action_id,
+        requested_next_action_id=requested_next_action_id,
+    )
+    if diagnostics is not None:
+        raise ProductRuntimeDecisionFailed(str(diagnostics["blocker_detail"]))
 
 
 def _execution_start_workflow_blocker(
@@ -3376,6 +3680,7 @@ def _execution_retry_start_workflow_blocker(
 def _kanban_recovery_source_state(projection: dict[str, Any]) -> dict[str, Any]:
     from hermes_cli import kanban_db
 
+    binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
     board = _normalize_board(str(projection["kanban_board_slug"]))
     task_id = str(projection["kanban_task_id"])
     conn = kanban_db.connect(board=board)
@@ -3397,21 +3702,27 @@ def _kanban_recovery_source_state(projection: dict[str, Any]) -> dict[str, Any]:
                 "blocker_code": "WORKPACKET_AUTHORITY_DRIFT_GAP",
                 "blocker_detail": (
                     "synthetic Kanban execution-detail WorkPacket identity cannot be "
-                    "treated as canonical P18.9.0 WorkPacket authority"
+                    f"treated as canonical {binding.ticket_id} WorkPacket authority"
                 ),
                 "synthetic_work_packet_id": synthetic_work_packet_id,
             }
         if task_body.get("WorkPacket_ID") != projection["work_packet_id"]:
             return {
                 "blocker_code": "WORKPACKET_AUTHORITY_DRIFT_GAP",
-                "blocker_detail": "projected Kanban task WorkPacket ID does not match P18.9.0 authority",
+                "blocker_detail": (
+                    "projected Kanban task WorkPacket ID does not match "
+                    f"{binding.ticket_id} authority"
+                ),
                 "observed_work_packet_id": task_body.get("WorkPacket_ID"),
                 "canonical_work_packet_id": projection["work_packet_id"],
             }
         if task_body.get("WorkPacket_SHA256") != projection["work_packet_SHA256"]:
             return {
                 "blocker_code": "WORKPACKET_AUTHORITY_DRIFT_GAP",
-                "blocker_detail": "projected Kanban task WorkPacket SHA256 does not match P18.9.0 authority",
+                "blocker_detail": (
+                    "projected Kanban task WorkPacket SHA256 does not match "
+                    f"{binding.ticket_id} authority"
+                ),
             }
         runs = kanban_db.list_runs(conn, task_id)
         active_runs = [run for run in runs if _execution_is_active(_run_dict(run))]
@@ -3438,7 +3749,7 @@ def _kanban_recovery_source_state(projection: dict[str, Any]) -> dict[str, Any]:
         if getattr(latest_run, "ended_at", None) is None:
             return {
                 "blocker_code": "EXECUTION_ALREADY_ACTIVE",
-                "blocker_detail": "latest P18.9.0 run has not ended",
+                "blocker_detail": f"latest {binding.ticket_id} run has not ended",
             }
         if task.status != "blocked" or (
             latest_outcome or latest_status
@@ -3490,6 +3801,7 @@ def _kanban_retry_start_source_state(
     projection: dict[str, Any],
     recovery_record: dict[str, Any],
 ) -> dict[str, Any]:
+    binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
     retry_source = _kanban_recovered_retry_source_state(projection, recovery_record)
     if retry_source.get("blocker_code"):
         return retry_source
@@ -3546,7 +3858,7 @@ def _kanban_retry_start_source_state(
         return {
             **retry_source,
             "blocker_code": "RETRY_BUDGET_EXHAUSTED",
-            "blocker_detail": "P18.9.0 retry budget is exhausted",
+            "blocker_detail": f"{binding.ticket_id} retry budget is exhausted",
         }
     if retry_source.get("latest_run_id") != recovery_record.get("latest_failed_run_id"):
         return {
@@ -3563,6 +3875,7 @@ def _kanban_recovered_retry_source_state(
 ) -> dict[str, Any]:
     from hermes_cli import kanban_db
 
+    binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
     board = _normalize_board(str(projection["kanban_board_slug"]))
     task_id = str(projection["kanban_task_id"])
     conn = kanban_db.connect(board=board)
@@ -3586,21 +3899,27 @@ def _kanban_recovered_retry_source_state(
                 "blocker_code": "WORKPACKET_AUTHORITY_DRIFT_GAP",
                 "blocker_detail": (
                     "synthetic Kanban execution-detail WorkPacket identity cannot be "
-                    "treated as canonical P18.9.0 WorkPacket authority"
+                    f"treated as canonical {binding.ticket_id} WorkPacket authority"
                 ),
                 "synthetic_work_packet_id": synthetic_work_packet_id,
             }
         if task_body.get("WorkPacket_ID") != projection["work_packet_id"]:
             return {
                 "blocker_code": "WORKPACKET_AUTHORITY_DRIFT_GAP",
-                "blocker_detail": "projected Kanban task WorkPacket ID does not match P18.9.0 authority",
+                "blocker_detail": (
+                    "projected Kanban task WorkPacket ID does not match "
+                    f"{binding.ticket_id} authority"
+                ),
                 "observed_work_packet_id": task_body.get("WorkPacket_ID"),
                 "canonical_work_packet_id": projection["work_packet_id"],
             }
         if task_body.get("WorkPacket_SHA256") != projection["work_packet_SHA256"]:
             return {
                 "blocker_code": "WORKPACKET_AUTHORITY_DRIFT_GAP",
-                "blocker_detail": "projected Kanban task WorkPacket SHA256 does not match P18.9.0 authority",
+                "blocker_detail": (
+                    "projected Kanban task WorkPacket SHA256 does not match "
+                    f"{binding.ticket_id} authority"
+                ),
             }
         runs = kanban_db.list_runs(conn, task_id)
         active_runs = [run for run in runs if _execution_is_active(_run_dict(run))]
@@ -3639,7 +3958,7 @@ def _kanban_recovered_retry_source_state(
         if getattr(latest_run, "ended_at", None) is None:
             return {
                 "blocker_code": "EXECUTION_ALREADY_ACTIVE",
-                "blocker_detail": "latest P18.9.0 run has not ended",
+                "blocker_detail": f"latest {binding.ticket_id} run has not ended",
             }
         if latest_run.id != recovery_record.get("latest_failed_run_id"):
             return {
@@ -3709,7 +4028,7 @@ def _recovery_record_matches_current_failure(
         return False
     if retry_source.get("blocker_code"):
         return False
-    current_cycle_id = _p18_9_0_recovery_cycle_id(
+    current_cycle_id = _governed_ticket_recovery_cycle_id(
         projection=projection,
         latest_failed_run_id=retry_source.get("latest_run_id"),
         observed_attempt_count=retry_source.get("observed_attempt_count"),
@@ -3816,6 +4135,7 @@ def _kanban_start_preflight_blocker(
 ) -> tuple[str, str] | None:
     from hermes_cli import kanban_db
 
+    binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
     board = _normalize_board(str(projection["kanban_board_slug"]))
     task_id = str(projection["kanban_task_id"])
     conn = kanban_db.connect(board=board)
@@ -3832,7 +4152,10 @@ def _kanban_start_preflight_blocker(
         if task.worker_pid and kanban_db._pid_alive(int(task.worker_pid)):
             return "KANBAN_TASK_NOT_READY", "projected Kanban task still has a live worker process"
         if task.workspace_kind != "scratch":
-            return "WORKSPACE_POLICY_GAP", "P18.9.0 start only authorizes scratch workspace dispatch"
+            return (
+                "WORKSPACE_POLICY_GAP",
+                f"{binding.ticket_id} start only authorizes scratch workspace dispatch",
+            )
         if task.max_retries != 1:
             return "KANBAN_TASK_GAP", "projected Kanban task retry policy mismatch"
         if task.skills:
@@ -5143,15 +5466,16 @@ def _build_recovery_action_record(
         authorizer_id=request.authorizer_id,
         authorization_reference=request.human_authorization_text,
         rationale=(
-            f"Authorize {binding.ticket_id} retry-pending governance after failed run 1 "
-            "without starting run 2 or mutating Kanban."
+            f"Authorize {binding.ticket_id} retry-pending governance after failed run "
+            f"{retry_source.get('latest_run_id')} without starting attempt "
+            f"{retry_source.get('next_attempt_number')} or mutating Kanban."
         ),
         authorized_at=observed_at,
     )
     observed_attempt_count = int(retry_source["observed_attempt_count"])
     max_attempts = int(retry_source["max_attempts"])
     next_attempt_number = int(retry_source["next_attempt_number"])
-    recovery_cycle_id = _p18_9_0_recovery_cycle_id(
+    recovery_cycle_id = _governed_ticket_recovery_cycle_id(
         projection=projection,
         latest_failed_run_id=retry_source.get("latest_run_id"),
         observed_attempt_count=observed_attempt_count,
@@ -6093,10 +6417,11 @@ def _recovery_action_record_digest(record: dict[str, Any]) -> str:
 
 def _persist_recovery_action_record(record: dict[str, Any]) -> None:
     validate_p18_9_0_recovery_action_record(record)
-    path = p18_9_0_recovery_action_record_path()
+    ticket_id = str(record["ticket_id"])
+    path = recovery_action_record_path_for_ticket(ticket_id)
     _archive_existing_authority_record(
         path,
-        p18_9_0_recovery_action_history_path(),
+        recovery_action_history_path_for_ticket(ticket_id),
         reason="replaced_by_current_recovery_cycle",
     )
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -6119,10 +6444,11 @@ def _retry_start_record_digest(record: dict[str, Any]) -> str:
 
 def _persist_retry_start_record(record: dict[str, Any]) -> None:
     validate_p18_9_0_retry_start_record(record)
-    path = p18_9_0_retry_start_record_path()
+    ticket_id = str(record["ticket_id"])
+    path = retry_start_record_path_for_ticket(ticket_id)
     _archive_existing_authority_record(
         path,
-        p18_9_0_retry_start_history_path(),
+        retry_start_history_path_for_ticket(ticket_id),
         reason="replaced_by_current_recovery_cycle",
     )
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -7594,10 +7920,10 @@ def _p18_9_0_recovery_overlay(
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
     try:
-        record = load_p18_9_0_recovery_action_record(projection_record=projection)
+        record = load_current_ticket_recovery_action_record(projection_record=projection)
     except Exception as exc:  # pragma: no cover - defensive live-state guard
         return None, {
-            "id": "P18-9-0-RECOVERY-AUTHORITY",
+            "id": f"{binding.ticket_hyphen_token}-RECOVERY-AUTHORITY",
             "status": "blocked_by_invalid_recovery_authority",
             "evidence": _safe_text(exc, limit=300),
         }
@@ -7607,13 +7933,13 @@ def _p18_9_0_recovery_overlay(
         return None, None
     if start_overlay.get("workflow_status") != "execution_failed":
         return None, {
-            "id": "P18-9-0-RECOVERY-AUTHORITY",
+            "id": f"{binding.ticket_hyphen_token}-RECOVERY-AUTHORITY",
             "status": "blocked_by_recovery_state_mismatch",
-            "evidence": "P18.9.0 recovery authority exists but execution is not failed",
+            "evidence": f"{binding.ticket_id} recovery authority exists but execution is not failed",
         }
     return {
         "readiness": "execution_failed_retry_pending",
-        "workflow_state": "P18.9.0-RETRY-PENDING-NOT-DISPATCHED",
+        "workflow_state": f"{binding.ticket_id}-RETRY-PENDING-NOT-DISPATCHED",
         "workflow_status": "retry_pending",
         "queue_state": "kanban_retry_prepared_not_dispatched",
         "execution_state": "no_active_executions",
@@ -7656,7 +7982,7 @@ def _p18_9_0_recovery_overlay(
             "id": binding.retry_start_next_action_id,
             "label": (
                 f"{binding.ticket_id} recovery authorization is recorded and retry is pending; "
-                "a separate governed retry-start authorization is required before run 2."
+                "a separate governed retry-start authorization is required before a new run."
             ),
             "target_ticket_id": binding.ticket_id,
             "target_ticket_title": binding.ticket_title,
@@ -7673,17 +7999,17 @@ def _p18_9_0_retry_start_overlay(
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
     try:
-        recovery = load_p18_9_0_recovery_action_record(projection_record=projection)
+        recovery = load_current_ticket_recovery_action_record(projection_record=projection)
         if recovery is None:
             return None, None
-        record = load_p18_9_0_retry_start_record(
+        record = load_current_ticket_retry_start_record(
             projection_record=projection,
             recovery_record=recovery,
             allow_historical_mismatch=True,
         )
     except Exception as exc:  # pragma: no cover - defensive live-state guard
         return None, {
-            "id": "P18-9-0-RETRY-START-AUTHORITY",
+            "id": f"{binding.ticket_hyphen_token}-RETRY-START-AUTHORITY",
             "status": "blocked_by_invalid_retry_start_authority",
             "evidence": _safe_text(exc, limit=300),
         }
@@ -7713,7 +8039,7 @@ def _p18_9_0_retry_start_overlay(
     if not bool(record.get("execution_started")):
         return {
             "readiness": "execution_failed_retry_pending",
-            "workflow_state": "P18.9.0-RETRY-PENDING-NOT-DISPATCHED",
+            "workflow_state": f"{binding.ticket_id}-RETRY-PENDING-NOT-DISPATCHED",
             "workflow_status": "retry_pending",
             "queue_state": "kanban_retry_prepared_not_dispatched",
             "execution_state": "no_active_executions",
@@ -7770,7 +8096,7 @@ def _p18_9_0_retry_start_overlay(
             "start_status": "failed",
             "blocker_code": "WORKER_LIFECYCLE_RECONCILIATION_REQUIRED",
             "blocker_detail": f"Kanban retry execution state unavailable: {_safe_text(exc, limit=200)}",
-            "next_action_id": "RECOVER_P18_9_0_EXECUTION",
+            "next_action_id": binding.execution_recovery_next_action_id,
             "outcome": "state_unavailable",
         }
         task = None
@@ -7778,7 +8104,7 @@ def _p18_9_0_retry_start_overlay(
     authority["kanban_run_id"] = getattr(task, "current_run_id", None) or record.get("kanban_run_id")
     if terminal_state is not None and terminal_state["start_status"] != "completed":
         blocker = {
-            "id": "P18-9-0-RETRY-WORKER-LIFECYCLE",
+            "id": f"{binding.ticket_hyphen_token}-RETRY-WORKER-LIFECYCLE",
             "status": "blocked_by_worker_lifecycle_failure",
             "evidence": terminal_state["blocker_detail"],
             "outcome": terminal_state.get("outcome"),
@@ -7787,7 +8113,7 @@ def _p18_9_0_retry_start_overlay(
         }
         return {
             "readiness": "retry_execution_failed_recovery_required",
-            "workflow_state": "P18.9.0-RETRY-EXECUTION-FAILED-RECOVERY-REQUIRED",
+            "workflow_state": f"{binding.ticket_id}-RETRY-EXECUTION-FAILED-RECOVERY-REQUIRED",
             "workflow_status": "execution_failed",
             "queue_state": "kanban_retry_execution_terminal",
             "execution_state": "no_active_executions",
@@ -7817,10 +8143,13 @@ def _p18_9_0_retry_start_overlay(
                 "runs": [_run_dict(run) for run in runs],
             },
             "next_action": {
-                "id": "RECOVER_P18_9_0_EXECUTION",
-                "label": "P18.9.0 retry execution failed; governed recovery authorization is required before another action.",
-                "target_ticket_id": PEPPER_NEXT_TICKET_ID,
-                "target_ticket_title": PEPPER_NEXT_TICKET_TITLE,
+                "id": binding.execution_recovery_next_action_id,
+                "label": (
+                    f"{binding.ticket_id} retry execution failed; governed recovery "
+                    "authorization is required before another action."
+                ),
+                "target_ticket_id": binding.ticket_id,
+                "target_ticket_title": binding.ticket_title,
             },
             "Git_mutation": False,
             "auto_retry": False,
@@ -7829,7 +8158,7 @@ def _p18_9_0_retry_start_overlay(
     if terminal_state is not None and terminal_state["start_status"] == "completed":
         return {
             "readiness": "retry_execution_completed",
-            "workflow_state": "P18.9.0-RETRY-EXECUTION-COMPLETED",
+            "workflow_state": f"{binding.ticket_id}-RETRY-EXECUTION-COMPLETED",
             "workflow_status": "execution_completed",
             "queue_state": "kanban_retry_execution_terminal",
             "execution_state": "no_active_executions",
@@ -7847,10 +8176,10 @@ def _p18_9_0_retry_start_overlay(
             "retry_execution_count": record["retry_execution_count"],
             "retry_start_authority": authority,
             "next_action": {
-                "id": "PREPARE_P18_9_0_REVIEW",
-                "label": "P18.9.0 retry execution completed; prepare review validation.",
-                "target_ticket_id": PEPPER_NEXT_TICKET_ID,
-                "target_ticket_title": PEPPER_NEXT_TICKET_TITLE,
+                "id": binding.review_prepare_next_action_id,
+                "label": f"{binding.ticket_id} retry execution completed; prepare review validation.",
+                "target_ticket_id": binding.ticket_id,
+                "target_ticket_title": binding.ticket_title,
             },
             "Git_mutation": False,
             "auto_retry": False,
@@ -7858,7 +8187,7 @@ def _p18_9_0_retry_start_overlay(
         }, None
     return {
         "readiness": "retry_execution_started",
-        "workflow_state": "P18.9.0-EXECUTING",
+        "workflow_state": f"{binding.ticket_id}-EXECUTING",
         "workflow_status": "executing",
         "queue_state": "kanban_dispatched",
         "execution_state": "active_executions",
@@ -7876,10 +8205,13 @@ def _p18_9_0_retry_start_overlay(
         "retry_execution_count": record["retry_execution_count"],
         "retry_start_authority": authority,
         "next_action": {
-            "id": "MONITOR_P18_9_0_EXECUTION",
-            "label": "P18.9.0 retry execution has started; monitor the Kanban run and await worker completion.",
-            "target_ticket_id": PEPPER_NEXT_TICKET_ID,
-            "target_ticket_title": PEPPER_NEXT_TICKET_TITLE,
+            "id": binding.monitor_execution_next_action_id,
+            "label": (
+                f"{binding.ticket_id} retry execution has started; monitor the Kanban run "
+                "and await worker completion."
+            ),
+            "target_ticket_id": binding.ticket_id,
+            "target_ticket_title": binding.ticket_title,
         },
         "Git_mutation": False,
         "auto_retry": False,

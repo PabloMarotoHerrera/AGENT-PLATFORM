@@ -344,6 +344,9 @@ def test_lead_agent_prompt_requires_tool_backed_state() -> None:
     assert "current approved governed WorkPacket" in prompt
     assert "start_current_ticket_execution" in prompt
     assert "recover_current_ticket_execution" in prompt
+    assert "RECOVER_<current-ticket>_EXECUTION" in prompt
+    assert "failed execution for that same current ticket" in prompt
+    assert "Autorizo explícitamente la recuperación de la ejecución fallida de P18.9.0." not in prompt
     assert "prepare_current_ticket_review" in prompt
     assert "accept_current_ticket_review" in prompt
     assert "PREPARE_P18_9_0_REVIEW" in prompt
