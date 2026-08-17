@@ -1,4 +1,4 @@
-"""Tests that handle_function_call forwards session_id into registry.dispatch."""
+"""Tests that handle_function_call forwards runtime context into registry.dispatch."""
 
 import json
 from unittest.mock import MagicMock, patch
@@ -73,3 +73,19 @@ class TestSessionIdForwarding:
                 skip_pre_tool_call_hook=True,
             )
         assert captured.get("task_id") == "task-999"
+
+    def test_parent_agent_forwarded_when_supplied(self):
+        """Pepper A2A continuation can reach the live parent agent context."""
+        captured = {}
+        parent_agent = object()
+        with patch("model_tools.registry", _make_registry(captured)):
+            from model_tools import handle_function_call
+            handle_function_call(
+                "web_search",
+                {"query": "test"},
+                task_id="task-1",
+                session_id="sess-1",
+                parent_agent=parent_agent,
+                skip_pre_tool_call_hook=True,
+            )
+        assert captured.get("parent_agent") is parent_agent

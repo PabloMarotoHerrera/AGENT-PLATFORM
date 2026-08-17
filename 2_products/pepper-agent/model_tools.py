@@ -1057,6 +1057,7 @@ def handle_function_call(
     api_request_id: Optional[str] = None,
     user_task: Optional[str] = None,
     enabled_tools: Optional[List[str]] = None,
+    parent_agent: Any | None = None,
     skip_pre_tool_call_hook: bool = False,
     skip_tool_request_middleware: bool = False,
     tool_request_middleware_trace: Optional[List[Dict[str, Any]]] = None,
@@ -1161,6 +1162,7 @@ def handle_function_call(
                 session_id=session_id,
                 user_task=user_task,
                 enabled_tools=enabled_tools,
+                parent_agent=parent_agent,
                 skip_pre_tool_call_hook=skip_pre_tool_call_hook,
                 skip_tool_request_middleware=skip_tool_request_middleware,
                 tool_request_middleware_trace=list(_tool_middleware_trace),
@@ -1292,6 +1294,7 @@ def handle_function_call(
                         task_id=task_id,
                         session_id=session_id,
                         enabled_tools=sandbox_enabled,
+                        parent_agent=parent_agent,
                     )
             else:
                 def _dispatch(next_args: Dict[str, Any]) -> Any:
@@ -1300,6 +1303,7 @@ def handle_function_call(
                         task_id=task_id,
                         session_id=session_id,
                         user_task=user_task,
+                        parent_agent=parent_agent,
                     )
             from hermes_cli.middleware import run_tool_execution_middleware
 

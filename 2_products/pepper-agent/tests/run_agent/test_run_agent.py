@@ -3079,6 +3079,7 @@ class TestConcurrentToolExecution:
                 api_request_id="",
                 user_task=None,
                 enabled_tools=list(agent.valid_tool_names),
+                parent_agent=agent,
                 skip_pre_tool_call_hook=True,
                 skip_tool_request_middleware=True,
                 enabled_toolsets=agent.enabled_toolsets,

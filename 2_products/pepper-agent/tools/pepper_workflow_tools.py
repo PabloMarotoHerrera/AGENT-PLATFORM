@@ -393,6 +393,16 @@ def _generation_request_text_from_args_or_user_task(
     return kwargs.get("user_task")
 
 
+def _autonomy_request_text_from_args_or_user_task(
+    args: dict[str, Any],
+    kwargs: dict[str, Any],
+) -> object:
+    value = args.get("human_request_text")
+    if str(value or "").strip():
+        return value
+    return kwargs.get("user_task")
+
+
 def _get_current_project(args: dict[str, Any], **_kwargs) -> str:
     ctx = _context()
     return _result({
@@ -424,6 +434,8 @@ def _get_current_ticket(args: dict[str, Any], **_kwargs) -> str:
         "current_ticket_title": ctx["current_ticket_title"],
         "current_gap_id": ctx["current_gap_id"],
         "current_gap_title": ctx["current_gap_title"],
+        "governed_autonomy_status": ctx.get("governed_autonomy_status"),
+        "governed_autonomy": ctx.get("governed_autonomy"),
         "next_action": ctx["next_action"],
         "evidence_timestamp": ctx["evidence_timestamp"],
         "evidence_version": ctx["evidence_version"],
@@ -453,6 +465,8 @@ def _get_workflow_control(args: dict[str, Any], **_kwargs) -> str:
         "recovery_state": ctx["recovery_state"],
         "failure_category": ctx.get("failure_category"),
         "failure_summary": ctx.get("failure_summary"),
+        "governed_autonomy_status": ctx.get("governed_autonomy_status"),
+        "governed_autonomy": ctx.get("governed_autonomy"),
         "git_handoff_state": ctx["git_handoff_state"],
         "blocker_count": ctx["blocker_count"],
         "warning_count": ctx["warning_count"],
@@ -856,6 +870,126 @@ def _recover_current_ticket_execution(args: dict[str, Any], **_kwargs) -> str:
     })
 
 
+def _get_governed_autonomy_status(args: dict[str, Any], **_kwargs) -> str:
+    pr = _runtime()
+    try:
+        result = pr.get_current_ticket_governed_autonomy_status(
+            project_id=str(args.get("project_id") or "").strip() or None,
+            ticket_id=str(args.get("ticket_id") or "").strip() or None,
+        )
+    except Exception as exc:
+        return tool_error(str(exc) or "governed autonomy status failed", success=False)
+    return _result({
+        "source_tool": "get_governed_autonomy_status",
+        **result,
+    })
+
+
+def _activate_current_ticket_governed_autonomy(args: dict[str, Any], **_kwargs) -> str:
+    pr = _runtime()
+    try:
+        human_request_text = _autonomy_request_text_from_args_or_user_task(args, _kwargs)
+        envelope = args.get("governed_autonomy_envelope")
+        if not isinstance(envelope, dict):
+            raise ValueError("governed_autonomy_envelope is required")
+        capability_gap = args.get("capability_gap")
+        if capability_gap is not None and not isinstance(capability_gap, dict):
+            raise ValueError("capability_gap must be an object when supplied")
+        continuation_lineage = args.get("continuation_lineage")
+        if continuation_lineage is not None and not isinstance(continuation_lineage, dict):
+            raise ValueError("continuation_lineage must be an object when supplied")
+        result = pr.activate_current_ticket_governed_autonomy(
+            human_request_text=str(human_request_text or ""),
+            authorizer_id="pepper-chat-human",
+            governed_autonomy_envelope=envelope,
+            capability_gap=capability_gap,
+            continuation_lineage=continuation_lineage,
+            project_id=str(args.get("project_id") or "").strip() or None,
+            ticket_id=str(args.get("ticket_id") or "").strip() or None,
+            next_action_id=str(args.get("next_action_id") or "").strip() or None,
+        )
+        updated_context = pr.build_lead_agent_operational_context()
+    except Exception as exc:
+        return tool_error(str(exc) or "governed autonomy activation failed", success=False)
+    return _result({
+        "source_tool": "activate_current_ticket_governed_autonomy",
+        "human_request_text": str(human_request_text or ""),
+        **result,
+        "current_ticket_id": updated_context.get("current_ticket_id"),
+        "workflow_state": updated_context.get("workflow_state"),
+        "workflow_status": updated_context.get("workflow_status"),
+        "recovery_state": updated_context.get("recovery_state"),
+        "failure_category": updated_context.get("failure_category"),
+        "failure_summary": updated_context.get("failure_summary"),
+        "governed_autonomy": updated_context.get("governed_autonomy"),
+        "next_action": updated_context.get("next_action"),
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "Kanban_dispatch": False,
+        "A2A_dispatch_performed": False,
+        "lineage_dispatch_performed": False,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+    })
+
+
+def _continue_current_ticket_governed_autonomy(args: dict[str, Any], **_kwargs) -> str:
+    pr = _runtime()
+    try:
+        envelope = args.get("governed_autonomy_envelope")
+        if not isinstance(envelope, dict):
+            raise ValueError("governed_autonomy_envelope is required")
+        delegate_paths = args.get("delegate_paths") or []
+        if not isinstance(delegate_paths, list):
+            raise ValueError("delegate_paths must be an array when supplied")
+        delegate_operations = args.get("delegate_requested_operations") or []
+        if not isinstance(delegate_operations, list):
+            raise ValueError("delegate_requested_operations must be an array when supplied")
+        result = pr.continue_current_ticket_governed_autonomy(
+            runtime_goal=str(args.get("runtime_goal") or ""),
+            governed_autonomy_envelope=envelope,
+            observed_failure=str(args.get("observed_failure") or "").strip() or None,
+            requested_capability=str(args.get("requested_capability") or "").strip() or None,
+            strategy=str(args.get("strategy") or "AUTO").strip() or "AUTO",
+            task_local_tool_name=str(args.get("task_local_tool_name") or "").strip() or None,
+            task_local_language=str(args.get("task_local_language") or "python").strip() or "python",
+            task_local_implementation_path=(
+                str(args.get("task_local_implementation_path") or "").strip() or None
+            ),
+            task_local_source_text=args.get("task_local_source_text"),
+            task_local_command=str(args.get("task_local_command") or "").strip() or None,
+            delegate_goal=str(args.get("delegate_goal") or "").strip() or None,
+            delegate_paths=tuple(str(item) for item in delegate_paths),
+            delegate_requested_operations=tuple(str(item) for item in delegate_operations),
+            delegate_parent_agent=_kwargs.get("parent_agent"),
+            project_id=str(args.get("project_id") or "").strip() or None,
+            ticket_id=str(args.get("ticket_id") or "").strip() or None,
+        )
+        updated_context = pr.build_lead_agent_operational_context()
+    except Exception as exc:
+        return tool_error(str(exc) or "governed autonomy continuation failed", success=False)
+    return _result({
+        "source_tool": "continue_current_ticket_governed_autonomy",
+        **result,
+        "current_ticket_id": updated_context.get("current_ticket_id"),
+        "workflow_state": updated_context.get("workflow_state"),
+        "workflow_status": updated_context.get("workflow_status"),
+        "recovery_state": updated_context.get("recovery_state"),
+        "governed_autonomy": updated_context.get("governed_autonomy"),
+        "next_action": updated_context.get("next_action"),
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "Kanban_dispatch": False,
+        "lineage_dispatch_performed": False,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+    })
+
+
 def _prepare_current_ticket_review(args: dict[str, Any], **_kwargs) -> str:
     pr = _runtime()
     try:
@@ -1129,6 +1263,132 @@ _RECOVER_CURRENT_TICKET_EXECUTION_SCHEMA = {
 }
 
 
+_GET_GOVERNED_AUTONOMY_STATUS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "project_id": {
+            "type": "string",
+            "description": "Optional governed project guard. Must be PEPPER if supplied.",
+        },
+        "ticket_id": {
+            "type": "string",
+            "description": "Optional governed ticket guard. Must equal the current governed ticket if supplied.",
+        },
+    },
+    "additionalProperties": False,
+}
+
+
+_ACTIVATE_CURRENT_TICKET_GOVERNED_AUTONOMY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "human_request_text": {
+            "type": "string",
+            "description": "Exact user text explicitly asking to record 01AH governed autonomy status for the current ticket.",
+        },
+        "governed_autonomy_envelope": {
+            "type": "object",
+            "description": "Canonical 01AH GovernedAutonomyEnvelope JSON for the current WorkPacket authority.",
+        },
+        "capability_gap": {
+            "type": "object",
+            "description": "Optional canonical 01AH CapabilityGapEvidence JSON bound to the envelope.",
+        },
+        "continuation_lineage": {
+            "type": "object",
+            "description": "Optional canonical 01AH AutonomyContinuationLineage JSON bound to the envelope and gap.",
+        },
+        "project_id": {
+            "type": "string",
+            "description": "Optional governed project guard. Must be PEPPER if supplied.",
+        },
+        "ticket_id": {
+            "type": "string",
+            "description": "Optional governed ticket guard. Must equal the current governed ticket if supplied.",
+        },
+        "next_action_id": {
+            "type": "string",
+            "description": "Optional next-action guard. Must equal the active workflow-control next action if supplied.",
+        },
+    },
+    "required": ["human_request_text", "governed_autonomy_envelope"],
+    "additionalProperties": False,
+}
+
+
+_CONTINUE_CURRENT_TICKET_GOVERNED_AUTONOMY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "runtime_goal": {
+            "type": "string",
+            "description": "Bounded operational goal for consuming the already-active 01AH envelope.",
+        },
+        "governed_autonomy_envelope": {
+            "type": "object",
+            "description": "Canonical 01AH GovernedAutonomyEnvelope JSON. It is validated against the active reference but not persisted in full.",
+        },
+        "strategy": {
+            "type": "string",
+            "enum": ["AUTO", "DIRECT", "TASK_LOCAL_SELF_EXTENSION", "A2A_DELEGATION", "STOP_FOR_HUMAN"],
+            "description": "Continuation decision. AUTO derives from supplied task-local or A2A fields.",
+        },
+        "observed_failure": {
+            "type": "string",
+            "description": "Optional bounded failure evidence for task-local capability classification.",
+        },
+        "requested_capability": {
+            "type": "string",
+            "description": "Optional bounded capability name for task-local capability classification.",
+        },
+        "task_local_tool_name": {
+            "type": "string",
+            "description": "Task-local helper name for TASK_LOCAL_SELF_EXTENSION.",
+        },
+        "task_local_language": {
+            "type": "string",
+            "enum": ["python", "javascript", "typescript"],
+            "description": "Task-local helper implementation language.",
+        },
+        "task_local_implementation_path": {
+            "type": "string",
+            "description": "Repository-relative helper path inside the active envelope allowed paths.",
+        },
+        "task_local_source_text": {
+            "type": "string",
+            "description": "Task-local helper source text. The runtime persists only source and candidate digests.",
+        },
+        "task_local_command": {
+            "type": "string",
+            "description": "Optional bounded command to evaluate/execute through 01AH command policy.",
+        },
+        "delegate_goal": {
+            "type": "string",
+            "description": "A2A child goal for canonical Hermes delegate_task under inherited parent-agent authority.",
+        },
+        "delegate_paths": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "A2A child filesystem paths. Must be a subset of the parent envelope allowed paths.",
+        },
+        "delegate_requested_operations": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "A2A child operations. Git mutation, provider/model, network, Docker, Graphify, dependency install, and worker control are denied.",
+        },
+        "project_id": {
+            "type": "string",
+            "description": "Optional governed project guard. Must be PEPPER if supplied.",
+        },
+        "ticket_id": {
+            "type": "string",
+            "description": "Optional governed ticket guard. Must equal the current governed ticket if supplied.",
+        },
+    },
+    "required": ["runtime_goal", "governed_autonomy_envelope"],
+    "additionalProperties": False,
+}
+
+
 _PREPARE_CURRENT_TICKET_REVIEW_SCHEMA = {
     "type": "object",
     "properties": {
@@ -1334,6 +1594,63 @@ registry.register(
     emoji="V",
     max_result_size_chars=24000,
 )
+
+registry.register(
+    name="get_governed_autonomy_status",
+    toolset=TOOLSET,
+    schema={
+        "name": "get_governed_autonomy_status",
+        "description": (
+            "Read 01AH governed autonomy activation, live-lineage, and A2A status "
+            "for the current Pepper ticket. Read-only; no execution, continuation, "
+            "A2A dispatch, Kanban mutation, provider call, Docker, Graphify, or Git."
+        ),
+        "parameters": _GET_GOVERNED_AUTONOMY_STATUS_SCHEMA,
+    },
+    handler=_get_governed_autonomy_status,
+    emoji="U",
+    max_result_size_chars=24000,
+)
+
+registry.register(
+    name="activate_current_ticket_governed_autonomy",
+    toolset=TOOLSET,
+    schema={
+        "name": "activate_current_ticket_governed_autonomy",
+        "description": (
+            "Record a canonical 01AH GovernedAutonomyEnvelope reference for the current "
+            "Pepper ticket as dispatch-free autonomy status. It validates same-authority "
+            "digests and reports live lineage/A2A as blocked unless separately authorized; "
+            "it never starts a worker, continuation, A2A dispatch, provider call, Kanban "
+            "mutation, Docker, Graphify, or Git."
+        ),
+        "parameters": _ACTIVATE_CURRENT_TICKET_GOVERNED_AUTONOMY_SCHEMA,
+    },
+    handler=_activate_current_ticket_governed_autonomy,
+    emoji="U",
+    max_result_size_chars=32000,
+)
+
+
+registry.register(
+    name="continue_current_ticket_governed_autonomy",
+    toolset=TOOLSET,
+    schema={
+        "name": "continue_current_ticket_governed_autonomy",
+        "description": (
+            "Consume an already-active 01AH governed-autonomy envelope for the current "
+            "Pepper ticket. Revalidates same authority, live budgets, credentials, and "
+            "privileged-operation denials before recording DIRECT, task-local self-extension, "
+            "canonical Hermes delegate_task A2A delegation, or STOP_FOR_HUMAN runtime state. "
+            "Does not create Kanban runs, retry/recover execution, mutate Git, or invoke Docker/Graphify."
+        ),
+        "parameters": _CONTINUE_CURRENT_TICKET_GOVERNED_AUTONOMY_SCHEMA,
+    },
+    handler=_continue_current_ticket_governed_autonomy,
+    emoji="U",
+    max_result_size_chars=36000,
+)
+
 
 registry.register(
     name="prepare_current_ticket_review",
