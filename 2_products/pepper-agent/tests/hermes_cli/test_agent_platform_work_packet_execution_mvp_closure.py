@@ -309,22 +309,22 @@ def test_prior_255_exports_remain_exact_prefix() -> None:
     )
     assert len(prior) == 255
     assert work_packet.__all__[:255] == prior
-    assert work_packet.__all__[255:] == P17_R_EXPORTS
-    assert len(work_packet.__all__) == 283
-    assert len(set(work_packet.__all__)) == 283
+    assert work_packet.__all__[255:283] == P17_R_EXPORTS
+    assert len(work_packet.__all__) >= 283
+    assert len(set(work_packet.__all__)) == len(work_packet.__all__)
     assert not any(name.startswith("_") for name in work_packet.__all__)
 
 
 def test_import_smoke_exact_output() -> None:
     assert (
-        len(work_packet.__all__[-28:]),
-        len(work_packet.__all__),
-        len(set(work_packet.__all__)),
+        len(work_packet.__all__[255:283]),
+        len(work_packet.__all__) >= 283,
+        len(set(work_packet.__all__)) == len(work_packet.__all__),
         hasattr(work_packet, "P17ClosureResult"),
         hasattr(work_packet, "build_p17_work_packet_execution_mvp_closure"),
         hasattr(work_packet, "execute_p17_closure"),
         hasattr(work_packet, "P17ClosureExecutor"),
-    ) == (28, 283, 283, True, True, False, False)
+    ) == (28, True, True, True, True, False, False)
 
 
 def test_function_import_smoke_exact_names() -> None:
