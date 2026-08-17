@@ -152,6 +152,9 @@ PEPPER_GOVERNED_AUTONOMY_RUNTIME_POLICY_ID = (
 PEPPER_GOVERNED_AUTONOMY_RUNTIME_DIGEST_ALGORITHM = (
     "agent-platform-pepper-governed-autonomy-runtime-sha256-v1"
 )
+PEPPER_GOVERNED_AUTONOMY_AUTHORITY_DIGEST_ALGORITHM = (
+    "agent-platform-pepper-governed-autonomy-backend-derived-live-authority-sha256-v1"
+)
 
 _GOVERNED_TICKET_START_STORE_DIR = Path("agent-platform") / "pepper-worker-start-action"
 _GOVERNED_TICKET_RECOVERY_STORE_DIR = Path("agent-platform") / "pepper-recovery-action"
@@ -347,6 +350,22 @@ class GovernedTicketLifecycleBinding:
     revise_next_action_id: str
 
 
+@dataclass(frozen=True)
+class _BackendDerivedGovernedAutonomyAuthority:
+    authority_kind: str
+    policy_id: str
+    envelope_SHA256: str
+    ticket_id: str
+    source_ticket_SHA256: str
+    work_packet_id: str
+    work_packet_SHA256: str
+    live_lineage_activation_authorized: bool
+    provider_dispatch_count: int
+    model_inference_count: int
+    allowed_paths: tuple[str, ...]
+    forbidden_paths: tuple[str, ...]
+
+
 class ApprovalDecisionRequest(BaseModel):
     """Dashboard request body for a human approval decision."""
 
@@ -479,9 +498,6 @@ class CurrentTicketGovernedAutonomyActivationRequest(BaseModel):
 
     human_request_text: str = Field(min_length=1, max_length=1024)
     authorizer_id: str = Field(default="pepper-chat-human", min_length=1, max_length=128)
-    governed_autonomy_envelope: dict[str, Any]
-    capability_gap: dict[str, Any] | None = None
-    continuation_lineage: dict[str, Any] | None = None
     project_id: str | None = Field(default=None, max_length=128)
     ticket_id: str | None = Field(default=None, max_length=128)
     next_action_id: str | None = Field(default=None, max_length=128)
@@ -511,33 +527,13 @@ class CurrentTicketGovernedAutonomyActivationRequest(BaseModel):
             raise ValueError("human_request_text contains control characters")
         return value
 
-    @field_validator("governed_autonomy_envelope")
-    @classmethod
-    def envelope_must_be_object(cls, value: dict[str, Any]) -> dict[str, Any]:
-        if not isinstance(value, dict) or not value:
-            raise ValueError("governed_autonomy_envelope must be a nonempty object")
-        return value
-
-    @field_validator("capability_gap", "continuation_lineage")
-    @classmethod
-    def optional_evidence_must_be_object(
-        cls,
-        value: dict[str, Any] | None,
-    ) -> dict[str, Any] | None:
-        if value is None:
-            return None
-        if not isinstance(value, dict) or not value:
-            raise ValueError("optional autonomy evidence must be a nonempty object")
-        return value
-
 
 class CurrentTicketGovernedAutonomyContinuationRequest(BaseModel):
-    """Request body for consuming an already-active 01AH autonomy envelope."""
+    """Request body for consuming active server-derived 01AH authority."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
 
     runtime_goal: str = Field(min_length=1, max_length=1024)
-    governed_autonomy_envelope: dict[str, Any]
     observed_failure: str | None = Field(default=None, max_length=1024)
     requested_capability: str | None = Field(default=None, max_length=1024)
     strategy: Literal[
@@ -626,13 +622,6 @@ class CurrentTicketGovernedAutonomyContinuationRequest(BaseModel):
             return None
         if not isinstance(value, dict):
             raise ValueError("delegate_result must be an object")
-        return value
-
-    @field_validator("governed_autonomy_envelope")
-    @classmethod
-    def envelope_must_be_object(cls, value: dict[str, Any]) -> dict[str, Any]:
-        if not isinstance(value, dict) or not value:
-            raise ValueError("governed_autonomy_envelope must be a nonempty object")
         return value
 
 
@@ -2476,6 +2465,9 @@ def _governed_autonomy_activation_cycle(record: dict[str, Any]) -> str:
         "governed_autonomy_envelope_SHA256": record.get(
             "governed_autonomy_envelope_SHA256"
         ),
+        "backend_derived_live_authority_SHA256": record.get(
+            "backend_derived_live_authority_SHA256"
+        ),
         "capability_gap_SHA256": record.get("capability_gap_SHA256"),
         "continuation_lineage_SHA256": record.get("continuation_lineage_SHA256"),
         "human_request_text": record.get("human_request_text"),
@@ -2484,41 +2476,209 @@ def _governed_autonomy_activation_cycle(record: dict[str, Any]) -> str:
     return _digest_payload("pepper-governed-autonomy-activation-cycle-v1", payload)
 
 
-def _validated_governed_autonomy_envelope(value: object):
-    from hermes_cli.agent_platform.work_packet import (
-        GovernedAutonomyEnvelope,
-        validate_governed_autonomy_envelope,
+def _governed_autonomy_reference_digest(reference: dict[str, Any]) -> str:
+    payload = {
+        key: value
+        for key, value in reference.items()
+        if key != "envelope_SHA256"
+    }
+    return _digest_payload(PEPPER_GOVERNED_AUTONOMY_AUTHORITY_DIGEST_ALGORITHM, payload)
+
+
+def _digest_optional_text(value: object, *, algorithm: str) -> str | None:
+    text = str(value or "")
+    if not text:
+        return None
+    return _digest_payload(algorithm, {"text": text})
+
+
+def _current_work_packet_scope_for_governed_autonomy(
+    projection: dict[str, Any],
+) -> tuple[tuple[str, ...], tuple[str, ...], str]:
+    from hermes_cli.agent_platform.work_packet import WorkPacketCompilationResult
+    from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
+        load_generation_record,
     )
 
+    generation = load_generation_record(ticket_id=str(projection["ticket_id"]))
+    if generation is None:
+        raise ProductRuntimeConflict("governed-autonomy authority requires generated WorkPacket")
     try:
-        envelope = GovernedAutonomyEnvelope.model_validate(value)
-        validate_governed_autonomy_envelope(envelope)
+        compilation = WorkPacketCompilationResult.model_validate(
+            generation["work_packet_compilation_result"]
+        )
     except Exception as exc:
-        raise ProductRuntimeConflict("governed-autonomy envelope is invalid") from exc
-    return envelope
+        raise ProductRuntimeConflict(
+            "governed-autonomy authority WorkPacket compilation is invalid"
+        ) from exc
+    packet = compilation.work_packet.model_dump(mode="json")
+    scope = packet.get("repository_scope") if isinstance(packet, dict) else None
+    if not isinstance(scope, dict):
+        raise ProductRuntimeConflict("governed-autonomy authority scope is unavailable")
+    allowed_paths = tuple(str(item) for item in scope.get("allowed_paths") or ())
+    forbidden_paths = tuple(str(item) for item in scope.get("forbidden_paths") or ())
+    if not allowed_paths:
+        raise ProductRuntimeConflict("governed-autonomy authority has no allowed paths")
+    validation_steps_sha = _digest_payload(
+        "pepper-governed-autonomy-workpacket-validation-steps-sha256-v1",
+        {"validation_steps": packet.get("validation_steps") or []},
+    )
+    return allowed_paths, forbidden_paths, validation_steps_sha
 
 
-def _validated_governed_autonomy_gap(value: object):
-    from hermes_cli.agent_platform.work_packet import CapabilityGapEvidence
-
-    try:
-        return CapabilityGapEvidence.model_validate(value)
-    except Exception as exc:
-        raise ProductRuntimeConflict("governed-autonomy capability gap is invalid") from exc
-
-
-def _validated_governed_autonomy_lineage(value: object):
+def _derive_current_governed_autonomy_authority_reference(
+    projection: dict[str, Any],
+) -> dict[str, Any]:
     from hermes_cli.agent_platform.work_packet import (
-        AutonomyContinuationLineage,
-        validate_governed_autonomy_continuation,
+        GOVERNED_AUTONOMY_POLICY_ID,
+        GovernedAutonomyBudget,
     )
 
-    try:
-        lineage = AutonomyContinuationLineage.model_validate(value)
-        validate_governed_autonomy_continuation(lineage)
-    except Exception as exc:
-        raise ProductRuntimeConflict("governed-autonomy continuation lineage is invalid") from exc
-    return lineage
+    _validate_execution_start_authority(projection)
+    allowed_paths, forbidden_paths, validation_steps_sha = (
+        _current_work_packet_scope_for_governed_autonomy(projection)
+    )
+    task_visibility, runs = _governed_autonomy_kanban_visibility(projection)
+    if task_visibility is None:
+        raise ProductRuntimeConflict("governed-autonomy authority requires projected Kanban task")
+    if task_visibility.get("workspace_kind") != "scratch":
+        raise ProductRuntimeConflict("governed-autonomy authority requires scratch workspace")
+    active_runs = [run for run in runs if _execution_is_active(run)]
+    if active_runs or task_visibility.get("current_run_id") is not None:
+        raise ProductRuntimeConflict("governed-autonomy authority requires no active execution")
+    if not runs:
+        raise ProductRuntimeConflict("governed-autonomy authority requires blocked source run evidence")
+    latest = runs[-1]
+    source_status = str(latest.get("status") or "").strip().lower()
+    source_outcome = str(latest.get("outcome") or "").strip().lower()
+    if (
+        source_status not in _GOVERNED_TICKET_FAILURE_OUTCOMES
+        and source_outcome not in _GOVERNED_TICKET_FAILURE_OUTCOMES
+    ):
+        raise ProductRuntimeConflict(
+            "governed-autonomy authority requires failed or blocked source run evidence"
+        )
+    source_status = source_status or "none"
+    source_outcome = source_outcome or "none"
+    source_profile = _safe_text(latest.get("profile"), limit=128) or "unknown"
+    source_run_snapshot = {
+        "source_run_id": latest.get("id"),
+        "source_run_status": source_status,
+        "source_run_outcome": source_outcome,
+        "source_run_profile": source_profile,
+        "source_run_ended_at": latest.get("ended_at"),
+        "failure_category": _safe_text(latest.get("failure_category"), limit=128),
+        "failure_summary_SHA256": _digest_optional_text(
+            latest.get("failure_summary") or latest.get("summary") or latest.get("error"),
+            algorithm="pepper-governed-autonomy-source-run-failure-summary-sha256-v1",
+        ),
+    }
+    workspace_path_sha = _digest_optional_text(
+        task_visibility.get("workspace_path"),
+        algorithm="pepper-governed-autonomy-scratch-workspace-path-sha256-v1",
+    )
+    reference = {
+        "authority_kind": "backend_derived_live_authority",
+        "authority_lifecycle": "pre_continuation_blocked_run",
+        "01AH_envelope_lifecycle_classification": "01AH_ENVELOPE_WRONG_LIFECYCLE_PHASE",
+        "policy_id": GOVERNED_AUTONOMY_POLICY_ID,
+        "envelope_SHA256": "0" * 64,
+        "ticket_id": projection["ticket_id"],
+        "source_ticket_SHA256": projection["ticket_spec_SHA256"],
+        "work_packet_id": projection["work_packet_id"],
+        "work_packet_SHA256": projection["work_packet_SHA256"],
+        "single_agent_result_SHA256": None,
+        "allocation_SHA256": None,
+        "profile_SHA256": None,
+        "projection_SHA256": projection["projection_SHA256"],
+        "approval_publication_SHA256": projection["approval_publication_SHA256"],
+        "dependency_plan_SHA256": projection["dependency_plan_SHA256"],
+        "allowed_paths_SHA256": _digest_payload(
+            "pepper-governed-autonomy-allowed-paths-sha256-v1",
+            {"allowed_paths": allowed_paths},
+        ),
+        "forbidden_paths_SHA256": _digest_payload(
+            "pepper-governed-autonomy-forbidden-paths-sha256-v1",
+            {"forbidden_paths": forbidden_paths},
+        ),
+        "validation_steps_SHA256": validation_steps_sha,
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+        "assignee_profile": projection["assignee_profile"],
+        "selected_profile": projection["selected_profile"],
+        "execution_profile_role": projection["execution_profile_role"],
+        "workspace_kind": task_visibility.get("workspace_kind"),
+        "workspace_path_SHA256": workspace_path_sha,
+        "source_run_id": latest.get("id"),
+        "source_run_status": source_status,
+        "source_run_outcome": source_outcome,
+        "source_run_profile": source_profile,
+        "source_run_snapshot_SHA256": _digest_payload(
+            "pepper-governed-autonomy-source-run-snapshot-sha256-v1",
+            source_run_snapshot,
+        ),
+        "source_run_count": len(runs),
+        "active_execution_count": 0,
+        "live_lineage_activation_authorized": False,
+        "provider_dispatch_count": 0,
+        "model_inference_count": 0,
+        "budget": GovernedAutonomyBudget().model_dump(mode="json"),
+    }
+    reference["envelope_SHA256"] = _governed_autonomy_reference_digest(reference)
+    return reference
+
+
+def _governed_autonomy_authority_view_from_reference(
+    reference: dict[str, Any],
+    *,
+    projection: dict[str, Any],
+) -> _BackendDerivedGovernedAutonomyAuthority:
+    allowed_paths, forbidden_paths, _validation_steps_sha = (
+        _current_work_packet_scope_for_governed_autonomy(projection)
+    )
+    return _BackendDerivedGovernedAutonomyAuthority(
+        authority_kind=str(reference["authority_kind"]),
+        policy_id=str(reference["policy_id"]),
+        envelope_SHA256=str(reference["envelope_SHA256"]),
+        ticket_id=str(reference["ticket_id"]),
+        source_ticket_SHA256=str(reference["source_ticket_SHA256"]),
+        work_packet_id=str(reference["work_packet_id"]),
+        work_packet_SHA256=str(reference["work_packet_SHA256"]),
+        live_lineage_activation_authorized=False,
+        provider_dispatch_count=0,
+        model_inference_count=0,
+        allowed_paths=allowed_paths,
+        forbidden_paths=forbidden_paths,
+    )
+
+
+def _require_current_governed_autonomy_authority_match(
+    *,
+    projection: dict[str, Any],
+    activation: dict[str, Any],
+) -> _BackendDerivedGovernedAutonomyAuthority:
+    activation_reference = _validated_governed_autonomy_envelope_reference(
+        activation.get("governed_autonomy_envelope_reference")
+    )
+    current_reference = _derive_current_governed_autonomy_authority_reference(projection)
+    if activation_reference != current_reference:
+        diagnostics = {
+            "blocker_code": "CONTINUATION_AUTHORITY_MISMATCH",
+            "activation_authority_SHA256": activation_reference.get("envelope_SHA256"),
+            "current_authority_SHA256": current_reference.get("envelope_SHA256"),
+            "activation_source_run_id": activation_reference.get("source_run_id"),
+            "current_source_run_id": current_reference.get("source_run_id"),
+            "activation_source_run_status": activation_reference.get("source_run_status"),
+            "current_source_run_status": current_reference.get("source_run_status"),
+        }
+        raise ProductRuntimeAuthorityMismatch(
+            "CONTINUATION_AUTHORITY_MISMATCH",
+            diagnostics=diagnostics,
+        )
+    return _governed_autonomy_authority_view_from_reference(
+        current_reference,
+        projection=projection,
+    )
 
 
 def _validated_governed_autonomy_budget_reference(value: object) -> dict[str, int]:
@@ -2535,6 +2695,9 @@ def _validated_governed_autonomy_envelope_reference(value: object) -> dict[str, 
     from hermes_cli.agent_platform.work_packet import GOVERNED_AUTONOMY_POLICY_ID
 
     required_keys = {
+        "authority_kind",
+        "authority_lifecycle",
+        "01AH_envelope_lifecycle_classification",
         "policy_id",
         "envelope_SHA256",
         "ticket_id",
@@ -2544,28 +2707,86 @@ def _validated_governed_autonomy_envelope_reference(value: object) -> dict[str, 
         "single_agent_result_SHA256",
         "allocation_SHA256",
         "profile_SHA256",
+        "projection_SHA256",
+        "approval_publication_SHA256",
+        "dependency_plan_SHA256",
+        "allowed_paths_SHA256",
+        "forbidden_paths_SHA256",
+        "validation_steps_SHA256",
+        "kanban_board_slug",
+        "kanban_task_id",
+        "assignee_profile",
+        "selected_profile",
+        "execution_profile_role",
+        "workspace_kind",
+        "workspace_path_SHA256",
+        "source_run_id",
+        "source_run_status",
+        "source_run_outcome",
+        "source_run_profile",
+        "source_run_snapshot_SHA256",
+        "source_run_count",
+        "active_execution_count",
         "live_lineage_activation_authorized",
         "provider_dispatch_count",
         "model_inference_count",
+        "budget",
     }
     if not isinstance(value, dict):
         raise ProductRuntimeConflict("governed-autonomy envelope reference must be an object")
     keys = set(value)
     if keys != required_keys:
         raise ProductRuntimeConflict("governed-autonomy envelope reference field mismatch")
+    if value["authority_kind"] != "backend_derived_live_authority":
+        raise ProductRuntimeConflict("governed-autonomy authority kind mismatch")
+    if value["authority_lifecycle"] != "pre_continuation_blocked_run":
+        raise ProductRuntimeConflict("governed-autonomy authority lifecycle mismatch")
+    if value["01AH_envelope_lifecycle_classification"] != "01AH_ENVELOPE_WRONG_LIFECYCLE_PHASE":
+        raise ProductRuntimeConflict("governed-autonomy 01AH lifecycle classification mismatch")
+    if value["envelope_SHA256"] != _governed_autonomy_reference_digest(value):
+        raise ProductRuntimeConflict("governed-autonomy authority reference digest mismatch")
     digest_fields = {
         "envelope_SHA256",
         "source_ticket_SHA256",
         "work_packet_SHA256",
+        "projection_SHA256",
+        "approval_publication_SHA256",
+        "dependency_plan_SHA256",
+        "allowed_paths_SHA256",
+        "forbidden_paths_SHA256",
+        "validation_steps_SHA256",
+        "source_run_snapshot_SHA256",
+    }
+    nullable_digest_fields = {
         "single_agent_result_SHA256",
         "allocation_SHA256",
         "profile_SHA256",
+        "workspace_path_SHA256",
     }
-    identifier_fields = {"ticket_id", "work_packet_id"}
+    identifier_fields = {
+        "ticket_id",
+        "work_packet_id",
+        "kanban_board_slug",
+        "kanban_task_id",
+        "assignee_profile",
+        "selected_profile",
+        "execution_profile_role",
+        "workspace_kind",
+        "source_run_status",
+        "source_run_outcome",
+        "source_run_profile",
+    }
     if value["policy_id"] != GOVERNED_AUTONOMY_POLICY_ID:
         raise ProductRuntimeConflict("governed-autonomy envelope policy mismatch")
     for field in digest_fields:
         if not isinstance(value[field], str) or not _SAFE_SHA256.fullmatch(value[field]):
+            raise ProductRuntimeConflict(
+                f"governed-autonomy envelope reference {field} is invalid"
+            )
+    for field in nullable_digest_fields:
+        if value[field] is not None and (
+            not isinstance(value[field], str) or not _SAFE_SHA256.fullmatch(value[field])
+        ):
             raise ProductRuntimeConflict(
                 f"governed-autonomy envelope reference {field} is invalid"
             )
@@ -2585,6 +2806,20 @@ def _validated_governed_autonomy_envelope_reference(value: object) -> dict[str, 
         raise ProductRuntimeConflict(
             "governed-autonomy envelope reference dispatch count mismatch"
         )
+    for field in ("source_run_id", "source_run_count", "active_execution_count"):
+        if not isinstance(value[field], int) or isinstance(value[field], bool) or value[field] < 0:
+            raise ProductRuntimeConflict(
+                f"governed-autonomy envelope reference {field} is invalid"
+            )
+    if value["single_agent_result_SHA256"] is not None:
+        raise ProductRuntimeConflict(
+            "backend-derived governed-autonomy authority must not claim completed single-agent evidence"
+        )
+    if value["allocation_SHA256"] is not None or value["profile_SHA256"] is not None:
+        raise ProductRuntimeConflict(
+            "backend-derived governed-autonomy authority must not claim P17 envelope allocation/profile digests"
+        )
+    _validated_governed_autonomy_budget_reference(value["budget"])
     return dict(value)
 
 
@@ -3006,6 +3241,8 @@ def validate_governed_autonomy_activation_record(
     budget_reference = _validated_governed_autonomy_budget_reference(
         record.get("governed_autonomy_budget")
     )
+    if envelope_reference.get("budget") != budget_reference:
+        raise ProductRuntimeConflict("governed-autonomy authority budget mismatch")
     same_authority = _governed_autonomy_same_authority_subset(
         projection,
         envelope_reference,
@@ -3021,6 +3258,8 @@ def validate_governed_autonomy_activation_record(
         raise ProductRuntimeConflict("governed-autonomy activation record must store gap reference only")
     if record.get("continuation_lineage") is not None:
         raise ProductRuntimeConflict("governed-autonomy activation record must store lineage reference only")
+    if record.get("backend_derived_live_authority_reference") != envelope_reference:
+        raise ProductRuntimeConflict("governed-autonomy backend authority reference mismatch")
     gap_payload = record.get("capability_gap_reference")
     gap = _validated_governed_autonomy_gap_reference(gap_payload) if gap_payload is not None else None
     if gap is not None and gap["envelope_SHA256"] != envelope_reference["envelope_SHA256"]:
@@ -3050,6 +3289,9 @@ def validate_governed_autonomy_activation_record(
         "governed_autonomy_policy_id": envelope_reference["policy_id"],
         "governed_autonomy_envelope_SHA256": envelope_reference["envelope_SHA256"],
         "governed_autonomy_budget": budget_reference,
+        "backend_derived_live_authority_SHA256": envelope_reference["envelope_SHA256"],
+        "authority_derivation_source": "server_side_current_ticket_projection_and_kanban_run",
+        "01AH_envelope_lifecycle_classification": "01AH_ENVELOPE_WRONG_LIFECYCLE_PHASE",
         "governed_autonomy_activation_recorded": True,
         "governed_autonomy_status": "activation_recorded_live_lineage_blocked",
         "live_lineage_activation_authorized": False,
@@ -3125,7 +3367,7 @@ def validate_governed_autonomy_runtime_state_record(
             projection_record=projection,
         )
     if activation is None:
-        raise ProductRuntimeConflict("governed-autonomy runtime state requires active envelope")
+        raise ProductRuntimeConflict("governed-autonomy runtime state requires active authority")
     _binding, identity = _current_ticket_identity_fields(projection)
     envelope_reference = _validated_governed_autonomy_envelope_reference(
         record.get("governed_autonomy_envelope_reference")
@@ -3929,7 +4171,7 @@ def get_current_ticket_governed_autonomy_status(
     )
     if runtime_state is None:
         result.update({
-            "governed_autonomy_runtime_status": "active_envelope_ready_for_continuation",
+            "governed_autonomy_runtime_status": "active_authority_ready_for_continuation",
             "runtime_decision": None,
             "runtime_state_SHA256": None,
             "process_continuation_count": 0,
@@ -3940,7 +4182,7 @@ def get_current_ticket_governed_autonomy_status(
             "budget_limits": record.get("governed_autonomy_budget"),
             "budget_remaining": record.get("governed_autonomy_budget"),
             "budget_exhausted": False,
-            "next_autonomous_action": "call continue_current_ticket_governed_autonomy with the active canonical envelope",
+            "next_autonomous_action": "call continue_current_ticket_governed_autonomy with active server-derived authority",
             "next_human_action": None,
             "governed_autonomy_runtime": None,
         })
@@ -3972,9 +4214,6 @@ def get_current_ticket_governed_autonomy_status(
 def activate_current_ticket_governed_autonomy(
     *,
     human_request_text: str,
-    governed_autonomy_envelope: dict[str, Any],
-    capability_gap: dict[str, Any] | None = None,
-    continuation_lineage: dict[str, Any] | None = None,
     authorizer_id: str = "pepper-chat-human",
     project_id: str | None = None,
     ticket_id: str | None = None,
@@ -3985,9 +4224,6 @@ def activate_current_ticket_governed_autonomy(
     request = CurrentTicketGovernedAutonomyActivationRequest(
         human_request_text=human_request_text,
         authorizer_id=authorizer_id,
-        governed_autonomy_envelope=governed_autonomy_envelope,
-        capability_gap=capability_gap,
-        continuation_lineage=continuation_lineage,
         project_id=project_id,
         ticket_id=ticket_id,
         next_action_id=next_action_id,
@@ -4037,7 +4273,6 @@ def activate_current_ticket_governed_autonomy(
 def continue_current_ticket_governed_autonomy(
     *,
     runtime_goal: str,
-    governed_autonomy_envelope: dict[str, Any],
     observed_failure: str | None = None,
     requested_capability: str | None = None,
     strategy: Literal[
@@ -4061,11 +4296,10 @@ def continue_current_ticket_governed_autonomy(
     project_id: str | None = None,
     ticket_id: str | None = None,
 ) -> dict[str, Any]:
-    """Consume an already-active governed-autonomy envelope under same authority."""
+    """Consume already-active server-derived governed-autonomy authority."""
 
     request = CurrentTicketGovernedAutonomyContinuationRequest(
         runtime_goal=runtime_goal,
-        governed_autonomy_envelope=governed_autonomy_envelope,
         observed_failure=observed_failure,
         requested_capability=requested_capability,
         strategy=strategy,
@@ -4096,10 +4330,8 @@ def continue_current_ticket_governed_autonomy(
         projection_record=projection,
     )
     if activation is None:
-        raise ProductRuntimeConflict("governed autonomy continuation requires active 01AH envelope")
-    envelope = _validated_governed_autonomy_envelope(request.governed_autonomy_envelope)
-    _validate_governed_autonomy_runtime_envelope_authority(
-        envelope=envelope,
+        raise ProductRuntimeConflict("governed autonomy continuation requires active server-derived authority")
+    authority = _require_current_governed_autonomy_authority_match(
         projection=projection,
         activation=activation,
     )
@@ -4159,7 +4391,7 @@ def continue_current_ticket_governed_autonomy(
             projection=projection,
             activation=activation,
             previous=previous,
-            envelope=envelope,
+            envelope=authority,
             provider_readiness=provider_readiness,
         )
     elif decision == "A2A_DELEGATION":
@@ -4168,7 +4400,7 @@ def continue_current_ticket_governed_autonomy(
             projection=projection,
             activation=activation,
             previous=previous,
-            envelope=envelope,
+            envelope=authority,
             provider_readiness=provider_readiness,
             delegate_runner=delegate_runner,
             delegate_parent_agent=delegate_parent_agent,
@@ -6813,30 +7045,20 @@ def _build_governed_autonomy_activation_record(
     projection: dict[str, Any],
     workflow: dict[str, Any],
 ) -> dict[str, Any]:
-    envelope = _validated_governed_autonomy_envelope(request.governed_autonomy_envelope)
-    gap = (
-        _validated_governed_autonomy_gap(request.capability_gap)
-        if request.capability_gap is not None
-        else None
+    authority_reference = _derive_current_governed_autonomy_authority_reference(projection)
+    budget_reference = _validated_governed_autonomy_budget_reference(
+        authority_reference["budget"]
     )
-    lineage = (
-        _validated_governed_autonomy_lineage(request.continuation_lineage)
-        if request.continuation_lineage is not None
-        else None
+    authority_view = _governed_autonomy_authority_view_from_reference(
+        authority_reference,
+        projection=projection,
     )
-    same_authority = _governed_autonomy_same_authority_subset(projection, envelope)
+    same_authority = _governed_autonomy_same_authority_subset(projection, authority_view)
     if not same_authority["same_authority"]:
         raise ProductRuntimeAuthorityMismatch(
-            "governed-autonomy envelope authority mismatch",
+            "governed-autonomy backend authority mismatch",
             diagnostics=same_authority,
         )
-    if gap is not None and gap.envelope_SHA256 != envelope.envelope_SHA256:
-        raise ProductRuntimeConflict("governed-autonomy capability gap envelope mismatch")
-    if lineage is not None:
-        if lineage.envelope_SHA256 != envelope.envelope_SHA256:
-            raise ProductRuntimeConflict("governed-autonomy lineage envelope mismatch")
-        if gap is not None and lineage.gap_SHA256 != gap.gap_SHA256:
-            raise ProductRuntimeConflict("governed-autonomy lineage gap mismatch")
     binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
     current_next_action = workflow.get("next_action")
     record = {
@@ -6859,51 +7081,22 @@ def _build_governed_autonomy_activation_record(
         "current_next_action_id": (
             current_next_action.get("id") if isinstance(current_next_action, dict) else None
         ),
-        "governed_autonomy_policy_id": envelope.policy_id,
-        "governed_autonomy_envelope_SHA256": envelope.envelope_SHA256,
-        "governed_autonomy_budget": envelope.budget.model_dump(mode="json"),
-        "governed_autonomy_envelope_reference": {
-            "policy_id": envelope.policy_id,
-            "envelope_SHA256": envelope.envelope_SHA256,
-            "ticket_id": envelope.ticket_id,
-            "source_ticket_SHA256": envelope.source_ticket_SHA256,
-            "work_packet_id": envelope.work_packet_id,
-            "work_packet_SHA256": envelope.work_packet_SHA256,
-            "single_agent_result_SHA256": envelope.single_agent_result_SHA256,
-            "allocation_SHA256": envelope.allocation_SHA256,
-            "profile_SHA256": envelope.profile_SHA256,
-            "live_lineage_activation_authorized": envelope.live_lineage_activation_authorized,
-            "provider_dispatch_count": envelope.provider_dispatch_count,
-            "model_inference_count": envelope.model_inference_count,
-        },
+        "governed_autonomy_policy_id": authority_reference["policy_id"],
+        "governed_autonomy_envelope_SHA256": authority_reference["envelope_SHA256"],
+        "governed_autonomy_budget": budget_reference,
+        "governed_autonomy_envelope_reference": authority_reference,
+        "backend_derived_live_authority_SHA256": authority_reference["envelope_SHA256"],
+        "backend_derived_live_authority_reference": authority_reference,
+        "authority_derivation_source": "server_side_current_ticket_projection_and_kanban_run",
+        "01AH_envelope_lifecycle_classification": authority_reference[
+            "01AH_envelope_lifecycle_classification"
+        ],
         "governed_autonomy_activation_recorded": True,
         "governed_autonomy_status": "activation_recorded_live_lineage_blocked",
-        "capability_gap_SHA256": gap.gap_SHA256 if gap is not None else None,
-        "capability_gap_reference": (
-            {
-                "gap_id": gap.gap_id,
-                "gap_SHA256": gap.gap_SHA256,
-                "envelope_SHA256": gap.envelope_SHA256,
-                "kind": gap.kind.value,
-                "disposition": gap.disposition.value,
-                "requires_human_authority": gap.requires_human_authority,
-            }
-            if gap is not None
-            else None
-        ),
-        "continuation_lineage_SHA256": lineage.lineage_SHA256 if lineage is not None else None,
-        "continuation_lineage_reference": (
-            {
-                "lineage_id": lineage.lineage_id,
-                "lineage_SHA256": lineage.lineage_SHA256,
-                "envelope_SHA256": lineage.envelope_SHA256,
-                "gap_SHA256": lineage.gap_SHA256,
-                "state": lineage.state.value,
-                "continuation_index": lineage.continuation_index,
-            }
-            if lineage is not None
-            else None
-        ),
+        "capability_gap_SHA256": None,
+        "capability_gap_reference": None,
+        "continuation_lineage_SHA256": None,
+        "continuation_lineage_reference": None,
         "same_authority_subset_validated": True,
         "same_authority_subset": same_authority,
         "same_authority_delegation_policy_id": PEPPER_GOVERNED_AUTONOMY_A2A_POLICY_ID,
@@ -6959,36 +7152,6 @@ def _select_governed_autonomy_runtime_decision(
     ):
         return "TASK_LOCAL_SELF_EXTENSION"
     return "DIRECT"
-
-
-def _validate_governed_autonomy_runtime_envelope_authority(
-    *,
-    envelope: Any,
-    projection: dict[str, Any],
-    activation: dict[str, Any],
-) -> None:
-    same_authority = _governed_autonomy_same_authority_subset(projection, envelope)
-    if not same_authority["same_authority"]:
-        raise ProductRuntimeAuthorityMismatch(
-            "governed-autonomy runtime envelope authority mismatch",
-            diagnostics=same_authority,
-        )
-    if envelope.envelope_SHA256 != activation.get("governed_autonomy_envelope_SHA256"):
-        raise ProductRuntimeAuthorityMismatch(
-            "governed-autonomy runtime envelope digest mismatch",
-            diagnostics={
-                "activation_envelope_SHA256": activation.get("governed_autonomy_envelope_SHA256"),
-                "runtime_envelope_SHA256": envelope.envelope_SHA256,
-            },
-        )
-    if envelope.budget.model_dump(mode="json") != activation.get("governed_autonomy_budget"):
-        raise ProductRuntimeAuthorityMismatch(
-            "governed-autonomy runtime budget mismatch",
-            diagnostics={
-                "activation_budget": activation.get("governed_autonomy_budget"),
-                "runtime_budget": envelope.budget.model_dump(mode="json"),
-            },
-        )
 
 
 def _governed_autonomy_runtime_budget_limits(
@@ -7357,10 +7520,10 @@ def _build_governed_autonomy_direct_runtime_record(
         runtime_status="direct_continuation_recorded",
         latest_decision_evidence={
             "decision": "DIRECT",
-            "rationale": "active envelope revalidated; no task-local helper or A2A delegation requested",
+            "rationale": "active authority revalidated; no task-local helper or A2A delegation requested",
         },
         provider_readiness=provider_readiness,
-        next_autonomous_action="continue under active envelope or stop when the goal is complete",
+        next_autonomous_action="continue under active authority or stop when the goal is complete",
     )
 
 
@@ -7458,6 +7621,26 @@ def _build_governed_autonomy_self_extension_runtime_record(
     envelope: Any,
     provider_readiness: dict[str, Any],
 ) -> dict[str, Any]:
+    if getattr(envelope, "authority_kind", None) == "backend_derived_live_authority":
+        return _build_governed_autonomy_runtime_stop_record(
+            request=request,
+            projection=projection,
+            activation=activation,
+            previous=previous,
+            runtime_decision="STOP_FOR_HUMAN",
+            blocker_code="TASK_LOCAL_SELF_EXTENSION_01AH_ENVELOPE_GAP",
+            blocker_detail=(
+                "task-local self-extension requires real 01AH envelope evidence; "
+                "backend-derived live authority deliberately does not synthesize completed "
+                "single-agent execution evidence"
+            ),
+            validation_failed=True,
+            provider_readiness=provider_readiness,
+            extra_evidence={
+                "authority_kind": envelope.authority_kind,
+                "01AH_envelope_lifecycle_classification": "01AH_ENVELOPE_WRONG_LIFECYCLE_PHASE",
+            },
+        )
     if not (
         request.task_local_tool_name
         and request.task_local_implementation_path
@@ -7677,7 +7860,7 @@ def _build_governed_autonomy_self_extension_runtime_record(
         progress_marker_sha256=progress_marker,
         blocker_code="TASK_LOCAL_COMMAND_FAILED" if blocked else None,
         blocker_detail=advanced_lineage.stop_reason.value if blocked else None,
-        next_autonomous_action=None if blocked else "continue under active envelope with materialized helper evidence",
+        next_autonomous_action=None if blocked else "continue under active authority with materialized helper evidence",
         next_human_action="human review required for blocked task-local continuation" if blocked else None,
     )
 
@@ -7773,7 +7956,7 @@ def _governed_autonomy_a2a_delegate_context_text(
     context = {
         "parent_policy_id": PEPPER_GOVERNED_AUTONOMY_RUNTIME_POLICY_ID,
         "a2a_policy_id": PEPPER_GOVERNED_AUTONOMY_A2A_POLICY_ID,
-        "parent_envelope_SHA256": envelope.envelope_SHA256,
+        "parent_authority_SHA256": envelope.envelope_SHA256,
         "activation_action_SHA256": activation["activation_action_SHA256"],
         "ticket_id": projection["ticket_id"],
         "work_packet_id": projection["work_packet_id"],
@@ -8039,7 +8222,7 @@ def _build_governed_autonomy_a2a_runtime_record(
                 goal=request.delegate_goal,
                 context={
                     "parent_policy_id": PEPPER_GOVERNED_AUTONOMY_RUNTIME_POLICY_ID,
-                    "parent_envelope_SHA256": envelope.envelope_SHA256,
+                    "parent_authority_SHA256": envelope.envelope_SHA256,
                     "activation_action_SHA256": activation["activation_action_SHA256"],
                     "ticket_id": projection["ticket_id"],
                     "work_packet_id": projection["work_packet_id"],
@@ -8101,7 +8284,7 @@ def _build_governed_autonomy_a2a_runtime_record(
         provider_readiness=provider_readiness,
         delegation_increment=1,
         progress_marker_sha256=result_reference["delegate_result_SHA256"],
-        next_autonomous_action="continue under active envelope using bounded delegate result evidence",
+        next_autonomous_action="continue under active authority using bounded delegate result evidence",
     )
 
 
@@ -8852,8 +9035,8 @@ def _governed_autonomy_status_without_record(
     ticket_id: str | None,
     ticket_title: str | None = None,
     projection: dict[str, Any] | None = None,
-    blocker_code: str = "GOVERNED_AUTONOMY_ENVELOPE_REQUIRED",
-    blocker_detail: str = "01AH governed autonomy has not been activated for the current ticket.",
+    blocker_code: str = "GOVERNED_AUTONOMY_AUTHORITY_REQUIRED",
+    blocker_detail: str = "01AH governed autonomy authority has not been activated for the current ticket.",
 ) -> dict[str, Any]:
     identity = _current_ticket_projection_identity_fields(projection) if projection is not None else {}
     task_visibility: dict[str, Any] | None = None
@@ -8879,7 +9062,7 @@ def _governed_autonomy_status_without_record(
         "continuation_lineage_SHA256": None,
         "same_authority_subset_validated": False,
         "live_lineage_activation_authorized": False,
-        "live_lineage_activation_status": "blocked_requires_01ah_envelope",
+        "live_lineage_activation_status": "blocked_requires_governed_autonomy_activation",
         "blocker_code": blocker_code,
         "blocker_detail": _safe_text(blocker_detail, limit=300),
         "same_authority_delegation_status": "blocked_no_activation_record",
@@ -8939,6 +9122,13 @@ def _governed_autonomy_activation_operational_result(
         "governed_autonomy_status": record["governed_autonomy_status"],
         "governed_autonomy_policy_id": record["governed_autonomy_policy_id"],
         "governed_autonomy_envelope_SHA256": record["governed_autonomy_envelope_SHA256"],
+        "backend_derived_live_authority_SHA256": record[
+            "backend_derived_live_authority_SHA256"
+        ],
+        "authority_derivation_source": record["authority_derivation_source"],
+        "01AH_envelope_lifecycle_classification": record[
+            "01AH_envelope_lifecycle_classification"
+        ],
         "capability_gap_SHA256": record.get("capability_gap_SHA256"),
         "continuation_lineage_SHA256": record.get("continuation_lineage_SHA256"),
         "same_authority_subset_validated": record["same_authority_subset_validated"],
@@ -11147,6 +11337,13 @@ def _current_ticket_governed_autonomy_overlay(
         "governed_autonomy_status": result["governed_autonomy_status"],
         "governed_autonomy_policy_id": result["governed_autonomy_policy_id"],
         "governed_autonomy_envelope_SHA256": result["governed_autonomy_envelope_SHA256"],
+        "backend_derived_live_authority_SHA256": result[
+            "backend_derived_live_authority_SHA256"
+        ],
+        "authority_derivation_source": result["authority_derivation_source"],
+        "01AH_envelope_lifecycle_classification": result[
+            "01AH_envelope_lifecycle_classification"
+        ],
         "capability_gap_SHA256": result.get("capability_gap_SHA256"),
         "continuation_lineage_SHA256": result.get("continuation_lineage_SHA256"),
         "same_authority_subset_validated": result["same_authority_subset_validated"],
@@ -11162,7 +11359,7 @@ def _current_ticket_governed_autonomy_overlay(
         "governed_autonomy_runtime_status": (
             runtime_state["governed_autonomy_runtime_status"]
             if runtime_state is not None
-            else "active_envelope_ready_for_continuation"
+            else "active_authority_ready_for_continuation"
         ),
         "runtime_decision": runtime_state["runtime_decision"] if runtime_state is not None else None,
         "runtime_state_SHA256": runtime_state["runtime_state_SHA256"] if runtime_state is not None else None,
@@ -11180,7 +11377,7 @@ def _current_ticket_governed_autonomy_overlay(
         "next_autonomous_action": (
             runtime_state.get("next_autonomous_action")
             if runtime_state is not None
-            else "call continue_current_ticket_governed_autonomy with the active canonical envelope"
+            else "call continue_current_ticket_governed_autonomy with the active server-derived authority"
         ),
         "next_human_action": runtime_state.get("next_human_action") if runtime_state is not None else None,
         "dispatch_performed": False,
@@ -11204,6 +11401,9 @@ def _current_ticket_governed_autonomy_overlay(
         "governed_autonomy_activation_recorded": True,
         "governed_autonomy_status": result["governed_autonomy_status"],
         "governed_autonomy_envelope_SHA256": result["governed_autonomy_envelope_SHA256"],
+        "backend_derived_live_authority_SHA256": result[
+            "backend_derived_live_authority_SHA256"
+        ],
         "governed_autonomy_live_lineage_activation_authorized": False,
         "governed_autonomy_live_lineage_activation_status": result[
             "live_lineage_activation_status"

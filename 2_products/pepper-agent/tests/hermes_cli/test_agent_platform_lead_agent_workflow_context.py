@@ -328,6 +328,15 @@ def test_pepper_toolset_exposes_no_arbitrary_shell_or_file_authority(monkeypatch
         "search_repository",
         "resolve_repository_authority",
     }.issubset(names)
+    by_name = {definition["function"]["name"]: definition["function"] for definition in definitions}
+    activation_params = by_name["activate_current_ticket_governed_autonomy"]["parameters"]
+    continuation_params = by_name["continue_current_ticket_governed_autonomy"]["parameters"]
+    assert activation_params["required"] == ["human_request_text"]
+    assert "governed_autonomy_envelope" not in activation_params["properties"]
+    assert "capability_gap" not in activation_params["properties"]
+    assert "continuation_lineage" not in activation_params["properties"]
+    assert continuation_params["required"] == ["runtime_goal"]
+    assert "governed_autonomy_envelope" not in continuation_params["properties"]
     assert not (names & {"terminal", "process", "read_file", "write_file", "patch", "search_files"})
 
 
@@ -355,6 +364,8 @@ def test_lead_agent_prompt_requires_tool_backed_state() -> None:
     assert "continue_current_ticket_governed_autonomy" in prompt
     assert "01AH governed autonomy" in prompt
     assert "status-only" in prompt
+    assert "server-derived authority" in prompt
+    assert "Do not ask for or supply GovernedAutonomyEnvelope JSON" in prompt
     assert "prepare_current_ticket_review" in prompt
     assert "accept_current_ticket_review" in prompt
     assert "PREPARE_P18_9_0_REVIEW" in prompt

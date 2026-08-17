@@ -625,137 +625,26 @@ def _force_p18_9_1_blocked_run_4(pr, kanban_db, projected: dict, monkeypatch) ->
     return run_4
 
 
-def _p18_9_1_governed_autonomy_evidence(monkeypatch, tmp_path: Path) -> dict:
-    from hermes_cli.agent_platform.work_packet import (
-        SingleAgentActionExecutionRequest,
-        SingleAgentExecutionRequest,
-        ToolPermissionOperation,
-        WorkPacketCompilationResult,
-        build_governed_autonomy_envelope,
-        build_single_agent_execution_authorization,
-        build_single_agent_runtime_binding,
-        classify_capability_gap,
-        complete_single_agent_execution,
-        execute_single_agent_tool_action,
-        prepare_single_agent_execution,
-        start_governed_autonomy_continuation,
-    )
-    from tests.hermes_cli.test_agent_platform_work_packet_single_agent_execution import (
-        action as single_action,
-        allocation_result as single_allocation_result,
-        plan as single_plan,
-        profile_result as single_profile_result,
-    )
-
-    generation = bridge.load_generation_record(ticket_id="P18.9.1")
+def _first_projection_allowed_directory(projected: dict) -> str:
+    generation = bridge.load_generation_record(ticket_id=projected["ticket_id"])
     assert generation is not None
-    compilation = WorkPacketCompilationResult.model_validate(
-        generation["work_packet_compilation_result"]
-    )
-    workspace_root = tmp_path / "p18_9_1_autonomy_workspace"
-    allowed_patterns = tuple(
-        str(pattern) for pattern in compilation.work_packet.repository_scope.allowed_paths
-    )
-    allowed_directory = next(
-        (pattern[:-3].rstrip("/") for pattern in allowed_patterns if pattern.endswith("/**")),
-        None,
-    )
-    fixture_path = (
-        f"{allowed_directory}/autonomy-fixture.txt"
-        if allowed_directory is not None
-        else next(pattern for pattern in allowed_patterns if "*" not in pattern)
-    )
-    (workspace_root / fixture_path).parent.mkdir(parents=True, exist_ok=True)
-    (workspace_root / fixture_path).write_text("01AI autonomy fixture", encoding="utf-8")
-
-    allocated, _status_state = single_allocation_result(
-        monkeypatch,
-        compilation,
-        workspace_root,
-    )
-    permissions = single_profile_result(compilation, allocated)
-    runtime_binding = build_single_agent_runtime_binding(
-        agent_id="agent.01ai.p18-9-1",
-        worker_id="worker.01ai.p18-9-1",
-        work_packet=compilation.work_packet,
-    )
-    execution_plan = single_plan(tuple(
-        single_action(
-            index,
-            task.step_id,
-            ToolPermissionOperation.READ_FILE,
-            fixture_path,
-        )
-        for index, task in enumerate(compilation.work_packet.tasks, start=1)
-    ))
-    authorization = build_single_agent_execution_authorization(
-        authorizer_id="execution.authorizer.01ai",
-        authorization_reference="AUTH-01AI-P18-9-1",
-        rationale="Authorize read-only P18.9.1 envelope fixture execution.",
-        compilation_result=compilation,
-        allocation_result=allocated,
-        profile_result=permissions,
-        runtime_binding=runtime_binding,
-        plan=execution_plan,
-        risk_acknowledgement="Synthetic read-only P18.9.1 autonomy fixture risk acknowledged.",
-    )
-    request = SingleAgentExecutionRequest(
-        compilation_result=compilation,
-        allocation_result=allocated,
-        profile_result=permissions,
-        runtime_binding=runtime_binding,
-        plan=execution_plan,
-        execution_authorization=authorization,
-    )
-    session = prepare_single_agent_execution(request)
-    action_result = execute_single_agent_tool_action(
-        SingleAgentActionExecutionRequest(
-            execution_request=request,
-            session=session,
-        )
-    )
-    session = action_result.updated_session
-    single_result = complete_single_agent_execution(session)
-    envelope = build_governed_autonomy_envelope(
-        compilation_result=compilation,
-        allocation_result=allocated,
-        profile_result=permissions,
-        single_agent_execution_result=single_result,
-    )
-    gap = classify_capability_gap(
-        envelope=envelope,
-        observed_failure="ModuleNotFoundError: missing task-local autonomy helper",
-        requested_capability="Need a local helper to inspect generated Pepper text.",
-    )
-    lineage = start_governed_autonomy_continuation(envelope=envelope, gap=gap)
-    return {
-        "envelope": envelope,
-        "gap": gap,
-        "lineage": lineage,
-    }
-
-
-def _first_autonomy_allowed_directory(envelope) -> str:
-    for pattern in envelope.allowed_paths:
+    work_packet = generation["work_packet_compilation_result"]["work_packet"]
+    allowed_paths = work_packet["repository_scope"]["allowed_paths"]
+    for pattern in allowed_paths:
         text = str(pattern)
         if text.endswith("/**"):
             return text[:-3].rstrip("/")
-    return str(envelope.allowed_paths[0]).rstrip("/")
+    return str(allowed_paths[0]).rstrip("/")
 
 
 def _activate_p18_9_1_governed_autonomy_for_test(
     pr,
     monkeypatch,
-    tmp_path: Path,
 ) -> dict:
-    evidence = _p18_9_1_governed_autonomy_evidence(monkeypatch, tmp_path)
     activation = pr.activate_current_ticket_governed_autonomy(
         human_request_text=(
-            "Record 01AH governed autonomy status for P18.9.1 without live lineage activation."
+            "Activate 01AH governed autonomy status for P18.9.1 without live lineage activation."
         ),
-        governed_autonomy_envelope=evidence["envelope"].model_dump(mode="json"),
-        capability_gap=evidence["gap"].model_dump(mode="json"),
-        continuation_lineage=evidence["lineage"].model_dump(mode="json"),
         project_id="PEPPER",
         ticket_id="P18.9.1",
         next_action_id="RECOVER_P18_9_1_EXECUTION",
@@ -765,7 +654,15 @@ def _activate_p18_9_1_governed_autonomy_for_test(
         "_executor_provider_readiness",
         lambda profile_name: _ready_executor_provider_payload(profile_name),
     )
-    return {**evidence, "activation": activation}
+    return {"activation": activation}
+
+
+def _write_governed_autonomy_activation_record_for_test(pr, record: dict) -> None:
+    path = pr.governed_autonomy_activation_record_path_for_ticket(str(record["ticket_id"]))
+    path.write_text(
+        json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _queued_workflow_for_projection(projected: dict) -> dict:
@@ -4891,15 +4788,11 @@ def test_current_p18_9_1_governed_autonomy_activation_is_status_only(
     assert not_activated["dispatch_performed"] is False
     assert not_activated["runs"][-1]["id"] == run_4
 
-    evidence = _p18_9_1_governed_autonomy_evidence(monkeypatch, tmp_path)
     activation_text = (
-        "Record 01AH governed autonomy status for P18.9.1 without live lineage activation."
+        "Activate 01AH governed autonomy status for P18.9.1 without live lineage activation."
     )
     activation = json.loads(pepper_tools._activate_current_ticket_governed_autonomy({
         "human_request_text": activation_text,
-        "governed_autonomy_envelope": evidence["envelope"].model_dump(mode="json"),
-        "capability_gap": evidence["gap"].model_dump(mode="json"),
-        "continuation_lineage": evidence["lineage"].model_dump(mode="json"),
         "project_id": "PEPPER",
         "ticket_id": "P18.9.1",
         "next_action_id": "RECOVER_P18_9_1_EXECUTION",
@@ -4909,6 +4802,11 @@ def test_current_p18_9_1_governed_autonomy_activation_is_status_only(
     assert activation["governed_autonomy_status"] == "activation_recorded_live_lineage_blocked"
     assert activation["governed_autonomy_activation_recorded"] is True
     assert activation["same_authority_subset_validated"] is True
+    assert activation["authority_derivation_source"] == "server_side_current_ticket_projection_and_kanban_run"
+    assert activation["01AH_envelope_lifecycle_classification"] == "01AH_ENVELOPE_WRONG_LIFECYCLE_PHASE"
+    assert activation["backend_derived_live_authority_SHA256"] == activation[
+        "governed_autonomy_envelope_SHA256"
+    ]
     assert activation["same_authority_delegation_status"] == "blocked_metadata_only"
     assert activation["same_authority_delegation_authorized"] is False
     assert activation["A2A_dispatch_performed"] is False
@@ -4930,19 +4828,26 @@ def test_current_p18_9_1_governed_autonomy_activation_is_status_only(
     )
     assert record is not None
     assert record["ticket_id"] == "P18.9.1"
-    assert record["governed_autonomy_envelope_SHA256"] == evidence["envelope"].envelope_SHA256
-    assert record["capability_gap_SHA256"] == evidence["gap"].gap_SHA256
-    assert record["continuation_lineage_SHA256"] == evidence["lineage"].lineage_SHA256
+    assert record["governed_autonomy_envelope_SHA256"] == activation[
+        "governed_autonomy_envelope_SHA256"
+    ]
+    assert record["backend_derived_live_authority_SHA256"] == activation[
+        "governed_autonomy_envelope_SHA256"
+    ]
+    assert record["capability_gap_SHA256"] is None
+    assert record["continuation_lineage_SHA256"] is None
     assert "governed_autonomy_envelope" not in record
     assert "capability_gap" not in record
     assert "continuation_lineage" not in record
-    assert record["governed_autonomy_envelope_reference"]["envelope_SHA256"] == evidence[
-        "envelope"
-    ].envelope_SHA256
-    assert record["capability_gap_reference"]["gap_SHA256"] == evidence["gap"].gap_SHA256
-    assert record["continuation_lineage_reference"]["lineage_SHA256"] == evidence[
-        "lineage"
-    ].lineage_SHA256
+    authority_reference = record["governed_autonomy_envelope_reference"]
+    assert authority_reference["authority_kind"] == "backend_derived_live_authority"
+    assert authority_reference["single_agent_result_SHA256"] is None
+    assert authority_reference["allocation_SHA256"] is None
+    assert authority_reference["profile_SHA256"] is None
+    assert authority_reference["source_run_id"] == run_4
+    assert authority_reference["active_execution_count"] == 0
+    assert record["capability_gap_reference"] is None
+    assert record["continuation_lineage_reference"] is None
     assert pr.governed_autonomy_activation_record_path_for_ticket("P18.9.1").exists()
     assert not pr.governed_autonomy_activation_record_path_for_ticket("P18.9.0").exists()
 
@@ -4971,18 +4876,15 @@ def test_current_p18_9_1_governed_autonomy_activation_is_status_only(
         "ticket_id": "P18.9.1",
     }))
     assert tool_status["success"] is True
-    assert tool_status["governed_autonomy_envelope_SHA256"] == evidence[
-        "envelope"
-    ].envelope_SHA256
+    assert tool_status["governed_autonomy_envelope_SHA256"] == activation[
+        "governed_autonomy_envelope_SHA256"
+    ]
     workflow_control = json.loads(pepper_tools._get_workflow_control({}))
     assert workflow_control["next_action"]["id"] == "RECOVER_P18_9_1_EXECUTION"
     assert workflow_control["governed_autonomy"]["same_authority_delegation_authorized"] is False
 
     replay = pr.activate_current_ticket_governed_autonomy(
         human_request_text=activation_text,
-        governed_autonomy_envelope=evidence["envelope"].model_dump(mode="json"),
-        capability_gap=evidence["gap"].model_dump(mode="json"),
-        continuation_lineage=evidence["lineage"].model_dump(mode="json"),
         project_id="PEPPER",
         ticket_id="P18.9.1",
         next_action_id="RECOVER_P18_9_1_EXECUTION",
@@ -5004,7 +4906,136 @@ def test_current_p18_9_1_governed_autonomy_activation_is_status_only(
         conn.close()
 
 
-def test_current_p18_9_1_governed_autonomy_self_extension_consumes_active_envelope(
+def test_current_p18_9_1_governed_autonomy_tool_rejects_caller_supplied_authority(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, projected, _authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
+    )
+
+    from hermes_cli import kanban_db
+    import tools.pepper_workflow_tools as pepper_tools
+
+    _force_p18_9_1_blocked_run_4(pr, kanban_db, projected, monkeypatch)
+    activation = json.loads(pepper_tools._activate_current_ticket_governed_autonomy({
+        "human_request_text": (
+            "Activate 01AH governed autonomy status for P18.9.1 without live lineage activation."
+        ),
+        "governed_autonomy_envelope": {"caller": "supplied"},
+        "capability_gap": {"caller": "supplied"},
+        "continuation_lineage": {"caller": "supplied"},
+        "project_id": "PEPPER",
+        "ticket_id": "P18.9.1",
+        "next_action_id": "RECOVER_P18_9_1_EXECUTION",
+    }))
+    assert activation["success"] is False
+    assert "derives authority server-side" in activation["error"]
+    assert "governed_autonomy_envelope" in activation["error"]
+    assert not pr.governed_autonomy_activation_record_path_for_ticket("P18.9.1").exists()
+
+    continuation = json.loads(pepper_tools._continue_current_ticket_governed_autonomy({
+        "runtime_goal": "Try to continue with model-supplied authority.",
+        "governed_autonomy_envelope": {"caller": "supplied"},
+        "project_id": "PEPPER",
+        "ticket_id": "P18.9.1",
+    }))
+    assert continuation["success"] is False
+    assert "persisted server-derived authority" in continuation["error"]
+
+
+def test_current_p18_9_1_governed_autonomy_rejects_tampered_authority_digest(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, projected, authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
+    )
+
+    from hermes_cli import kanban_db
+
+    run_4 = _force_p18_9_1_blocked_run_4(pr, kanban_db, projected, monkeypatch)
+    _activate_p18_9_1_governed_autonomy_for_test(pr, monkeypatch)
+    record = pr.load_current_ticket_governed_autonomy_activation_record(
+        projection_record=authority,
+    )
+    assert record is not None
+    record["governed_autonomy_envelope_reference"]["source_run_count"] += 1
+    record["activation_action_SHA256"] = pr._governed_autonomy_activation_record_digest(record)
+    _write_governed_autonomy_activation_record_for_test(pr, record)
+
+    with pytest.raises(pr.ProductRuntimeConflict) as excinfo:
+        pr.continue_current_ticket_governed_autonomy(
+            runtime_goal="Attempt continuation with a tampered persisted authority digest.",
+            strategy="DIRECT",
+            project_id="PEPPER",
+            ticket_id="P18.9.1",
+        )
+
+    assert "authority reference digest mismatch" in str(excinfo.value)
+    assert not pr.governed_autonomy_runtime_state_path_for_ticket("P18.9.1").exists()
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        runs = kanban_db.list_runs(conn, projected["kanban_task_id"])
+        assert runs[-1].id == run_4
+        assert all(run.id != 5 for run in runs)
+    finally:
+        conn.close()
+
+
+def test_current_p18_9_1_governed_autonomy_rejects_stale_authority_after_new_blocked_run(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, projected, _authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
+    )
+
+    from hermes_cli import kanban_db
+
+    run_4 = _force_p18_9_1_blocked_run_4(pr, kanban_db, projected, monkeypatch)
+    _activate_p18_9_1_governed_autonomy_for_test(pr, monkeypatch)
+    run_5 = _claim_next_projected_run(kanban_db, projected, pid=6404)
+    assert run_5 == run_4 + 1
+    _block_projected_run(
+        kanban_db,
+        projected,
+        run_5,
+        reason="synthetic newer P18.9.1 blocked run superseded activation authority",
+        kind="transient",
+    )
+
+    with pytest.raises(pr.ProductRuntimeAuthorityMismatch) as excinfo:
+        pr.continue_current_ticket_governed_autonomy(
+            runtime_goal="Attempt continuation under stale source-run authority.",
+            strategy="DIRECT",
+            project_id="PEPPER",
+            ticket_id="P18.9.1",
+        )
+
+    assert str(excinfo.value) == "CONTINUATION_AUTHORITY_MISMATCH"
+    diagnostics = excinfo.value.diagnostics
+    assert diagnostics["blocker_code"] == "CONTINUATION_AUTHORITY_MISMATCH"
+    assert diagnostics["activation_source_run_id"] == run_4
+    assert diagnostics["current_source_run_id"] == run_5
+    assert diagnostics["activation_authority_SHA256"] != diagnostics[
+        "current_authority_SHA256"
+    ]
+    assert not pr.governed_autonomy_runtime_state_path_for_ticket("P18.9.1").exists()
+
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        runs = kanban_db.list_runs(conn, projected["kanban_task_id"])
+        assert runs[-1].id == run_5
+        assert all(run.id != 6 for run in runs)
+    finally:
+        conn.close()
+
+
+def test_current_p18_9_1_governed_autonomy_self_extension_stops_without_01ah_envelope(
     projection_home,
     monkeypatch,
     tmp_path,
@@ -5017,14 +5048,12 @@ def test_current_p18_9_1_governed_autonomy_self_extension_consumes_active_envelo
     from hermes_cli import kanban_db
 
     run_4 = _force_p18_9_1_blocked_run_4(pr, kanban_db, projected, monkeypatch)
-    evidence = _activate_p18_9_1_governed_autonomy_for_test(pr, monkeypatch, tmp_path)
-    envelope = evidence["envelope"]
-    allowed_dir = _first_autonomy_allowed_directory(envelope)
+    evidence = _activate_p18_9_1_governed_autonomy_for_test(pr, monkeypatch)
+    allowed_dir = _first_projection_allowed_directory(projected)
     helper_path = f"{allowed_dir}/autonomy_runtime_helper.py"
 
     result = pr.continue_current_ticket_governed_autonomy(
-        runtime_goal="Repair the failed run with a task-local helper under the active envelope.",
-        governed_autonomy_envelope=envelope.model_dump(mode="json"),
+        runtime_goal="Repair the failed run with a task-local helper under the active authority.",
         observed_failure="Missing task-local helper for offline inspection.",
         requested_capability="task local helper",
         strategy="TASK_LOCAL_SELF_EXTENSION",
@@ -5037,22 +5066,24 @@ def test_current_p18_9_1_governed_autonomy_self_extension_consumes_active_envelo
         ticket_id="P18.9.1",
     )
 
-    assert result["runtime_decision"] == "TASK_LOCAL_SELF_EXTENSION"
-    assert result["governed_autonomy_runtime_status"] == "task_local_self_extension_completed"
+    assert evidence["activation"]["01AH_envelope_lifecycle_classification"] == "01AH_ENVELOPE_WRONG_LIFECYCLE_PHASE"
+    assert result["runtime_decision"] == "STOP_FOR_HUMAN"
+    assert result["governed_autonomy_runtime_status"] == "blocked_stop_for_human"
+    assert result["blocker_code"] == "TASK_LOCAL_SELF_EXTENSION_01AH_ENVELOPE_GAP"
     assert result["authority_revalidated"] is True
     assert result["legacy_human_recovery_retry_micro_gates_required"] is False
     assert result["source_run_id"] == run_4
     assert result["kanban_run_count"] == 3
-    assert result["self_repair_count"] == 1
-    assert result["task_local_tool_candidate_count"] == 1
-    assert result["command_evaluation_count"] == 1
+    assert result["self_repair_count"] == 0
+    assert result["task_local_tool_candidate_count"] == 0
+    assert result["command_evaluation_count"] == 0
+    assert result["validation_failure_count"] == 1
     assert result["A2A_dispatch_performed"] is False
     assert result["dispatch_performed"] is False
     assert result["Kanban_dispatch"] is False
     assert result["Git_mutation"] is False
     assert result["auto_retry"] is False
-    assert (Path(envelope.resolved_workspace_root) / helper_path).exists()
-    assert result["latest_decision_evidence"]["command_result_reference"]["disposition"] == "passed"
+    assert result["latest_decision_evidence"]["authority_kind"] == "backend_derived_live_authority"
 
     record = pr.load_current_ticket_governed_autonomy_runtime_state(
         projection_record=authority,
@@ -5061,7 +5092,7 @@ def test_current_p18_9_1_governed_autonomy_self_extension_consumes_active_envelo
     assert record["runtime_state_SHA256"] == result["runtime_state_SHA256"]
     assert "governed_autonomy_envelope" not in record
     assert "task_local_source_text" not in record
-    assert record["latest_decision_evidence"]["tool_candidate_reference"]["source_SHA256"]
+    assert "tool_candidate_reference" not in record["latest_decision_evidence"]
     status = pr.get_current_ticket_governed_autonomy_status(
         project_id="PEPPER",
         ticket_id="P18.9.1",
@@ -5092,9 +5123,8 @@ def test_current_p18_9_1_governed_autonomy_a2a_uses_injected_delegate_runner(
     from hermes_cli import kanban_db
 
     run_4 = _force_p18_9_1_blocked_run_4(pr, kanban_db, projected, monkeypatch)
-    evidence = _activate_p18_9_1_governed_autonomy_for_test(pr, monkeypatch, tmp_path)
-    envelope = evidence["envelope"]
-    allowed_dir = _first_autonomy_allowed_directory(envelope)
+    _activate_p18_9_1_governed_autonomy_for_test(pr, monkeypatch)
+    allowed_dir = _first_projection_allowed_directory(projected)
     calls: list[dict] = []
 
     def delegate_runner(**kwargs):
@@ -5106,8 +5136,7 @@ def test_current_p18_9_1_governed_autonomy_a2a_uses_injected_delegate_runner(
         }
 
     result = pr.continue_current_ticket_governed_autonomy(
-        runtime_goal="Delegate bounded offline inspection under the active envelope.",
-        governed_autonomy_envelope=envelope.model_dump(mode="json"),
+        runtime_goal="Delegate bounded offline inspection under the active authority.",
         strategy="A2A_DELEGATION",
         delegate_goal="Inspect only the delegated allowed path and summarize.",
         delegate_paths=(allowed_dir,),
@@ -5162,9 +5191,8 @@ def test_current_p18_9_1_governed_autonomy_a2a_resolves_canonical_delegate_task_
     from tools.registry import registry
 
     run_4 = _force_p18_9_1_blocked_run_4(pr, kanban_db, projected, monkeypatch)
-    evidence = _activate_p18_9_1_governed_autonomy_for_test(pr, monkeypatch, tmp_path)
-    envelope = evidence["envelope"]
-    allowed_dir = _first_autonomy_allowed_directory(envelope)
+    _activate_p18_9_1_governed_autonomy_for_test(pr, monkeypatch)
+    allowed_dir = _first_projection_allowed_directory(projected)
     parent_agent = SimpleNamespace(
         _delegate_depth=0,
         _memory_manager=None,
@@ -5210,8 +5238,7 @@ def test_current_p18_9_1_governed_autonomy_a2a_resolves_canonical_delegate_task_
     assert entry.toolset == "delegation"
 
     result = pr.continue_current_ticket_governed_autonomy(
-        runtime_goal="Delegate through the canonical Hermes A2A runtime under the active envelope.",
-        governed_autonomy_envelope=envelope.model_dump(mode="json"),
+        runtime_goal="Delegate through the canonical Hermes A2A runtime under the active authority.",
         strategy="A2A_DELEGATION",
         delegate_goal="Inspect only the delegated allowed path and summarize.",
         delegate_paths=(allowed_dir,),
@@ -5229,7 +5256,7 @@ def test_current_p18_9_1_governed_autonomy_a2a_resolves_canonical_delegate_task_
     assert delegated_parent.valid_tool_names == []
     assert delegated_parent.model == "gpt-5.5"
     assert build_call["role"] == "leaf"
-    assert '"parent_envelope_SHA256"' in build_call["context"]
+    assert '"parent_authority_SHA256"' in build_call["context"]
     assert allowed_dir in build_call["context"]
     assert run_calls[0]["parent_agent"].enabled_toolsets == []
 
@@ -5285,7 +5312,7 @@ def test_current_p18_9_1_governed_autonomy_a2a_denies_out_of_scope_child_authori
     from hermes_cli import kanban_db
 
     run_4 = _force_p18_9_1_blocked_run_4(pr, kanban_db, projected, monkeypatch)
-    evidence = _activate_p18_9_1_governed_autonomy_for_test(pr, monkeypatch, tmp_path)
+    _activate_p18_9_1_governed_autonomy_for_test(pr, monkeypatch)
     called = False
 
     def delegate_runner(**_kwargs):
@@ -5295,7 +5322,6 @@ def test_current_p18_9_1_governed_autonomy_a2a_denies_out_of_scope_child_authori
 
     result = pr.continue_current_ticket_governed_autonomy(
         runtime_goal="Attempt an out-of-scope child delegation.",
-        governed_autonomy_envelope=evidence["envelope"].model_dump(mode="json"),
         strategy="A2A_DELEGATION",
         delegate_goal="Inspect a forbidden path.",
         delegate_paths=("outside/scope.txt",),
@@ -5336,18 +5362,15 @@ def test_current_p18_9_1_governed_autonomy_status_reconstructs_runtime_after_res
     from hermes_cli import kanban_db
 
     run_4 = _force_p18_9_1_blocked_run_4(pr, kanban_db, projected, monkeypatch)
-    evidence = _activate_p18_9_1_governed_autonomy_for_test(pr, monkeypatch, tmp_path)
-    envelope_json = evidence["envelope"].model_dump(mode="json")
+    _activate_p18_9_1_governed_autonomy_for_test(pr, monkeypatch)
     first = pr.continue_current_ticket_governed_autonomy(
-        runtime_goal="Record direct active-envelope continuation with no external action.",
-        governed_autonomy_envelope=envelope_json,
+        runtime_goal="Record direct active-authority continuation with no external action.",
         strategy="DIRECT",
         project_id="PEPPER",
         ticket_id="P18.9.1",
     )
     second = pr.continue_current_ticket_governed_autonomy(
-        runtime_goal="Record direct active-envelope continuation with no external action.",
-        governed_autonomy_envelope=envelope_json,
+        runtime_goal="Record direct active-authority continuation with no external action.",
         strategy="DIRECT",
         project_id="PEPPER",
         ticket_id="P18.9.1",
