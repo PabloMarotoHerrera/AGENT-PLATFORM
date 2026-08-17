@@ -50,6 +50,8 @@ _PROTECTED_PATHS = (
     "4_external/sources/**",
     "2_products/pepper-agent/AGENT_PLATFORM_UPSTREAM_BASELINE.json",
 )
+_PROTECTED_COMPONENTS = frozenset({"node_modules"})
+_PROTECTED_FILENAMES = frozenset({"package-lock.json"})
 _FORBIDDEN_SCRIPT_TOKENS = {
     "git",
     "docker",
@@ -498,6 +500,11 @@ def _path_is_authorized(
         or rel.startswith("/")
         or any(part in {"", ".", ".."} for part in rel.split("/"))
     ):
+        return False
+    lowered = tuple(part.casefold() for part in rel.split("/") if part)
+    if any(part in _PROTECTED_COMPONENTS for part in lowered):
+        return False
+    if lowered and lowered[-1] in _PROTECTED_FILENAMES:
         return False
     if _first_matching_pattern(rel, (*_PROTECTED_PATHS, *authority.forbidden_paths)):
         return False

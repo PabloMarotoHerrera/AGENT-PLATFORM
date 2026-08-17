@@ -43,6 +43,8 @@ _PROTECTED_PATHS = (
     "4_external/sources/**",
     "2_products/pepper-agent/AGENT_PLATFORM_UPSTREAM_BASELINE.json",
 )
+_PROTECTED_COMPONENTS = frozenset({"node_modules"})
+_PROTECTED_FILENAMES = frozenset({"package-lock.json"})
 
 
 @dataclass(frozen=True)
@@ -282,6 +284,14 @@ def evaluate_write_target(
             raw,
             "mutation target is not a repository-relative file path",
         )
+    protected_component = _first_protected_component(relative_text)
+    if protected_component is not None:
+        return WorkPacketWriteDenial(
+            WORKPACKET_FORBIDDEN_PATH,
+            raw,
+            "mutation target is forbidden by governed dependency substrate policy",
+            matched_pattern=protected_component,
+        )
     forbidden = _first_matching_pattern(relative_text, (*_PROTECTED_PATHS, *authority.forbidden_paths))
     if forbidden is not None:
         return WorkPacketWriteDenial(
@@ -352,6 +362,15 @@ def _repository_scope_from_generation(generation: dict[str, Any]) -> dict[str, A
 def _has_parent_traversal(path: str) -> bool:
     normalized = path.replace("\\", "/")
     return any(part == ".." for part in normalized.split("/"))
+
+
+def _first_protected_component(path: str) -> str | None:
+    parts = tuple(part.casefold() for part in path.replace("\\", "/").split("/") if part)
+    if any(part in _PROTECTED_COMPONENTS for part in parts):
+        return "node_modules/**"
+    if parts and parts[-1] in _PROTECTED_FILENAMES:
+        return parts[-1]
+    return None
 
 
 def _first_matching_pattern(path: str, patterns: tuple[str, ...]) -> str | None:

@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import time
 import unicodedata
 from pathlib import Path
@@ -58,6 +59,22 @@ PEPPER_WORKER_START_ACTION_POLICY_ID = "pepper-worker-start-action-v1"
 PEPPER_WORKER_START_AUTHORIZATION_DIGEST_ALGORITHM = (
     "agent-platform-pepper-worker-start-authorization-sha256-v1"
 )
+PEPPER_SCRATCH_SOURCE_MATERIALIZATION_POLICY_ID = (
+    "pepper-governed-workpacket-scratch-source-materialization-v1"
+)
+PEPPER_SCRATCH_SOURCE_MATERIALIZATION_MANIFEST = (
+    ".hermes-agent-platform/workpacket-source-materialization.json"
+)
+PEPPER_SCRATCH_DEPENDENCY_SUBSTRATE_POLICY_ID = (
+    "pepper-governed-workpacket-scratch-dependency-substrate-v1"
+)
+IMPLEMENTATION_SCRATCH_VALIDATION_DEPENDENCY_GAP = (
+    "IMPLEMENTATION_SCRATCH_VALIDATION_DEPENDENCY_GAP"
+)
+DEPENDENCY_SOURCE_NOT_FOUND = "DEPENDENCY_SOURCE_NOT_FOUND"
+DEPENDENCY_MATERIALIZATION_FAILED = "DEPENDENCY_MATERIALIZATION_FAILED"
+DEPENDENCY_PROVENANCE_MISMATCH = "DEPENDENCY_PROVENANCE_MISMATCH"
+VALIDATION_RUNTIME_UNAVAILABLE = "VALIDATION_RUNTIME_UNAVAILABLE"
 PEPPER_RECOVERY_ACTION_SOURCE_SYSTEM = "pepper-recovery-action"
 PEPPER_RECOVERY_ACTION_SCHEMA_VERSION = 1
 PEPPER_RECOVERY_ACTION_POLICY_ID = "pepper-p18-9-0-recovery-action-v1"
@@ -3990,6 +4007,868 @@ def _preflight_pepper_governed_worker_credentials(
         }
 
 
+_SCRATCH_SOURCE_SKIP_DIR_NAMES = frozenset({
+    ".git",
+    ".opencode",
+    ".agents",
+    ".cache",
+    ".mypy_cache",
+    ".next",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".tox",
+    ".turbo",
+    "__pycache__",
+    "build",
+    "coverage",
+    "dist",
+    "graphify-out",
+    "node_modules",
+    "out",
+    "target",
+    "venv",
+    ".venv",
+})
+_SCRATCH_SOURCE_SKIP_FILE_SUFFIXES = frozenset({".pyc", ".pyo"})
+_SCRATCH_SOURCE_COMMON_PACKAGE_FILES = (
+    "package.json",
+    "tsconfig.json",
+    "tsconfig.app.json",
+    "tsconfig.node.json",
+    "vite.config.ts",
+    "vitest.config.ts",
+    "eslint.config.js",
+    "index.html",
+)
+_SCRATCH_SOURCE_PACKAGE_CLOSURES = (
+    {
+        "package_rel": "2_products/pepper-agent/web",
+        "source_dirs": ("src", "public"),
+        "support_files": _SCRATCH_SOURCE_COMMON_PACKAGE_FILES,
+    },
+    {
+        "package_rel": "2_products/pepper-agent/apps/desktop",
+        "source_dirs": ("src", "electron", "public"),
+        "support_files": _SCRATCH_SOURCE_COMMON_PACKAGE_FILES,
+    },
+    {
+        "package_rel": "2_products/pepper-agent/ui-tui",
+        "source_dirs": ("src",),
+        "support_files": _SCRATCH_SOURCE_COMMON_PACKAGE_FILES,
+    },
+)
+_SCRATCH_DEPENDENCY_EXCLUDED_DIR_NAMES = frozenset({
+    ".cache",
+    ".vite",
+    ".turbo",
+    "__pycache__",
+})
+_SCRATCH_DEPENDENCY_PROTECTED_DIR_NAMES = frozenset({
+    ".agents",
+    ".git",
+    ".opencode",
+    "4_external",
+    "graphify-out",
+})
+_FRONTEND_DEPENDENCY_SENTINEL_ENTRIES = (
+    "vitest/vitest.mjs",
+    "vite/package.json",
+    "react/package.json",
+    "react-dom/package.json",
+    "@vitejs/plugin-react/package.json",
+)
+
+
+class ProductRuntimeDependencyGap(ProductRuntimeConflict):
+    def __init__(self, dependency_code: str, detail: str) -> None:
+        self.dependency_code = dependency_code
+        self.external_code = IMPLEMENTATION_SCRATCH_VALIDATION_DEPENDENCY_GAP
+        super().__init__(detail)
+
+
+def _agent_platform_repository_root() -> Path:
+    return Path(__file__).resolve().parents[4]
+
+
+def _materialize_pepper_governed_scratch_source(
+    projection: dict[str, Any],
+    workspace: Path | str,
+    *,
+    env_overlay: dict[str, str] | None = None,
+    source_root: Path | str | None = None,
+) -> dict[str, Any]:
+    """Materialize a governed scratch source tree before worker spawn."""
+
+    if projection.get("workspace_kind") != "scratch":
+        raise ProductRuntimeConflict("governed source materialization requires scratch workspace")
+    workspace_path = Path(workspace).expanduser()
+    if not workspace_path.is_absolute():
+        raise ProductRuntimeConflict("governed scratch workspace path is not absolute")
+    workspace_path.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ)
+    overlay = env_overlay or _pepper_governed_worker_env_overlay(projection)
+    env.update({str(key): str(value) for key, value in overlay.items()})
+    env["HERMES_KANBAN_WORKSPACE"] = str(workspace_path)
+    env["TERMINAL_CWD"] = str(workspace_path)
+    from tools import governed_workpacket_file_guard as file_guard
+
+    authority = file_guard.resolve_governed_workpacket_file_authority(env)
+    materialization = _materialize_workpacket_scratch_source_tree(
+        authority,
+        source_root=source_root,
+    )
+    from tools import workpacket_validation_tool as validation_tool
+
+    try:
+        (
+            _validation_authority,
+            work_packet,
+        ) = validation_tool.resolve_governed_workpacket_validation_authority(env)
+    except Exception as exc:
+        raise ProductRuntimeDependencyGap(
+            VALIDATION_RUNTIME_UNAVAILABLE,
+            "governed validation authority is unavailable for dependency substrate readiness",
+        ) from exc
+    dependency_materialization = _materialize_workpacket_dependency_substrate(
+        authority,
+        work_packet,
+        source_root=source_root,
+    )
+    materialization.update(dependency_materialization)
+    _write_materialization_manifest(
+        Path(materialization["manifest_path"]),
+        materialization,
+        workspace_root=authority.resolved_workspace_root,
+    )
+    return materialization
+
+
+def _projection_requires_scratch_source_materialization(projection: dict[str, Any]) -> bool:
+    fields: list[Any] = [
+        projection.get("execution_profile_role"),
+        projection.get("selected_role"),
+        projection.get("assignee_profile"),
+        projection.get("selected_profile"),
+    ]
+    requirements = projection.get("ticket_execution_requirements")
+    if isinstance(requirements, dict):
+        fields.append(requirements.get("role"))
+        fields.extend(requirements.get("semantic_capabilities") or ())
+    return any("implementation" in str(value or "").casefold() for value in fields)
+
+
+def _materialize_workpacket_dependency_substrate(
+    authority: Any,
+    work_packet: Any,
+    *,
+    source_root: Path | str | None = None,
+) -> dict[str, Any]:
+    """Copy preinstalled validation dependencies into scratch when required."""
+
+    from tools import workpacket_validation_tool as validation_tool
+
+    source = (
+        Path(source_root).expanduser()
+        if source_root is not None
+        else _agent_platform_repository_root()
+    )
+    try:
+        resolved_source = source.resolve(strict=True)
+    except OSError as exc:
+        raise ProductRuntimeDependencyGap(
+            DEPENDENCY_SOURCE_NOT_FOUND,
+            "canonical source root is unavailable for dependency substrate discovery",
+        ) from exc
+    workspace = Path(authority.resolved_workspace_root).resolve(strict=True)
+    specs = validation_tool.build_governed_validation_command_specs(authority, work_packet)
+    frontend_specs = tuple(spec for spec in specs if str(spec.source).startswith("package:"))
+    if not frontend_specs:
+        return _empty_dependency_materialization_record(authority)
+
+    substrates: list[dict[str, Any]] = []
+    copied_destinations: set[str] = set()
+    for spec in frontend_specs:
+        package_dir = Path(spec.working_directory)
+        try:
+            package_rel = package_dir.relative_to(workspace).as_posix()
+        except ValueError as exc:
+            raise ProductRuntimeDependencyGap(
+                VALIDATION_RUNTIME_UNAVAILABLE,
+                "validation package cwd is outside scratch workspace",
+            ) from exc
+        candidates = _dependency_root_candidates(
+            package_rel,
+            source_root=resolved_source,
+            workspace_root=workspace,
+        )
+        if not any(
+            (source_root_path / "vitest/vitest.mjs").is_file()
+            for source_root_path, _dest in candidates
+        ):
+            raise ProductRuntimeDependencyGap(
+                DEPENDENCY_SOURCE_NOT_FOUND,
+                "vitest dependency source root is unavailable for scratch validation",
+            )
+        for source_root_path, destination_root in candidates:
+            if not source_root_path.is_dir():
+                continue
+            if not any(
+                (source_root_path / entry).exists()
+                for entry in _FRONTEND_DEPENDENCY_SENTINEL_ENTRIES
+            ):
+                continue
+            destination_key = destination_root.resolve(strict=False).as_posix().casefold()
+            if destination_key in copied_destinations:
+                continue
+            copied_destinations.add(destination_key)
+            substrates.append(
+                _copy_dependency_substrate_root(
+                    source_root_path,
+                    destination_root,
+                    source_root=resolved_source,
+                    workspace_root=workspace,
+                    package_rel=package_rel,
+                    authority=authority,
+                )
+            )
+        resolved_vitest = validation_tool._resolve_node_module_entry(  # noqa: SLF001
+            workspace,
+            workspace / package_rel,
+            "vitest/vitest.mjs",
+        )
+        if resolved_vitest is None:
+            raise ProductRuntimeDependencyGap(
+                DEPENDENCY_PROVENANCE_MISMATCH,
+                "scratch dependency substrate does not expose vitest at the authorized package cwd",
+            )
+
+    total_files = sum(int(item["copied_file_count"]) for item in substrates)
+    total_dirs = sum(int(item["copied_directory_count"]) for item in substrates)
+    total_bytes = sum(int(item["copied_bytes"]) for item in substrates)
+    return {
+        "dependency_substrate_materialized": bool(substrates),
+        "dependency_substrate_policy_id": PEPPER_SCRATCH_DEPENDENCY_SUBSTRATE_POLICY_ID,
+        "dependency_substrate_kind": "physical_node_modules_snapshot",
+        "dependency_substrates": substrates,
+        "dependency_substrate_copied_file_count": total_files,
+        "dependency_substrate_copied_directory_count": total_dirs,
+        "dependency_substrate_copied_bytes": total_bytes,
+        "dependency_substrate_excluded_directories": sorted(
+            _SCRATCH_DEPENDENCY_EXCLUDED_DIR_NAMES
+        ),
+        "product_diff_excluded_roots": sorted(
+            item["scratch_dependency_root_relative"] for item in substrates
+        ),
+        "dependency_install_performed": False,
+    }
+
+
+def _empty_dependency_materialization_record(authority: Any) -> dict[str, Any]:
+    _ = authority
+    return {
+        "dependency_substrate_materialized": False,
+        "dependency_substrate_policy_id": PEPPER_SCRATCH_DEPENDENCY_SUBSTRATE_POLICY_ID,
+        "dependency_substrate_kind": "not_required",
+        "dependency_substrates": [],
+        "dependency_substrate_copied_file_count": 0,
+        "dependency_substrate_copied_directory_count": 0,
+        "dependency_substrate_copied_bytes": 0,
+        "dependency_substrate_excluded_directories": sorted(
+            _SCRATCH_DEPENDENCY_EXCLUDED_DIR_NAMES
+        ),
+        "product_diff_excluded_roots": [],
+        "dependency_install_performed": False,
+    }
+
+
+def _dependency_root_candidates(
+    package_rel: str,
+    *,
+    source_root: Path,
+    workspace_root: Path,
+) -> tuple[tuple[Path, Path], ...]:
+    rels = []
+    for rel in (
+        f"{package_rel}/node_modules",
+        "2_products/pepper-agent/node_modules",
+        "node_modules",
+    ):
+        normalized = _normalize_dependency_root_relative_path(rel)
+        if normalized not in rels:
+            rels.append(normalized)
+    return tuple((source_root / rel, workspace_root / rel) for rel in rels)
+
+
+def _normalize_dependency_root_relative_path(value: str) -> str:
+    text = str(value or "").strip().replace("\\", "/")
+    if not text or text.startswith("/") or re.match(r"^[A-Za-z]:", text):
+        raise ProductRuntimeConflict("dependency substrate path must be repository-relative")
+    if any(ord(character) < 32 or ord(character) == 127 for character in text):
+        raise ProductRuntimeConflict("dependency substrate path contains control characters")
+    parts = text.split("/")
+    lowered = tuple(part.casefold() for part in parts)
+    if any(part in {"", ".", ".."} for part in parts):
+        raise ProductRuntimeConflict("dependency substrate path contains traversal")
+    if lowered[-1] != "node_modules":
+        raise ProductRuntimeConflict("dependency substrate path must target node_modules")
+    if any(part in _SCRATCH_DEPENDENCY_PROTECTED_DIR_NAMES for part in lowered[:-1]):
+        raise ProductRuntimeConflict("dependency substrate path targets a protected root")
+    return text
+
+
+def _copy_dependency_substrate_root(
+    source_dependency_root: Path,
+    scratch_dependency_root: Path,
+    *,
+    source_root: Path,
+    workspace_root: Path,
+    package_rel: str,
+    authority: Any,
+) -> dict[str, Any]:
+    from hermes_cli.agent_platform.runtime_adapter.path_containment import is_reparse_or_symlink
+
+    started = time.perf_counter()
+    if is_reparse_or_symlink(source_dependency_root):
+        raise ProductRuntimeDependencyGap(
+            DEPENDENCY_SOURCE_NOT_FOUND,
+            "dependency source root is a symlink or reparse point",
+        )
+    try:
+        source_dependency_root.resolve(strict=True).relative_to(source_root)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise ProductRuntimeDependencyGap(
+            DEPENDENCY_SOURCE_NOT_FOUND,
+            "dependency source root escapes canonical source root",
+        ) from exc
+    if not source_dependency_root.is_dir():
+        raise ProductRuntimeDependencyGap(
+            DEPENDENCY_SOURCE_NOT_FOUND,
+            "dependency source root is not a directory",
+        )
+    _remove_materialized_destination(scratch_dependency_root, workspace_root=workspace_root)
+    _ensure_materialized_directory(scratch_dependency_root, workspace_root=workspace_root)
+
+    copied_files = 0
+    copied_dirs = 1
+    copied_bytes = 0
+    excluded_dirs: set[str] = set()
+    excluded_reparse_dirs: list[dict[str, str]] = []
+    try:
+        for root, dirnames, filenames in os.walk(source_dependency_root):
+            root_path = Path(root)
+            rel_root = root_path.relative_to(source_dependency_root).as_posix()
+            kept_dirnames: list[str] = []
+            for dirname in dirnames:
+                child = root_path / dirname
+                child_rel = child.relative_to(source_dependency_root).as_posix()
+                if dirname in _SCRATCH_DEPENDENCY_EXCLUDED_DIR_NAMES:
+                    excluded_dirs.add(child_rel)
+                    continue
+                if is_reparse_or_symlink(child):
+                    try:
+                        target = child.resolve(strict=True)
+                        target.relative_to(source_root)
+                    except (OSError, RuntimeError, ValueError) as exc:
+                        raise ProductRuntimeDependencyGap(
+                            DEPENDENCY_MATERIALIZATION_FAILED,
+                            "dependency source contains an unsafe reparse point",
+                        ) from exc
+                    try:
+                        target.relative_to(source_dependency_root)
+                    except ValueError:
+                        excluded_dirs.add(child_rel)
+                        excluded_reparse_dirs.append({
+                            "relative_path": child_rel,
+                            "resolved_target": str(target),
+                            "reason": "workspace_package_reparse_point_excluded",
+                        })
+                        continue
+                    raise ProductRuntimeDependencyGap(
+                        DEPENDENCY_MATERIALIZATION_FAILED,
+                        "dependency source contains a reparse point inside node_modules",
+                    )
+                kept_dirnames.append(dirname)
+            dirnames[:] = kept_dirnames
+            dest_root = (
+                scratch_dependency_root
+                if rel_root == "."
+                else scratch_dependency_root / rel_root
+            )
+            _ensure_materialized_directory(dest_root, workspace_root=workspace_root)
+            copied_dirs += len(kept_dirnames)
+            for filename in filenames:
+                source_file = root_path / filename
+                if is_reparse_or_symlink(source_file):
+                    raise ProductRuntimeDependencyGap(
+                        DEPENDENCY_MATERIALIZATION_FAILED,
+                        "dependency source contains a symlinked file",
+                    )
+                dest_file = dest_root / filename
+                _assert_materialized_destination(dest_file, workspace_root=workspace_root)
+                size = source_file.stat().st_size
+                shutil.copy2(source_file, dest_file)
+                copied_files += 1
+                copied_bytes += size
+    except ProductRuntimeDependencyGap:
+        raise
+    except Exception as exc:
+        raise ProductRuntimeDependencyGap(
+            DEPENDENCY_MATERIALIZATION_FAILED,
+            "dependency substrate physical copy failed",
+        ) from exc
+
+    elapsed_ms = int((time.perf_counter() - started) * 1000)
+    source_rel = source_dependency_root.relative_to(source_root).as_posix()
+    scratch_rel = scratch_dependency_root.relative_to(workspace_root).as_posix()
+    package_json = source_root / package_rel / "package.json"
+    canonical_lock = source_root / "2_products/pepper-agent/package-lock.json"
+    return {
+        "schema_version": 1,
+        "policy_id": PEPPER_SCRATCH_DEPENDENCY_SUBSTRATE_POLICY_ID,
+        "dependency_substrate_kind": "physical_node_modules_snapshot",
+        "created_at": _utc_now_iso(),
+        "ticket_id": authority.ticket_id,
+        "work_packet_id": authority.work_packet_id,
+        "work_packet_SHA256": authority.work_packet_SHA256,
+        "projection_SHA256": authority.projection_SHA256,
+        "package_relative_path": package_rel,
+        "canonical_dependency_root": str(source_dependency_root),
+        "canonical_dependency_root_relative": source_rel,
+        "scratch_dependency_root": str(scratch_dependency_root),
+        "scratch_dependency_root_relative": scratch_rel,
+        "source_package_json_SHA256": _sha256_file_or_none(package_json),
+        "canonical_package_lock_SHA256": _sha256_file_or_none(canonical_lock),
+        "dependency_sentinel_SHA256": _dependency_sentinel_hashes(source_dependency_root),
+        "scratch_dependency_sentinel_SHA256": _dependency_sentinel_hashes(scratch_dependency_root),
+        "copied_file_count": copied_files,
+        "copied_directory_count": copied_dirs,
+        "copied_bytes": copied_bytes,
+        "elapsed_ms": elapsed_ms,
+        "excluded_directories": sorted(excluded_dirs),
+        "excluded_reparse_directories": sorted(
+            excluded_reparse_dirs,
+            key=lambda item: item["relative_path"],
+        ),
+        "dependency_install_performed": False,
+        "canonical_package_lock_materialized": False,
+    }
+
+
+def _sha256_file_or_none(path: Path) -> str | None:
+    try:
+        if not path.is_file():
+            return None
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError:
+        return None
+
+
+def _dependency_sentinel_hashes(dependency_root: Path) -> dict[str, str | None]:
+    return {
+        entry: _sha256_file_or_none(dependency_root / entry)
+        for entry in _FRONTEND_DEPENDENCY_SENTINEL_ENTRIES
+    }
+
+
+def _materialize_workpacket_scratch_source_tree(
+    authority: Any,
+    *,
+    source_root: Path | str | None = None,
+) -> dict[str, Any]:
+    """Copy bounded readable source into scratch while preserving write scope."""
+
+    source = Path(source_root).expanduser() if source_root is not None else _agent_platform_repository_root()
+    try:
+        resolved_source = source.resolve(strict=True)
+    except OSError as exc:
+        raise ProductRuntimeConflict("canonical source root is unavailable") from exc
+    if not resolved_source.is_dir():
+        raise ProductRuntimeConflict("canonical source root is not a directory")
+    workspace = Path(authority.resolved_workspace_root).resolve(strict=True)
+    if not workspace.is_dir():
+        raise ProductRuntimeConflict("scratch workspace root is not a directory")
+    try:
+        workspace.relative_to(resolved_source)
+    except ValueError:
+        pass
+    else:
+        raise ProductRuntimeConflict("scratch workspace must not be inside canonical source root")
+
+    copied_files: set[str] = set()
+    materialized_roots: set[str] = set()
+    readable_roots: set[str] = set()
+    cleaned_roots: set[str] = set()
+    package_closures: set[str] = set()
+    missing_paths: set[str] = set()
+
+    for package in _selected_scratch_source_package_closures(authority.allowed_paths):
+        package_rel = str(package["package_rel"])
+        package_source = resolved_source / package_rel
+        if not package_source.is_dir():
+            missing_paths.add(package_rel)
+            continue
+        package_closures.add(package_rel)
+        for dirname in tuple(package["source_dirs"]):
+            rel = _normalize_materialization_relative_path(f"{package_rel}/{dirname}")
+            src = resolved_source / rel
+            if not src.is_dir():
+                continue
+            _copy_materialized_directory(
+                src,
+                workspace / rel,
+                source_root=resolved_source,
+                workspace_root=workspace,
+                copied_files=copied_files,
+                clean=True,
+            )
+            materialized_roots.add(rel)
+            readable_roots.add(rel)
+            cleaned_roots.add(rel)
+        for filename in tuple(package["support_files"]):
+            rel = _normalize_materialization_relative_path(f"{package_rel}/{filename}")
+            src = resolved_source / rel
+            if not src.is_file():
+                continue
+            _copy_materialized_file(
+                src,
+                workspace / rel,
+                source_root=resolved_source,
+                workspace_root=workspace,
+                copied_files=copied_files,
+            )
+            materialized_roots.add(rel)
+            readable_roots.add(package_rel)
+
+    for pattern in authority.allowed_paths:
+        _materialize_allowed_source_pattern(
+            str(pattern),
+            source_root=resolved_source,
+            workspace_root=workspace,
+            copied_files=copied_files,
+            materialized_roots=materialized_roots,
+            readable_roots=readable_roots,
+            cleaned_roots=cleaned_roots,
+            missing_paths=missing_paths,
+        )
+
+    manifest_path = workspace / PEPPER_SCRATCH_SOURCE_MATERIALIZATION_MANIFEST
+    record = {
+        "policy_id": PEPPER_SCRATCH_SOURCE_MATERIALIZATION_POLICY_ID,
+        "created_at": _utc_now_iso(),
+        "ticket_id": authority.ticket_id,
+        "work_packet_id": authority.work_packet_id,
+        "work_packet_SHA256": authority.work_packet_SHA256,
+        "ticket_spec_SHA256": authority.ticket_spec_SHA256,
+        "projection_SHA256": authority.projection_SHA256,
+        "source_materialized": True,
+        "source_root": str(resolved_source),
+        "workspace_root": str(workspace),
+        "manifest_path": str(manifest_path),
+        "readable_source_roots": sorted(readable_roots),
+        "writable_allowed_paths": list(authority.allowed_paths),
+        "forbidden_paths": list(authority.forbidden_paths),
+        "package_source_closures": sorted(package_closures),
+        "materialized_roots": sorted(materialized_roots),
+        "missing_source_paths": sorted(missing_paths),
+        "copied_file_count": len(copied_files),
+        "dependency_install_performed": False,
+        "canonical_package_lock_materialized": False,
+        "Git_commands_executed": 0,
+        "Docker_commands_executed": 0,
+        "Graphify_commands_executed": 0,
+    }
+    _write_materialization_manifest(manifest_path, record, workspace_root=workspace)
+    return record
+
+
+def _selected_scratch_source_package_closures(
+    allowed_paths: tuple[str, ...],
+) -> tuple[dict[str, Any], ...]:
+    selected: list[dict[str, Any]] = []
+    for package in _SCRATCH_SOURCE_PACKAGE_CLOSURES:
+        package_rel = str(package["package_rel"])
+        prefix = f"{package_rel}/"
+        if any(str(path).strip() == package_rel or str(path).strip().startswith(prefix) for path in allowed_paths):
+            selected.append(package)
+    return tuple(selected)
+
+
+def _materialize_allowed_source_pattern(
+    pattern: str,
+    *,
+    source_root: Path,
+    workspace_root: Path,
+    copied_files: set[str],
+    materialized_roots: set[str],
+    readable_roots: set[str],
+    cleaned_roots: set[str],
+    missing_paths: set[str],
+) -> None:
+    rel_pattern = _normalize_materialization_relative_path(pattern)
+    if rel_pattern.endswith("/**"):
+        rel_dir = rel_pattern[:-3]
+        src = source_root / rel_dir
+        dest = workspace_root / rel_dir
+        clean = not _relative_path_under_any_root(rel_dir, cleaned_roots)
+        if src.is_dir():
+            _copy_materialized_directory(
+                src,
+                dest,
+                source_root=source_root,
+                workspace_root=workspace_root,
+                copied_files=copied_files,
+                clean=clean,
+            )
+            materialized_roots.add(rel_dir)
+            readable_roots.add(rel_dir)
+            if clean:
+                cleaned_roots.add(rel_dir)
+        else:
+            if clean:
+                _remove_materialized_destination(dest, workspace_root=workspace_root)
+            _ensure_materialized_directory(dest, workspace_root=workspace_root)
+            materialized_roots.add(rel_dir)
+            missing_paths.add(rel_dir)
+        return
+
+    if _contains_glob_pattern(rel_pattern):
+        matches = sorted(source_root.glob(rel_pattern))
+        if not matches:
+            missing_paths.add(rel_pattern)
+            return
+        for src in matches:
+            rel = src.relative_to(source_root).as_posix()
+            if _should_skip_materialized_relative_path(rel, is_dir=src.is_dir()):
+                continue
+            dest = workspace_root / rel
+            if src.is_dir():
+                _copy_materialized_directory(
+                    src,
+                    dest,
+                    source_root=source_root,
+                    workspace_root=workspace_root,
+                    copied_files=copied_files,
+                    clean=not _relative_path_under_any_root(rel, cleaned_roots),
+                )
+                materialized_roots.add(rel)
+                readable_roots.add(rel)
+            elif src.is_file():
+                _copy_materialized_file(
+                    src,
+                    dest,
+                    source_root=source_root,
+                    workspace_root=workspace_root,
+                    copied_files=copied_files,
+                )
+                materialized_roots.add(rel)
+                readable_roots.add(str(Path(rel).parent).replace("\\", "/"))
+        return
+
+    src = source_root / rel_pattern
+    dest = workspace_root / rel_pattern
+    if src.is_dir():
+        clean = not _relative_path_under_any_root(rel_pattern, cleaned_roots)
+        _copy_materialized_directory(
+            src,
+            dest,
+            source_root=source_root,
+            workspace_root=workspace_root,
+            copied_files=copied_files,
+            clean=clean,
+        )
+        materialized_roots.add(rel_pattern)
+        readable_roots.add(rel_pattern)
+        if clean:
+            cleaned_roots.add(rel_pattern)
+    elif src.is_file():
+        _copy_materialized_file(
+            src,
+            dest,
+            source_root=source_root,
+            workspace_root=workspace_root,
+            copied_files=copied_files,
+        )
+        materialized_roots.add(rel_pattern)
+        readable_roots.add(str(Path(rel_pattern).parent).replace("\\", "/"))
+    else:
+        _remove_materialized_destination(dest, workspace_root=workspace_root)
+        _ensure_materialized_directory(dest.parent, workspace_root=workspace_root)
+        missing_paths.add(rel_pattern)
+
+
+def _normalize_materialization_relative_path(value: str) -> str:
+    text = str(value or "").strip().replace("\\", "/")
+    if not text or text.startswith("/") or re.match(r"^[A-Za-z]:", text):
+        raise ProductRuntimeConflict("source materialization path must be repository-relative")
+    if any(ord(character) < 32 or ord(character) == 127 for character in text):
+        raise ProductRuntimeConflict("source materialization path contains control characters")
+    parts = text.split("/")
+    if any(part in {"", ".", ".."} for part in parts):
+        raise ProductRuntimeConflict("source materialization path contains traversal")
+    if _should_skip_materialized_relative_path(text, is_dir=text.endswith("/**")):
+        raise ProductRuntimeConflict("source materialization path targets a protected root")
+    return text
+
+
+def _contains_glob_pattern(value: str) -> bool:
+    return any(marker in value for marker in ("*", "?", "["))
+
+
+def _relative_path_under_any_root(relative_path: str, roots: set[str]) -> bool:
+    rel = relative_path.strip("/")
+    return any(rel == root or rel.startswith(f"{root.rstrip('/')}/") for root in roots)
+
+
+def _should_skip_materialized_relative_path(relative_path: str, *, is_dir: bool) -> bool:
+    rel = relative_path.replace("\\", "/").strip("/")
+    parts = tuple(part.casefold() for part in rel.split("/") if part)
+    if any(part in _SCRATCH_SOURCE_SKIP_DIR_NAMES for part in parts):
+        return True
+    if parts and parts[-1] == "package-lock.json":
+        return True
+    if rel == "AGENTS.md" or rel.startswith("4_external/sources/"):
+        return True
+    if rel == "2_products/pepper-agent/AGENT_PLATFORM_UPSTREAM_BASELINE.json":
+        return True
+    return (not is_dir) and Path(rel).suffix in _SCRATCH_SOURCE_SKIP_FILE_SUFFIXES
+
+
+def _copy_materialized_directory(
+    source_dir: Path,
+    destination_dir: Path,
+    *,
+    source_root: Path,
+    workspace_root: Path,
+    copied_files: set[str],
+    clean: bool,
+) -> None:
+    _assert_materialized_source(source_dir, source_root=source_root, expect_dir=True)
+    if clean:
+        _remove_materialized_destination(destination_dir, workspace_root=workspace_root)
+    _ensure_materialized_directory(destination_dir, workspace_root=workspace_root)
+    for root, dirnames, filenames in os.walk(source_dir):
+        root_path = Path(root)
+        rel_root = root_path.relative_to(source_root).as_posix()
+        kept_dirnames: list[str] = []
+        for dirname in dirnames:
+            child = root_path / dirname
+            child_rel = child.relative_to(source_root).as_posix()
+            if _should_skip_materialized_relative_path(child_rel, is_dir=True):
+                continue
+            if child.is_symlink():
+                raise ProductRuntimeConflict("source materialization refuses symlinked directories")
+            kept_dirnames.append(dirname)
+        dirnames[:] = kept_dirnames
+        _ensure_materialized_directory(
+            workspace_root / rel_root,
+            workspace_root=workspace_root,
+        )
+        for filename in filenames:
+            child = root_path / filename
+            child_rel = child.relative_to(source_root).as_posix()
+            if _should_skip_materialized_relative_path(child_rel, is_dir=False):
+                continue
+            _copy_materialized_file(
+                child,
+                workspace_root / child_rel,
+                source_root=source_root,
+                workspace_root=workspace_root,
+                copied_files=copied_files,
+            )
+
+
+def _copy_materialized_file(
+    source_file: Path,
+    destination_file: Path,
+    *,
+    source_root: Path,
+    workspace_root: Path,
+    copied_files: set[str],
+) -> None:
+    _assert_materialized_source(source_file, source_root=source_root, expect_dir=False)
+    _ensure_materialized_directory(destination_file.parent, workspace_root=workspace_root)
+    _assert_materialized_destination(destination_file, workspace_root=workspace_root)
+    if destination_file.is_symlink():
+        raise ProductRuntimeConflict("source materialization refuses symlinked scratch paths")
+    if destination_file.exists() and destination_file.is_dir():
+        _remove_materialized_destination(destination_file, workspace_root=workspace_root)
+    shutil.copy2(source_file, destination_file)
+    copied_files.add(destination_file.relative_to(workspace_root).as_posix())
+
+
+def _assert_materialized_source(
+    path: Path,
+    *,
+    source_root: Path,
+    expect_dir: bool,
+) -> None:
+    if path.is_symlink():
+        raise ProductRuntimeConflict("source materialization refuses symlinked source paths")
+    try:
+        resolved = path.resolve(strict=True)
+        resolved.relative_to(source_root)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise ProductRuntimeConflict("source materialization path escapes canonical source root") from exc
+    if expect_dir and not resolved.is_dir():
+        raise ProductRuntimeConflict("source materialization expected a directory")
+    if not expect_dir and not resolved.is_file():
+        raise ProductRuntimeConflict("source materialization expected a file")
+
+
+def _assert_materialized_destination(path: Path, *, workspace_root: Path) -> None:
+    if path == workspace_root:
+        raise ProductRuntimeConflict("source materialization refuses workspace root mutation")
+    try:
+        path.resolve(strict=False).relative_to(workspace_root)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise ProductRuntimeConflict("source materialization destination escapes scratch workspace") from exc
+
+
+def _ensure_materialized_directory(path: Path, *, workspace_root: Path) -> None:
+    if path == workspace_root:
+        if not path.is_dir():
+            raise ProductRuntimeConflict("scratch workspace root is not a directory")
+        return
+    _assert_materialized_destination(path, workspace_root=workspace_root)
+    if path.exists() and not path.is_dir():
+        _remove_materialized_destination(path, workspace_root=workspace_root)
+    path.mkdir(parents=True, exist_ok=True)
+
+
+def _remove_materialized_destination(path: Path, *, workspace_root: Path) -> None:
+    _assert_materialized_destination(path, workspace_root=workspace_root)
+    if not path.exists() and not path.is_symlink():
+        return
+    try:
+        path.resolve(strict=True).relative_to(workspace_root)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise ProductRuntimeConflict("source materialization destination escapes scratch workspace") from exc
+    if path.is_symlink():
+        raise ProductRuntimeConflict("source materialization refuses symlinked scratch paths")
+    if path.is_dir():
+        shutil.rmtree(path)
+    else:
+        path.unlink()
+
+
+def _write_materialization_manifest(
+    manifest_path: Path,
+    record: dict[str, Any],
+    *,
+    workspace_root: Path,
+) -> None:
+    _ensure_materialized_directory(manifest_path.parent, workspace_root=workspace_root)
+    _assert_materialized_destination(manifest_path, workspace_root=workspace_root)
+    manifest_path.write_text(
+        json.dumps(record, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
 def _dispatch_exact_current_kanban_task(
     projection: dict[str, Any],
     *,
@@ -4048,6 +4927,47 @@ def _dispatch_exact_current_kanban_task(
                 dispatch_performed=True,
             )
         env_overlay = _pepper_governed_worker_env_overlay(projection)
+        source_materialization = None
+        if _projection_requires_scratch_source_materialization(projection):
+            try:
+                source_materialization = _materialize_pepper_governed_scratch_source(
+                    projection,
+                    workspace,
+                    env_overlay=env_overlay,
+                )
+            except ProductRuntimeDependencyGap as exc:
+                detail = f"{exc.dependency_code}: {_safe_text(str(exc), limit=240)}"
+                kanban_db._record_spawn_failure(
+                    conn,
+                    claimed.id,
+                    f"dependency substrate: {detail}",
+                    failure_limit=1,
+                )
+                task = kanban_db.get_task(conn, task_id)
+                runs = kanban_db.list_runs(conn, task_id) if task is not None else []
+                return _dispatch_blocked_result(
+                    exc.external_code,
+                    detail,
+                    task=task,
+                    runs=runs,
+                    dispatch_performed=True,
+                )
+            except Exception as exc:
+                kanban_db._record_spawn_failure(
+                    conn,
+                    claimed.id,
+                    f"source materialization: {_safe_text(exc, limit=300)}",
+                    failure_limit=1,
+                )
+                task = kanban_db.get_task(conn, task_id)
+                runs = kanban_db.list_runs(conn, task_id) if task is not None else []
+                return _dispatch_blocked_result(
+                    "WORKSPACE_SOURCE_MATERIALIZATION_FAILED",
+                    str(exc) or "scratch source materialization failed",
+                    task=task,
+                    runs=runs,
+                    dispatch_performed=True,
+                )
         spawn = spawn_fn if spawn_fn is not None else kanban_db._default_spawn
         try:
             import inspect
@@ -4100,6 +5020,8 @@ def _dispatch_exact_current_kanban_task(
             "kanban_run_id": task.current_run_id if task is not None else None,
             "workspace_path": task.workspace_path if task is not None else str(workspace),
             "workspace_created": True,
+            "source_materialized": source_materialization is not None,
+            "source_materialization": source_materialization,
             "runs": [_run_dict(run) for run in runs],
         }
     finally:

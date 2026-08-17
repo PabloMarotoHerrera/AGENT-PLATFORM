@@ -385,6 +385,32 @@ def test_governed_write_does_not_grant_git_file_authority(governed_workspace, mo
     mock_ops.write_file.assert_not_called()
 
 
+def test_governed_write_denies_dependency_substrate_and_lockfile_noise(
+    governed_workspace,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        guard,
+        "resolve_governed_workpacket_file_authority",
+        lambda _env=None: _authority(
+            governed_workspace,
+            allowed_paths=("2_products/pepper-agent/web/**",),
+        ),
+    )
+
+    node_modules_denial = guard.governed_write_denial(
+        "2_products/pepper-agent/web/node_modules/vitest/vitest.mjs"
+    )
+    lockfile_denial = guard.governed_write_denial(
+        "2_products/pepper-agent/web/package-lock.json"
+    )
+
+    assert guard.WORKPACKET_FORBIDDEN_PATH in node_modules_denial
+    assert "node_modules/**" in node_modules_denial
+    assert guard.WORKPACKET_FORBIDDEN_PATH in lockfile_denial
+    assert "package-lock.json" in lockfile_denial
+
+
 def test_authority_matching_is_ticket_generic(governed_workspace):
     ticket_a = _authority(governed_workspace, allowed_paths=("a/**",), ticket_id="PA.1")
     ticket_b = _authority(governed_workspace, allowed_paths=("b/**",), ticket_id="PB.1")

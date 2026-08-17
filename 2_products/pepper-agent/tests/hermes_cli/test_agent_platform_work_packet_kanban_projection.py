@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+import sys
 import time
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -213,6 +215,34 @@ def _ready_worker_credential_probe() -> dict:
         "legacy_refresh_fallback": False,
         "credential_refresh_calls_per_request_maximum": 0,
     }
+
+
+def _write_fixture_file(root: Path, relative_path: str, text: str) -> Path:
+    path = root / relative_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def _source_materialization_authority(
+    workspace: Path,
+    *,
+    allowed_paths: tuple[str, ...],
+    forbidden_paths: tuple[str, ...] = (),
+):
+    from tools import governed_workpacket_file_guard as file_guard
+
+    return file_guard.WorkPacketFileAuthority(
+        ticket_id="P18.9.1",
+        work_packet_id="WP-P18-9-1-R0001-123456789abc",
+        work_packet_SHA256="a" * 64,
+        ticket_spec_SHA256="b" * 64,
+        projection_SHA256="c" * 64,
+        allowed_paths=allowed_paths,
+        forbidden_paths=forbidden_paths,
+        workspace_root=workspace,
+        resolved_workspace_root=workspace.resolve(strict=True),
+    )
 
 
 def _persist_started_execution_record(pr, projected, run_id: int) -> None:
@@ -443,7 +473,32 @@ def _closed_p18_9_0_with_projected_p18_9_1(projection_home, monkeypatch):
     return pr, projected, _projection_authority_record(projected)
 
 
+def _patch_synthetic_scratch_materialization(monkeypatch, pr) -> None:
+    def materialize(_projection, workspace, *, env_overlay=None, source_root=None):
+        _ = env_overlay, source_root
+        workspace_path = Path(workspace)
+        manifest_path = workspace_path / pr.PEPPER_SCRATCH_SOURCE_MATERIALIZATION_MANIFEST
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "source_materialized": True,
+            "dependency_substrate_materialized": True,
+            "dependency_substrate_kind": "synthetic_test_fixture",
+            "dependency_install_performed": False,
+            "canonical_package_lock_materialized": False,
+            "manifest_path": str(manifest_path),
+            "product_diff_excluded_roots": ["2_products/pepper-agent/node_modules"],
+        }
+        manifest_path.write_text(
+            json.dumps(record, sort_keys=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return record
+
+    monkeypatch.setattr(pr, "_materialize_pepper_governed_scratch_source", materialize)
+
+
 def _start_p18_9_1_execution(pr, monkeypatch, *, pid: int = 5321) -> dict:
+    _patch_synthetic_scratch_materialization(monkeypatch, pr)
     monkeypatch.setattr(
         pr,
         "_executor_provider_readiness",
@@ -462,6 +517,7 @@ def _start_p18_9_1_execution(pr, monkeypatch, *, pid: int = 5321) -> dict:
         spawn_fn=lambda _task, _workspace, board=None: pid,
     )
     assert result["start_status"] == "started"
+    assert (Path(result["workspace_path"]) / pr.PEPPER_SCRATCH_SOURCE_MATERIALIZATION_MANIFEST).is_file()
     assert result["kanban_run_id"] is not None
     return result
 
@@ -623,6 +679,493 @@ def _project_via_runtime():
         ticket_id="P18.9.0",
         next_action_id="P18_9_0_APPROVED_NO_EXECUTION",
     )
+
+
+def test_scratch_source_materialization_copies_frontend_readable_closure(
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    source_root = tmp_path / "source"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/package.json",
+        json.dumps({"scripts": {"test": "vitest run"}}),
+    )
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/package-lock.json",
+        "must not be materialized\n",
+    )
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/vitest.config.ts",
+        "export default {};\n",
+    )
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/src/App.tsx",
+        "export const app = 'canonical';\n",
+    )
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/src/shared/readable.ts",
+        "export const shared = true;\n",
+    )
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/src/agent-platform/shell/navigation.ts",
+        "export const nav = 'canonical';\n",
+    )
+    _write_fixture_file(
+        workspace,
+        "2_products/pepper-agent/web/src/agent-platform/shell/stale.patch",
+        "stale worker artifact\n",
+    )
+    authority = _source_materialization_authority(
+        workspace,
+        allowed_paths=(
+            "2_products/pepper-agent/web/src/App.tsx",
+            "2_products/pepper-agent/web/src/agent-platform/shell/**",
+        ),
+    )
+
+    record = pr._materialize_workpacket_scratch_source_tree(
+        authority,
+        source_root=source_root,
+    )
+
+    scratch_app = workspace / "2_products/pepper-agent/web/src/App.tsx"
+    canonical_app = source_root / "2_products/pepper-agent/web/src/App.tsx"
+    assert scratch_app.read_text(encoding="utf-8") == "export const app = 'canonical';\n"
+    assert (workspace / "2_products/pepper-agent/web/src/shared/readable.ts").is_file()
+    assert (workspace / "2_products/pepper-agent/web/package.json").is_file()
+    assert not (workspace / "2_products/pepper-agent/web/package-lock.json").exists()
+    assert not (
+        workspace / "2_products/pepper-agent/web/src/agent-platform/shell/stale.patch"
+    ).exists()
+    assert record["source_materialized"] is True
+    assert record["canonical_package_lock_materialized"] is False
+    assert record["dependency_install_performed"] is False
+    assert "2_products/pepper-agent/web/src" in record["readable_source_roots"]
+    assert record["writable_allowed_paths"] == list(authority.allowed_paths)
+    assert Path(record["manifest_path"]).is_file()
+
+    scratch_app.write_text("export const app = 'scratch edit';\n", encoding="utf-8")
+
+    assert canonical_app.read_text(encoding="utf-8") == "export const app = 'canonical';\n"
+
+
+def test_scratch_source_materialization_copies_python_allowed_files(
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    source_root = tmp_path / "source"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/hermes_cli/agent_platform/example.py",
+        "VALUE = 'canonical'\n",
+    )
+    _write_fixture_file(
+        workspace,
+        "2_products/pepper-agent/hermes_cli/agent_platform/new_file.py",
+        "stale retry file\n",
+    )
+    authority = _source_materialization_authority(
+        workspace,
+        allowed_paths=(
+            "2_products/pepper-agent/hermes_cli/agent_platform/example.py",
+            "2_products/pepper-agent/hermes_cli/agent_platform/new_file.py",
+        ),
+    )
+
+    record = pr._materialize_workpacket_scratch_source_tree(
+        authority,
+        source_root=source_root,
+    )
+
+    copied = workspace / "2_products/pepper-agent/hermes_cli/agent_platform/example.py"
+    missing = workspace / "2_products/pepper-agent/hermes_cli/agent_platform/new_file.py"
+    assert copied.read_text(encoding="utf-8") == "VALUE = 'canonical'\n"
+    assert not missing.exists()
+    assert missing.parent.is_dir()
+    assert "2_products/pepper-agent/hermes_cli/agent_platform/new_file.py" in record[
+        "missing_source_paths"
+    ]
+
+
+def test_scratch_source_materialization_skips_dependency_and_lockfile_noise(
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    source_root = tmp_path / "source"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/package.json",
+        json.dumps({"scripts": {"test": "vitest run"}}),
+    )
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/package-lock.json",
+        "must not be materialized\n",
+    )
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/node_modules/vitest/vitest.mjs",
+        "must not be source-materialized\n",
+    )
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/src/agent-platform/shell/component.test.tsx",
+        "test('scratch source', () => {})\n",
+    )
+    authority = _source_materialization_authority(
+        workspace,
+        allowed_paths=("2_products/pepper-agent/web/**",),
+    )
+
+    record = pr._materialize_workpacket_scratch_source_tree(
+        authority,
+        source_root=source_root,
+    )
+
+    assert (workspace / "2_products/pepper-agent/web/package.json").is_file()
+    assert (
+        workspace / "2_products/pepper-agent/web/src/agent-platform/shell/component.test.tsx"
+    ).is_file()
+    assert not (workspace / "2_products/pepper-agent/web/package-lock.json").exists()
+    assert not (workspace / "2_products/pepper-agent/web/node_modules").exists()
+    assert record["canonical_package_lock_materialized"] is False
+    assert record["dependency_install_performed"] is False
+
+
+def test_workpacket_validation_discovers_scratch_only_frontend_tests(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+    from tools import workpacket_validation_tool as validation_tool
+
+    source_root = tmp_path / "source"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/package.json",
+        json.dumps({"scripts": {"test": "vitest run"}}),
+    )
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/src/agent-platform/shell/navigation.ts",
+        "export const nav = true;\n",
+    )
+    authority = _source_materialization_authority(
+        workspace,
+        allowed_paths=(
+            "2_products/pepper-agent/web/src/agent-platform/shell/scratch-only.test.tsx",
+        ),
+    )
+    pr._materialize_workpacket_scratch_source_tree(authority, source_root=source_root)
+    scratch_test = (
+        workspace
+        / "2_products/pepper-agent/web/src/agent-platform/shell/scratch-only.test.tsx"
+    )
+    scratch_test.write_text("test('scratch only', () => {})\n", encoding="utf-8")
+    node = tmp_path / "node"
+    vitest = tmp_path / "vitest.mjs"
+    node.write_text("", encoding="utf-8")
+    vitest.write_text("", encoding="utf-8")
+    monkeypatch.setattr(validation_tool, "_resolve_node_executable", lambda: node)
+    monkeypatch.setattr(
+        validation_tool,
+        "_resolve_node_module_entry",
+        lambda _workspace, _package, _entry: vitest,
+    )
+    work_packet = SimpleNamespace(
+        validation_steps=(
+            SimpleNamespace(
+                validation_id="V2",
+                description="Focused frontend tests validate scratch state.",
+                expected_result="The focused frontend tests pass.",
+                command=None,
+            ),
+        ),
+        source_ticket=SimpleNamespace(ticket_type="implementation"),
+    )
+
+    specs = validation_tool.build_governed_validation_command_specs(
+        authority,
+        work_packet,
+    )
+
+    assert len(specs) == 1
+    spec = specs[0]
+    assert spec.working_directory == (
+        workspace / "2_products/pepper-agent/web"
+    ).resolve().as_posix()
+    assert spec.effective_argv[:3] == (node.as_posix(), vitest.as_posix(), "run")
+    assert spec.effective_argv[3:] == (
+        "src/agent-platform/shell/scratch-only.test.tsx",
+    )
+
+
+def test_dependency_substrate_materializes_snapshot_and_runs_scratch_validation(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+    from tools import workpacket_validation_tool as validation_tool
+
+    source_root = tmp_path / "source"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/package-lock.json",
+        json.dumps({"lockfileVersion": 3}),
+    )
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/package.json",
+        json.dumps({"scripts": {"test": "vitest run"}}),
+    )
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/src/agent-platform/shell/scratch-validation.test.ts",
+        "export const SCRATCH_MARKER = 'from scratch';\n",
+    )
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/node_modules/vitest/vitest.mjs",
+        "import os\n"
+        "import pathlib\n"
+        "import sys\n"
+        "print('FAKE_VITEST')\n"
+        "print('cwd=' + os.getcwd())\n"
+        "for arg in sys.argv[2:]:\n"
+        "    print(pathlib.Path(arg).read_text(encoding='utf-8'))\n",
+    )
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/node_modules/vite/package.json",
+        json.dumps({"name": "vite"}),
+    )
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/node_modules/react/package.json",
+        json.dumps({"name": "react"}),
+    )
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/node_modules/react-dom/package.json",
+        json.dumps({"name": "react-dom"}),
+    )
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/node_modules/@vitejs/plugin-react/package.json",
+        json.dumps({"name": "@vitejs/plugin-react"}),
+    )
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/node_modules/.cache/ignored.txt",
+        "cache noise\n",
+    )
+    authority = _source_materialization_authority(
+        workspace,
+        allowed_paths=(
+            "2_products/pepper-agent/web/src/agent-platform/shell/scratch-validation.test.ts",
+        ),
+    )
+    work_packet = SimpleNamespace(
+        validation_steps=(
+            SimpleNamespace(
+                validation_id="V-FRONTEND",
+                description="Focused frontend tests validate scratch state.",
+                expected_result="The focused frontend tests pass.",
+                command=None,
+            ),
+        ),
+        source_ticket=SimpleNamespace(ticket_type="implementation"),
+    )
+    monkeypatch.setattr(
+        validation_tool,
+        "_resolve_node_executable",
+        lambda: Path(sys.executable).resolve(strict=True),
+    )
+
+    pr._materialize_workpacket_scratch_source_tree(authority, source_root=source_root)
+    record = pr._materialize_workpacket_dependency_substrate(
+        authority,
+        work_packet,
+        source_root=source_root,
+    )
+
+    scratch_node_modules = workspace / "2_products/pepper-agent/node_modules"
+    scratch_vitest = scratch_node_modules / "vitest/vitest.mjs"
+    assert record["dependency_substrate_materialized"] is True
+    assert record["dependency_substrate_kind"] == "physical_node_modules_snapshot"
+    assert record["dependency_install_performed"] is False
+    assert record["product_diff_excluded_roots"] == [
+        "2_products/pepper-agent/node_modules",
+    ]
+    assert scratch_vitest.is_file()
+    assert not scratch_vitest.is_symlink()
+    assert not (scratch_node_modules / ".cache").exists()
+    substrate = record["dependency_substrates"][0]
+    assert substrate["canonical_package_lock_SHA256"] is not None
+    assert substrate["canonical_package_lock_materialized"] is False
+    assert substrate["dependency_install_performed"] is False
+
+    specs = validation_tool.build_governed_validation_command_specs(
+        authority,
+        work_packet,
+    )
+    assert len(specs) == 1
+    spec = specs[0]
+    assert spec.runtime_available is True
+    result = json.loads(validation_tool._run_command(authority, spec))
+
+    package_dir = workspace / "2_products/pepper-agent/web"
+    stdout = result["stdout"]["retained_text"]
+    assert result["success"] is True
+    assert result["process_started"] is True
+    assert result["exit_code"] == 0
+    assert result["command"]["working_directory"] == package_dir.as_posix()
+    assert "FAKE_VITEST" in stdout
+    assert package_dir.as_posix() in stdout.replace("\\", "/")
+    assert "SCRATCH_MARKER" in stdout
+
+
+def test_dependency_substrate_missing_vitest_fails_before_worker_spawn(
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    source_root = tmp_path / "source"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/package.json",
+        json.dumps({"scripts": {"test": "vitest run"}}),
+    )
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/src/agent-platform/shell/scratch-validation.test.ts",
+        "test('missing substrate', () => {})\n",
+    )
+    authority = _source_materialization_authority(
+        workspace,
+        allowed_paths=(
+            "2_products/pepper-agent/web/src/agent-platform/shell/scratch-validation.test.ts",
+        ),
+    )
+    work_packet = SimpleNamespace(
+        validation_steps=(
+            SimpleNamespace(
+                validation_id="V-FRONTEND",
+                description="Focused frontend tests validate scratch state.",
+                expected_result="The focused frontend tests pass.",
+                command=None,
+            ),
+        ),
+        source_ticket=SimpleNamespace(ticket_type="implementation"),
+    )
+
+    pr._materialize_workpacket_scratch_source_tree(authority, source_root=source_root)
+    with pytest.raises(pr.ProductRuntimeDependencyGap) as exc_info:
+        pr._materialize_workpacket_dependency_substrate(
+            authority,
+            work_packet,
+            source_root=source_root,
+        )
+
+    assert exc_info.value.external_code == pr.IMPLEMENTATION_SCRATCH_VALIDATION_DEPENDENCY_GAP
+    assert exc_info.value.dependency_code == pr.DEPENDENCY_SOURCE_NOT_FOUND
+
+
+def test_dependency_substrate_excludes_workspace_package_reparse_points(
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    source_root = tmp_path / "source"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/package.json",
+        json.dumps({"scripts": {"test": "vitest run"}}),
+    )
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/src/agent-platform/shell/scratch-validation.test.ts",
+        "test('workspace link exclusion', () => {})\n",
+    )
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/node_modules/vitest/vitest.mjs",
+        "#!/usr/bin/env node\n",
+    )
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/node_modules/vite/package.json",
+        json.dumps({"name": "vite"}),
+    )
+    workspace_package = source_root / "2_products/pepper-agent/apps/shared"
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/apps/shared/package.json",
+        json.dumps({"name": "@hermes/shared"}),
+    )
+    linked_package = source_root / "2_products/pepper-agent/node_modules/@hermes/shared"
+    linked_package.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        linked_package.symlink_to(workspace_package, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"directory symlink creation unavailable: {exc}")
+    authority = _source_materialization_authority(
+        workspace,
+        allowed_paths=(
+            "2_products/pepper-agent/web/src/agent-platform/shell/scratch-validation.test.ts",
+        ),
+    )
+    work_packet = SimpleNamespace(
+        validation_steps=(
+            SimpleNamespace(
+                validation_id="V-FRONTEND",
+                description="Focused frontend tests validate scratch state.",
+                expected_result="The focused frontend tests pass.",
+                command=None,
+            ),
+        ),
+        source_ticket=SimpleNamespace(ticket_type="implementation"),
+    )
+
+    pr._materialize_workpacket_scratch_source_tree(authority, source_root=source_root)
+    record = pr._materialize_workpacket_dependency_substrate(
+        authority,
+        work_packet,
+        source_root=source_root,
+    )
+
+    substrate = record["dependency_substrates"][0]
+    assert {
+        "relative_path": "@hermes/shared",
+        "resolved_target": str(workspace_package.resolve(strict=True)),
+        "reason": "workspace_package_reparse_point_excluded",
+    } in substrate["excluded_reparse_directories"]
+    assert not (
+        workspace / "2_products/pepper-agent/node_modules/@hermes/shared"
+    ).exists()
 
 
 def test_current_ticket_lifecycle_binding_derives_actions_and_paths(
@@ -2029,6 +2572,7 @@ def test_current_ticket_start_binds_generic_projection_and_record_path(
         "_preflight_pepper_governed_worker_credentials",
         lambda _projection, *, enabled=True: _ready_worker_credential_probe(),
     )
+    _patch_synthetic_scratch_materialization(monkeypatch, pr)
 
     result = pr.start_current_ticket_execution(
         human_authorization_text="Start P18.9.1 execution now",
@@ -2285,6 +2829,7 @@ def test_historical_p18_9_0_start_authority_does_not_replay_for_next_ticket(
         "build_workflow_control_snapshot",
         lambda: _queued_workflow_for_projection(current_projection),
     )
+    _patch_synthetic_scratch_materialization(monkeypatch, pr)
     current = pr.start_current_ticket_execution(
         human_authorization_text="Start P18.9.1 execution now",
         project_id="PEPPER",
@@ -2467,6 +3012,8 @@ def test_exact_dispatch_passes_non_secret_governed_worker_overlay(
     result = pr._dispatch_exact_current_kanban_task(projected, spawn_fn=capture_spawn)
 
     assert result["start_status"] == "started"
+    assert result["source_materialized"] is False
+    assert result["source_materialization"] is None
     assert captured["board"] == projected["kanban_board_slug"]
     overlay = captured["env_overlay"]
     assert overlay["HERMES_AGENT_PLATFORM_GOVERNED_WORKER"] == "pepper-kanban-worker"
