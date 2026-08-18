@@ -1,10 +1,25 @@
 """Regression tests for conversation loop fallback state management."""
-from types import SimpleNamespace
+import json
+import logging.handlers
+import sys
+from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from run_agent import AIAgent
+
+
+@pytest.fixture(autouse=True)
+def _stub_windows_log_handler_dependency(monkeypatch):
+    if sys.platform != "win32":
+        return
+    try:
+        __import__("concurrent_log_handler")
+    except ModuleNotFoundError:
+        module = ModuleType("concurrent_log_handler")
+        module.ConcurrentRotatingFileHandler = logging.handlers.RotatingFileHandler
+        monkeypatch.setitem(sys.modules, "concurrent_log_handler", module)
 
 
 def _tool_defs(*names):
@@ -177,4 +192,70 @@ def test_housekeeping_only_turn_still_sets_fallback():
     )
     assert "fallback_prior_turn_content" in result.get("turn_exit_reason", ""), (
         f"Expected fallback_prior_turn_content exit, got: {result['turn_exit_reason']}."
+    )
+
+
+def test_workpacket_validation_error_continues_native_tool_loop():
+    """A failed governed validation tool result is model-visible, not terminal."""
+
+    tool_error = json.dumps({
+        "success": False,
+        "error_code": "WORKPACKET_VALIDATION_AUTHORITY_UNAVAILABLE",
+        "error": "generation record path is unavailable",
+    })
+    handle_function_call = MagicMock(return_value=tool_error)
+    with (
+        patch("run_agent.get_tool_definitions", return_value=_tool_defs("workpacket_validation")),
+        patch("run_agent.check_toolset_requirements", return_value={}),
+        patch("run_agent.OpenAI"),
+    ):
+        agent = AIAgent(
+            api_key="test-key",
+            base_url="https://openrouter.ai/api/v1/",
+            quiet_mode=True,
+            skip_context_files=True,
+            skip_memory=True,
+        )
+
+    agent._cached_system_prompt = "You are helpful."
+    agent._use_prompt_caching = False
+    agent.tool_delay = 0
+    agent.compression_enabled = False
+    agent.save_trajectories = False
+    agent.valid_tool_names = {"workpacket_validation"}
+    agent.client = MagicMock()
+    agent.client.chat.completions.create.side_effect = [
+        _response(
+            content="",
+            finish_reason="tool_calls",
+            tool_calls=[_tool_call("workpacket_validation", "validation1")],
+        ),
+        _response(
+            content="Validation unavailable; I will report the bounded blocker.",
+            finish_reason="stop",
+        ),
+    ]
+
+    with (
+        patch("run_agent.handle_function_call", handle_function_call),
+        patch.object(agent, "_persist_session"),
+        patch.object(agent, "_save_trajectory"),
+        patch.object(agent, "_cleanup_task_resources"),
+    ):
+        result = agent.run_conversation("work kanban task t_d5b19f78", task_id="t_d5b19f78")
+
+    assert result["final_response"] == "Validation unavailable; I will report the bounded blocker."
+    assert result["api_calls"] == 2
+    assert handle_function_call.call_count == 1
+    args, kwargs = handle_function_call.call_args
+    assert args[:3] == ("workpacket_validation", {}, "t_d5b19f78")
+    assert kwargs["tool_call_id"] == "validation1"
+    assert kwargs["user_task"] == "work kanban task t_d5b19f78"
+    assert kwargs["enabled_tools"] == ["workpacket_validation"]
+    second_call_messages = agent.client.chat.completions.create.call_args_list[1].kwargs["messages"]
+    assert any(
+        message.get("role") == "tool"
+        and message.get("tool_call_id") == "validation1"
+        and "WORKPACKET_VALIDATION_AUTHORITY_UNAVAILABLE" in message.get("content", "")
+        for message in second_call_messages
     )

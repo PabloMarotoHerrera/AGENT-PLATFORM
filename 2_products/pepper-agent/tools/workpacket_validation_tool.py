@@ -92,15 +92,15 @@ class _LaunchSpec:
 
 
 def check_governed_workpacket_validation_requirements() -> bool:
-    """Return True when the active process has runnable governed commands."""
+    """Expose the tool whenever the active process is a governed worker.
 
-    if not file_guard.governed_worker_enabled():
-        return False
-    try:
-        authority, work_packet = resolve_governed_workpacket_validation_authority()
-        return bool(build_governed_validation_command_specs(authority, work_packet))
-    except Exception:
-        return False
+    Authority and runtime failures must be returned by the handler as bounded
+    JSON tool results so the model can repair or block through the normal
+    Hermes tool loop. Hiding the schema here strands the worker with no
+    validation surface and encourages a plain-text stop.
+    """
+
+    return file_guard.governed_worker_enabled()
 
 
 def workpacket_validation_tool(

@@ -331,3 +331,34 @@ def test_model_tools_auto_adds_validation_toolset_only_for_governed_workers(
     assert "workpacket_validation" in captured[-1]
     assert "terminal" not in captured[-1]
     assert "process" not in captured[-1]
+
+
+def test_governed_worker_exposes_validation_schema_when_authority_is_unavailable(
+    monkeypatch,
+) -> None:
+    import model_tools
+    from tools.registry import invalidate_check_fn_cache
+
+    monkeypatch.setenv(file_guard.GOVERNED_WORKER_ENV, file_guard.GOVERNED_WORKER_MODE)
+    monkeypatch.setenv("HERMES_AGENT_PLATFORM_WORKPACKET_ID", "WP-P18-9-1-R0001-123456789abc")
+    monkeypatch.setenv("HERMES_AGENT_PLATFORM_WORKPACKET_SHA256", "a" * 64)
+    monkeypatch.delenv(file_guard.GENERATION_RECORD_PATH_ENV, raising=False)
+    model_tools._clear_tool_defs_cache()
+    invalidate_check_fn_cache()
+
+    try:
+        definitions = model_tools.get_tool_definitions(
+            enabled_toolsets=["pepper_validation"],
+            quiet_mode=True,
+            skip_tool_search_assembly=True,
+        )
+    finally:
+        model_tools._clear_tool_defs_cache()
+        invalidate_check_fn_cache()
+
+    assert {definition["function"]["name"] for definition in definitions} == {
+        "workpacket_validation"
+    }
+
+    result = json.loads(tool.registry.dispatch("workpacket_validation", {"action": "list"}))
+    assert result["error_code"] == tool.WORKPACKET_VALIDATION_AUTHORITY_UNAVAILABLE
