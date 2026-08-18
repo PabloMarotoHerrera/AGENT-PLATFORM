@@ -152,6 +152,9 @@ PEPPER_GOVERNED_AUTONOMY_LIVE_CONTINUATION_MARKER = (
 PEPPER_GOVERNED_AUTONOMY_INTERNAL_CONTINUATION_REASON = (
     "governed_autonomy_internal_continuation"
 )
+PEPPER_GOVERNED_AUTONOMY_FRESH_EXECUTION_REASON = (
+    "human_requested_fresh_execution_after_runtime_substrate_correction"
+)
 PEPPER_GOVERNED_AUTONOMY_RUNTIME_SOURCE_SYSTEM = (
     "pepper-governed-autonomy-runtime"
 )
@@ -161,6 +164,9 @@ PEPPER_GOVERNED_AUTONOMY_RUNTIME_POLICY_ID = (
 )
 PEPPER_GOVERNED_AUTONOMY_RUNTIME_DIGEST_ALGORITHM = (
     "agent-platform-pepper-governed-autonomy-runtime-sha256-v1"
+)
+PEPPER_GOVERNED_AUTONOMY_FRESH_EXECUTION_DIGEST_ALGORITHM = (
+    "agent-platform-pepper-governed-autonomy-fresh-execution-request-sha256-v1"
 )
 PEPPER_GOVERNED_AUTONOMY_AUTHORITY_DIGEST_ALGORITHM = (
     "agent-platform-pepper-governed-autonomy-backend-derived-live-authority-sha256-v1"
@@ -602,10 +608,17 @@ class CurrentTicketGovernedAutonomyContinuationRequest(BaseModel):
     delegate_paths: tuple[str, ...] = ()
     delegate_requested_operations: tuple[str, ...] = ()
     delegate_result: dict[str, Any] | None = None
+    fresh_execution_request_text: str | None = Field(default=None, max_length=1024)
     project_id: str | None = Field(default=None, max_length=128)
     ticket_id: str | None = Field(default=None, max_length=128)
 
-    @field_validator("runtime_goal", "observed_failure", "requested_capability", "delegate_goal")
+    @field_validator(
+        "runtime_goal",
+        "observed_failure",
+        "requested_capability",
+        "delegate_goal",
+        "fresh_execution_request_text",
+    )
     @classmethod
     def bounded_text_must_be_safe(cls, value: str | None) -> str | None:
         if value in {None, ""}:
@@ -4400,6 +4413,36 @@ def validate_governed_autonomy_runtime_state_record(
     for key in ("budget_exhausted", "authority_revalidated"):
         if not isinstance(record.get(key), bool):
             raise ProductRuntimeConflict(f"governed-autonomy runtime {key} is invalid")
+    if "fresh_execution_requested" in record:
+        if not isinstance(record.get("fresh_execution_requested"), bool):
+            raise ProductRuntimeConflict("governed-autonomy fresh execution flag is invalid")
+        if record.get("fresh_execution_requested"):
+            fresh_request_sha = record.get("fresh_execution_request_SHA256")
+            fresh_request_reference = record.get("fresh_execution_request_reference")
+            if not isinstance(fresh_request_sha, str) or not _SAFE_SHA256.fullmatch(
+                fresh_request_sha
+            ):
+                raise ProductRuntimeConflict(
+                    "governed-autonomy fresh execution request digest is invalid"
+                )
+            if not isinstance(fresh_request_reference, dict):
+                raise ProductRuntimeConflict(
+                    "governed-autonomy fresh execution request reference is invalid"
+                )
+            if fresh_request_reference.get("fresh_execution_request_SHA256") != fresh_request_sha:
+                raise ProductRuntimeConflict(
+                    "governed-autonomy fresh execution request reference mismatch"
+                )
+            if record.get("execution_attempt_reason") != (
+                PEPPER_GOVERNED_AUTONOMY_FRESH_EXECUTION_REASON
+            ):
+                raise ProductRuntimeConflict(
+                    "governed-autonomy fresh execution reason mismatch"
+                )
+            if _int_or_none(record.get("prior_terminal_run_id")) is None:
+                raise ProductRuntimeConflict(
+                    "governed-autonomy fresh execution prior terminal run is invalid"
+                )
     latest_fingerprint = record.get("latest_no_progress_fingerprint_SHA256")
     if latest_fingerprint is not None and (
         not isinstance(latest_fingerprint, str) or not _SAFE_SHA256.fullmatch(latest_fingerprint)
@@ -5220,6 +5263,15 @@ def get_current_ticket_governed_autonomy_status(
         "budget_exhausted": runtime_state["budget_exhausted"],
         "blocker_code": runtime_state.get("blocker_code"),
         "blocker_detail": runtime_state.get("blocker_detail"),
+        "fresh_execution_requested": bool(runtime_state.get("fresh_execution_requested")),
+        "fresh_execution_request_SHA256": runtime_state.get(
+            "fresh_execution_request_SHA256"
+        ),
+        "fresh_execution_request_reference": runtime_state.get(
+            "fresh_execution_request_reference"
+        ),
+        "execution_attempt_reason": runtime_state.get("execution_attempt_reason"),
+        "prior_terminal_run_id": runtime_state.get("prior_terminal_run_id"),
         "next_autonomous_action": runtime_state.get("next_autonomous_action"),
         "next_human_action": runtime_state.get("next_human_action"),
         "latest_runtime_side_effects": runtime_state["current_invocation_side_effects"],
@@ -5334,6 +5386,7 @@ def continue_current_ticket_governed_autonomy(
     delegate_runner: Any | None = None,
     delegate_result: dict[str, Any] | None = None,
     delegate_parent_agent: Any | None = None,
+    fresh_execution_request_text: str | None = None,
     spawn_fn: Any = None,
     project_id: str | None = None,
     ticket_id: str | None = None,
@@ -5354,6 +5407,7 @@ def continue_current_ticket_governed_autonomy(
         delegate_paths=tuple(delegate_paths or ()),
         delegate_requested_operations=tuple(delegate_requested_operations or ()),
         delegate_result=delegate_result,
+        fresh_execution_request_text=fresh_execution_request_text,
         project_id=project_id,
         ticket_id=ticket_id,
     )
@@ -5403,16 +5457,87 @@ def continue_current_ticket_governed_autonomy(
         previous,
         effective_authority=effective_authority,
     )
+    fresh_execution_request = _governed_autonomy_fresh_execution_request_reference(
+        request,
+        projection=projection,
+        activation=activation,
+        terminal_reconciliation=terminal_reconciliation,
+    )
     if terminal_reconciliation is not None and decision == "DIRECT":
-        result = _governed_autonomy_runtime_operational_result(
+        if _governed_autonomy_fresh_execution_request_already_consumed(
             previous,
+            fresh_execution_request,
+        ):
+            result = _governed_autonomy_runtime_operational_result(
+                previous,
+                activation_record=activation,
+                idempotent_replay=True,
+                effective_authority=effective_authority,
+            )
+            result["fresh_execution_requested"] = True
+            result["fresh_execution_duplicate_suppressed"] = True
+            result["fresh_execution_request_SHA256"] = fresh_execution_request[
+                "fresh_execution_request_SHA256"
+            ]
+            result["non_consuming_observation"] = True
+            result["observation_status"] = "governed_autonomy_fresh_execution_request_replayed"
+            return result
+        if fresh_execution_request is None:
+            result = _governed_autonomy_runtime_operational_result(
+                previous,
+                activation_record=activation,
+                idempotent_replay=True,
+                effective_authority=effective_authority,
+            )
+            result["non_consuming_observation"] = True
+            result["observation_status"] = "governed_autonomy_execution_terminal_reconciled"
+            return result
+
+    if fresh_execution_request is not None and terminal_reconciliation is None:
+        record = _build_governed_autonomy_runtime_stop_record(
+            request=request,
+            projection=projection,
+            activation=activation,
+            previous=previous,
+            runtime_decision="STOP_FOR_HUMAN",
+            blocker_code="FRESH_EXECUTION_TERMINAL_SOURCE_REQUIRED",
+            blocker_detail="fresh same-authority execution requires an owned terminal run source",
+            validation_failed=True,
+            provider_readiness={"ok": True},
+            extra_evidence={
+                "fresh_execution_request_reference": fresh_execution_request,
+            },
+        )
+        _persist_governed_autonomy_runtime_state(record)
+        return _governed_autonomy_runtime_operational_result(
+            record,
             activation_record=activation,
-            idempotent_replay=True,
+            idempotent_replay=False,
             effective_authority=effective_authority,
         )
-        result["non_consuming_observation"] = True
-        result["observation_status"] = "governed_autonomy_execution_terminal_reconciled"
-        return result
+
+    if fresh_execution_request is not None and decision != "DIRECT":
+        record = _build_governed_autonomy_runtime_stop_record(
+            request=request,
+            projection=projection,
+            activation=activation,
+            previous=previous,
+            runtime_decision="STOP_FOR_HUMAN",
+            blocker_code="FRESH_EXECUTION_REQUIRES_DIRECT_STRATEGY",
+            blocker_detail="fresh same-authority execution requires DIRECT strategy",
+            validation_failed=True,
+            provider_readiness={"ok": True},
+            extra_evidence={
+                "fresh_execution_request_reference": fresh_execution_request,
+            },
+        )
+        _persist_governed_autonomy_runtime_state(record)
+        return _governed_autonomy_runtime_operational_result(
+            record,
+            activation_record=activation,
+            idempotent_replay=False,
+            effective_authority=effective_authority,
+        )
     provider_readiness = _executor_provider_readiness(str(projection["assignee_profile"]))
     if provider_readiness.get("ok") is not True:
         record = _build_governed_autonomy_runtime_stop_record(
@@ -5527,6 +5652,7 @@ def continue_current_ticket_governed_autonomy(
             previous=previous,
             provider_readiness=provider_readiness,
             envelope=authority,
+            terminal_reconciliation=terminal_reconciliation,
             spawn_fn=spawn_fn,
         )
     _persist_governed_autonomy_runtime_state(record)
@@ -8484,6 +8610,11 @@ def _governed_autonomy_runtime_fingerprint(
             "delegate_goal": request.delegate_goal,
             "delegate_paths": list(request.delegate_paths),
             "delegate_requested_operations": list(request.delegate_requested_operations),
+            "fresh_execution_request_text_SHA256": (
+                hashlib.sha256(request.fresh_execution_request_text.encode("utf-8")).hexdigest()
+                if request.fresh_execution_request_text
+                else None
+            ),
         },
     )
 
@@ -8919,6 +9050,85 @@ def _governed_autonomy_runtime_terminal_reconciliation(
     }
 
 
+def _governed_autonomy_fresh_execution_request_reference(
+    request: CurrentTicketGovernedAutonomyContinuationRequest,
+    *,
+    projection: dict[str, Any],
+    activation: dict[str, Any],
+    terminal_reconciliation: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    if not request.fresh_execution_request_text:
+        return None
+    identity = {
+        "project_id": projection["project_id"],
+        "ticket_id": projection["ticket_id"],
+        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
+        "work_packet_id": projection["work_packet_id"],
+        "work_packet_SHA256": projection["work_packet_SHA256"],
+        "projection_SHA256": projection["projection_SHA256"],
+        "kanban_task_id": projection["kanban_task_id"],
+        "assignee_profile": projection["assignee_profile"],
+        "activation_action_SHA256": activation["activation_action_SHA256"],
+        "human_request_text": request.fresh_execution_request_text,
+    }
+    text_sha256 = hashlib.sha256(
+        request.fresh_execution_request_text.encode("utf-8")
+    ).hexdigest()
+    reference = {
+        "fresh_execution_requested": True,
+        "transition_classification": "FRESH_EXECUTION_TRANSITION_REPRESENTED",
+        "execution_attempt_reason": PEPPER_GOVERNED_AUTONOMY_FRESH_EXECUTION_REASON,
+        "fresh_execution_request_SHA256": _digest_payload(
+            PEPPER_GOVERNED_AUTONOMY_FRESH_EXECUTION_DIGEST_ALGORITHM,
+            identity,
+        ),
+        "human_request_text_SHA256": text_sha256,
+        "human_request_text_excerpt": _safe_text(
+            request.fresh_execution_request_text,
+            limit=300,
+        ),
+        "same_ticket": True,
+        "same_work_packet_authority": True,
+        "same_kanban_task": True,
+        "same_authority_envelope": True,
+        "new_scratch_required": True,
+    }
+    if terminal_reconciliation is not None:
+        reference.update({
+            "prior_terminal_run_id": terminal_reconciliation.get("terminal_run_id"),
+            "prior_terminal_run_status": terminal_reconciliation.get(
+                "terminal_run_status"
+            ),
+            "prior_terminal_run_outcome": terminal_reconciliation.get(
+                "terminal_run_outcome"
+            ),
+            "prior_terminal_run_ended_at": terminal_reconciliation.get(
+                "terminal_run_ended_at"
+            ),
+            "prior_terminal_run_preserved": True,
+        })
+    return reference
+
+
+def _governed_autonomy_fresh_execution_request_already_consumed(
+    previous: dict[str, Any] | None,
+    fresh_execution_request: dict[str, Any] | None,
+) -> bool:
+    if previous is None or fresh_execution_request is None:
+        return False
+    if not bool(previous.get("fresh_execution_requested")):
+        return False
+    if previous.get("fresh_execution_request_SHA256") != fresh_execution_request.get(
+        "fresh_execution_request_SHA256"
+    ):
+        return False
+    return bool(
+        previous.get("kanban_run_created")
+        or previous.get("lineage_dispatch_performed")
+        or previous.get("execution_started")
+    )
+
+
 def _governed_autonomy_apply_terminal_reconciliation(
     payload: dict[str, Any],
     terminal_reconciliation: dict[str, Any] | None,
@@ -9008,6 +9218,7 @@ def _governed_autonomy_runtime_base_record(
     blocker_detail: str | None = None,
     next_autonomous_action: str | None = None,
     next_human_action: str | None = None,
+    fresh_execution_request: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     limits = _governed_autonomy_runtime_budget_limits(activation)
     counts = _governed_autonomy_runtime_counts(
@@ -9069,6 +9280,23 @@ def _governed_autonomy_runtime_base_record(
         "runtime_decision": runtime_decision,
         "governed_autonomy_runtime_status": runtime_status,
         "latest_decision_evidence": latest_decision_evidence,
+        "fresh_execution_requested": fresh_execution_request is not None,
+        "fresh_execution_request_SHA256": (
+            fresh_execution_request.get("fresh_execution_request_SHA256")
+            if fresh_execution_request is not None
+            else None
+        ),
+        "fresh_execution_request_reference": fresh_execution_request,
+        "execution_attempt_reason": (
+            PEPPER_GOVERNED_AUTONOMY_FRESH_EXECUTION_REASON
+            if fresh_execution_request is not None
+            else None
+        ),
+        "prior_terminal_run_id": (
+            fresh_execution_request.get("prior_terminal_run_id")
+            if fresh_execution_request is not None
+            else None
+        ),
         "provider_readiness_reference": _governed_autonomy_provider_readiness_reference(
             provider_readiness
         ),
@@ -9130,6 +9358,7 @@ def _prepare_current_ticket_governed_autonomy_task_for_dispatch(
     projection: dict[str, Any],
     activation: dict[str, Any],
     envelope: Any,
+    fresh_execution_request: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     from hermes_cli import kanban_db
 
@@ -9190,10 +9419,34 @@ def _prepare_current_ticket_governed_autonomy_task_for_dispatch(
             "governed_autonomy_authority_SHA256": envelope.envelope_SHA256,
             "governed_autonomy_source_run_id": source_run_id,
         })
+        if fresh_execution_request is not None:
+            next_attempt_number = len(kanban_db.list_runs(conn, task_id)) + 1
+            fresh_workspace_path = (
+                kanban_db.workspaces_root(board=board)
+                / f"{task_id}-attempt-{next_attempt_number}"
+            )
+            body.update({
+                "fresh_execution_requested": True,
+                "fresh_execution_request_SHA256": fresh_execution_request[
+                    "fresh_execution_request_SHA256"
+                ],
+                "execution_attempt_reason": PEPPER_GOVERNED_AUTONOMY_FRESH_EXECUTION_REASON,
+                "prior_terminal_run_id": fresh_execution_request.get("prior_terminal_run_id"),
+                "fresh_execution_attempt_number": next_attempt_number,
+                "fresh_execution_workspace_path": str(fresh_workspace_path),
+            })
+        else:
+            fresh_workspace_path = None
         conn.execute(
             "UPDATE tasks SET skills = ?, body = ?, claim_lock = NULL, "
-            "claim_expires = NULL, worker_pid = NULL WHERE id = ? AND status = 'ready'",
-            (json.dumps([]), json.dumps(body, sort_keys=True), task_id),
+            "claim_expires = NULL, worker_pid = NULL, workspace_path = ? "
+            "WHERE id = ? AND status = 'ready'",
+            (
+                json.dumps([]),
+                json.dumps(body, sort_keys=True),
+                str(fresh_workspace_path) if fresh_workspace_path is not None else task.workspace_path,
+                task_id,
+            ),
         )
         kanban_db._append_event(
             conn,
@@ -9206,6 +9459,10 @@ def _prepare_current_ticket_governed_autonomy_task_for_dispatch(
                 "backend_derived_live_authority_SHA256": envelope.envelope_SHA256,
                 "source_run_id": source_run_id,
                 "future_task_skills": [],
+                "fresh_execution_request_reference": fresh_execution_request,
+                "fresh_execution_workspace_path": str(fresh_workspace_path)
+                if fresh_workspace_path is not None
+                else None,
             },
         )
         conn.commit()
@@ -9223,6 +9480,10 @@ def _prepare_current_ticket_governed_autonomy_task_for_dispatch(
             "kanban_task_status_after_prepare": task.status if task is not None else None,
             "kanban_task_skills_after_prepare": list(task.skills or []) if task is not None else None,
             "source_run_id": source_run_id,
+            "fresh_execution_request_reference": fresh_execution_request,
+            "fresh_execution_workspace_path": str(fresh_workspace_path)
+            if fresh_workspace_path is not None
+            else None,
         }
     finally:
         conn.close()
@@ -9328,12 +9589,20 @@ def _build_governed_autonomy_direct_runtime_record(
     previous: dict[str, Any] | None,
     provider_readiness: dict[str, Any],
     envelope: Any,
+    terminal_reconciliation: dict[str, Any] | None = None,
     spawn_fn: Any = None,
 ) -> dict[str, Any]:
+    fresh_execution_request = _governed_autonomy_fresh_execution_request_reference(
+        request,
+        projection=projection,
+        activation=activation,
+        terminal_reconciliation=terminal_reconciliation,
+    )
     prep_result = _prepare_current_ticket_governed_autonomy_task_for_dispatch(
         projection=projection,
         activation=activation,
         envelope=envelope,
+        fresh_execution_request=fresh_execution_request,
     )
     if prep_result.get("blocker_code"):
         return _governed_autonomy_runtime_base_record(
@@ -9348,6 +9617,7 @@ def _build_governed_autonomy_direct_runtime_record(
                 "direct_execution_request_reference": prep_result,
                 "blocker_code": prep_result.get("blocker_code"),
                 "blocker_detail": prep_result.get("blocker_detail"),
+                "fresh_execution_request_reference": fresh_execution_request,
             },
             provider_readiness=provider_readiness,
             process_continuation_increment=0,
@@ -9355,6 +9625,7 @@ def _build_governed_autonomy_direct_runtime_record(
             blocker_code=str(prep_result.get("blocker_code") or "GOVERNED_AUTONOMY_PREP_FAILED"),
             blocker_detail=str(prep_result.get("blocker_detail") or "governed autonomy task preparation failed"),
             next_human_action="human authority required to resolve governed autonomy dispatch preparation",
+            fresh_execution_request=fresh_execution_request,
         )
 
     dispatch_result = _dispatch_exact_current_kanban_task(
@@ -9386,6 +9657,7 @@ def _build_governed_autonomy_direct_runtime_record(
             "decision": "DIRECT",
             "rationale": "active authority revalidated; same-authority Kanban dispatch uses the canonical worker lifecycle",
             "direct_execution_request_reference": prep_result,
+            "fresh_execution_request_reference": fresh_execution_request,
             "direct_execution_result_reference": _governed_autonomy_dispatch_result_reference(
                 dispatch_result
             ),
@@ -9406,6 +9678,7 @@ def _build_governed_autonomy_direct_runtime_record(
             else None
         ),
         next_human_action=None if execution_started else "human authority required to resolve dispatch blocker",
+        fresh_execution_request=fresh_execution_request,
     )
     return _with_governed_autonomy_dispatch_result(record, dispatch_result=dispatch_result)
 
@@ -11183,6 +11456,11 @@ def _governed_autonomy_runtime_summary(
         "previous_runtime_state_SHA256": record.get("previous_runtime_state_SHA256"),
         "runtime_goal_excerpt": record["runtime_goal_excerpt"],
         "latest_decision_evidence": record["latest_decision_evidence"],
+        "fresh_execution_requested": bool(record.get("fresh_execution_requested")),
+        "fresh_execution_request_SHA256": record.get("fresh_execution_request_SHA256"),
+        "fresh_execution_request_reference": record.get("fresh_execution_request_reference"),
+        "execution_attempt_reason": record.get("execution_attempt_reason"),
+        "prior_terminal_run_id": record.get("prior_terminal_run_id"),
         "process_continuation_count": _effective_governed_autonomy_process_continuation_count(record),
         "recorded_process_continuation_count": record["process_continuation_count"],
         "self_repair_count": record["self_repair_count"],
@@ -11265,6 +11543,11 @@ def _governed_autonomy_runtime_operational_result(
         "authority_revalidated": record["authority_revalidated"],
         "same_authority_subset_validated": record["same_authority_subset_validated"],
         "latest_decision_evidence": record["latest_decision_evidence"],
+        "fresh_execution_requested": bool(record.get("fresh_execution_requested")),
+        "fresh_execution_request_SHA256": record.get("fresh_execution_request_SHA256"),
+        "fresh_execution_request_reference": record.get("fresh_execution_request_reference"),
+        "execution_attempt_reason": record.get("execution_attempt_reason"),
+        "prior_terminal_run_id": record.get("prior_terminal_run_id"),
         "process_continuation_count": _effective_governed_autonomy_process_continuation_count(record),
         "recorded_process_continuation_count": record["process_continuation_count"],
         "self_repair_count": record["self_repair_count"],
@@ -13503,6 +13786,29 @@ def _current_ticket_governed_autonomy_overlay(
             runtime_state["validation_failure_count"] if runtime_state is not None else 0
         ),
         "budget_exhausted": runtime_state["budget_exhausted"] if runtime_state is not None else False,
+        "fresh_execution_requested": bool(runtime_state.get("fresh_execution_requested"))
+        if runtime_state is not None
+        else False,
+        "fresh_execution_request_SHA256": (
+            runtime_state.get("fresh_execution_request_SHA256")
+            if runtime_state is not None
+            else None
+        ),
+        "fresh_execution_request_reference": (
+            runtime_state.get("fresh_execution_request_reference")
+            if runtime_state is not None
+            else None
+        ),
+        "execution_attempt_reason": (
+            runtime_state.get("execution_attempt_reason")
+            if runtime_state is not None
+            else None
+        ),
+        "prior_terminal_run_id": (
+            runtime_state.get("prior_terminal_run_id")
+            if runtime_state is not None
+            else None
+        ),
         "next_autonomous_action": (
             runtime_state.get("next_autonomous_action")
             if runtime_state is not None

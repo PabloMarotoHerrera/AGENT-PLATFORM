@@ -973,6 +973,9 @@ def _continue_current_ticket_governed_autonomy(args: dict[str, Any], **_kwargs) 
             delegate_paths=(),
             delegate_requested_operations=(),
             delegate_parent_agent=_kwargs.get("parent_agent"),
+            fresh_execution_request_text=(
+                str(args.get("fresh_execution_request_text") or "").strip() or None
+            ),
             project_id=str(args.get("project_id") or "").strip() or None,
             ticket_id=str(args.get("ticket_id") or "").strip() or None,
         )
@@ -1358,6 +1361,14 @@ _CONTINUE_CURRENT_TICKET_GOVERNED_AUTONOMY_SCHEMA = {
             "type": "string",
             "description": "Optional A2A child goal for canonical Hermes delegate_task. Backend derives child scope and filesystem operations from the active authority.",
         },
+        "fresh_execution_request_text": {
+            "type": "string",
+            "description": (
+                "Exact human text explicitly requesting a fresh same-authority execution "
+                "after an owned terminal governed-autonomy run. Omit for normal continue, "
+                "which remains an idempotent terminal reconciliation."
+            ),
+        },
         "project_id": {
             "type": "string",
             "description": "Optional governed project guard. Must be PEPPER if supplied.",
@@ -1626,7 +1637,9 @@ registry.register(
             "privileged-operation denials before recording DIRECT, task-local self-extension, "
             "canonical Hermes delegate_task A2A delegation, or STOP_FOR_HUMAN runtime state. "
             "DIRECT may create one same-authority Kanban run through the canonical projected-task "
-            "dispatch lifecycle; no legacy retry/recovery authorization, Git, Docker, or Graphify."
+            "dispatch lifecycle; after an owned terminal run, a new attempt requires "
+            "fresh_execution_request_text. No legacy retry/recovery authorization, Git, Docker, "
+            "or Graphify."
         ),
         "parameters": _CONTINUE_CURRENT_TICKET_GOVERNED_AUTONOMY_SCHEMA,
     },

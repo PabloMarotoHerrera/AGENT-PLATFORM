@@ -5511,6 +5511,283 @@ def test_current_p18_9_1_governed_autonomy_reconciles_owned_terminal_validation_
         conn.close()
 
 
+def test_current_p18_9_1_governed_autonomy_fresh_execution_after_terminal_run_is_idempotent(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, projected, authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
+    )
+
+    from hermes_cli import kanban_db
+
+    run_4 = _force_p18_9_1_blocked_run_4(pr, kanban_db, projected, monkeypatch)
+    activation = _activate_p18_9_1_governed_autonomy_for_test(pr, monkeypatch)["activation"]
+    _patch_synthetic_scratch_materialization(monkeypatch, pr)
+    monkeypatch.setattr(kanban_db, "_pid_alive", lambda pid: int(pid) == 6515)
+    started = pr.continue_current_ticket_governed_autonomy(
+        runtime_goal="Continue P18.9.1 under governed autonomy before fresh replay proof.",
+        strategy="DIRECT",
+        spawn_fn=lambda _task, _workspace, board=None, env_overlay=None: 6515,
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+    run_5 = started["kanban_run_id"]
+    assert run_5 == run_4 + 1
+
+    run_5_workspace = Path(started["workspace_path"])
+    _write_p18_9_1_terminal_candidate_fixture(pr, projection_home, run_5_workspace)
+    run_5_manifest = (
+        run_5_workspace / pr.PEPPER_SCRATCH_SOURCE_MATERIALIZATION_MANIFEST
+    ).read_bytes()
+    run_5_failure = "GOVERNED_AUTONOMY_TERMINAL_RUN_BLOCKED: historical terminal run"
+    _finish_projected_run_as_terminal(
+        kanban_db,
+        projected,
+        run_5,
+        status="blocked",
+        outcome="blocked",
+        summary=run_5_failure,
+    )
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        run_5_before = next(
+            run
+            for run in kanban_db.list_runs(conn, projected["kanban_task_id"])
+            if run.id == run_5
+        )
+        run_5_snapshot = {
+            "id": run_5_before.id,
+            "status": run_5_before.status,
+            "outcome": run_5_before.outcome,
+            "summary": run_5_before.summary,
+            "error": run_5_before.error,
+            "ended_at": run_5_before.ended_at,
+        }
+    finally:
+        conn.close()
+
+    plain_continue = pr.continue_current_ticket_governed_autonomy(
+        runtime_goal="Observe terminal governed run without requesting a fresh attempt.",
+        strategy="DIRECT",
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("plain continue must not spawn"),
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+    assert plain_continue["idempotent_replay"] is True
+    assert plain_continue["observation_status"] == "governed_autonomy_execution_terminal_reconciled"
+    assert plain_continue["terminal_run_id"] == run_5
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        runs = kanban_db.list_runs(conn, projected["kanban_task_id"])
+        assert runs[-1].id == run_5
+        assert all(run.id != run_5 + 1 for run in runs)
+    finally:
+        conn.close()
+
+    fresh_request_text = (
+        "Launch a fresh P18.9.1 governed execution after corrected runtime substrate."
+    )
+    spawn_calls: list[dict] = []
+
+    def spawn(task, workspace, board=None, env_overlay=None):
+        spawn_calls.append({
+            "task_id": task.id,
+            "workspace": workspace,
+            "board": board,
+            "env_overlay": env_overlay,
+        })
+        return 6616
+
+    monkeypatch.setattr(kanban_db, "_pid_alive", lambda pid: int(pid) == 6616)
+    fresh = pr.continue_current_ticket_governed_autonomy(
+        runtime_goal="Start the explicitly requested fresh same-authority P18.9.1 attempt.",
+        strategy="DIRECT",
+        fresh_execution_request_text=fresh_request_text,
+        spawn_fn=spawn,
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+
+    assert len(spawn_calls) == 1
+    assert fresh["idempotent_replay"] is False
+    assert fresh["governed_autonomy_runtime_status"] == "direct_execution_continuation_started"
+    assert fresh["kanban_run_created"] is True
+    assert fresh["kanban_run_id"] == run_5 + 1
+    assert fresh["fresh_execution_requested"] is True
+    assert fresh["execution_attempt_reason"] == pr.PEPPER_GOVERNED_AUTONOMY_FRESH_EXECUTION_REASON
+    assert fresh["prior_terminal_run_id"] == run_5
+    assert fresh["fresh_execution_request_reference"]["prior_terminal_run_id"] == run_5
+    assert fresh["source_run_id"] == run_4
+    assert fresh["work_packet_id"] == projected["work_packet_id"]
+    assert fresh["work_packet_SHA256"] == projected["work_packet_SHA256"]
+    assert fresh["Git_mutation"] is False
+    assert fresh["auto_retry"] is False
+    assert fresh["auto_rollback"] is False
+    assert spawn_calls[0]["env_overlay"]["HERMES_AGENT_PLATFORM_WORKPACKET_ID"] == (
+        projected["work_packet_id"]
+    )
+    fresh_workspace = Path(fresh["workspace_path"])
+    assert fresh_workspace != run_5_workspace
+    assert (fresh_workspace / pr.PEPPER_SCRATCH_SOURCE_MATERIALIZATION_MANIFEST).is_file()
+    assert not (
+        fresh_workspace
+        / "2_products/pepper-agent/web/src/agent-platform/shell/P18.9.1-implementation-report.txt"
+    ).exists()
+
+    runtime_record = pr.load_current_ticket_governed_autonomy_runtime_state(
+        projection_record=authority,
+        activation_record=pr.load_current_ticket_governed_autonomy_activation_record(
+            projection_record=authority,
+        ),
+    )
+    assert runtime_record is not None
+    assert runtime_record["activation_action_SHA256"] == activation["activation_action_SHA256"]
+    assert runtime_record["fresh_execution_request_SHA256"] == fresh[
+        "fresh_execution_request_SHA256"
+    ]
+    assert runtime_record["prior_terminal_run_id"] == run_5
+
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        task = kanban_db.get_task(conn, projected["kanban_task_id"])
+        runs = kanban_db.list_runs(conn, projected["kanban_task_id"])
+        events = kanban_db.list_events(conn, projected["kanban_task_id"])
+        run_5_after = next(run for run in runs if run.id == run_5)
+        assert task is not None
+        assert task.status == "running"
+        assert task.current_run_id == run_5 + 1
+        assert task.worker_pid == 6616
+        assert [run.id for run in runs][-2:] == [run_5, run_5 + 1]
+        assert {
+            "id": run_5_after.id,
+            "status": run_5_after.status,
+            "outcome": run_5_after.outcome,
+            "summary": run_5_after.summary,
+            "error": run_5_after.error,
+            "ended_at": run_5_after.ended_at,
+        } == run_5_snapshot
+        body = json.loads(task.body or "{}")
+        assert body["fresh_execution_requested"] is True
+        assert body["fresh_execution_request_SHA256"] == fresh["fresh_execution_request_SHA256"]
+        assert body["execution_attempt_reason"] == pr.PEPPER_GOVERNED_AUTONOMY_FRESH_EXECUTION_REASON
+        assert body["prior_terminal_run_id"] == run_5
+        assert any(
+            event.kind == "governed_autonomy_continuation_prepared"
+            and isinstance(event.payload.get("fresh_execution_request_reference"), dict)
+            and event.payload["fresh_execution_request_reference"]["prior_terminal_run_id"] == run_5
+            for event in events
+        )
+    finally:
+        conn.close()
+    assert (
+        run_5_workspace / pr.PEPPER_SCRATCH_SOURCE_MATERIALIZATION_MANIFEST
+    ).read_bytes() == run_5_manifest
+
+    active_replay = pr.continue_current_ticket_governed_autonomy(
+        runtime_goal="Replay the same fresh request while the new run is active.",
+        strategy="DIRECT",
+        fresh_execution_request_text=fresh_request_text,
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("active fresh replay must not spawn"),
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+    assert active_replay["idempotent_replay"] is True
+    assert active_replay["observation_status"] == "governed_autonomy_execution_already_active"
+    assert active_replay["kanban_run_id"] == run_5 + 1
+
+    _finish_projected_run_as_terminal(
+        kanban_db,
+        projected,
+        run_5 + 1,
+        status="blocked",
+        outcome="blocked",
+        summary="fresh attempt terminalized in offline duplicate-replay fixture",
+    )
+    terminal_replay = pr.continue_current_ticket_governed_autonomy(
+        runtime_goal="Replay the same fresh request after its run reached terminal state.",
+        strategy="DIRECT",
+        fresh_execution_request_text=fresh_request_text,
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("duplicate fresh request must not spawn"),
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+    assert terminal_replay["idempotent_replay"] is True
+    assert terminal_replay["fresh_execution_duplicate_suppressed"] is True
+    assert terminal_replay["fresh_execution_request_SHA256"] == fresh[
+        "fresh_execution_request_SHA256"
+    ]
+    assert terminal_replay["terminal_run_id"] == run_5 + 1
+
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        runs = kanban_db.list_runs(conn, projected["kanban_task_id"])
+        assert [run.id for run in runs][-2:] == [run_5, run_5 + 1]
+        assert all(run.id != run_5 + 2 for run in runs)
+        run_5_after_duplicate = next(run for run in runs if run.id == run_5)
+        assert {
+            "id": run_5_after_duplicate.id,
+            "status": run_5_after_duplicate.status,
+            "outcome": run_5_after_duplicate.outcome,
+            "summary": run_5_after_duplicate.summary,
+            "error": run_5_after_duplicate.error,
+            "ended_at": run_5_after_duplicate.ended_at,
+        } == run_5_snapshot
+    finally:
+        conn.close()
+    assert (
+        run_5_workspace / pr.PEPPER_SCRATCH_SOURCE_MATERIALIZATION_MANIFEST
+    ).read_bytes() == run_5_manifest
+
+
+def test_current_p18_9_1_governed_autonomy_fresh_execution_fails_closed_on_authority_mismatch(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, projected, _authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
+    )
+
+    from hermes_cli import kanban_db
+
+    run_4 = _force_p18_9_1_blocked_run_4(pr, kanban_db, projected, monkeypatch)
+    _activate_p18_9_1_governed_autonomy_for_test(pr, monkeypatch)
+    run_5 = _claim_next_projected_run(kanban_db, projected, pid=6715)
+    assert run_5 == run_4 + 1
+    _block_projected_run(
+        kanban_db,
+        projected,
+        run_5,
+        reason="unowned run superseded same-authority fresh execution source",
+        kind="transient",
+    )
+
+    with pytest.raises(pr.ProductRuntimeAuthorityMismatch) as excinfo:
+        pr.continue_current_ticket_governed_autonomy(
+            runtime_goal="Attempt fresh execution after authority drift.",
+            strategy="DIRECT",
+            fresh_execution_request_text=(
+                "Launch a fresh P18.9.1 governed execution after corrected runtime substrate."
+            ),
+            spawn_fn=lambda *_args, **_kwargs: pytest.fail("authority mismatch must not spawn"),
+            project_id="PEPPER",
+            ticket_id="P18.9.1",
+        )
+
+    assert str(excinfo.value) == "CONTINUATION_AUTHORITY_MISMATCH"
+    assert excinfo.value.diagnostics["reason"] == "newer_unowned_source_run"
+    assert not pr.governed_autonomy_runtime_state_path_for_ticket("P18.9.1").exists()
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        runs = kanban_db.list_runs(conn, projected["kanban_task_id"])
+        assert runs[-1].id == run_5
+        assert all(run.id != run_5 + 1 for run in runs)
+    finally:
+        conn.close()
+
+
 def test_current_p18_9_1_governed_autonomy_unifies_owned_terminal_run_after_a2a_history(
     projection_home,
     monkeypatch,

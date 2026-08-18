@@ -339,6 +339,7 @@ def test_pepper_toolset_exposes_no_arbitrary_shell_or_file_authority(monkeypatch
     assert "governed_autonomy_envelope" not in continuation_params["properties"]
     assert "delegate_paths" not in continuation_params["properties"]
     assert "delegate_requested_operations" not in continuation_params["properties"]
+    assert "fresh_execution_request_text" in continuation_params["properties"]
     assert not (names & {"terminal", "process", "read_file", "write_file", "patch", "search_files"})
 
 
@@ -370,6 +371,8 @@ def test_lead_agent_prompt_requires_tool_backed_state() -> None:
     assert "Do not ask for or supply GovernedAutonomyEnvelope JSON" in prompt
     assert "without a GovernedAutonomyEnvelope, delegate paths, or delegate operations" in prompt
     assert "DIRECT may start exactly one same-authority Kanban run" in prompt
+    assert "fresh_execution_request_text" in prompt
+    assert "replaying the same fresh request must not create another run" in prompt
     assert "backend-derived child scope/operations" in prompt
     assert "prepare_current_ticket_review" in prompt
     assert "accept_current_ticket_review" in prompt
