@@ -142,6 +142,9 @@ PEPPER_GOVERNED_AUTONOMY_A2A_POLICY_ID = (
 PEPPER_GOVERNED_AUTONOMY_READY_MARKER = (
     "PEPPER-GOVERNED-AUTONOMY-EXECUTION-PLANE-AND-A2A-CLOSURE-READY"
 )
+PEPPER_LEGACY_GOVERNED_AUTONOMY_READY_MARKER = (
+    "PEPPER-GOVERNED-AUTONOMY-RUNTIME-AND-A2A-INTEGRATION-READY"
+)
 PEPPER_GOVERNED_AUTONOMY_LIVE_CONTINUATION_MARKER = (
     "READY_FOR_LIVE_P18_9_1_AUTONOMOUS_CONTINUATION"
 )
@@ -2983,6 +2986,231 @@ def _governed_autonomy_same_authority_subset(
     }
 
 
+def _governed_autonomy_activation_has_legacy_runtime_limit(record: dict[str, Any]) -> bool:
+    return (
+        record.get("live_lineage_activation_authorized") is False
+        and record.get("live_lineage_activation_status") == "blocked_requires_separate_authority"
+        and record.get("live_lineage_activation_blocker_code") == "LIVE_LINEAGE_ACTIVATION_AUTHORITY_GAP"
+        and record.get("same_authority_delegation_status") == "blocked_metadata_only"
+        and record.get("same_authority_delegation_authorized") is False
+        and record.get("same_authority_delegation_blocker_code")
+        == "A2A_RUNTIME_UNAVAILABLE_WITHOUT_TASK_LOCAL_AUTHORITY"
+        and record.get("opencode_runtime_dispatcher_found") is False
+        and record.get("delegate_task_runtime_kind") == "local_subagent_not_opencode_a2a"
+    )
+
+
+def _raise_governed_autonomy_continuation_authority_mismatch(
+    *,
+    record: dict[str, Any],
+    current_reference: dict[str, Any] | None,
+    reason: str,
+    detail: Any | None = None,
+) -> None:
+    activation_reference = record.get("governed_autonomy_envelope_reference")
+    if not isinstance(activation_reference, dict):
+        activation_reference = {}
+    diagnostics = {
+        "blocker_code": "CONTINUATION_AUTHORITY_MISMATCH",
+        "reason": reason,
+        "detail": detail,
+        "activation_action_SHA256": record.get("activation_action_SHA256"),
+        "activation_authority_SHA256": activation_reference.get("envelope_SHA256"),
+        "current_authority_SHA256": (
+            current_reference.get("envelope_SHA256")
+            if isinstance(current_reference, dict)
+            else None
+        ),
+        "activation_ticket_id": record.get("ticket_id"),
+        "current_ticket_id": (
+            current_reference.get("ticket_id")
+            if isinstance(current_reference, dict)
+            else None
+        ),
+        "activation_work_packet_id": record.get("work_packet_id"),
+        "current_work_packet_id": (
+            current_reference.get("work_packet_id")
+            if isinstance(current_reference, dict)
+            else None
+        ),
+        "activation_work_packet_SHA256": record.get("work_packet_SHA256"),
+        "current_work_packet_SHA256": (
+            current_reference.get("work_packet_SHA256")
+            if isinstance(current_reference, dict)
+            else None
+        ),
+        "activation_projection_SHA256": record.get("projection_SHA256"),
+        "current_projection_SHA256": (
+            current_reference.get("projection_SHA256")
+            if isinstance(current_reference, dict)
+            else None
+        ),
+    }
+    raise ProductRuntimeAuthorityMismatch(
+        "CONTINUATION_AUTHORITY_MISMATCH",
+        diagnostics=diagnostics,
+    )
+
+
+def _validate_governed_autonomy_legacy_activation_compatibility(
+    *,
+    record: dict[str, Any],
+    projection: dict[str, Any],
+    expected: dict[str, Any],
+    envelope_reference: dict[str, Any],
+    same_authority: dict[str, Any],
+    gap: dict[str, Any] | None,
+    lineage: dict[str, Any] | None,
+) -> None:
+    if not _governed_autonomy_activation_has_legacy_runtime_limit(record):
+        raise ProductRuntimeConflict("governed-autonomy activation record is not legacy-compatible")
+    try:
+        request = CurrentTicketGovernedAutonomyActivationRequest(
+            human_request_text=str(record.get("human_request_text") or ""),
+            authorizer_id=str(record.get("authorizer_id") or ""),
+            project_id=str(record.get("project_id") or "") or None,
+            ticket_id=str(record.get("ticket_id") or "") or None,
+            next_action_id=str(record.get("current_next_action_id") or "") or None,
+        )
+        _validate_governed_autonomy_activation_request_text(
+            request.human_request_text,
+            ticket_id=str(projection["ticket_id"]),
+        )
+    except Exception as exc:
+        raise ProductRuntimeConflict(
+            "legacy governed-autonomy activation human authorization is invalid"
+        ) from exc
+
+    compatibility_expected = dict(expected)
+    compatibility_expected.update({
+        "same_authority_delegation_status": "blocked_metadata_only",
+        "same_authority_delegation_authorized": False,
+        "same_authority_delegation_blocker_code": "A2A_RUNTIME_UNAVAILABLE_WITHOUT_TASK_LOCAL_AUTHORITY",
+        "same_authority_delegation_blocker_detail": (
+            "No canonical OpenCode/A2A dispatcher is available; task-local delegation requires "
+            "a separate 01AH-scoped authority that still cannot activate live lineage."
+        ),
+        "opencode_runtime_dispatcher_found": False,
+        "delegate_task_runtime_kind": "local_subagent_not_opencode_a2a",
+        "live_lineage_activation_authorized": False,
+        "live_lineage_activation_status": "blocked_requires_separate_authority",
+        "live_lineage_activation_blocker_code": "LIVE_LINEAGE_ACTIVATION_AUTHORITY_GAP",
+        "live_lineage_activation_blocker_detail": (
+            f"{projection['ticket_id']} live lineage activation, retry execution, and run creation "
+            "require separate human/runtime authority."
+        ),
+        "human_smoke_marker": PEPPER_LEGACY_GOVERNED_AUTONOMY_READY_MARKER,
+    })
+    for key, value in compatibility_expected.items():
+        if record.get(key) != value:
+            _raise_governed_autonomy_continuation_authority_mismatch(
+                record=record,
+                current_reference=None,
+                reason="legacy_activation_field_mismatch",
+                detail={"field": key},
+            )
+    if record.get("requested_action") != "record_governed_autonomy_activation_status":
+        raise ProductRuntimeConflict("legacy governed-autonomy activation action is invalid")
+    if record.get("same_authority_subset") != same_authority:
+        _raise_governed_autonomy_continuation_authority_mismatch(
+            record=record,
+            current_reference=None,
+            reason="legacy_activation_same_authority_subset_mismatch",
+        )
+    expected_gap_sha = gap["gap_SHA256"] if gap is not None else None
+    if record.get("capability_gap_SHA256") != expected_gap_sha or record.get("capability_gap_reference") != gap:
+        _raise_governed_autonomy_continuation_authority_mismatch(
+            record=record,
+            current_reference=None,
+            reason="legacy_activation_capability_gap_mismatch",
+        )
+    expected_lineage_sha = lineage["lineage_SHA256"] if lineage is not None else None
+    if (
+        record.get("continuation_lineage_SHA256") != expected_lineage_sha
+        or record.get("continuation_lineage_reference") != lineage
+    ):
+        _raise_governed_autonomy_continuation_authority_mismatch(
+            record=record,
+            current_reference=None,
+            reason="legacy_activation_continuation_lineage_mismatch",
+        )
+    try:
+        current_reference = _derive_current_governed_autonomy_authority_reference(projection)
+    except Exception as exc:
+        _raise_governed_autonomy_continuation_authority_mismatch(
+            record=record,
+            current_reference=None,
+            reason="current_backend_authority_unavailable",
+            detail=_safe_text(exc, limit=300),
+        )
+    if envelope_reference != current_reference:
+        _raise_governed_autonomy_continuation_authority_mismatch(
+            record=record,
+            current_reference=current_reference,
+            reason="current_backend_authority_changed",
+        )
+
+
+def _governed_autonomy_activation_effective_projection(record: dict[str, Any]) -> dict[str, Any]:
+    if _governed_autonomy_activation_has_legacy_runtime_limit(record):
+        return {
+            "governed_autonomy_activation_origin": "legacy_compatible_human_activation",
+            "legacy_activation_compatibility_applied": True,
+            "historical_activation_record_preserved": True,
+            "historical_runtime_limitation_classification": "LEGACY_ACTIVATION_RUNTIME_CAPABILITY_LIMITATION",
+            "effective_live_lineage_activation_authorized": True,
+            "additional_human_activation_required": False,
+            "authority_revalidated": True,
+            "same_authority_delegation_status": "canonical_hermes_delegate_task_available_with_parent_agent",
+            "same_authority_delegation_authorized": True,
+            "same_authority_delegation_blocker_code": None,
+            "same_authority_delegation_blocker_detail": (
+                "Canonical Hermes delegate_task can run a bounded same-authority child when "
+                "the tool invocation provides parent_agent context; otherwise continuation stops."
+            ),
+            "opencode_runtime_dispatcher_found": True,
+            "delegate_task_runtime_kind": "canonical_hermes_delegate_task",
+            "live_lineage_activation_authorized": True,
+            "live_lineage_activation_status": "active_authority_ready_for_continuation",
+            "live_lineage_activation_blocker_code": None,
+            "live_lineage_activation_blocker_detail": (
+                "Legacy human activation is preserved; current backend-derived authority has "
+                "been revalidated without expanding scope."
+            ),
+            "historical_live_lineage_activation_authorized": record.get("live_lineage_activation_authorized"),
+            "historical_live_lineage_activation_status": record.get("live_lineage_activation_status"),
+            "historical_live_lineage_activation_blocker_code": record.get(
+                "live_lineage_activation_blocker_code"
+            ),
+        }
+    return {
+        "governed_autonomy_activation_origin": "current_human_activation",
+        "legacy_activation_compatibility_applied": False,
+        "historical_activation_record_preserved": False,
+        "historical_runtime_limitation_classification": None,
+        "effective_live_lineage_activation_authorized": bool(
+            record.get("live_lineage_activation_authorized")
+        ),
+        "additional_human_activation_required": False,
+        "authority_revalidated": True,
+        "same_authority_delegation_status": record.get("same_authority_delegation_status"),
+        "same_authority_delegation_authorized": record.get("same_authority_delegation_authorized"),
+        "same_authority_delegation_blocker_code": record.get("same_authority_delegation_blocker_code"),
+        "same_authority_delegation_blocker_detail": record.get("same_authority_delegation_blocker_detail"),
+        "opencode_runtime_dispatcher_found": record.get("opencode_runtime_dispatcher_found"),
+        "delegate_task_runtime_kind": record.get("delegate_task_runtime_kind"),
+        "live_lineage_activation_authorized": record.get("live_lineage_activation_authorized"),
+        "live_lineage_activation_status": record.get("live_lineage_activation_status"),
+        "live_lineage_activation_blocker_code": record.get("live_lineage_activation_blocker_code"),
+        "live_lineage_activation_blocker_detail": record.get("live_lineage_activation_blocker_detail"),
+        "historical_live_lineage_activation_authorized": record.get("live_lineage_activation_authorized"),
+        "historical_live_lineage_activation_status": record.get("live_lineage_activation_status"),
+        "historical_live_lineage_activation_blocker_code": record.get(
+            "live_lineage_activation_blocker_code"
+        ),
+    }
+
+
 def _append_authority_history(path: Path, record: dict[str, Any], *, reason: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     entry = {
@@ -3246,9 +3474,19 @@ def validate_governed_autonomy_activation_record(
     projection = projection_record if projection_record is not None else _load_current_projection_record()
     _validate_execution_start_authority(projection)
     _binding, identity = _current_ticket_identity_fields(projection)
-    envelope_reference = _validated_governed_autonomy_envelope_reference(
-        record.get("governed_autonomy_envelope_reference")
-    )
+    try:
+        envelope_reference = _validated_governed_autonomy_envelope_reference(
+            record.get("governed_autonomy_envelope_reference")
+        )
+    except Exception as exc:
+        if _governed_autonomy_activation_has_legacy_runtime_limit(record):
+            _raise_governed_autonomy_continuation_authority_mismatch(
+                record=record,
+                current_reference=None,
+                reason="legacy_activation_envelope_reference_invalid",
+                detail=_safe_text(exc, limit=300),
+            )
+        raise
     budget_reference = _validated_governed_autonomy_budget_reference(
         record.get("governed_autonomy_budget")
     )
@@ -3259,6 +3497,13 @@ def validate_governed_autonomy_activation_record(
         envelope_reference,
     )
     if not same_authority["same_authority"]:
+        if _governed_autonomy_activation_has_legacy_runtime_limit(record):
+            _raise_governed_autonomy_continuation_authority_mismatch(
+                record=record,
+                current_reference=None,
+                reason="legacy_activation_same_authority_subset_mismatch",
+                detail=same_authority,
+            )
         raise ProductRuntimeAuthorityMismatch(
             "governed-autonomy envelope authority mismatch",
             diagnostics=same_authority,
@@ -3270,6 +3515,12 @@ def validate_governed_autonomy_activation_record(
     if record.get("continuation_lineage") is not None:
         raise ProductRuntimeConflict("governed-autonomy activation record must store lineage reference only")
     if record.get("backend_derived_live_authority_reference") != envelope_reference:
+        if _governed_autonomy_activation_has_legacy_runtime_limit(record):
+            _raise_governed_autonomy_continuation_authority_mismatch(
+                record=record,
+                current_reference=None,
+                reason="legacy_activation_backend_authority_reference_mismatch",
+            )
         raise ProductRuntimeConflict("governed-autonomy backend authority reference mismatch")
     gap_payload = record.get("capability_gap_reference")
     gap = _validated_governed_autonomy_gap_reference(gap_payload) if gap_payload is not None else None
@@ -3326,19 +3577,33 @@ def validate_governed_autonomy_activation_record(
         "auto_rollback": False,
         "human_smoke_marker": PEPPER_GOVERNED_AUTONOMY_READY_MARKER,
     }
-    for key, value in expected.items():
-        if record.get(key) != value:
-            raise ProductRuntimeConflict(f"governed-autonomy activation record {key} mismatch")
+    expected_gap_sha = gap["gap_SHA256"] if gap is not None else None
+    expected_lineage_sha = lineage["lineage_SHA256"] if lineage is not None else None
+    mismatched_fields = [key for key, value in expected.items() if record.get(key) != value]
+    legacy_candidate = bool(mismatched_fields) and _governed_autonomy_activation_has_legacy_runtime_limit(record)
+    if legacy_candidate:
+        _validate_governed_autonomy_legacy_activation_compatibility(
+            record=record,
+            projection=projection,
+            expected=expected,
+            envelope_reference=envelope_reference,
+            same_authority=same_authority,
+            gap=gap,
+            lineage=lineage,
+        )
+        return record
+    if mismatched_fields:
+        raise ProductRuntimeConflict(
+            f"governed-autonomy activation record {mismatched_fields[0]} mismatch"
+        )
     if record.get("same_authority_subset") != same_authority:
         raise ProductRuntimeConflict("governed-autonomy same-authority subset mismatch")
     if record.get("governed_autonomy_envelope_reference") != envelope_reference:
         raise ProductRuntimeConflict("governed-autonomy envelope reference mismatch")
-    expected_gap_sha = gap["gap_SHA256"] if gap is not None else None
     if record.get("capability_gap_SHA256") != expected_gap_sha:
         raise ProductRuntimeConflict("governed-autonomy capability gap digest mismatch")
     if record.get("capability_gap_reference") != gap:
         raise ProductRuntimeConflict("governed-autonomy capability gap reference mismatch")
-    expected_lineage_sha = lineage["lineage_SHA256"] if lineage is not None else None
     if record.get("continuation_lineage_SHA256") != expected_lineage_sha:
         raise ProductRuntimeConflict("governed-autonomy continuation digest mismatch")
     if record.get("continuation_lineage_reference") != lineage:
@@ -3416,11 +3681,15 @@ def validate_governed_autonomy_runtime_state_record(
         "Git_mutation": False,
         "auto_retry": False,
         "auto_rollback": False,
-        "human_smoke_marker": PEPPER_GOVERNED_AUTONOMY_READY_MARKER,
     }
     for key, value in expected.items():
         if record.get(key) != value:
             raise ProductRuntimeConflict(f"governed-autonomy runtime state {key} mismatch")
+    if record.get("human_smoke_marker") not in {
+        PEPPER_GOVERNED_AUTONOMY_READY_MARKER,
+        PEPPER_LEGACY_GOVERNED_AUTONOMY_READY_MARKER,
+    }:
+        raise ProductRuntimeConflict("governed-autonomy runtime state human_smoke_marker mismatch")
     if record.get("runtime_decision") not in _GOVERNED_AUTONOMY_RUNTIME_DECISIONS:
         raise ProductRuntimeConflict("governed-autonomy runtime decision is invalid")
     for key in (
@@ -5131,6 +5400,18 @@ def _governed_autonomy_text_has_activation_intent(normalized: str) -> bool:
     )
 
 
+def _governed_autonomy_text_has_denial_intent(normalized: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(?:do not authorize|don'?t authorize|not authorized|not authorize|"
+            r"deny|denied|reject|rejected|revoke|revoked|"
+            r"no autorizo|no autorizar|no autorizado|rechazo|rechazar|"
+            r"revoco|revocar|deniego|denegar)\b",
+            normalized,
+        )
+    )
+
+
 def _validate_governed_autonomy_activation_request_text(
     value: str,
     *,
@@ -5144,6 +5425,8 @@ def _validate_governed_autonomy_activation_request_text(
         raise ProductRuntimeDecisionFailed("governed autonomy activation text must not be a question")
     if _authorization_text_is_ambiguous(normalized):
         raise ProductRuntimeDecisionFailed("governed autonomy activation text is ambiguous")
+    if _governed_autonomy_text_has_denial_intent(normalized):
+        raise ProductRuntimeDecisionFailed("governed autonomy activation text must not deny autonomy")
     mentioned_ticket_ids = _mentioned_authorization_ticket_ids(normalized)
     if ticket_id.upper() not in mentioned_ticket_ids:
         raise ProductRuntimeDecisionFailed(
@@ -9603,6 +9886,7 @@ def _governed_autonomy_activation_operational_result(
     idempotent_replay: bool,
 ) -> dict[str, Any]:
     task_visibility, runs = _governed_autonomy_kanban_visibility(record)
+    effective = _governed_autonomy_activation_effective_projection(record)
     current_side_effects = {
         "dispatch_performed": False,
         "Kanban_dispatch": False,
@@ -9629,6 +9913,25 @@ def _governed_autonomy_activation_operational_result(
         "WorkPacket_compilation_count": record["WorkPacket_compilation_count"],
         "activation_action_SHA256": record["activation_action_SHA256"],
         "governed_autonomy_activation_recorded": True,
+        "governed_autonomy_activation_origin": effective[
+            "governed_autonomy_activation_origin"
+        ],
+        "legacy_activation_compatibility_applied": effective[
+            "legacy_activation_compatibility_applied"
+        ],
+        "historical_activation_record_preserved": effective[
+            "historical_activation_record_preserved"
+        ],
+        "historical_runtime_limitation_classification": effective[
+            "historical_runtime_limitation_classification"
+        ],
+        "effective_live_lineage_activation_authorized": effective[
+            "effective_live_lineage_activation_authorized"
+        ],
+        "additional_human_activation_required": effective[
+            "additional_human_activation_required"
+        ],
+        "authority_revalidated": effective["authority_revalidated"],
         "governed_autonomy_status": record["governed_autonomy_status"],
         "governed_autonomy_policy_id": record["governed_autonomy_policy_id"],
         "governed_autonomy_envelope_SHA256": record["governed_autonomy_envelope_SHA256"],
@@ -9644,16 +9947,35 @@ def _governed_autonomy_activation_operational_result(
         "same_authority_subset_validated": record["same_authority_subset_validated"],
         "same_authority_subset": record["same_authority_subset"],
         "same_authority_delegation_policy_id": record["same_authority_delegation_policy_id"],
-        "same_authority_delegation_status": record["same_authority_delegation_status"],
-        "same_authority_delegation_authorized": record["same_authority_delegation_authorized"],
-        "same_authority_delegation_blocker_code": record["same_authority_delegation_blocker_code"],
-        "same_authority_delegation_blocker_detail": record["same_authority_delegation_blocker_detail"],
-        "opencode_runtime_dispatcher_found": record["opencode_runtime_dispatcher_found"],
-        "delegate_task_runtime_kind": record["delegate_task_runtime_kind"],
-        "live_lineage_activation_authorized": record["live_lineage_activation_authorized"],
-        "live_lineage_activation_status": record["live_lineage_activation_status"],
-        "live_lineage_activation_blocker_code": record["live_lineage_activation_blocker_code"],
-        "live_lineage_activation_blocker_detail": record["live_lineage_activation_blocker_detail"],
+        "same_authority_delegation_status": effective["same_authority_delegation_status"],
+        "same_authority_delegation_authorized": effective[
+            "same_authority_delegation_authorized"
+        ],
+        "same_authority_delegation_blocker_code": effective[
+            "same_authority_delegation_blocker_code"
+        ],
+        "same_authority_delegation_blocker_detail": effective[
+            "same_authority_delegation_blocker_detail"
+        ],
+        "opencode_runtime_dispatcher_found": effective["opencode_runtime_dispatcher_found"],
+        "delegate_task_runtime_kind": effective["delegate_task_runtime_kind"],
+        "live_lineage_activation_authorized": effective["live_lineage_activation_authorized"],
+        "live_lineage_activation_status": effective["live_lineage_activation_status"],
+        "live_lineage_activation_blocker_code": effective[
+            "live_lineage_activation_blocker_code"
+        ],
+        "live_lineage_activation_blocker_detail": effective[
+            "live_lineage_activation_blocker_detail"
+        ],
+        "historical_live_lineage_activation_authorized": effective[
+            "historical_live_lineage_activation_authorized"
+        ],
+        "historical_live_lineage_activation_status": effective[
+            "historical_live_lineage_activation_status"
+        ],
+        "historical_live_lineage_activation_blocker_code": effective[
+            "historical_live_lineage_activation_blocker_code"
+        ],
         "current_invocation_side_effects": current_side_effects,
         "kanban_board_slug": record["kanban_board_slug"],
         "kanban_task_id": record["kanban_task_id"],
@@ -11890,6 +12212,25 @@ def _current_ticket_governed_autonomy_overlay(
         "source_system": result["source_system"],
         "policy_id": result["policy_id"],
         "activation_action_SHA256": result["activation_action_SHA256"],
+        "governed_autonomy_activation_origin": result[
+            "governed_autonomy_activation_origin"
+        ],
+        "legacy_activation_compatibility_applied": result[
+            "legacy_activation_compatibility_applied"
+        ],
+        "historical_activation_record_preserved": result[
+            "historical_activation_record_preserved"
+        ],
+        "historical_runtime_limitation_classification": result[
+            "historical_runtime_limitation_classification"
+        ],
+        "effective_live_lineage_activation_authorized": result[
+            "effective_live_lineage_activation_authorized"
+        ],
+        "additional_human_activation_required": result[
+            "additional_human_activation_required"
+        ],
+        "authority_revalidated": result["authority_revalidated"],
         "governed_autonomy_status": result["governed_autonomy_status"],
         "governed_autonomy_policy_id": result["governed_autonomy_policy_id"],
         "governed_autonomy_envelope_SHA256": result["governed_autonomy_envelope_SHA256"],
@@ -11912,6 +12253,15 @@ def _current_ticket_governed_autonomy_overlay(
         "live_lineage_activation_authorized": result["live_lineage_activation_authorized"],
         "live_lineage_activation_status": result["live_lineage_activation_status"],
         "live_lineage_activation_blocker_code": result["live_lineage_activation_blocker_code"],
+        "historical_live_lineage_activation_authorized": result[
+            "historical_live_lineage_activation_authorized"
+        ],
+        "historical_live_lineage_activation_status": result[
+            "historical_live_lineage_activation_status"
+        ],
+        "historical_live_lineage_activation_blocker_code": result[
+            "historical_live_lineage_activation_blocker_code"
+        ],
         "governed_autonomy_runtime_status": (
             runtime_state["governed_autonomy_runtime_status"]
             if runtime_state is not None
@@ -11981,6 +12331,18 @@ def _current_ticket_governed_autonomy_overlay(
     overlay = {
         "governed_autonomy_activation_recorded": True,
         "governed_autonomy_status": result["governed_autonomy_status"],
+        "governed_autonomy_activation_origin": result[
+            "governed_autonomy_activation_origin"
+        ],
+        "legacy_activation_compatibility_applied": result[
+            "legacy_activation_compatibility_applied"
+        ],
+        "historical_activation_record_preserved": result[
+            "historical_activation_record_preserved"
+        ],
+        "effective_live_lineage_activation_authorized": result[
+            "effective_live_lineage_activation_authorized"
+        ],
         "governed_autonomy_envelope_SHA256": result["governed_autonomy_envelope_SHA256"],
         "backend_derived_live_authority_SHA256": result[
             "backend_derived_live_authority_SHA256"

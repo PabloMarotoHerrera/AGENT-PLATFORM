@@ -665,6 +665,33 @@ def _write_governed_autonomy_activation_record_for_test(pr, record: dict) -> Non
     )
 
 
+def _legacy_runtime_limited_governed_autonomy_activation_record(pr, record: dict) -> dict:
+    legacy = json.loads(json.dumps(record))
+    ticket_id = legacy["ticket_id"]
+    legacy.update({
+        "same_authority_delegation_status": "blocked_metadata_only",
+        "same_authority_delegation_authorized": False,
+        "same_authority_delegation_blocker_code": "A2A_RUNTIME_UNAVAILABLE_WITHOUT_TASK_LOCAL_AUTHORITY",
+        "same_authority_delegation_blocker_detail": (
+            "No canonical OpenCode/A2A dispatcher is available; task-local delegation requires "
+            "a separate 01AH-scoped authority that still cannot activate live lineage."
+        ),
+        "opencode_runtime_dispatcher_found": False,
+        "delegate_task_runtime_kind": "local_subagent_not_opencode_a2a",
+        "live_lineage_activation_authorized": False,
+        "live_lineage_activation_status": "blocked_requires_separate_authority",
+        "live_lineage_activation_blocker_code": "LIVE_LINEAGE_ACTIVATION_AUTHORITY_GAP",
+        "live_lineage_activation_blocker_detail": (
+            f"{ticket_id} live lineage activation, retry execution, and run creation "
+            "require separate human/runtime authority."
+        ),
+        "human_smoke_marker": pr.PEPPER_LEGACY_GOVERNED_AUTONOMY_READY_MARKER,
+    })
+    legacy.pop("activation_action_SHA256", None)
+    legacy["activation_action_SHA256"] = pr._governed_autonomy_activation_record_digest(legacy)
+    return legacy
+
+
 def _queued_workflow_for_projection(projected: dict) -> dict:
     authority = _projection_authority_record(projected)
     generation = bridge.load_generation_record(ticket_id=projected["ticket_id"])
@@ -4801,6 +4828,11 @@ def test_current_p18_9_1_governed_autonomy_activation_is_status_only(
     assert activation["success"] is True
     assert activation["governed_autonomy_status"] == "activation_recorded_live_lineage_blocked"
     assert activation["governed_autonomy_activation_recorded"] is True
+    assert activation["governed_autonomy_activation_origin"] == "current_human_activation"
+    assert activation["legacy_activation_compatibility_applied"] is False
+    assert activation["historical_activation_record_preserved"] is False
+    assert activation["effective_live_lineage_activation_authorized"] is True
+    assert activation["additional_human_activation_required"] is False
     assert activation["same_authority_subset_validated"] is True
     assert activation["authority_derivation_source"] == "server_side_current_ticket_projection_and_kanban_run"
     assert activation["01AH_envelope_lifecycle_classification"] == "01AH_ENVELOPE_WRONG_LIFECYCLE_PHASE"
@@ -4862,6 +4894,7 @@ def test_current_p18_9_1_governed_autonomy_activation_is_status_only(
     assert workflow["governed_autonomy"]["activation_action_SHA256"] == activation[
         "activation_action_SHA256"
     ]
+    assert workflow["governed_autonomy"]["legacy_activation_compatibility_applied"] is False
     assert workflow["governed_autonomy"]["same_authority_delegation_status"] == (
         "canonical_hermes_delegate_task_available_with_parent_agent"
     )
@@ -4872,6 +4905,7 @@ def test_current_p18_9_1_governed_autonomy_activation_is_status_only(
         ticket_id="P18.9.1",
     )
     assert status["idempotent_replay"] is True
+    assert status["legacy_activation_compatibility_applied"] is False
     assert status["activation_action_SHA256"] == activation["activation_action_SHA256"]
     assert status["runs"][-1]["id"] == run_4
 
@@ -4908,6 +4942,253 @@ def test_current_p18_9_1_governed_autonomy_activation_is_status_only(
         assert all(run.id != 5 for run in runs)
     finally:
         conn.close()
+
+
+def test_current_p18_9_1_legacy_governed_autonomy_activation_promotes_effective_authority(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, projected, authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
+    )
+
+    from hermes_cli import kanban_db
+
+    run_4 = _force_p18_9_1_blocked_run_4(pr, kanban_db, projected, monkeypatch)
+    _activate_p18_9_1_governed_autonomy_for_test(pr, monkeypatch)
+    current_record = pr.load_current_ticket_governed_autonomy_activation_record(
+        projection_record=authority,
+    )
+    assert current_record is not None
+    legacy_record = _legacy_runtime_limited_governed_autonomy_activation_record(
+        pr,
+        current_record,
+    )
+    _write_governed_autonomy_activation_record_for_test(pr, legacy_record)
+    path = pr.governed_autonomy_activation_record_path_for_ticket("P18.9.1")
+    preserved_bytes = path.read_bytes()
+
+    loaded = pr.load_current_ticket_governed_autonomy_activation_record(
+        projection_record=authority,
+    )
+    assert loaded is not None
+    assert loaded["activation_action_SHA256"] == legacy_record["activation_action_SHA256"]
+    assert loaded["live_lineage_activation_authorized"] is False
+    assert loaded["live_lineage_activation_status"] == "blocked_requires_separate_authority"
+    assert loaded["live_lineage_activation_blocker_code"] == "LIVE_LINEAGE_ACTIVATION_AUTHORITY_GAP"
+
+    status = pr.get_current_ticket_governed_autonomy_status(
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+    assert status["activation_action_SHA256"] == legacy_record["activation_action_SHA256"]
+    assert status["governed_autonomy_activation_origin"] == "legacy_compatible_human_activation"
+    assert status["legacy_activation_compatibility_applied"] is True
+    assert status["historical_activation_record_preserved"] is True
+    assert status["historical_runtime_limitation_classification"] == (
+        "LEGACY_ACTIVATION_RUNTIME_CAPABILITY_LIMITATION"
+    )
+    assert status["effective_live_lineage_activation_authorized"] is True
+    assert status["live_lineage_activation_authorized"] is True
+    assert status["historical_live_lineage_activation_authorized"] is False
+    assert status["live_lineage_activation_status"] == "active_authority_ready_for_continuation"
+    assert status["additional_human_activation_required"] is False
+    assert status["authority_revalidated"] is True
+    assert status["backend_derived_live_authority_SHA256"] == (
+        legacy_record["backend_derived_live_authority_SHA256"]
+    )
+    assert status["runs"][-1]["id"] == run_4
+
+    workflow = pr.build_workflow_control_snapshot()
+    assert workflow["next_action"]["id"] == "CONTINUE_P18_9_1_GOVERNED_AUTONOMY"
+    assert workflow["governed_autonomy_live_lineage_activation_authorized"] is True
+    assert workflow["effective_live_lineage_activation_authorized"] is True
+    assert workflow["governed_autonomy"]["legacy_activation_compatibility_applied"] is True
+    assert workflow["governed_autonomy"]["historical_activation_record_preserved"] is True
+    assert workflow["governed_autonomy"]["same_authority_delegation_authorized"] is True
+
+    replay = pr.activate_current_ticket_governed_autonomy(
+        human_request_text=legacy_record["human_request_text"],
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+        next_action_id="RECOVER_P18_9_1_EXECUTION",
+    )
+    assert replay["idempotent_replay"] is True
+    assert replay["activation_action_SHA256"] == legacy_record["activation_action_SHA256"]
+    assert path.read_bytes() == preserved_bytes
+
+
+def test_current_p18_9_1_direct_continuation_accepts_legacy_compatible_activation(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, projected, authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
+    )
+
+    from hermes_cli import kanban_db
+
+    run_4 = _force_p18_9_1_blocked_run_4(pr, kanban_db, projected, monkeypatch)
+    _activate_p18_9_1_governed_autonomy_for_test(pr, monkeypatch)
+    current_record = pr.load_current_ticket_governed_autonomy_activation_record(
+        projection_record=authority,
+    )
+    assert current_record is not None
+    legacy_record = _legacy_runtime_limited_governed_autonomy_activation_record(
+        pr,
+        current_record,
+    )
+    _write_governed_autonomy_activation_record_for_test(pr, legacy_record)
+    path = pr.governed_autonomy_activation_record_path_for_ticket("P18.9.1")
+    preserved_bytes = path.read_bytes()
+
+    _patch_synthetic_scratch_materialization(monkeypatch, pr)
+    monkeypatch.setattr(kanban_db, "_pid_alive", lambda pid: int(pid) == 6707)
+    result = pr.continue_current_ticket_governed_autonomy(
+        runtime_goal="Continue P18.9.1 from the legacy compatible human activation.",
+        strategy="DIRECT",
+        spawn_fn=lambda _task, _workspace, board=None, env_overlay=None: 6707,
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+
+    assert result["runtime_decision"] == "DIRECT"
+    assert result["governed_autonomy_runtime_status"] == "direct_execution_continuation_started"
+    assert result["kanban_run_created"] is True
+    assert result["kanban_run_id"] == run_4 + 1
+    assert result["source_run_id"] == run_4
+    assert result["process_continuation_count"] == 1
+    assert result["legacy_human_recovery_retry_micro_gates_required"] is False
+    assert path.read_bytes() == preserved_bytes
+
+
+@pytest.mark.parametrize(
+    "human_request_text",
+    (
+        "",
+        "I do not authorize governed autonomy for P18.9.1.",
+    ),
+)
+def test_current_p18_9_1_legacy_governed_autonomy_activation_rejects_invalid_human_authority(
+    projection_home,
+    monkeypatch,
+    human_request_text,
+) -> None:
+    pr, projected, authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
+    )
+
+    from hermes_cli import kanban_db
+
+    _force_p18_9_1_blocked_run_4(pr, kanban_db, projected, monkeypatch)
+    _activate_p18_9_1_governed_autonomy_for_test(pr, monkeypatch)
+    current_record = pr.load_current_ticket_governed_autonomy_activation_record(
+        projection_record=authority,
+    )
+    assert current_record is not None
+    legacy_record = _legacy_runtime_limited_governed_autonomy_activation_record(
+        pr,
+        current_record,
+    )
+    legacy_record["human_request_text"] = human_request_text
+    legacy_record.pop("activation_action_SHA256")
+    legacy_record["activation_action_SHA256"] = pr._governed_autonomy_activation_record_digest(
+        legacy_record
+    )
+    _write_governed_autonomy_activation_record_for_test(pr, legacy_record)
+
+    with pytest.raises(pr.ProductRuntimeConflict) as excinfo:
+        pr.load_current_ticket_governed_autonomy_activation_record(
+            projection_record=authority,
+        )
+    assert "human authorization is invalid" in str(excinfo.value)
+
+
+def test_current_p18_9_1_legacy_governed_autonomy_activation_rejects_authority_sha_mismatch(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, projected, authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
+    )
+
+    from hermes_cli import kanban_db
+
+    _force_p18_9_1_blocked_run_4(pr, kanban_db, projected, monkeypatch)
+    _activate_p18_9_1_governed_autonomy_for_test(pr, monkeypatch)
+    current_record = pr.load_current_ticket_governed_autonomy_activation_record(
+        projection_record=authority,
+    )
+    assert current_record is not None
+    legacy_record = _legacy_runtime_limited_governed_autonomy_activation_record(
+        pr,
+        current_record,
+    )
+    legacy_record["backend_derived_live_authority_SHA256"] = "f" * 64
+    legacy_record.pop("activation_action_SHA256")
+    legacy_record["activation_action_SHA256"] = pr._governed_autonomy_activation_record_digest(
+        legacy_record
+    )
+    _write_governed_autonomy_activation_record_for_test(pr, legacy_record)
+
+    with pytest.raises(pr.ProductRuntimeAuthorityMismatch) as excinfo:
+        pr.load_current_ticket_governed_autonomy_activation_record(
+            projection_record=authority,
+        )
+    assert str(excinfo.value) == "CONTINUATION_AUTHORITY_MISMATCH"
+    assert excinfo.value.diagnostics["reason"] == "legacy_activation_field_mismatch"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("ticket_spec_SHA256", "b" * 64),
+        ("work_packet_id", "WP-P18-9-1-R0001-mismatch"),
+        ("work_packet_SHA256", "c" * 64),
+        ("projection_SHA256", "d" * 64),
+        ("kanban_task_id", "t_mismatch"),
+        ("assignee_profile", "pepper-mismatched-profile"),
+        ("selected_profile", "pepper-mismatched-profile"),
+    ),
+)
+def test_current_p18_9_1_legacy_governed_autonomy_activation_rejects_scope_mismatch(
+    projection_home,
+    monkeypatch,
+    field,
+    value,
+) -> None:
+    pr, projected, authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
+    )
+
+    from hermes_cli import kanban_db
+
+    _force_p18_9_1_blocked_run_4(pr, kanban_db, projected, monkeypatch)
+    _activate_p18_9_1_governed_autonomy_for_test(pr, monkeypatch)
+    current_record = pr.load_current_ticket_governed_autonomy_activation_record(
+        projection_record=authority,
+    )
+    assert current_record is not None
+    legacy_record = _legacy_runtime_limited_governed_autonomy_activation_record(
+        pr,
+        current_record,
+    )
+    legacy_record[field] = value
+    legacy_record.pop("activation_action_SHA256")
+    legacy_record["activation_action_SHA256"] = pr._governed_autonomy_activation_record_digest(
+        legacy_record
+    )
+    _write_governed_autonomy_activation_record_for_test(pr, legacy_record)
+
+    with pytest.raises((pr.ProductRuntimeConflict, pr.ProductRuntimeAuthorityMismatch)):
+        pr.load_current_ticket_governed_autonomy_activation_record(
+            projection_record=authority,
+        )
 
 
 def test_current_p18_9_1_governed_autonomy_direct_starts_same_authority_run_5(
@@ -5628,6 +5909,7 @@ def test_current_p18_9_1_governed_autonomy_status_reconstructs_runtime_after_res
         for key, value in second["current_invocation_side_effects"].items()
         if key not in legacy_dispatch_keys
     }
+    second["human_smoke_marker"] = pr.PEPPER_LEGACY_GOVERNED_AUTONOMY_READY_MARKER
     second.pop("runtime_state_SHA256")
     second["runtime_state_SHA256"] = pr._governed_autonomy_runtime_record_digest(second)
     pr._persist_governed_autonomy_runtime_state(second)
