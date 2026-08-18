@@ -585,7 +585,7 @@ _SCHEMA = {
 }
 
 
-def _handle(args: dict[str, Any], task_id: str | None = None) -> str:
+def _handle(args: dict[str, Any], task_id: str | None = None, **_kwargs: Any) -> str:
     return workpacket_validation_tool(
         action=str(args.get("action") or "list"),
         command_id=args.get("command_id"),

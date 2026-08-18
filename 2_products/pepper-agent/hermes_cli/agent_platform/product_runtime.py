@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
+import difflib
 import hashlib
 import json
 import os
@@ -267,6 +268,46 @@ _GOVERNED_AUTONOMY_RUNTIME_DECISIONS = frozenset({
     "A2A_DELEGATION",
     "STOP_FOR_HUMAN",
 })
+_GOVERNED_AUTONOMY_STABLE_AUTHORITY_FIELDS = (
+    "authority_kind",
+    "authority_lifecycle",
+    "01AH_envelope_lifecycle_classification",
+    "policy_id",
+    "ticket_id",
+    "source_ticket_SHA256",
+    "work_packet_id",
+    "work_packet_SHA256",
+    "single_agent_result_SHA256",
+    "allocation_SHA256",
+    "profile_SHA256",
+    "projection_SHA256",
+    "approval_publication_SHA256",
+    "dependency_plan_SHA256",
+    "allowed_paths_SHA256",
+    "forbidden_paths_SHA256",
+    "validation_steps_SHA256",
+    "kanban_board_slug",
+    "kanban_task_id",
+    "assignee_profile",
+    "selected_profile",
+    "execution_profile_role",
+    "workspace_kind",
+    "live_lineage_activation_authorized",
+    "provider_dispatch_count",
+    "model_inference_count",
+    "budget",
+)
+_GOVERNED_AUTONOMY_MUTABLE_AUTHORITY_FIELDS = (
+    "envelope_SHA256",
+    "workspace_path_SHA256",
+    "source_run_id",
+    "source_run_status",
+    "source_run_outcome",
+    "source_run_profile",
+    "source_run_snapshot_SHA256",
+    "source_run_count",
+    "active_execution_count",
+)
 _GOVERNED_AUTONOMY_A2A_ALLOWED_OPERATIONS = frozenset({
     "list_directory",
     "read_file",
@@ -2642,6 +2683,106 @@ def _derive_current_governed_autonomy_authority_reference(
     return reference
 
 
+def _derive_current_governed_autonomy_stable_authority_reference(
+    projection: dict[str, Any],
+) -> dict[str, Any]:
+    from hermes_cli.agent_platform.work_packet import (
+        GOVERNED_AUTONOMY_POLICY_ID,
+        GovernedAutonomyBudget,
+    )
+
+    _validate_execution_start_authority(projection)
+    allowed_paths, forbidden_paths, validation_steps_sha = (
+        _current_work_packet_scope_for_governed_autonomy(projection)
+    )
+    return {
+        "authority_kind": "backend_derived_live_authority",
+        "authority_lifecycle": "pre_continuation_blocked_run",
+        "01AH_envelope_lifecycle_classification": "01AH_ENVELOPE_WRONG_LIFECYCLE_PHASE",
+        "policy_id": GOVERNED_AUTONOMY_POLICY_ID,
+        "ticket_id": projection["ticket_id"],
+        "source_ticket_SHA256": projection["ticket_spec_SHA256"],
+        "work_packet_id": projection["work_packet_id"],
+        "work_packet_SHA256": projection["work_packet_SHA256"],
+        "single_agent_result_SHA256": None,
+        "allocation_SHA256": None,
+        "profile_SHA256": None,
+        "projection_SHA256": projection["projection_SHA256"],
+        "approval_publication_SHA256": projection["approval_publication_SHA256"],
+        "dependency_plan_SHA256": projection["dependency_plan_SHA256"],
+        "allowed_paths_SHA256": _digest_payload(
+            "pepper-governed-autonomy-allowed-paths-sha256-v1",
+            {"allowed_paths": allowed_paths},
+        ),
+        "forbidden_paths_SHA256": _digest_payload(
+            "pepper-governed-autonomy-forbidden-paths-sha256-v1",
+            {"forbidden_paths": forbidden_paths},
+        ),
+        "validation_steps_SHA256": validation_steps_sha,
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+        "assignee_profile": projection["assignee_profile"],
+        "selected_profile": projection["selected_profile"],
+        "execution_profile_role": projection["execution_profile_role"],
+        "workspace_kind": projection["workspace_kind"],
+        "live_lineage_activation_authorized": False,
+        "provider_dispatch_count": 0,
+        "model_inference_count": 0,
+        "budget": GovernedAutonomyBudget().model_dump(mode="json"),
+    }
+
+
+def _governed_autonomy_stable_authority_reference(
+    reference: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        field: reference.get(field)
+        for field in _GOVERNED_AUTONOMY_STABLE_AUTHORITY_FIELDS
+    }
+
+
+def _governed_autonomy_stable_authority_digest(
+    reference: dict[str, Any],
+) -> str:
+    return _digest_payload(
+        "pepper-governed-autonomy-stable-authority-sha256-v1",
+        _governed_autonomy_stable_authority_reference(reference),
+    )
+
+
+def _governed_autonomy_stable_authority_comparison(
+    *,
+    projection: dict[str, Any],
+    activation_reference: dict[str, Any],
+) -> dict[str, Any]:
+    current_reference = _derive_current_governed_autonomy_stable_authority_reference(
+        projection,
+    )
+    activation_stable = _governed_autonomy_stable_authority_reference(
+        activation_reference,
+    )
+    mismatches = [
+        field
+        for field in _GOVERNED_AUTONOMY_STABLE_AUTHORITY_FIELDS
+        if activation_stable.get(field) != current_reference.get(field)
+    ]
+    return {
+        "same_authority": not mismatches,
+        "mismatches": mismatches,
+        "activation_stable_authority_SHA256": _governed_autonomy_stable_authority_digest(
+            activation_reference,
+        ),
+        "current_stable_authority_SHA256": _governed_autonomy_stable_authority_digest(
+            current_reference,
+        ),
+        "mutable_authority_fields_ignored": list(
+            _GOVERNED_AUTONOMY_MUTABLE_AUTHORITY_FIELDS,
+        ),
+        "activation_authority_SHA256": activation_reference.get("envelope_SHA256"),
+        "activation_source_run_id": activation_reference.get("source_run_id"),
+    }
+
+
 def _governed_autonomy_authority_view_from_reference(
     reference: dict[str, Any],
     *,
@@ -2666,31 +2807,160 @@ def _governed_autonomy_authority_view_from_reference(
     )
 
 
+def _governed_autonomy_owned_direct_run_id(
+    previous: dict[str, Any] | None,
+) -> int | None:
+    if not isinstance(previous, dict):
+        return None
+    if previous.get("runtime_decision") != "DIRECT":
+        return None
+    if previous.get("governed_autonomy_continuation_reason") != (
+        PEPPER_GOVERNED_AUTONOMY_INTERNAL_CONTINUATION_REASON
+    ):
+        return None
+    if not previous.get("kanban_run_created") or not previous.get("execution_started"):
+        return None
+    return _int_or_none(previous.get("kanban_run_id"))
+
+
+def _governed_autonomy_lineage_mismatch(
+    *,
+    projection: dict[str, Any],
+    activation_reference: dict[str, Any],
+    previous: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    task_visibility, runs = _governed_autonomy_kanban_visibility(projection)
+    active_runs = [run for run in runs if _execution_is_active(run)]
+    owned_run_id = _governed_autonomy_owned_direct_run_id(previous)
+    activation_source_run_id = _int_or_none(activation_reference.get("source_run_id"))
+    latest_run = runs[-1] if runs else None
+    latest_run_id = (
+        _int_or_none(latest_run.get("id"))
+        if isinstance(latest_run, dict)
+        else None
+    )
+    task_current_run_id = (
+        _int_or_none(task_visibility.get("current_run_id"))
+        if isinstance(task_visibility, dict)
+        else None
+    )
+    base = {
+        "activation_source_run_id": activation_source_run_id,
+        "owned_governed_run_id": owned_run_id,
+        "current_source_run_id": latest_run_id,
+        "current_active_run_ids": [run.get("id") for run in active_runs],
+        "task_current_run_id": task_current_run_id,
+    }
+    if active_runs:
+        active_run_ids = {_int_or_none(run.get("id")) for run in active_runs}
+        if owned_run_id is not None and active_run_ids == {owned_run_id}:
+            return None
+        return {
+            **base,
+            "reason": "unowned_active_execution_present",
+            "blocker_detail": (
+                "an active Kanban run is not owned by this governed-autonomy runtime"
+            ),
+        }
+    if task_current_run_id is not None and task_current_run_id != owned_run_id:
+        return {
+            **base,
+            "reason": "unowned_task_current_run_present",
+            "blocker_detail": "projected Kanban task has an unowned current run",
+        }
+    if (
+        latest_run_id is not None
+        and activation_source_run_id is not None
+        and latest_run_id > activation_source_run_id
+        and latest_run_id != owned_run_id
+    ):
+        return {
+            **base,
+            "reason": "newer_unowned_source_run",
+            "current_source_run_status": (
+                latest_run.get("status") if isinstance(latest_run, dict) else None
+            ),
+            "current_source_run_outcome": (
+                latest_run.get("outcome") if isinstance(latest_run, dict) else None
+            ),
+            "blocker_detail": (
+                "latest Kanban run is newer than the activation source and is not "
+                "owned by this governed-autonomy runtime"
+            ),
+        }
+    return None
+
+
 def _require_current_governed_autonomy_authority_match(
     *,
     projection: dict[str, Any],
     activation: dict[str, Any],
+    previous: dict[str, Any] | None = None,
 ) -> _BackendDerivedGovernedAutonomyAuthority:
     activation_reference = _validated_governed_autonomy_envelope_reference(
         activation.get("governed_autonomy_envelope_reference")
     )
-    current_reference = _derive_current_governed_autonomy_authority_reference(projection)
-    if activation_reference != current_reference:
+    stable_comparison = _governed_autonomy_stable_authority_comparison(
+        projection=projection,
+        activation_reference=activation_reference,
+    )
+    lineage_mismatch = _governed_autonomy_lineage_mismatch(
+        projection=projection,
+        activation_reference=activation_reference,
+        previous=previous,
+    )
+    if not stable_comparison["same_authority"] or lineage_mismatch is not None:
+        current_reference = None
+        try:
+            current_reference = _derive_current_governed_autonomy_authority_reference(
+                projection,
+            )
+        except Exception:
+            current_reference = None
         diagnostics = {
             "blocker_code": "CONTINUATION_AUTHORITY_MISMATCH",
+            "reason": (
+                "stable_authority_fields_changed"
+                if not stable_comparison["same_authority"]
+                else lineage_mismatch.get("reason")
+            ),
             "activation_authority_SHA256": activation_reference.get("envelope_SHA256"),
-            "current_authority_SHA256": current_reference.get("envelope_SHA256"),
+            "current_authority_SHA256": (
+                current_reference.get("envelope_SHA256")
+                if isinstance(current_reference, dict)
+                else None
+            ),
+            "activation_stable_authority_SHA256": stable_comparison[
+                "activation_stable_authority_SHA256"
+            ],
+            "current_stable_authority_SHA256": stable_comparison[
+                "current_stable_authority_SHA256"
+            ],
+            "stable_authority_mismatches": stable_comparison["mismatches"],
+            "mutable_authority_fields_ignored": stable_comparison[
+                "mutable_authority_fields_ignored"
+            ],
             "activation_source_run_id": activation_reference.get("source_run_id"),
-            "current_source_run_id": current_reference.get("source_run_id"),
+            "current_source_run_id": (
+                current_reference.get("source_run_id")
+                if isinstance(current_reference, dict)
+                else None
+            ),
             "activation_source_run_status": activation_reference.get("source_run_status"),
-            "current_source_run_status": current_reference.get("source_run_status"),
+            "current_source_run_status": (
+                current_reference.get("source_run_status")
+                if isinstance(current_reference, dict)
+                else None
+            ),
         }
+        if lineage_mismatch is not None:
+            diagnostics.update(lineage_mismatch)
         raise ProductRuntimeAuthorityMismatch(
             "CONTINUATION_AUTHORITY_MISMATCH",
             diagnostics=diagnostics,
         )
     return _governed_autonomy_authority_view_from_reference(
-        current_reference,
+        activation_reference,
         projection=projection,
     )
 
@@ -3135,19 +3405,31 @@ def _validate_governed_autonomy_legacy_activation_compatibility(
             reason="legacy_activation_continuation_lineage_mismatch",
         )
     try:
-        current_reference = _derive_current_governed_autonomy_authority_reference(projection)
+        stable_comparison = _governed_autonomy_stable_authority_comparison(
+            projection=projection,
+            activation_reference=envelope_reference,
+        )
     except Exception as exc:
         _raise_governed_autonomy_continuation_authority_mismatch(
             record=record,
             current_reference=None,
-            reason="current_backend_authority_unavailable",
+            reason="current_backend_stable_authority_unavailable",
             detail=_safe_text(exc, limit=300),
         )
-    if envelope_reference != current_reference:
+    if not stable_comparison["same_authority"]:
         _raise_governed_autonomy_continuation_authority_mismatch(
             record=record,
-            current_reference=current_reference,
-            reason="current_backend_authority_changed",
+            current_reference={
+                "ticket_id": projection.get("ticket_id"),
+                "work_packet_id": projection.get("work_packet_id"),
+                "work_packet_SHA256": projection.get("work_packet_SHA256"),
+                "projection_SHA256": projection.get("projection_SHA256"),
+                "envelope_SHA256": stable_comparison.get(
+                    "current_stable_authority_SHA256"
+                ),
+            },
+            reason="current_backend_stable_authority_changed",
+            detail=stable_comparison,
         )
 
 
@@ -4487,6 +4769,13 @@ def get_current_ticket_governed_autonomy_status(
             "governed_autonomy_runtime": None,
         })
         return result
+    terminal_reconciliation = _governed_autonomy_runtime_terminal_reconciliation(
+        runtime_state,
+    )
+    runtime_summary = _governed_autonomy_runtime_summary(
+        runtime_state,
+        terminal_reconciliation=terminal_reconciliation,
+    )
     result.update({
         "governed_autonomy_runtime_status": runtime_state["governed_autonomy_runtime_status"],
         "runtime_decision": runtime_state["runtime_decision"],
@@ -4521,9 +4810,12 @@ def get_current_ticket_governed_autonomy_status(
         "live_autonomous_continuation_marker": runtime_state.get(
             "live_autonomous_continuation_marker"
         ),
-        "governed_autonomy_runtime": _governed_autonomy_runtime_summary(runtime_state),
+        "governed_autonomy_runtime": runtime_summary,
     })
-    return result
+    return _governed_autonomy_apply_terminal_reconciliation(
+        result,
+        terminal_reconciliation,
+    )
 
 
 def activate_current_ticket_governed_autonomy(
@@ -4557,13 +4849,22 @@ def activate_current_ticket_governed_autonomy(
         ticket_id=binding.ticket_id,
     )
 
+    existing = load_current_ticket_governed_autonomy_activation_record(
+        projection_record=projection,
+    )
+    if existing is not None:
+        if (
+            existing.get("human_request_text") == request.human_request_text
+            and existing.get("authorizer_id") == request.authorizer_id
+        ):
+            return _governed_autonomy_activation_operational_result(
+                existing,
+                idempotent_replay=True,
+            )
     record = _build_governed_autonomy_activation_record(
         request=request,
         projection=projection,
         workflow=workflow,
-    )
-    existing = load_current_ticket_governed_autonomy_activation_record(
-        projection_record=projection,
     )
     if existing is not None:
         existing_cycle = _governed_autonomy_activation_cycle(existing)
@@ -4651,6 +4952,11 @@ def continue_current_ticket_governed_autonomy(
         projection_record=projection,
         activation_record=activation,
     )
+    authority = _require_current_governed_autonomy_authority_match(
+        projection=projection,
+        activation=activation,
+        previous=previous,
+    )
     if _governed_autonomy_active_execution_replay(previous, projection):
         result = _governed_autonomy_runtime_operational_result(
             previous,
@@ -4660,11 +4966,19 @@ def continue_current_ticket_governed_autonomy(
         result["non_consuming_observation"] = True
         result["observation_status"] = "governed_autonomy_execution_already_active"
         return result
-    authority = _require_current_governed_autonomy_authority_match(
-        projection=projection,
-        activation=activation,
-    )
     decision = _select_governed_autonomy_runtime_decision(request)
+    terminal_reconciliation = _governed_autonomy_runtime_terminal_reconciliation(
+        previous,
+    )
+    if terminal_reconciliation is not None and decision == "DIRECT":
+        result = _governed_autonomy_runtime_operational_result(
+            previous,
+            activation_record=activation,
+            idempotent_replay=True,
+        )
+        result["non_consuming_observation"] = True
+        result["observation_status"] = "governed_autonomy_execution_terminal_reconciled"
+        return result
     provider_readiness = _executor_provider_readiness(str(projection["assignee_profile"]))
     if provider_readiness.get("ok") is not True:
         record = _build_governed_autonomy_runtime_stop_record(
@@ -7566,6 +7880,11 @@ def _governed_autonomy_runtime_record_consumed_process(
         return True
     if record.get("kanban_run_created") or record.get("lineage_dispatch_performed"):
         return True
+    if (
+        record.get("human_smoke_marker") == PEPPER_GOVERNED_AUTONOMY_READY_MARKER
+        and _runtime_counter(record, "process_continuation_count") > 0
+    ):
+        return True
     return str(record.get("runtime_decision") or "") == "TASK_LOCAL_SELF_EXTENSION" and str(
         record.get("governed_autonomy_runtime_status") or ""
     ).startswith("task_local_self_extension")
@@ -7806,6 +8125,396 @@ def _governed_autonomy_active_execution_replay(
         if _int_or_none(run.get("id")) == run_id:
             return _execution_is_active(run)
     return False
+
+
+def _governed_autonomy_materialization_manifest(
+    workspace_path: object,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    if not workspace_path:
+        return None, None
+    manifest_path = Path(str(workspace_path)) / PEPPER_SCRATCH_SOURCE_MATERIALIZATION_MANIFEST
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None, {
+            "available": False,
+            "manifest_path": str(manifest_path),
+        }
+    if not isinstance(manifest, dict):
+        return None, {
+            "available": False,
+            "manifest_path": str(manifest_path),
+        }
+    reference = {
+        "available": True,
+        "manifest_path": _safe_text(
+            manifest.get("manifest_path") or manifest_path,
+            limit=500,
+        ),
+    }
+    for key in (
+        "policy_id",
+        "source_materialized",
+        "copied_file_count",
+        "dependency_substrate_materialized",
+        "dependency_substrate_kind",
+        "dependency_substrate_copied_file_count",
+        "dependency_substrate_copied_directory_count",
+        "dependency_install_performed",
+        "canonical_package_lock_materialized",
+        "missing_source_paths",
+        "product_diff_excluded_roots",
+    ):
+        if key in manifest:
+            reference[key] = manifest.get(key)
+    canonical_lock_sha = manifest.get("canonical_package_lock_SHA256")
+    if not canonical_lock_sha:
+        substrates = manifest.get("dependency_substrates")
+        if isinstance(substrates, list):
+            for substrate in substrates:
+                if isinstance(substrate, dict) and substrate.get(
+                    "canonical_package_lock_SHA256"
+                ):
+                    canonical_lock_sha = substrate.get("canonical_package_lock_SHA256")
+                    break
+    reference["canonical_package_lock_SHA256"] = canonical_lock_sha
+    return manifest, reference
+
+
+def _governed_autonomy_candidate_files_for_pattern(
+    root: Path,
+    pattern: object,
+) -> set[str]:
+    try:
+        rel_pattern = _normalize_materialization_relative_path(str(pattern or ""))
+    except ProductRuntimeConflict:
+        return set()
+    matches: set[str] = set()
+    try:
+        if rel_pattern.endswith("/**"):
+            base = root / rel_pattern[:-3]
+            if base.is_file():
+                return {base.relative_to(root).as_posix()}
+            if base.is_dir():
+                for path in base.rglob("*"):
+                    if path.is_file():
+                        matches.add(path.relative_to(root).as_posix())
+            return matches
+        if _contains_glob_pattern(rel_pattern):
+            for path in root.glob(rel_pattern):
+                if path.is_file():
+                    matches.add(path.relative_to(root).as_posix())
+            return matches
+        path = root / rel_pattern
+        if path.is_file():
+            return {rel_pattern}
+        if path.is_dir():
+            for child in path.rglob("*"):
+                if child.is_file():
+                    matches.add(child.relative_to(root).as_posix())
+    except (OSError, RuntimeError, ValueError):
+        return matches
+    return matches
+
+
+def _governed_autonomy_candidate_diff_excluded(
+    relative_path: str,
+    *,
+    excluded_roots: tuple[str, ...],
+) -> bool:
+    rel = str(relative_path or "").replace("\\", "/").strip("/")
+    if not rel:
+        return True
+    try:
+        if _should_skip_materialized_relative_path(rel, is_dir=False):
+            return True
+    except ProductRuntimeConflict:
+        return True
+    for root in excluded_roots:
+        normalized = str(root or "").replace("\\", "/").strip("/")
+        if normalized and (rel == normalized or rel.startswith(f"{normalized}/")):
+            return True
+    return False
+
+
+def _governed_autonomy_line_delta(
+    source_path: Path | None,
+    workspace_path: Path | None,
+) -> dict[str, Any]:
+    try:
+        source_lines = (
+            source_path.read_text(encoding="utf-8").splitlines()
+            if source_path
+            else []
+        )
+        workspace_lines = (
+            workspace_path.read_text(encoding="utf-8").splitlines()
+            if workspace_path
+            else []
+        )
+    except (OSError, UnicodeDecodeError):
+        return {"line_delta_available": False}
+    insertions = 0
+    deletions = 0
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(
+        a=source_lines,
+        b=workspace_lines,
+    ).get_opcodes():
+        if tag in {"replace", "delete"}:
+            deletions += i2 - i1
+        if tag in {"replace", "insert"}:
+            insertions += j2 - j1
+    return {
+        "line_delta_available": True,
+        "insertions": insertions,
+        "deletions": deletions,
+    }
+
+
+def _governed_autonomy_candidate_changes_reference(
+    manifest: dict[str, Any] | None,
+    *,
+    max_files: int = 80,
+) -> dict[str, Any] | None:
+    if not isinstance(manifest, dict):
+        return None
+    source_root_value = manifest.get("source_root")
+    workspace_root_value = manifest.get("workspace_root")
+    if not source_root_value or not workspace_root_value:
+        return {"available": False, "reason": "source_or_workspace_root_unavailable"}
+    try:
+        source_root = Path(str(source_root_value)).resolve(strict=True)
+        workspace_root = Path(str(workspace_root_value)).resolve(strict=True)
+    except (OSError, RuntimeError, ValueError):
+        return {"available": False, "reason": "source_or_workspace_root_unavailable"}
+    allowed_paths = tuple(manifest.get("writable_allowed_paths") or ())
+    excluded_roots = tuple(
+        str(item) for item in manifest.get("product_diff_excluded_roots") or ()
+    )
+    source_files: set[str] = set()
+    workspace_files: set[str] = set()
+    for pattern in allowed_paths:
+        source_files.update(
+            _governed_autonomy_candidate_files_for_pattern(source_root, pattern)
+        )
+        workspace_files.update(
+            _governed_autonomy_candidate_files_for_pattern(workspace_root, pattern)
+        )
+    changes: list[dict[str, Any]] = []
+    totals = {
+        "modified": 0,
+        "created": 0,
+        "deleted": 0,
+        "insertions": 0,
+        "deletions": 0,
+    }
+    for rel in sorted(source_files | workspace_files):
+        if _governed_autonomy_candidate_diff_excluded(rel, excluded_roots=excluded_roots):
+            continue
+        source_path = source_root / rel if rel in source_files else None
+        workspace_path = workspace_root / rel if rel in workspace_files else None
+        source_sha = _sha256_file_or_none(source_path) if source_path is not None else None
+        workspace_sha = _sha256_file_or_none(workspace_path) if workspace_path is not None else None
+        if source_sha == workspace_sha:
+            continue
+        if source_path is not None and workspace_path is not None:
+            change = "modified"
+        elif workspace_path is not None:
+            change = "created"
+        else:
+            change = "deleted"
+        line_delta = _governed_autonomy_line_delta(source_path, workspace_path)
+        insertions = int(line_delta.get("insertions") or 0)
+        deletions = int(line_delta.get("deletions") or 0)
+        totals[change] += 1
+        totals["insertions"] += insertions
+        totals["deletions"] += deletions
+        if len(changes) < max_files:
+            changes.append({
+                "path": rel,
+                "change": change,
+                "source_SHA256": source_sha,
+                "workspace_SHA256": workspace_sha,
+                **line_delta,
+            })
+    return {
+        "available": True,
+        "files_changed": totals["modified"] + totals["created"] + totals["deleted"],
+        "modified_file_count": totals["modified"],
+        "created_file_count": totals["created"],
+        "deleted_file_count": totals["deleted"],
+        "line_insertions": totals["insertions"],
+        "line_deletions": totals["deletions"],
+        "truncated": (
+            totals["modified"] + totals["created"] + totals["deleted"] > max_files
+        ),
+        "files": changes,
+    }
+
+
+def _governed_autonomy_validation_infrastructure_failure(
+    run: dict[str, Any],
+) -> bool:
+    text = " ".join(
+        str(run.get(key) or "")
+        for key in (
+            "status",
+            "outcome",
+            "failure_category",
+            "failure_summary",
+            "summary",
+            "error",
+        )
+    ).casefold()
+    validation_hint = "workpacket_validation" in text or "validation" in text
+    infrastructure_hint = any(
+        marker in text
+        for marker in (
+            "typeerror",
+            "unexpected keyword argument",
+            "tool execution failed",
+            "validation_runtime_unavailable",
+            "workpacket_validation_authority_unavailable",
+        )
+    )
+    return validation_hint and infrastructure_hint
+
+
+def _governed_autonomy_runtime_terminal_reconciliation(
+    record: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    owned_run_id = _governed_autonomy_owned_direct_run_id(record)
+    if owned_run_id is None or record is None:
+        return None
+    task_visibility, runs = _governed_autonomy_kanban_visibility(record)
+    owned_run = next(
+        (run for run in runs if _int_or_none(run.get("id")) == owned_run_id),
+        None,
+    )
+    if owned_run is None or _execution_is_active(owned_run):
+        return None
+    status = str(owned_run.get("status") or "").strip().lower()
+    outcome = str(owned_run.get("outcome") or "").strip().lower()
+    if (
+        status not in _TERMINAL_EXECUTION_STATUSES
+        and outcome not in _TERMINAL_EXECUTION_STATUSES
+        and owned_run.get("ended_at") is None
+    ):
+        return None
+    action_ids = governed_ticket_lifecycle_action_ids(str(record["ticket_id"]))
+    completed = status in {"completed", "done"} or outcome == "completed"
+    detail = (
+        owned_run.get("error")
+        or owned_run.get("failure_summary")
+        or owned_run.get("summary")
+        or f"Kanban run {owned_run_id} ended with status {status or outcome or 'unknown'}"
+    )
+    manifest, materialization_reference = _governed_autonomy_materialization_manifest(
+        record.get("workspace_path") or (task_visibility or {}).get("workspace_path"),
+    )
+    candidate_changes = _governed_autonomy_candidate_changes_reference(manifest)
+    validation_infra_failure = _governed_autonomy_validation_infrastructure_failure(
+        owned_run,
+    )
+    if completed:
+        runtime_status = "direct_execution_terminal_completed"
+        blocker_code = None
+        next_action = {
+            "id": action_ids["review_prepare"],
+            "target_ticket_id": record["ticket_id"],
+            "required_human_action": "review_validation_preparation",
+        }
+        next_autonomous_action = "prepare governed review validation from terminal completion evidence"
+        next_human_action = None
+    elif validation_infra_failure:
+        runtime_status = "direct_execution_terminal_blocked_validation_repairable"
+        blocker_code = "GOVERNED_AUTONOMY_VALIDATION_INFRASTRUCTURE_REPAIRABLE"
+        next_action = {
+            "id": governed_autonomy_continuation_action_id(str(record["ticket_id"])),
+            "target_ticket_id": record["ticket_id"],
+            "authority": "backend_derived_governed_autonomy_continuation",
+            "recommended_strategy": "DIRECT",
+        }
+        next_autonomous_action = (
+            "replay terminal run evidence non-consumingly, then run governed workpacket validation "
+            "after validation tool infrastructure is repaired"
+        )
+        next_human_action = None
+    else:
+        runtime_status = "direct_execution_terminal_blocked"
+        blocker_code = "GOVERNED_AUTONOMY_TERMINAL_RUN_BLOCKED"
+        next_action = None
+        next_autonomous_action = None
+        next_human_action = "human review or recovery authority required for terminal governed run"
+    return {
+        "terminal_run_reconciled": True,
+        "governed_autonomy_runtime_status": runtime_status,
+        "terminal_run_id": owned_run_id,
+        "terminal_run_status": status or None,
+        "terminal_run_outcome": outcome or None,
+        "terminal_run_ended_at": owned_run.get("ended_at"),
+        "terminal_run_failure_category": owned_run.get("failure_category"),
+        "terminal_run_failure_summary": owned_run.get("failure_summary"),
+        "validation_infrastructure_failure": validation_infra_failure,
+        "validation_observation_reference": {
+            "tool_name": "workpacket_validation",
+            "infrastructure_failure": validation_infra_failure,
+            "error_excerpt": _safe_text(detail, limit=500),
+        },
+        "source_materialization_reference": materialization_reference,
+        "candidate_changes_reference": candidate_changes,
+        "blocker_code": blocker_code,
+        "blocker_detail": _safe_text(detail, limit=500) if blocker_code else None,
+        "next_autonomous_action": next_autonomous_action,
+        "next_human_action": next_human_action,
+        "next_action": next_action,
+    }
+
+
+def _governed_autonomy_apply_terminal_reconciliation(
+    payload: dict[str, Any],
+    terminal_reconciliation: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if terminal_reconciliation is None:
+        return payload
+    payload.update({
+        "governed_autonomy_runtime_status": terminal_reconciliation[
+            "governed_autonomy_runtime_status"
+        ],
+        "terminal_run_reconciled": True,
+        "terminal_run_id": terminal_reconciliation["terminal_run_id"],
+        "terminal_run_status": terminal_reconciliation["terminal_run_status"],
+        "terminal_run_outcome": terminal_reconciliation["terminal_run_outcome"],
+        "terminal_run_ended_at": terminal_reconciliation["terminal_run_ended_at"],
+        "terminal_run_failure_category": terminal_reconciliation[
+            "terminal_run_failure_category"
+        ],
+        "terminal_run_failure_summary": terminal_reconciliation[
+            "terminal_run_failure_summary"
+        ],
+        "validation_infrastructure_failure": terminal_reconciliation[
+            "validation_infrastructure_failure"
+        ],
+        "validation_observation_reference": terminal_reconciliation[
+            "validation_observation_reference"
+        ],
+        "source_materialization_reference": terminal_reconciliation[
+            "source_materialization_reference"
+        ],
+        "candidate_changes_reference": terminal_reconciliation[
+            "candidate_changes_reference"
+        ],
+        "blocker_code": terminal_reconciliation["blocker_code"],
+        "blocker_detail": terminal_reconciliation["blocker_detail"],
+        "next_autonomous_action": terminal_reconciliation["next_autonomous_action"],
+        "next_human_action": terminal_reconciliation["next_human_action"],
+        "execution_started": False,
+        "worker_execution": False,
+        "worker_process_started": False,
+    })
+    if terminal_reconciliation.get("next_action") is not None:
+        payload["next_action"] = terminal_reconciliation["next_action"]
+    return payload
 
 
 def _governed_autonomy_provider_readiness_reference(
@@ -10003,8 +10712,14 @@ def _governed_autonomy_activation_operational_result(
     }
 
 
-def _governed_autonomy_runtime_summary(record: dict[str, Any]) -> dict[str, Any]:
-    return {
+def _governed_autonomy_runtime_summary(
+    record: dict[str, Any],
+    *,
+    terminal_reconciliation: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if terminal_reconciliation is None:
+        terminal_reconciliation = _governed_autonomy_runtime_terminal_reconciliation(record)
+    summary = {
         "source_system": record["source_system"],
         "policy_id": record["policy_id"],
         "runtime_state_SHA256": record["runtime_state_SHA256"],
@@ -10044,12 +10759,12 @@ def _governed_autonomy_runtime_summary(record: dict[str, Any]) -> dict[str, Any]
         "kanban_run_created": bool(record.get("kanban_run_created")),
         "kanban_run_id": record.get("kanban_run_id"),
         "workspace_path": record.get("workspace_path"),
-        "dispatch_performed": record.get("dispatch_performed"),
-        "execution_started": record.get("execution_started"),
-        "worker_execution": record.get("worker_execution"),
-        "worker_process_started": record.get("worker_process_started"),
-        "Kanban_dispatch": record.get("Kanban_dispatch"),
-        "lineage_dispatch_performed": record.get("lineage_dispatch_performed"),
+        "dispatch_performed": bool(record.get("dispatch_performed")),
+        "execution_started": bool(record.get("execution_started")),
+        "worker_execution": bool(record.get("worker_execution")),
+        "worker_process_started": bool(record.get("worker_process_started")),
+        "Kanban_dispatch": bool(record.get("Kanban_dispatch")),
+        "lineage_dispatch_performed": bool(record.get("lineage_dispatch_performed")),
         "current_invocation_side_effects": record["current_invocation_side_effects"],
         "provider_dispatch_count": record["provider_dispatch_count"],
         "model_inference_count": record["model_inference_count"],
@@ -10057,6 +10772,10 @@ def _governed_autonomy_runtime_summary(record: dict[str, Any]) -> dict[str, Any]
         "auto_retry": record["auto_retry"],
         "auto_rollback": record["auto_rollback"],
     }
+    return _governed_autonomy_apply_terminal_reconciliation(
+        summary,
+        terminal_reconciliation,
+    )
 
 
 def _governed_autonomy_runtime_operational_result(
@@ -10066,7 +10785,8 @@ def _governed_autonomy_runtime_operational_result(
     idempotent_replay: bool,
 ) -> dict[str, Any]:
     task_visibility, runs = _governed_autonomy_kanban_visibility(record)
-    return {
+    terminal_reconciliation = _governed_autonomy_runtime_terminal_reconciliation(record)
+    result = {
         "source_system": PEPPER_GOVERNED_AUTONOMY_RUNTIME_SOURCE_SYSTEM,
         "schema_version": PEPPER_GOVERNED_AUTONOMY_RUNTIME_SCHEMA_VERSION,
         "policy_id": PEPPER_GOVERNED_AUTONOMY_RUNTIME_POLICY_ID,
@@ -10133,10 +10853,17 @@ def _governed_autonomy_runtime_operational_result(
         "auto_retry": False,
         "auto_rollback": False,
         "current_invocation_side_effects": record["current_invocation_side_effects"],
-        "governed_autonomy_runtime": _governed_autonomy_runtime_summary(record),
+        "governed_autonomy_runtime": _governed_autonomy_runtime_summary(
+            record,
+            terminal_reconciliation=terminal_reconciliation,
+        ),
         "live_autonomous_continuation_marker": record.get("live_autonomous_continuation_marker"),
         "human_smoke_marker": record["human_smoke_marker"],
     }
+    return _governed_autonomy_apply_terminal_reconciliation(
+        result,
+        terminal_reconciliation,
+    )
 
 
 def _p18_9_0_terminal_execution_state(
@@ -12173,8 +12900,16 @@ def _current_ticket_governed_autonomy_overlay(
         projection_record=projection,
         activation_record=record,
     )
+    terminal_reconciliation = (
+        _governed_autonomy_runtime_terminal_reconciliation(runtime_state)
+        if runtime_state is not None
+        else None
+    )
     runtime_summary = (
-        _governed_autonomy_runtime_summary(runtime_state)
+        _governed_autonomy_runtime_summary(
+            runtime_state,
+            terminal_reconciliation=terminal_reconciliation,
+        )
         if runtime_state is not None
         else None
     )
@@ -12199,12 +12934,23 @@ def _current_ticket_governed_autonomy_overlay(
             or (
                 runtime_state.get("governed_autonomy_runtime_status")
                 in {
+                    "direct_continuation_recorded",
                     "a2a_delegation_completed",
                     "task_local_self_extension_completed",
                     "task_local_self_extension_materialized",
                 }
                 and runtime_state.get("budget_exhausted") is not True
                 and runtime_state.get("blocker_code") in {None, ""}
+            )
+            or (
+                runtime_state is not None
+                and not _governed_autonomy_runtime_record_consumed_process(runtime_state)
+                and runtime_state.get("budget_exhausted") is not True
+                and runtime_state.get("blocker_code") in {None, ""}
+            )
+            or (
+                terminal_reconciliation is not None
+                and terminal_reconciliation.get("validation_infrastructure_failure") is True
             )
         )
     )
@@ -12328,6 +13074,10 @@ def _current_ticket_governed_autonomy_overlay(
         "human_smoke_marker": result["human_smoke_marker"],
         "runtime": runtime_summary,
     }
+    _governed_autonomy_apply_terminal_reconciliation(
+        summary,
+        terminal_reconciliation,
+    )
     overlay = {
         "governed_autonomy_activation_recorded": True,
         "governed_autonomy_status": result["governed_autonomy_status"],
@@ -12361,9 +13111,59 @@ def _current_ticket_governed_autonomy_overlay(
         "governed_autonomy_runtime_state_SHA256": summary["runtime_state_SHA256"],
         "A2A_dispatch_performed": summary["A2A_dispatch_performed"],
         "lineage_dispatch_performed": summary["lineage_dispatch_performed"],
+        "governed_autonomy_terminal_run_reconciled": bool(
+            summary.get("terminal_run_reconciled")
+        ),
+        "governed_autonomy_validation_infrastructure_failure": bool(
+            summary.get("validation_infrastructure_failure")
+        ),
         "governed_autonomy": summary,
     }
-    if expose_continue_action:
+    if (
+        terminal_reconciliation is not None
+        and terminal_reconciliation.get("next_action") is not None
+    ):
+        terminal_next_action = dict(terminal_reconciliation["next_action"])
+        if terminal_next_action.get("id") == governed_autonomy_continuation_action_id(
+            binding.ticket_id,
+        ):
+            terminal_next_action.setdefault(
+                "label",
+                (
+                    f"{binding.ticket_id} governed-autonomy run reached terminal validation "
+                    "infrastructure failure; continue under the same authority without creating a new run."
+                ),
+            )
+            overlay.update({
+                "readiness": "governed_autonomy_execution_terminal_reconciled",
+                "workflow_state": f"{binding.ticket_id}-GOVERNED-AUTONOMY-TERMINAL-VALIDATION-REPAIRABLE",
+                "workflow_status": "governed_autonomy_validation_repairable",
+                "queue_state": "governed_autonomy_kanban_execution_terminal",
+                "execution_state": "no_active_executions",
+                "active_execution_count": 0,
+                "validation_state": "governed_autonomy_validation_infrastructure_repairable",
+                "review_state": "candidate_available_pending_governed_validation",
+                "recovery_state": "not_required_same_authority_reconciliation_available",
+                "next_action": terminal_next_action,
+            })
+        else:
+            terminal_next_action.setdefault(
+                "label",
+                f"{binding.ticket_id} governed-autonomy execution completed; prepare review validation.",
+            )
+            overlay.update({
+                "readiness": "governed_autonomy_execution_completed",
+                "workflow_state": f"{binding.ticket_id}-GOVERNED-AUTONOMY-EXECUTION-COMPLETED",
+                "workflow_status": "execution_completed",
+                "queue_state": "governed_autonomy_kanban_execution_terminal",
+                "execution_state": "no_active_executions",
+                "active_execution_count": 0,
+                "validation_state": "execution_completed_pending_validation",
+                "review_state": "ready_for_review_validation",
+                "recovery_state": "not_required",
+                "next_action": terminal_next_action,
+            })
+    elif expose_continue_action:
         overlay["next_action"] = continue_next_action
     return overlay, None
 

@@ -87,6 +87,32 @@ def test_non_governed_tool_fails_closed(monkeypatch) -> None:
     assert result["error_code"] == tool.WORKPACKET_VALIDATION_AUTHORITY_UNAVAILABLE
 
 
+def test_registry_dispatch_accepts_session_metadata(monkeypatch) -> None:
+    authority = _authority(
+        Path(__file__).resolve().parent,
+        allowed_paths=("tests/**",),
+    )
+    work_packet = _workpacket_with_steps()
+    monkeypatch.setattr(
+        tool,
+        "resolve_governed_workpacket_validation_authority",
+        lambda _env=None: (authority, work_packet),
+    )
+
+    result = json.loads(
+        tool.registry.dispatch(
+            "workpacket_validation",
+            {"action": "list"},
+            task_id="t_d5b19f78",
+            session_id="session-1",
+            user_task="P18.9.1",
+        )
+    )
+
+    assert result["success"] is True
+    assert result["command_count"] == 0
+
+
 def test_python_command_run_uses_shell_false_and_minimal_env(tmp_path, monkeypatch) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
