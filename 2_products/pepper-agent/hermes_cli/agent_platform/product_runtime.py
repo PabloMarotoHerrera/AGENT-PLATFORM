@@ -5463,6 +5463,13 @@ def continue_current_ticket_governed_autonomy(
         activation=activation,
         terminal_reconciliation=terminal_reconciliation,
     )
+    fresh_execution_request_pending_replay = (
+        decision == "DIRECT"
+        and _governed_autonomy_fresh_execution_request_pending_replay(
+            previous,
+            fresh_execution_request,
+        )
+    )
     if terminal_reconciliation is not None and decision == "DIRECT":
         if _governed_autonomy_fresh_execution_request_already_consumed(
             previous,
@@ -5592,6 +5599,7 @@ def continue_current_ticket_governed_autonomy(
         previous,
         requested_decision=decision,
         request=request,
+        fresh_execution_request_pending_replay=fresh_execution_request_pending_replay,
     )
     if budget_blocker is not None:
         record = _build_governed_autonomy_runtime_stop_record(
@@ -8747,6 +8755,7 @@ def _governed_autonomy_runtime_budget_blocker(
     *,
     requested_decision: str,
     request: CurrentTicketGovernedAutonomyContinuationRequest,
+    fresh_execution_request_pending_replay: bool = False,
 ) -> tuple[str, str] | None:
     limits = _governed_autonomy_runtime_budget_limits(activation)
     if requested_decision != "STOP_FOR_HUMAN" and (
@@ -8780,7 +8789,11 @@ def _governed_autonomy_runtime_budget_blocker(
             return "GOVERNED_AUTONOMY_A2A_DELEGATION_BUDGET_EXHAUSTED", (
                 "A2A delegation budget is exhausted"
             )
-    if _runtime_counter(previous, "validation_failure_count") >= limits["max_no_progress_iterations"]:
+    if (
+        not fresh_execution_request_pending_replay
+        and _runtime_counter(previous, "validation_failure_count")
+        >= limits["max_no_progress_iterations"]
+    ):
         return "GOVERNED_AUTONOMY_VALIDATION_FAILURE_BUDGET_EXHAUSTED", (
             "validation failure budget is exhausted"
         )
@@ -9410,6 +9423,24 @@ def _governed_autonomy_fresh_execution_request_already_consumed(
     )
 
 
+def _governed_autonomy_fresh_execution_request_pending_replay(
+    previous: dict[str, Any] | None,
+    fresh_execution_request: dict[str, Any] | None,
+) -> bool:
+    if previous is None or fresh_execution_request is None:
+        return False
+    if not bool(previous.get("fresh_execution_requested")):
+        return False
+    if previous.get("fresh_execution_request_SHA256") != fresh_execution_request.get(
+        "fresh_execution_request_SHA256"
+    ):
+        return False
+    return not _governed_autonomy_fresh_execution_request_already_consumed(
+        previous,
+        fresh_execution_request,
+    )
+
+
 def _governed_autonomy_apply_terminal_reconciliation(
     payload: dict[str, Any],
     terminal_reconciliation: dict[str, Any] | None,
@@ -9654,13 +9685,40 @@ def _prepare_current_ticket_governed_autonomy_task_for_dispatch(
                 "blocker_code": "KANBAN_TASK_GAP",
                 "blocker_detail": "projected Kanban task is missing",
             }
+        task_unblocked = False
+        task_triage_specified = False
+        if task.status == "triage" and fresh_execution_request is not None:
+            if task.claim_lock or task.worker_pid or task.current_run_id is not None:
+                return {
+                    "task_prepare_status": "blocked",
+                    "blocker_code": "WORKER_LIFECYCLE_RECONCILIATION_REQUIRED",
+                    "blocker_detail": "projected Kanban task has unresolved current lifecycle state",
+                }
+            if not kanban_db.specify_triage_task(
+                conn,
+                task_id,
+                assignee=str(projection["assignee_profile"]),
+                author=PEPPER_GOVERNED_AUTONOMY_RUNTIME_SOURCE_SYSTEM,
+            ):
+                return {
+                    "task_prepare_status": "blocked",
+                    "blocker_code": "KANBAN_TRIAGE_SPECIFICATION_FAILED",
+                    "blocker_detail": "projected Kanban triage task could not be specified for fresh governed autonomy",
+                }
+            task_triage_specified = True
+            task = kanban_db.get_task(conn, task_id)
+            if task is None:
+                return {
+                    "task_prepare_status": "blocked",
+                    "blocker_code": "KANBAN_TASK_GAP",
+                    "blocker_detail": "projected Kanban task is missing after triage specification",
+                }
         if task.status not in {"blocked", "ready"}:
             return {
                 "task_prepare_status": "blocked",
                 "blocker_code": "KANBAN_GOVERNED_AUTONOMY_SOURCE_GAP",
                 "blocker_detail": f"projected Kanban task status is {task.status}",
             }
-        task_unblocked = False
         if task.status == "blocked":
             if not kanban_db.unblock_task(conn, task_id):
                 return {
@@ -9740,6 +9798,7 @@ def _prepare_current_ticket_governed_autonomy_task_for_dispatch(
                 "backend_derived_live_authority_SHA256": envelope.envelope_SHA256,
                 "source_run_id": source_run_id,
                 "future_task_skills": [],
+                "task_triage_specified": task_triage_specified,
                 "fresh_execution_request_reference": fresh_execution_request,
                 "fresh_execution_workspace_path": str(fresh_workspace_path)
                 if fresh_workspace_path is not None
@@ -9753,11 +9812,16 @@ def _prepare_current_ticket_governed_autonomy_task_for_dispatch(
             "blocker_code": None,
             "blocker_detail": None,
             "task_unblocked": task_unblocked,
+            "task_triage_specified": task_triage_specified,
             "task_skills_corrected": True,
             "governed_autonomy_continuation_reason": (
                 PEPPER_GOVERNED_AUTONOMY_INTERNAL_CONTINUATION_REASON
             ),
-            "dispatcher_primitive": "kanban_db.unblock_task+kanban_db.claim_task+resolve_workspace+_default_spawn",
+            "dispatcher_primitive": (
+                "kanban_db.specify_triage_task+kanban_db.claim_task+resolve_workspace+_default_spawn"
+                if task_triage_specified
+                else "kanban_db.unblock_task+kanban_db.claim_task+resolve_workspace+_default_spawn"
+            ),
             "kanban_task_status_after_prepare": task.status if task is not None else None,
             "kanban_task_skills_after_prepare": list(task.skills or []) if task is not None else None,
             "source_run_id": source_run_id,
@@ -9902,11 +9966,11 @@ def _build_governed_autonomy_direct_runtime_record(
             },
             provider_readiness=provider_readiness,
             process_continuation_increment=0,
-            validation_failure_increment=1,
+            validation_failure_increment=0 if fresh_execution_request is not None else 1,
             blocker_code=str(prep_result.get("blocker_code") or "GOVERNED_AUTONOMY_PREP_FAILED"),
             blocker_detail=str(prep_result.get("blocker_detail") or "governed autonomy task preparation failed"),
             next_human_action="human authority required to resolve governed autonomy dispatch preparation",
-            fresh_execution_request=fresh_execution_request,
+            fresh_execution_request=None,
         )
 
     dispatch_result = _dispatch_exact_current_kanban_task(
@@ -9915,6 +9979,14 @@ def _build_governed_autonomy_direct_runtime_record(
     )
     dispatch_consumed = bool(dispatch_result.get("dispatch_performed"))
     execution_started = bool(dispatch_result.get("execution_started"))
+    fresh_execution_request_consumed = bool(
+        fresh_execution_request is not None
+        and (
+            dispatch_consumed
+            or execution_started
+            or dispatch_result.get("kanban_run_id") is not None
+        )
+    )
     progress_marker = (
         _digest_payload(
             "pepper-governed-autonomy-direct-dispatch-progress-sha256-v1",
@@ -9959,7 +10031,9 @@ def _build_governed_autonomy_direct_runtime_record(
             else None
         ),
         next_human_action=None if execution_started else "human authority required to resolve dispatch blocker",
-        fresh_execution_request=fresh_execution_request,
+        fresh_execution_request=(
+            fresh_execution_request if fresh_execution_request_consumed else None
+        ),
     )
     return _with_governed_autonomy_dispatch_result(record, dispatch_result=dispatch_result)
 
