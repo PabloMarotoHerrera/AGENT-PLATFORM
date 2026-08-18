@@ -2766,9 +2766,19 @@ def _governed_autonomy_stable_authority_comparison(
         for field in _GOVERNED_AUTONOMY_STABLE_AUTHORITY_FIELDS
         if activation_stable.get(field) != current_reference.get(field)
     ]
+    mismatch_details = [
+        _governed_autonomy_authority_field_comparison(
+            field=field,
+            expected=activation_stable.get(field),
+            observed=current_reference.get(field),
+            classification="STABLE_AUTHORITY",
+        )
+        for field in mismatches
+    ]
     return {
         "same_authority": not mismatches,
         "mismatches": mismatches,
+        "mismatch_details": mismatch_details,
         "activation_stable_authority_SHA256": _governed_autonomy_stable_authority_digest(
             activation_reference,
         ),
@@ -2823,15 +2833,355 @@ def _governed_autonomy_owned_direct_run_id(
     return _int_or_none(previous.get("kanban_run_id"))
 
 
-def _governed_autonomy_lineage_mismatch(
+def _governed_autonomy_authority_field_comparison(
+    *,
+    field: str,
+    expected: Any,
+    observed: Any,
+    classification: str,
+    matches: bool | None = None,
+) -> dict[str, Any]:
+    return {
+        "field": field,
+        "expected": expected,
+        "observed": observed,
+        "classification": classification,
+        "matches": expected == observed if matches is None else matches,
+    }
+
+
+def _governed_autonomy_task_governance_events(
+    projection: dict[str, Any],
+) -> list[dict[str, Any]]:
+    from hermes_cli import kanban_db
+
+    board = _normalize_board(str(projection["kanban_board_slug"]))
+    task_id = str(projection["kanban_task_id"])
+    conn = kanban_db.connect(board=board)
+    try:
+        rows = conn.execute(
+            "SELECT id, kind, payload, created_at, run_id FROM task_events "
+            "WHERE task_id = ? ORDER BY id ASC",
+            (task_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+    events: list[dict[str, Any]] = []
+    for row in rows:
+        kind = str(row["kind"] or "")
+        if kind not in {"governed_autonomy_continuation_prepared", "claimed"}:
+            continue
+        try:
+            payload = json.loads(row["payload"]) if row["payload"] else None
+        except json.JSONDecodeError:
+            payload = None
+        if not isinstance(payload, dict):
+            payload = {}
+        events.append({
+            "id": int(row["id"]),
+            "kind": kind,
+            "payload": {
+                key: payload.get(key)
+                for key in (
+                    "source",
+                    "reason",
+                    "activation_action_SHA256",
+                    "backend_derived_live_authority_SHA256",
+                    "source_run_id",
+                    "run_id",
+                )
+                if key in payload
+            },
+            "created_at": row["created_at"],
+            "run_id": row["run_id"],
+        })
+    return events
+
+
+def _governed_autonomy_event_owned_run_probe(
     *,
     projection: dict[str, Any],
-    activation_reference: dict[str, Any],
+    activation: dict[str, Any],
+    run: dict[str, Any],
+    events: list[dict[str, Any]],
+) -> dict[str, Any]:
+    activation_reference = _validated_governed_autonomy_envelope_reference(
+        activation.get("governed_autonomy_envelope_reference")
+    )
+    run_id = _int_or_none(run.get("id"))
+    expected_task_id = str(projection["kanban_task_id"])
+    expected_profiles = {
+        str(projection["assignee_profile"]),
+        str(projection["selected_profile"]),
+    }
+    comparisons = [
+        _governed_autonomy_authority_field_comparison(
+            field="kanban_task_id",
+            expected=expected_task_id,
+            observed=run.get("task_id"),
+            classification="STABLE_AUTHORITY",
+        ),
+        _governed_autonomy_authority_field_comparison(
+            field="executor_profile",
+            expected=sorted(expected_profiles),
+            observed=run.get("profile"),
+            classification="STABLE_AUTHORITY",
+            matches=str(run.get("profile")) in expected_profiles,
+        ),
+    ]
+    claim_event = None
+    if run_id is not None:
+        for event in events:
+            if event["kind"] != "claimed":
+                continue
+            payload_run_id = _int_or_none(event.get("payload", {}).get("run_id"))
+            event_run_id = _int_or_none(event.get("run_id"))
+            if run_id in {payload_run_id, event_run_id}:
+                claim_event = event
+                break
+    comparisons.append(
+        _governed_autonomy_authority_field_comparison(
+            field="claimed_run_event",
+            expected=run_id,
+            observed=claim_event.get("id") if claim_event else None,
+            classification="RUNTIME_RECORD_STATE",
+            matches=claim_event is not None,
+        )
+    )
+    previous_claim_event_id = 0
+    preparation_event = None
+    if claim_event is not None:
+        claim_event_id = int(claim_event["id"])
+        previous_claim_event_id = max(
+            (
+                int(event["id"])
+                for event in events
+                if event["kind"] == "claimed" and int(event["id"]) < claim_event_id
+            ),
+            default=0,
+        )
+        prepared_events = [
+            event
+            for event in events
+            if event["kind"] == "governed_autonomy_continuation_prepared"
+            and previous_claim_event_id < int(event["id"]) < claim_event_id
+        ]
+        preparation_event = prepared_events[-1] if prepared_events else None
+    comparisons.append(
+        _governed_autonomy_authority_field_comparison(
+            field="governed_preparation_event",
+            expected="event_between_previous_claim_and_this_claim",
+            observed=preparation_event.get("id") if preparation_event else None,
+            classification="RUNTIME_RECORD_STATE",
+            matches=preparation_event is not None,
+        )
+    )
+    payload = preparation_event.get("payload", {}) if preparation_event else {}
+    expected_source_run_id = _int_or_none(activation_reference.get("source_run_id"))
+    comparisons.extend([
+        _governed_autonomy_authority_field_comparison(
+            field="governed_autonomy_event_source",
+            expected=PEPPER_GOVERNED_AUTONOMY_RUNTIME_SOURCE_SYSTEM,
+            observed=payload.get("source"),
+            classification="RUNTIME_RECORD_STATE",
+        ),
+        _governed_autonomy_authority_field_comparison(
+            field="governed_autonomy_continuation_reason",
+            expected=PEPPER_GOVERNED_AUTONOMY_INTERNAL_CONTINUATION_REASON,
+            observed=payload.get("reason"),
+            classification="RUNTIME_RECORD_STATE",
+        ),
+        _governed_autonomy_authority_field_comparison(
+            field="activation_action_SHA256",
+            expected=activation.get("activation_action_SHA256"),
+            observed=payload.get("activation_action_SHA256"),
+            classification="STABLE_AUTHORITY",
+        ),
+        _governed_autonomy_authority_field_comparison(
+            field="authority_SHA256",
+            expected=activation_reference.get("envelope_SHA256"),
+            observed=payload.get("backend_derived_live_authority_SHA256"),
+            classification="STABLE_AUTHORITY",
+        ),
+        _governed_autonomy_authority_field_comparison(
+            field="historical_source_run_id",
+            expected=expected_source_run_id,
+            observed=_int_or_none(payload.get("source_run_id")),
+            classification="HISTORICAL_PROVENANCE",
+        ),
+    ])
+    mismatches = [comparison for comparison in comparisons if not comparison["matches"]]
+    return {
+        "owned": not mismatches,
+        "run_id": run_id,
+        "proof_kind": "kanban_preparation_event_and_claim_event",
+        "claim_event_id": claim_event.get("id") if claim_event else None,
+        "previous_claim_event_id": previous_claim_event_id or None,
+        "preparation_event_id": preparation_event.get("id") if preparation_event else None,
+        "comparisons": comparisons,
+        "mismatches": mismatches,
+    }
+
+
+def _governed_autonomy_runtime_record_owned_run_probe(
+    *,
+    projection: dict[str, Any],
+    activation: dict[str, Any],
     previous: dict[str, Any] | None,
+    run: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
-    task_visibility, runs = _governed_autonomy_kanban_visibility(projection)
+    run_id = _governed_autonomy_owned_direct_run_id(previous)
+    if run_id is None or previous is None:
+        return None
+    activation_reference = _validated_governed_autonomy_envelope_reference(
+        activation.get("governed_autonomy_envelope_reference")
+    )
+    expected_profiles = {
+        str(projection["assignee_profile"]),
+        str(projection["selected_profile"]),
+    }
+    comparisons = [
+        _governed_autonomy_authority_field_comparison(
+            field="kanban_run_id",
+            expected=run_id,
+            observed=_int_or_none(run.get("id")) if isinstance(run, dict) else None,
+            classification="RUNTIME_RECORD_STATE",
+        ),
+        _governed_autonomy_authority_field_comparison(
+            field="kanban_task_id",
+            expected=projection["kanban_task_id"],
+            observed=run.get("task_id") if isinstance(run, dict) else None,
+            classification="STABLE_AUTHORITY",
+        ),
+        _governed_autonomy_authority_field_comparison(
+            field="executor_profile",
+            expected=sorted(expected_profiles),
+            observed=run.get("profile") if isinstance(run, dict) else None,
+            classification="STABLE_AUTHORITY",
+            matches=(
+                isinstance(run, dict)
+                and str(run.get("profile")) in expected_profiles
+            ),
+        ),
+        _governed_autonomy_authority_field_comparison(
+            field="governed_autonomy_continuation_reason",
+            expected=PEPPER_GOVERNED_AUTONOMY_INTERNAL_CONTINUATION_REASON,
+            observed=previous.get("governed_autonomy_continuation_reason"),
+            classification="RUNTIME_RECORD_STATE",
+        ),
+        _governed_autonomy_authority_field_comparison(
+            field="activation_action_SHA256",
+            expected=activation.get("activation_action_SHA256"),
+            observed=previous.get("activation_action_SHA256"),
+            classification="STABLE_AUTHORITY",
+        ),
+        _governed_autonomy_authority_field_comparison(
+            field="authority_SHA256",
+            expected=activation_reference.get("envelope_SHA256"),
+            observed=previous.get("governed_autonomy_envelope_SHA256"),
+            classification="STABLE_AUTHORITY",
+        ),
+        _governed_autonomy_authority_field_comparison(
+            field="historical_source_run_id",
+            expected=_int_or_none(activation_reference.get("source_run_id")),
+            observed=_int_or_none(previous.get("source_run_id")),
+            classification="HISTORICAL_PROVENANCE",
+        ),
+    ]
+    mismatches = [comparison for comparison in comparisons if not comparison["matches"]]
+    return {
+        "owned": not mismatches,
+        "run_id": run_id,
+        "proof_kind": "validated_runtime_record",
+        "comparisons": comparisons,
+        "mismatches": mismatches,
+    }
+
+
+def _governed_autonomy_owned_lineage_state(
+    *,
+    projection: dict[str, Any],
+    activation: dict[str, Any],
+    previous: dict[str, Any] | None,
+    task_visibility: dict[str, Any] | None,
+    runs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    owned_proofs_by_run_id: dict[int, dict[str, Any]] = {}
+    previous_run_id = _governed_autonomy_owned_direct_run_id(previous)
+    if previous_run_id is not None:
+        previous_run = next(
+            (run for run in runs if _int_or_none(run.get("id")) == previous_run_id),
+            None,
+        )
+        previous_probe = _governed_autonomy_runtime_record_owned_run_probe(
+            projection=projection,
+            activation=activation,
+            previous=previous,
+            run=previous_run,
+        )
+        if previous_probe is not None and previous_probe["owned"]:
+            owned_proofs_by_run_id[previous_run_id] = previous_probe
+    event_probes: list[dict[str, Any]] = []
+    events = _governed_autonomy_task_governance_events(projection)
+    for run in runs:
+        probe = _governed_autonomy_event_owned_run_probe(
+            projection=projection,
+            activation=activation,
+            run=run,
+            events=events,
+        )
+        event_probes.append(probe)
+        run_id = _int_or_none(run.get("id"))
+        if run_id is not None and probe["owned"]:
+            owned_proofs_by_run_id[run_id] = probe
+    owned_run_ids = sorted(owned_proofs_by_run_id)
+    latest_run = runs[-1] if runs else None
+    latest_run_id = (
+        _int_or_none(latest_run.get("id"))
+        if isinstance(latest_run, dict)
+        else None
+    )
+    latest_probe = next(
+        (probe for probe in event_probes if probe.get("run_id") == latest_run_id),
+        None,
+    )
+    task_current_run_id = (
+        _int_or_none(task_visibility.get("current_run_id"))
+        if isinstance(task_visibility, dict)
+        else None
+    )
+    owned_active_run_ids = [
+        run_id
+        for run_id in owned_run_ids
+        for run in runs
+        if _int_or_none(run.get("id")) == run_id and _execution_is_active(run)
+    ]
+    return {
+        "owned_governed_run_id": owned_run_ids[-1] if owned_run_ids else None,
+        "owned_governed_run_ids": owned_run_ids,
+        "owned_active_run_ids": owned_active_run_ids,
+        "previous_runtime_owned_run_id": previous_run_id,
+        "latest_run_id": latest_run_id,
+        "task_current_run_id": task_current_run_id,
+        "latest_run_ownership_probe": latest_probe,
+        "ownership_proofs": list(owned_proofs_by_run_id.values()),
+    }
+
+
+def _governed_autonomy_lineage_mismatch(
+    *,
+    activation_reference: dict[str, Any],
+    task_visibility: dict[str, Any] | None,
+    runs: list[dict[str, Any]],
+    owned_lineage_state: dict[str, Any],
+) -> dict[str, Any] | None:
     active_runs = [run for run in runs if _execution_is_active(run)]
-    owned_run_id = _governed_autonomy_owned_direct_run_id(previous)
+    owned_run_ids = {
+        int(run_id)
+        for run_id in owned_lineage_state.get("owned_governed_run_ids", [])
+        if _int_or_none(run_id) is not None
+    }
+    owned_run_id = _int_or_none(owned_lineage_state.get("owned_governed_run_id"))
     activation_source_run_id = _int_or_none(activation_reference.get("source_run_id"))
     latest_run = runs[-1] if runs else None
     latest_run_id = (
@@ -2847,13 +3197,17 @@ def _governed_autonomy_lineage_mismatch(
     base = {
         "activation_source_run_id": activation_source_run_id,
         "owned_governed_run_id": owned_run_id,
+        "owned_governed_run_ids": sorted(owned_run_ids),
         "current_source_run_id": latest_run_id,
         "current_active_run_ids": [run.get("id") for run in active_runs],
         "task_current_run_id": task_current_run_id,
+        "latest_run_ownership_probe": owned_lineage_state.get(
+            "latest_run_ownership_probe"
+        ),
     }
     if active_runs:
         active_run_ids = {_int_or_none(run.get("id")) for run in active_runs}
-        if owned_run_id is not None and active_run_ids == {owned_run_id}:
+        if active_run_ids and active_run_ids.issubset(owned_run_ids):
             return None
         return {
             **base,
@@ -2862,7 +3216,7 @@ def _governed_autonomy_lineage_mismatch(
                 "an active Kanban run is not owned by this governed-autonomy runtime"
             ),
         }
-    if task_current_run_id is not None and task_current_run_id != owned_run_id:
+    if task_current_run_id is not None and task_current_run_id not in owned_run_ids:
         return {
             **base,
             "reason": "unowned_task_current_run_present",
@@ -2872,7 +3226,7 @@ def _governed_autonomy_lineage_mismatch(
         latest_run_id is not None
         and activation_source_run_id is not None
         and latest_run_id > activation_source_run_id
-        and latest_run_id != owned_run_id
+        and latest_run_id not in owned_run_ids
     ):
         return {
             **base,
@@ -2891,12 +3245,12 @@ def _governed_autonomy_lineage_mismatch(
     return None
 
 
-def _require_current_governed_autonomy_authority_match(
+def _resolve_effective_current_governed_autonomy_authority(
     *,
     projection: dict[str, Any],
     activation: dict[str, Any],
     previous: dict[str, Any] | None = None,
-) -> _BackendDerivedGovernedAutonomyAuthority:
+) -> dict[str, Any]:
     activation_reference = _validated_governed_autonomy_envelope_reference(
         activation.get("governed_autonomy_envelope_reference")
     )
@@ -2904,12 +3258,88 @@ def _require_current_governed_autonomy_authority_match(
         projection=projection,
         activation_reference=activation_reference,
     )
-    lineage_mismatch = _governed_autonomy_lineage_mismatch(
+    task_visibility, runs = _governed_autonomy_kanban_visibility(projection)
+    owned_lineage_state = _governed_autonomy_owned_lineage_state(
         projection=projection,
-        activation_reference=activation_reference,
+        activation=activation,
         previous=previous,
+        task_visibility=task_visibility,
+        runs=runs,
     )
-    if not stable_comparison["same_authority"] or lineage_mismatch is not None:
+    lineage_mismatch = _governed_autonomy_lineage_mismatch(
+        activation_reference=activation_reference,
+        task_visibility=task_visibility,
+        runs=runs,
+        owned_lineage_state=owned_lineage_state,
+    )
+    diagnostics = {
+        "blocker_code": "CONTINUATION_AUTHORITY_MISMATCH",
+        "reason": None,
+        "activation_authority_SHA256": activation_reference.get("envelope_SHA256"),
+        "activation_source_run_id": activation_reference.get("source_run_id"),
+        "activation_source_run_status": activation_reference.get("source_run_status"),
+        "activation_stable_authority_SHA256": stable_comparison[
+            "activation_stable_authority_SHA256"
+        ],
+        "current_stable_authority_SHA256": stable_comparison[
+            "current_stable_authority_SHA256"
+        ],
+        "stable_authority_mismatches": stable_comparison["mismatches"],
+        "stable_authority_mismatch_details": stable_comparison.get(
+            "mismatch_details",
+            [],
+        ),
+        "mutable_authority_fields_ignored": stable_comparison[
+            "mutable_authority_fields_ignored"
+        ],
+        "owned_lineage_state": owned_lineage_state,
+    }
+    if not stable_comparison["same_authority"]:
+        diagnostics["reason"] = "stable_authority_fields_changed"
+    elif lineage_mismatch is not None:
+        diagnostics.update(lineage_mismatch)
+    return {
+        "activation": activation,
+        "activation_reference": activation_reference,
+        "activation_origin": _governed_autonomy_activation_effective_projection(activation),
+        "stable_authority": stable_comparison,
+        "current_execution_state": {
+            "task": task_visibility,
+            "runs": runs,
+            "active_execution_count": len(
+                [run for run in runs if _execution_is_active(run)]
+            ),
+            "latest_run_id": owned_lineage_state.get("latest_run_id"),
+            "task_current_run_id": owned_lineage_state.get("task_current_run_id"),
+        },
+        "owned_lineage_state": owned_lineage_state,
+        "authority_revalidated": (
+            stable_comparison["same_authority"] and lineage_mismatch is None
+        ),
+        "continuation_eligible": (
+            stable_comparison["same_authority"] and lineage_mismatch is None
+        ),
+        "diagnostics": diagnostics,
+    }
+
+
+def _require_current_governed_autonomy_authority_match(
+    *,
+    projection: dict[str, Any],
+    activation: dict[str, Any],
+    previous: dict[str, Any] | None = None,
+    effective_authority: dict[str, Any] | None = None,
+) -> _BackendDerivedGovernedAutonomyAuthority:
+    if effective_authority is None:
+        effective_authority = _resolve_effective_current_governed_autonomy_authority(
+            projection=projection,
+            activation=activation,
+            previous=previous,
+        )
+    activation_reference = effective_authority["activation_reference"]
+    if not effective_authority["authority_revalidated"]:
+        stable_comparison = effective_authority["stable_authority"]
+        diagnostics = dict(effective_authority["diagnostics"])
         current_reference = None
         try:
             current_reference = _derive_current_governed_autonomy_authority_reference(
@@ -2917,34 +3347,17 @@ def _require_current_governed_autonomy_authority_match(
             )
         except Exception:
             current_reference = None
-        diagnostics = {
-            "blocker_code": "CONTINUATION_AUTHORITY_MISMATCH",
-            "reason": (
-                "stable_authority_fields_changed"
-                if not stable_comparison["same_authority"]
-                else lineage_mismatch.get("reason")
-            ),
-            "activation_authority_SHA256": activation_reference.get("envelope_SHA256"),
+        diagnostics.update({
             "current_authority_SHA256": (
                 current_reference.get("envelope_SHA256")
                 if isinstance(current_reference, dict)
                 else None
             ),
-            "activation_stable_authority_SHA256": stable_comparison[
-                "activation_stable_authority_SHA256"
-            ],
-            "current_stable_authority_SHA256": stable_comparison[
-                "current_stable_authority_SHA256"
-            ],
-            "stable_authority_mismatches": stable_comparison["mismatches"],
-            "mutable_authority_fields_ignored": stable_comparison[
-                "mutable_authority_fields_ignored"
-            ],
             "activation_source_run_id": activation_reference.get("source_run_id"),
             "current_source_run_id": (
                 current_reference.get("source_run_id")
                 if isinstance(current_reference, dict)
-                else None
+                else effective_authority["current_execution_state"].get("latest_run_id")
             ),
             "activation_source_run_status": activation_reference.get("source_run_status"),
             "current_source_run_status": (
@@ -2952,9 +3365,7 @@ def _require_current_governed_autonomy_authority_match(
                 if isinstance(current_reference, dict)
                 else None
             ),
-        }
-        if lineage_mismatch is not None:
-            diagnostics.update(lineage_mismatch)
+        })
         raise ProductRuntimeAuthorityMismatch(
             "CONTINUATION_AUTHORITY_MISMATCH",
             diagnostics=diagnostics,
@@ -4751,6 +5162,18 @@ def get_current_ticket_governed_autonomy_status(
         projection_record=projection,
         activation_record=record,
     )
+    effective_authority = _resolve_effective_current_governed_autonomy_authority(
+        projection=projection,
+        activation=record,
+        previous=runtime_state,
+    )
+    result["authority_revalidated"] = bool(
+        effective_authority["authority_revalidated"]
+    )
+    result["continuation_eligible"] = bool(
+        effective_authority["continuation_eligible"]
+    )
+    result["effective_authority_diagnostics"] = effective_authority["diagnostics"]
     if runtime_state is None:
         result.update({
             "governed_autonomy_runtime_status": "active_authority_ready_for_continuation",
@@ -4771,10 +5194,12 @@ def get_current_ticket_governed_autonomy_status(
         return result
     terminal_reconciliation = _governed_autonomy_runtime_terminal_reconciliation(
         runtime_state,
+        effective_authority=effective_authority,
     )
     runtime_summary = _governed_autonomy_runtime_summary(
         runtime_state,
         terminal_reconciliation=terminal_reconciliation,
+        effective_authority=effective_authority,
     )
     result.update({
         "governed_autonomy_runtime_status": runtime_state["governed_autonomy_runtime_status"],
@@ -4952,16 +5377,23 @@ def continue_current_ticket_governed_autonomy(
         projection_record=projection,
         activation_record=activation,
     )
+    effective_authority = _resolve_effective_current_governed_autonomy_authority(
+        projection=projection,
+        activation=activation,
+        previous=previous,
+    )
     authority = _require_current_governed_autonomy_authority_match(
         projection=projection,
         activation=activation,
         previous=previous,
+        effective_authority=effective_authority,
     )
     if _governed_autonomy_active_execution_replay(previous, projection):
         result = _governed_autonomy_runtime_operational_result(
             previous,
             activation_record=activation,
             idempotent_replay=True,
+            effective_authority=effective_authority,
         )
         result["non_consuming_observation"] = True
         result["observation_status"] = "governed_autonomy_execution_already_active"
@@ -4969,12 +5401,14 @@ def continue_current_ticket_governed_autonomy(
     decision = _select_governed_autonomy_runtime_decision(request)
     terminal_reconciliation = _governed_autonomy_runtime_terminal_reconciliation(
         previous,
+        effective_authority=effective_authority,
     )
     if terminal_reconciliation is not None and decision == "DIRECT":
         result = _governed_autonomy_runtime_operational_result(
             previous,
             activation_record=activation,
             idempotent_replay=True,
+            effective_authority=effective_authority,
         )
         result["non_consuming_observation"] = True
         result["observation_status"] = "governed_autonomy_execution_terminal_reconciled"
@@ -8382,11 +8816,25 @@ def _governed_autonomy_validation_infrastructure_failure(
 
 def _governed_autonomy_runtime_terminal_reconciliation(
     record: dict[str, Any] | None,
+    *,
+    effective_authority: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    owned_run_id = _governed_autonomy_owned_direct_run_id(record)
-    if owned_run_id is None or record is None:
+    if record is None:
         return None
-    task_visibility, runs = _governed_autonomy_kanban_visibility(record)
+    owned_run_id = None
+    if effective_authority is not None:
+        owned_lineage_state = effective_authority.get("owned_lineage_state") or {}
+        owned_run_id = _int_or_none(owned_lineage_state.get("owned_governed_run_id"))
+        execution_state = effective_authority.get("current_execution_state") or {}
+        task_visibility = execution_state.get("task")
+        runs = execution_state.get("runs")
+        if not isinstance(runs, list):
+            task_visibility, runs = _governed_autonomy_kanban_visibility(record)
+    else:
+        owned_run_id = _governed_autonomy_owned_direct_run_id(record)
+        task_visibility, runs = _governed_autonomy_kanban_visibility(record)
+    if owned_run_id is None:
+        return None
     owned_run = next(
         (run for run in runs if _int_or_none(run.get("id")) == owned_run_id),
         None,
@@ -10716,9 +11164,13 @@ def _governed_autonomy_runtime_summary(
     record: dict[str, Any],
     *,
     terminal_reconciliation: dict[str, Any] | None = None,
+    effective_authority: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if terminal_reconciliation is None:
-        terminal_reconciliation = _governed_autonomy_runtime_terminal_reconciliation(record)
+        terminal_reconciliation = _governed_autonomy_runtime_terminal_reconciliation(
+            record,
+            effective_authority=effective_authority,
+        )
     summary = {
         "source_system": record["source_system"],
         "policy_id": record["policy_id"],
@@ -10783,9 +11235,13 @@ def _governed_autonomy_runtime_operational_result(
     *,
     activation_record: dict[str, Any],
     idempotent_replay: bool,
+    effective_authority: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     task_visibility, runs = _governed_autonomy_kanban_visibility(record)
-    terminal_reconciliation = _governed_autonomy_runtime_terminal_reconciliation(record)
+    terminal_reconciliation = _governed_autonomy_runtime_terminal_reconciliation(
+        record,
+        effective_authority=effective_authority,
+    )
     result = {
         "source_system": PEPPER_GOVERNED_AUTONOMY_RUNTIME_SOURCE_SYSTEM,
         "schema_version": PEPPER_GOVERNED_AUTONOMY_RUNTIME_SCHEMA_VERSION,
@@ -10856,6 +11312,7 @@ def _governed_autonomy_runtime_operational_result(
         "governed_autonomy_runtime": _governed_autonomy_runtime_summary(
             record,
             terminal_reconciliation=terminal_reconciliation,
+            effective_authority=effective_authority,
         ),
         "live_autonomous_continuation_marker": record.get("live_autonomous_continuation_marker"),
         "human_smoke_marker": record["human_smoke_marker"],
@@ -12900,8 +13357,16 @@ def _current_ticket_governed_autonomy_overlay(
         projection_record=projection,
         activation_record=record,
     )
+    effective_authority = _resolve_effective_current_governed_autonomy_authority(
+        projection=projection,
+        activation=record,
+        previous=runtime_state,
+    )
     terminal_reconciliation = (
-        _governed_autonomy_runtime_terminal_reconciliation(runtime_state)
+        _governed_autonomy_runtime_terminal_reconciliation(
+            runtime_state,
+            effective_authority=effective_authority,
+        )
         if runtime_state is not None
         else None
     )
@@ -12909,6 +13374,7 @@ def _current_ticket_governed_autonomy_overlay(
         _governed_autonomy_runtime_summary(
             runtime_state,
             terminal_reconciliation=terminal_reconciliation,
+            effective_authority=effective_authority,
         )
         if runtime_state is not None
         else None
@@ -12929,6 +13395,7 @@ def _current_ticket_governed_autonomy_overlay(
     }
     expose_continue_action = (
         not active_governed_run
+        and effective_authority["continuation_eligible"]
         and (
             runtime_state is None
             or (
@@ -12977,6 +13444,11 @@ def _current_ticket_governed_autonomy_overlay(
             "additional_human_activation_required"
         ],
         "authority_revalidated": result["authority_revalidated"],
+        "effective_authority_revalidated": effective_authority[
+            "authority_revalidated"
+        ],
+        "continuation_eligible": effective_authority["continuation_eligible"],
+        "effective_authority_diagnostics": effective_authority["diagnostics"],
         "governed_autonomy_status": result["governed_autonomy_status"],
         "governed_autonomy_policy_id": result["governed_autonomy_policy_id"],
         "governed_autonomy_envelope_SHA256": result["governed_autonomy_envelope_SHA256"],
@@ -13107,6 +13579,12 @@ def _current_ticket_governed_autonomy_overlay(
             "same_authority_delegation_status"
         ],
         "governed_autonomy_runtime_status": summary["governed_autonomy_runtime_status"],
+        "governed_autonomy_effective_authority_revalidated": bool(
+            summary.get("effective_authority_revalidated")
+        ),
+        "governed_autonomy_continuation_eligible": bool(
+            summary.get("continuation_eligible")
+        ),
         "governed_autonomy_runtime_decision": summary["runtime_decision"],
         "governed_autonomy_runtime_state_SHA256": summary["runtime_state_SHA256"],
         "A2A_dispatch_performed": summary["A2A_dispatch_performed"],
@@ -13165,6 +13643,17 @@ def _current_ticket_governed_autonomy_overlay(
             })
     elif expose_continue_action:
         overlay["next_action"] = continue_next_action
+    elif not effective_authority["continuation_eligible"]:
+        overlay.update({
+            "readiness": "blocked_governed_autonomy_authority_mismatch",
+            "workflow_state": f"{binding.ticket_id}-GOVERNED-AUTONOMY-AUTHORITY-MISMATCH",
+            "workflow_status": "blocked_governed_autonomy_authority_mismatch",
+            "queue_state": "blocked_governed_autonomy_authority_mismatch",
+            "execution_state": "no_authorized_governed_continuation",
+            "recovery_state": "requires_authority_review",
+            "blocker_code": "CONTINUATION_AUTHORITY_MISMATCH",
+            "blocker_detail": effective_authority["diagnostics"].get("reason"),
+        })
     return overlay, None
 
 

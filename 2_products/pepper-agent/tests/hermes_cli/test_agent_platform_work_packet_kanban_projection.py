@@ -596,6 +596,57 @@ def _finish_projected_run_as_terminal(
         conn.close()
 
 
+def _write_p18_9_1_terminal_candidate_fixture(
+    pr,
+    projection_home: Path,
+    workspace: Path,
+) -> None:
+    source_root = projection_home / "terminal-candidate-source"
+    nav_relative_path = "2_products/pepper-agent/web/src/agent-platform/shell/navigation.ts"
+    _write_fixture_file(
+        source_root,
+        nav_relative_path,
+        "export const nav = 'canonical';\n",
+    )
+    _write_fixture_file(
+        workspace,
+        nav_relative_path,
+        "export const nav = 'canonical';\nexport const p18_9_1_terminal = true;\n",
+    )
+    _write_fixture_file(
+        workspace,
+        "2_products/pepper-agent/web/src/agent-platform/shell/P18.9.1-implementation-report.txt",
+        "Synthetic terminal candidate report.\n",
+    )
+    manifest_path = workspace / pr.PEPPER_SCRATCH_SOURCE_MATERIALIZATION_MANIFEST
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    if manifest_path.exists():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    else:
+        manifest = {
+            "source_materialized": True,
+            "dependency_substrate_materialized": True,
+            "dependency_substrate_kind": "synthetic_test_fixture",
+            "dependency_install_performed": False,
+            "canonical_package_lock_materialized": False,
+            "manifest_path": str(manifest_path),
+            "product_diff_excluded_roots": ["2_products/pepper-agent/node_modules"],
+        }
+    manifest.update(
+        {
+            "source_root": str(source_root),
+            "workspace_root": str(workspace),
+            "writable_allowed_paths": [
+                "2_products/pepper-agent/web/src/agent-platform/shell/**",
+            ],
+        }
+    )
+    manifest_path.write_text(
+        json.dumps(manifest, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
 def _force_p18_9_1_blocked_run_4(pr, kanban_db, projected: dict, monkeypatch) -> int:
     first = _start_p18_9_1_execution(pr, monkeypatch, pid=6401)
     _block_projected_run(
@@ -5354,38 +5405,7 @@ def test_current_p18_9_1_governed_autonomy_reconciles_owned_terminal_validation_
     assert run_5 == run_4 + 1
 
     workspace = Path(started["workspace_path"])
-    source_root = projection_home / "terminal-candidate-source"
-    nav_relative_path = "2_products/pepper-agent/web/src/agent-platform/shell/navigation.ts"
-    _write_fixture_file(
-        source_root,
-        nav_relative_path,
-        "export const nav = 'canonical';\n",
-    )
-    _write_fixture_file(
-        workspace,
-        nav_relative_path,
-        "export const nav = 'canonical';\nexport const p18_9_1_terminal = true;\n",
-    )
-    _write_fixture_file(
-        workspace,
-        "2_products/pepper-agent/web/src/agent-platform/shell/P18.9.1-implementation-report.txt",
-        "Synthetic terminal candidate report.\n",
-    )
-    manifest_path = workspace / pr.PEPPER_SCRATCH_SOURCE_MATERIALIZATION_MANIFEST
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest.update(
-        {
-            "source_root": str(source_root),
-            "workspace_root": str(workspace),
-            "writable_allowed_paths": [
-                "2_products/pepper-agent/web/src/agent-platform/shell/**",
-            ],
-        }
-    )
-    manifest_path.write_text(
-        json.dumps(manifest, sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    _write_p18_9_1_terminal_candidate_fixture(pr, projection_home, workspace)
     failure = (
         "workpacket_validation action list failed: TypeError: _handle() got an "
         "unexpected keyword argument 'session_id'"
@@ -5460,6 +5480,16 @@ def test_current_p18_9_1_governed_autonomy_reconciles_owned_terminal_validation_
         kind="transient",
     )
 
+    status_after_unowned = pr.get_current_ticket_governed_autonomy_status(
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+    assert status_after_unowned["authority_revalidated"] is False
+    assert status_after_unowned["continuation_eligible"] is False
+    assert status_after_unowned["effective_authority_diagnostics"]["reason"] == (
+        "newer_unowned_source_run"
+    )
+
     with pytest.raises(pr.ProductRuntimeAuthorityMismatch) as excinfo:
         pr.continue_current_ticket_governed_autonomy(
             runtime_goal="Do not replay an owned terminal run after a newer unowned run.",
@@ -5477,6 +5507,129 @@ def test_current_p18_9_1_governed_autonomy_reconciles_owned_terminal_validation_
         runs = kanban_db.list_runs(conn, projected["kanban_task_id"])
         assert runs[-1].id == run_6
         assert all(run.id != run_6 + 1 for run in runs)
+    finally:
+        conn.close()
+
+
+def test_current_p18_9_1_governed_autonomy_unifies_owned_terminal_run_after_a2a_history(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, projected, authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
+    )
+
+    from hermes_cli import kanban_db
+
+    run_4 = _force_p18_9_1_blocked_run_4(pr, kanban_db, projected, monkeypatch)
+    _activate_p18_9_1_governed_autonomy_for_test(pr, monkeypatch)
+    activation = pr.load_current_ticket_governed_autonomy_activation_record(
+        projection_record=authority,
+    )
+    assert activation is not None
+    historical_request = pr.CurrentTicketGovernedAutonomyContinuationRequest(
+        runtime_goal="Historical A2A-shaped governed autonomy provenance.",
+        strategy="A2A_DELEGATION",
+        delegate_goal="Historical same-authority child delegation completed.",
+        delegate_paths=(_first_projection_allowed_directory(projected),),
+        delegate_requested_operations=("read_file",),
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+    historical_runtime = pr._governed_autonomy_runtime_base_record(
+        request=historical_request,
+        projection=authority,
+        activation=activation,
+        previous=None,
+        runtime_decision="A2A_DELEGATION",
+        runtime_status="a2a_delegation_completed",
+        latest_decision_evidence={
+            "decision": "A2A_DELEGATION",
+            "historical_a2a_runtime_record": True,
+        },
+        provider_readiness=_ready_executor_provider_payload(),
+        process_continuation_increment=0,
+        delegation_increment=1,
+        next_autonomous_action="continue governed autonomy from historical A2A provenance",
+    )
+    pr._persist_governed_autonomy_runtime_state(historical_runtime)
+
+    prep = pr._prepare_current_ticket_governed_autonomy_task_for_dispatch(
+        projection=authority,
+        activation=activation,
+        envelope=SimpleNamespace(
+            envelope_SHA256=activation["governed_autonomy_envelope_SHA256"],
+        ),
+    )
+    assert prep["task_prepare_status"] == "prepared"
+    run_5 = _claim_next_projected_run(kanban_db, projected, pid=6815)
+    assert run_5 == run_4 + 1
+
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        task = kanban_db.get_task(conn, projected["kanban_task_id"])
+        assert task is not None
+        workspace = Path(task.workspace_path)
+    finally:
+        conn.close()
+    _write_p18_9_1_terminal_candidate_fixture(pr, projection_home, workspace)
+    failure = (
+        "workpacket_validation action list failed: TypeError: _handle() got an "
+        "unexpected keyword argument 'session_id'"
+    )
+    _finish_projected_run_as_terminal(
+        kanban_db,
+        projected,
+        run_5,
+        status="blocked",
+        outcome="blocked",
+        summary=failure,
+    )
+
+    status = pr.get_current_ticket_governed_autonomy_status(
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+    assert status["authority_revalidated"] is True
+    assert status["effective_live_lineage_activation_authorized"] is True
+    assert status["continuation_eligible"] is True
+    assert status["terminal_run_reconciled"] is True
+    assert status["terminal_run_id"] == run_5
+    assert status["effective_authority_diagnostics"]["activation_source_run_id"] == run_4
+    ownership = status["effective_authority_diagnostics"]["owned_lineage_state"]
+    assert ownership["owned_governed_run_id"] == run_5
+    latest_probe = ownership["latest_run_ownership_probe"]
+    assert latest_probe["owned"] is True
+    assert {item["classification"] for item in latest_probe["comparisons"]} >= {
+        "STABLE_AUTHORITY",
+        "HISTORICAL_PROVENANCE",
+        "RUNTIME_RECORD_STATE",
+    }
+
+    workflow = pr.build_workflow_control_snapshot()
+    assert workflow["workflow_status"] == "governed_autonomy_validation_repairable"
+    assert workflow["next_action"]["id"] == "CONTINUE_P18_9_1_GOVERNED_AUTONOMY"
+    assert workflow["governed_autonomy_continuation_eligible"] is True
+
+    replay = pr.continue_current_ticket_governed_autonomy(
+        runtime_goal="Reconcile owned terminal run 5 without creating run 6.",
+        strategy="DIRECT",
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("terminal replay must not spawn"),
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+    assert replay["authority_revalidated"] is True
+    assert replay["idempotent_replay"] is True
+    assert replay["non_consuming_observation"] is True
+    assert replay["observation_status"] == "governed_autonomy_execution_terminal_reconciled"
+    assert replay["terminal_run_id"] == run_5
+
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        runs = kanban_db.list_runs(conn, projected["kanban_task_id"])
+        assert runs[-1].id == run_5
+        assert all(run.id != run_5 + 1 for run in runs)
     finally:
         conn.close()
 
@@ -5620,6 +5773,53 @@ def test_current_p18_9_1_governed_autonomy_rejects_stale_authority_after_new_blo
         runs = kanban_db.list_runs(conn, projected["kanban_task_id"])
         assert runs[-1].id == run_5
         assert all(run.id != 6 for run in runs)
+    finally:
+        conn.close()
+
+
+def test_current_p18_9_1_governed_autonomy_rejects_active_foreign_execution(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, projected, _authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
+    )
+
+    from hermes_cli import kanban_db
+
+    run_4 = _force_p18_9_1_blocked_run_4(pr, kanban_db, projected, monkeypatch)
+    _activate_p18_9_1_governed_autonomy_for_test(pr, monkeypatch)
+    run_5 = _claim_next_projected_run(kanban_db, projected, pid=6825)
+    assert run_5 == run_4 + 1
+    monkeypatch.setattr(kanban_db, "_pid_alive", lambda pid: int(pid) == 6825)
+
+    status = pr.get_current_ticket_governed_autonomy_status(
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+    assert status["authority_revalidated"] is False
+    assert status["continuation_eligible"] is False
+    assert status["effective_authority_diagnostics"]["reason"] == (
+        "unowned_active_execution_present"
+    )
+
+    with pytest.raises(pr.ProductRuntimeAuthorityMismatch) as excinfo:
+        pr.continue_current_ticket_governed_autonomy(
+            runtime_goal="Do not continue across an active foreign run.",
+            strategy="DIRECT",
+            spawn_fn=lambda *_args, **_kwargs: pytest.fail("mismatch must not spawn"),
+            project_id="PEPPER",
+            ticket_id="P18.9.1",
+        )
+    assert excinfo.value.diagnostics["reason"] == "unowned_active_execution_present"
+    assert excinfo.value.diagnostics["current_active_run_ids"] == [run_5]
+
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        runs = kanban_db.list_runs(conn, projected["kanban_task_id"])
+        assert runs[-1].id == run_5
+        assert all(run.id != run_5 + 1 for run in runs)
     finally:
         conn.close()
 
