@@ -4807,11 +4807,13 @@ def test_current_p18_9_1_governed_autonomy_activation_is_status_only(
     assert activation["backend_derived_live_authority_SHA256"] == activation[
         "governed_autonomy_envelope_SHA256"
     ]
-    assert activation["same_authority_delegation_status"] == "blocked_metadata_only"
-    assert activation["same_authority_delegation_authorized"] is False
+    assert activation["same_authority_delegation_status"] == (
+        "canonical_hermes_delegate_task_available_with_parent_agent"
+    )
+    assert activation["same_authority_delegation_authorized"] is True
     assert activation["A2A_dispatch_performed"] is False
-    assert activation["live_lineage_activation_authorized"] is False
-    assert activation["live_lineage_activation_status"] == "blocked_requires_separate_authority"
+    assert activation["live_lineage_activation_authorized"] is True
+    assert activation["live_lineage_activation_status"] == "active_authority_ready_for_continuation"
     assert activation["lineage_dispatch_performed"] is False
     assert activation["dispatch_performed"] is False
     assert activation["execution_started"] is False
@@ -4854,13 +4856,15 @@ def test_current_p18_9_1_governed_autonomy_activation_is_status_only(
     workflow = pr.build_workflow_control_snapshot()
     assert workflow["workflow_status"] == "execution_failed"
     assert workflow["recovery_state"] == "recovery_required"
-    assert workflow["next_action"]["id"] == "RECOVER_P18_9_1_EXECUTION"
+    assert workflow["next_action"]["id"] == "CONTINUE_P18_9_1_GOVERNED_AUTONOMY"
     assert workflow["blocker_count"] == 1
     assert workflow["governed_autonomy_status"] == "activation_recorded_live_lineage_blocked"
     assert workflow["governed_autonomy"]["activation_action_SHA256"] == activation[
         "activation_action_SHA256"
     ]
-    assert workflow["governed_autonomy"]["same_authority_delegation_status"] == "blocked_metadata_only"
+    assert workflow["governed_autonomy"]["same_authority_delegation_status"] == (
+        "canonical_hermes_delegate_task_available_with_parent_agent"
+    )
     assert workflow["A2A_dispatch_performed"] is False
 
     status = pr.get_current_ticket_governed_autonomy_status(
@@ -4880,8 +4884,8 @@ def test_current_p18_9_1_governed_autonomy_activation_is_status_only(
         "governed_autonomy_envelope_SHA256"
     ]
     workflow_control = json.loads(pepper_tools._get_workflow_control({}))
-    assert workflow_control["next_action"]["id"] == "RECOVER_P18_9_1_EXECUTION"
-    assert workflow_control["governed_autonomy"]["same_authority_delegation_authorized"] is False
+    assert workflow_control["next_action"]["id"] == "CONTINUE_P18_9_1_GOVERNED_AUTONOMY"
+    assert workflow_control["governed_autonomy"]["same_authority_delegation_authorized"] is True
 
     replay = pr.activate_current_ticket_governed_autonomy(
         human_request_text=activation_text,
@@ -4904,6 +4908,143 @@ def test_current_p18_9_1_governed_autonomy_activation_is_status_only(
         assert all(run.id != 5 for run in runs)
     finally:
         conn.close()
+
+
+def test_current_p18_9_1_governed_autonomy_direct_starts_same_authority_run_5(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, projected, authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
+    )
+
+    from hermes_cli import kanban_db
+
+    run_4 = _force_p18_9_1_blocked_run_4(pr, kanban_db, projected, monkeypatch)
+    activation = _activate_p18_9_1_governed_autonomy_for_test(pr, monkeypatch)["activation"]
+    _patch_synthetic_scratch_materialization(monkeypatch, pr)
+    monkeypatch.setattr(kanban_db, "_pid_alive", lambda pid: int(pid) == 6505)
+    spawn_calls: list[dict] = []
+
+    def spawn(task, workspace, board=None, env_overlay=None):
+        spawn_calls.append({
+            "task_id": task.id,
+            "workspace": workspace,
+            "board": board,
+            "env_overlay": env_overlay,
+        })
+        return 6505
+
+    result = pr.continue_current_ticket_governed_autonomy(
+        runtime_goal="Continue P18.9.1 under the active same-authority execution plane.",
+        strategy="DIRECT",
+        spawn_fn=spawn,
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+
+    assert len(spawn_calls) == 1
+    assert spawn_calls[0]["task_id"] == projected["kanban_task_id"]
+    assert spawn_calls[0]["board"] == projected["kanban_board_slug"]
+    assert spawn_calls[0]["env_overlay"]["HERMES_AGENT_PLATFORM_WORKPACKET_ID"] == (
+        projected["work_packet_id"]
+    )
+    assert result["runtime_decision"] == "DIRECT"
+    assert result["governed_autonomy_runtime_status"] == "direct_execution_continuation_started"
+    assert result["kanban_run_created"] is True
+    assert result["kanban_run_id"] == run_4 + 1
+    assert result["source_run_id"] == run_4
+    assert result["historical_source_run_immutable"] is True
+    assert result["process_continuation_count"] == 1
+    assert result["dispatch_performed"] is True
+    assert result["execution_started"] is True
+    assert result["worker_execution"] is True
+    assert result["worker_process_started"] is True
+    assert result["Kanban_dispatch"] is True
+    assert result["lineage_dispatch_performed"] is True
+    assert result["legacy_human_recovery_retry_micro_gates_required"] is False
+    assert result["Git_mutation"] is False
+    assert result["auto_retry"] is False
+    assert result["auto_rollback"] is False
+    assert result["human_smoke_marker"] == pr.PEPPER_GOVERNED_AUTONOMY_READY_MARKER
+    assert result["live_autonomous_continuation_marker"] == (
+        pr.PEPPER_GOVERNED_AUTONOMY_LIVE_CONTINUATION_MARKER
+    )
+    assert result["current_invocation_side_effects"]["dispatch_performed"] is True
+    request_ref = result["latest_decision_evidence"]["direct_execution_request_reference"]
+    assert request_ref["governed_autonomy_continuation_reason"] == (
+        pr.PEPPER_GOVERNED_AUTONOMY_INTERNAL_CONTINUATION_REASON
+    )
+    assert request_ref["dispatcher_primitive"] == (
+        "kanban_db.unblock_task+kanban_db.claim_task+resolve_workspace+_default_spawn"
+    )
+    dispatch_ref = result["latest_decision_evidence"]["direct_execution_result_reference"]
+    assert dispatch_ref["kanban_run_id"] == run_4 + 1
+    assert dispatch_ref["source_materialization_reference"]["dependency_install_performed"] is False
+
+    assert not pr.recovery_action_record_path_for_ticket("P18.9.1").exists()
+    assert not pr.retry_start_record_path_for_ticket("P18.9.1").exists()
+    assert not pr.p18_9_0_recovery_action_record_path().exists()
+
+    record = pr.load_current_ticket_governed_autonomy_runtime_state(
+        projection_record=authority,
+        activation_record=pr.load_current_ticket_governed_autonomy_activation_record(
+            projection_record=authority,
+        ),
+    )
+    assert record is not None
+    assert record["runtime_state_SHA256"] == result["runtime_state_SHA256"]
+    assert record["activation_action_SHA256"] == activation["activation_action_SHA256"]
+    assert record["provider_readiness_reference"]["provider"] == "openai-codex"
+    assert record["provider_readiness_reference"]["model"] == "gpt-5.5"
+    assert record["provider_readiness_reference"]["credential_profile_id"] == (
+        "openai-codex.primary"
+    )
+
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        task = kanban_db.get_task(conn, projected["kanban_task_id"])
+        runs = kanban_db.list_runs(conn, projected["kanban_task_id"])
+        assert task is not None
+        assert task.status == "running"
+        assert task.current_run_id == run_4 + 1
+        assert task.worker_pid == 6505
+        body = json.loads(task.body or "{}")
+        assert body["governed_autonomy_continuation_authorized"] is True
+        assert body["governed_autonomy_activation_action_SHA256"] == activation[
+            "activation_action_SHA256"
+        ]
+        assert body["governed_autonomy_source_run_id"] == run_4
+        assert runs[-2].id == run_4
+        assert runs[-2].status == "blocked"
+        assert runs[-1].id == run_4 + 1
+        assert runs[-1].status == "running"
+        assert (Path(task.workspace_path) / pr.PEPPER_SCRATCH_SOURCE_MATERIALIZATION_MANIFEST).is_file()
+    finally:
+        conn.close()
+
+    replay = pr.continue_current_ticket_governed_autonomy(
+        runtime_goal="Probe while the same governed run is already active.",
+        strategy="DIRECT",
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("active replay must not spawn"),
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+    assert replay["idempotent_replay"] is True
+    assert replay["non_consuming_observation"] is True
+    assert replay["process_continuation_count"] == 1
+    assert replay["kanban_run_id"] == run_4 + 1
+
+    workflow = pr.build_workflow_control_snapshot()
+    assert workflow["workflow_status"] == "executing"
+    assert workflow["active_execution_count"] == 1
+    assert workflow["next_action"]["id"] == "MONITOR_P18_9_1_EXECUTION"
+    assert workflow["governed_autonomy"]["kanban_run_created"] is True
+    assert workflow["governed_autonomy"]["kanban_run_id"] == run_4 + 1
+    assert workflow["governed_autonomy"]["live_autonomous_continuation_marker"] == (
+        pr.PEPPER_GOVERNED_AUTONOMY_LIVE_CONTINUATION_MARKER
+    )
 
 
 def test_current_p18_9_1_governed_autonomy_tool_rejects_caller_supplied_authority(
@@ -4943,6 +5084,20 @@ def test_current_p18_9_1_governed_autonomy_tool_rejects_caller_supplied_authorit
     }))
     assert continuation["success"] is False
     assert "persisted server-derived authority" in continuation["error"]
+
+    _activate_p18_9_1_governed_autonomy_for_test(pr, monkeypatch)
+    raw_child_authority = json.loads(pepper_tools._continue_current_ticket_governed_autonomy({
+        "runtime_goal": "Try to continue with model-supplied A2A child authority.",
+        "strategy": "A2A_DELEGATION",
+        "delegate_goal": "Inspect the delegated area.",
+        "delegate_paths": ["2_products/pepper-agent/web/src/agent-platform/shell"],
+        "delegate_requested_operations": ["codebase_inspection"],
+        "project_id": "PEPPER",
+        "ticket_id": "P18.9.1",
+    }))
+    assert raw_child_authority["success"] is False
+    assert "derive server-side" in raw_child_authority["error"]
+    assert "delegate_requested_operations" in raw_child_authority["error"]
 
 
 def test_current_p18_9_1_governed_autonomy_rejects_tampered_authority_digest(
@@ -5139,8 +5294,6 @@ def test_current_p18_9_1_governed_autonomy_a2a_uses_injected_delegate_runner(
         runtime_goal="Delegate bounded offline inspection under the active authority.",
         strategy="A2A_DELEGATION",
         delegate_goal="Inspect only the delegated allowed path and summarize.",
-        delegate_paths=(allowed_dir,),
-        delegate_requested_operations=("list_directory", "read_file"),
         delegate_runner=delegate_runner,
         project_id="PEPPER",
         ticket_id="P18.9.1",
@@ -5149,6 +5302,12 @@ def test_current_p18_9_1_governed_autonomy_a2a_uses_injected_delegate_runner(
     assert len(calls) == 1
     assert calls[0]["role"] == "leaf"
     assert calls[0]["background"] is False
+    assert allowed_dir in calls[0]["context"]["delegate_paths"]
+    assert calls[0]["context"]["delegate_requested_operations"] == [
+        "list_directory",
+        "read_file",
+    ]
+    assert calls[0]["context"]["child_authority_source"] == "backend_derived_parent_authority"
     assert calls[0]["context"]["git_mutation"] is False
     assert calls[0]["context"]["provider_dispatch_count"] == 0
     assert calls[0]["context"]["model_inference_count"] == 0
@@ -5163,6 +5322,8 @@ def test_current_p18_9_1_governed_autonomy_a2a_uses_injected_delegate_runner(
     request_ref = result["latest_decision_evidence"]["a2a_delegation_request_reference"]
     assert request_ref["runtime_kind"] == "hermes_delegate_task"
     assert request_ref["opencode_provider_route"] == "opencode-zen"
+    assert request_ref["delegate_paths_source"] == "backend_allowed_paths"
+    assert request_ref["delegate_requested_operations_source"] == "backend_goal_classification"
     assert request_ref["git_mutation"] is False
     result_ref = result["latest_decision_evidence"]["a2a_delegation_result_reference"]
     assert result_ref["status"] == "completed"
@@ -5241,8 +5402,6 @@ def test_current_p18_9_1_governed_autonomy_a2a_resolves_canonical_delegate_task_
         runtime_goal="Delegate through the canonical Hermes A2A runtime under the active authority.",
         strategy="A2A_DELEGATION",
         delegate_goal="Inspect only the delegated allowed path and summarize.",
-        delegate_paths=(allowed_dir,),
-        delegate_requested_operations=("list_directory", "read_file"),
         delegate_parent_agent=parent_agent,
         project_id="PEPPER",
         ticket_id="P18.9.1",
@@ -5272,6 +5431,8 @@ def test_current_p18_9_1_governed_autonomy_a2a_resolves_canonical_delegate_task_
     request_ref = result["latest_decision_evidence"]["a2a_delegation_request_reference"]
     assert request_ref["runner_source"] == "canonical_hermes_delegate_task"
     assert request_ref["canonical_runtime_classification"] == "HERMES_CANONICAL_A2A_FOUND"
+    assert request_ref["delegate_paths_source"] == "backend_allowed_paths"
+    assert request_ref["delegate_requested_operations_source"] == "backend_goal_classification"
     assert request_ref["delegate_task_registered"] is True
     assert request_ref["delegate_task_toolset"] == "delegation"
     assert request_ref["opencode_provider_profile_found"] is True
@@ -5349,6 +5510,58 @@ def test_current_p18_9_1_governed_autonomy_a2a_denies_out_of_scope_child_authori
         conn.close()
 
 
+@pytest.mark.parametrize("operation", ("git_mutation", "package_install", "docker", "graphify"))
+def test_current_p18_9_1_governed_autonomy_a2a_denies_privileged_child_operations(
+    projection_home,
+    monkeypatch,
+    operation,
+) -> None:
+    pr, projected, _authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
+    )
+
+    from hermes_cli import kanban_db
+
+    run_4 = _force_p18_9_1_blocked_run_4(pr, kanban_db, projected, monkeypatch)
+    _activate_p18_9_1_governed_autonomy_for_test(pr, monkeypatch)
+    allowed_dir = _first_projection_allowed_directory(projected)
+    called = False
+
+    def delegate_runner(**_kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("delegate runner must not be called")
+
+    result = pr.continue_current_ticket_governed_autonomy(
+        runtime_goal="Attempt a privileged child delegation.",
+        strategy="A2A_DELEGATION",
+        delegate_goal="Run a privileged child operation.",
+        delegate_paths=(allowed_dir,),
+        delegate_requested_operations=(operation,),
+        delegate_runner=delegate_runner,
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+
+    assert called is False
+    assert result["runtime_decision"] == "STOP_FOR_HUMAN"
+    assert result["governed_autonomy_runtime_status"] == "blocked_stop_for_human"
+    assert result["blocker_code"] == "A2A_CHILD_AUTHORITY_OPERATION_DENIED"
+    assert result["process_continuation_count"] == 0
+    assert result["A2A_delegation_count"] == 0
+    assert result["A2A_dispatch_performed"] is False
+    assert result["source_run_id"] == run_4
+
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        runs = kanban_db.list_runs(conn, projected["kanban_task_id"])
+        assert runs[-1].id == run_4
+        assert all(run.id != run_4 + 1 for run in runs)
+    finally:
+        conn.close()
+
+
 def test_current_p18_9_1_governed_autonomy_status_reconstructs_runtime_after_restart(
     projection_home,
     monkeypatch,
@@ -5363,27 +5576,70 @@ def test_current_p18_9_1_governed_autonomy_status_reconstructs_runtime_after_res
 
     run_4 = _force_p18_9_1_blocked_run_4(pr, kanban_db, projected, monkeypatch)
     _activate_p18_9_1_governed_autonomy_for_test(pr, monkeypatch)
-    first = pr.continue_current_ticket_governed_autonomy(
-        runtime_goal="Record direct active-authority continuation with no external action.",
+    activation = pr.load_current_ticket_governed_autonomy_activation_record(
+        projection_record=authority,
+    )
+    assert activation is not None
+    legacy_request = pr.CurrentTicketGovernedAutonomyContinuationRequest(
+        runtime_goal="Historical metadata-only direct active-authority probe.",
         strategy="DIRECT",
         project_id="PEPPER",
         ticket_id="P18.9.1",
     )
-    second = pr.continue_current_ticket_governed_autonomy(
-        runtime_goal="Record direct active-authority continuation with no external action.",
-        strategy="DIRECT",
-        project_id="PEPPER",
-        ticket_id="P18.9.1",
+    first = pr._governed_autonomy_runtime_base_record(
+        request=legacy_request,
+        projection=authority,
+        activation=activation,
+        previous=None,
+        runtime_decision="DIRECT",
+        runtime_status="direct_continuation_recorded",
+        latest_decision_evidence={"decision": "DIRECT", "historical_metadata_only": True},
+        provider_readiness=_ready_executor_provider_payload(),
+        process_continuation_increment=1,
+        next_autonomous_action="historical metadata probe",
     )
+    pr._persist_governed_autonomy_runtime_state(first)
+    second = pr._governed_autonomy_runtime_base_record(
+        request=legacy_request,
+        projection=authority,
+        activation=activation,
+        previous=first,
+        runtime_decision="DIRECT",
+        runtime_status="direct_continuation_recorded",
+        latest_decision_evidence={"decision": "DIRECT", "historical_metadata_only": True},
+        provider_readiness=_ready_executor_provider_payload(),
+        process_continuation_increment=1,
+        next_autonomous_action="historical metadata probe",
+    )
+    legacy_dispatch_keys = (
+        "kanban_run_created",
+        "dispatch_performed",
+        "execution_started",
+        "worker_execution",
+        "worker_process_started",
+        "Kanban_dispatch",
+        "lineage_dispatch_performed",
+        "A2A_dispatch_performed",
+    )
+    for key in legacy_dispatch_keys:
+        second.pop(key, None)
+    second["current_invocation_side_effects"] = {
+        key: value
+        for key, value in second["current_invocation_side_effects"].items()
+        if key not in legacy_dispatch_keys
+    }
+    second.pop("runtime_state_SHA256")
+    second["runtime_state_SHA256"] = pr._governed_autonomy_runtime_record_digest(second)
+    pr._persist_governed_autonomy_runtime_state(second)
 
     assert second["process_continuation_count"] == 2
-    assert second["no_progress_count"] == 1
     persisted = pr.load_current_ticket_governed_autonomy_runtime_state(
         projection_record=authority,
     )
     assert persisted is not None
     assert persisted["previous_runtime_state_SHA256"] == first["runtime_state_SHA256"]
     assert persisted["runtime_state_SHA256"] == second["runtime_state_SHA256"]
+    assert "dispatch_performed" not in persisted
     status = pr.get_current_ticket_governed_autonomy_status(
         project_id="PEPPER",
         ticket_id="P18.9.1",
@@ -5391,20 +5647,43 @@ def test_current_p18_9_1_governed_autonomy_status_reconstructs_runtime_after_res
     assert status["governed_autonomy_runtime"]["runtime_state_SHA256"] == second[
         "runtime_state_SHA256"
     ]
-    assert status["governed_autonomy_runtime"]["process_continuation_count"] == 2
-    assert status["governed_autonomy_runtime"]["no_progress_count"] == 1
+    assert status["recorded_process_continuation_count"] == 2
+    assert status["governed_autonomy_runtime"]["recorded_process_continuation_count"] == 2
+    assert status["process_continuation_count"] == 0
+    assert status["governed_autonomy_runtime"]["process_continuation_count"] == 0
+    assert status["dispatch_performed"] is False
+    assert status["governed_autonomy_runtime"]["dispatch_performed"] is False
     workflow = pr.build_workflow_control_snapshot()
-    assert workflow["next_action"]["id"] == "RECOVER_P18_9_1_EXECUTION"
+    assert workflow["next_action"]["id"] == "CONTINUE_P18_9_1_GOVERNED_AUTONOMY"
     assert workflow["governed_autonomy"]["runtime_state_SHA256"] == second[
         "runtime_state_SHA256"
     ]
-    assert workflow["governed_autonomy"]["process_continuation_count"] == 2
+    assert workflow["governed_autonomy"]["recorded_process_continuation_count"] == 2
+    assert workflow["governed_autonomy"]["process_continuation_count"] == 0
+
+    _patch_synthetic_scratch_materialization(monkeypatch, pr)
+    monkeypatch.setattr(kanban_db, "_pid_alive", lambda pid: int(pid) == 6606)
+    resumed = pr.continue_current_ticket_governed_autonomy(
+        runtime_goal="Resume with the first real direct governed continuation after restart.",
+        strategy="DIRECT",
+        spawn_fn=lambda _task, _workspace, board=None, env_overlay=None: 6606,
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+    assert resumed["previous_runtime_state_SHA256"] == second["runtime_state_SHA256"]
+    assert resumed["process_continuation_count"] == 1
+    assert resumed["recorded_process_continuation_count"] == 1
+    assert resumed["kanban_run_id"] == run_4 + 1
+    assert resumed["live_autonomous_continuation_marker"] == (
+        pr.PEPPER_GOVERNED_AUTONOMY_LIVE_CONTINUATION_MARKER
+    )
 
     conn = kanban_db.connect(board=projected["kanban_board_slug"])
     try:
         runs = kanban_db.list_runs(conn, projected["kanban_task_id"])
-        assert runs[-1].id == run_4
-        assert all(run.id != 5 for run in runs)
+        assert runs[-2].id == run_4
+        assert runs[-1].id == run_4 + 1
+        assert runs[-1].status == "running"
     finally:
         conn.close()
 

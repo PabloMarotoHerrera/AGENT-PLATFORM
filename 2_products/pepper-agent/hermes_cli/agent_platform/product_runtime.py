@@ -140,7 +140,13 @@ PEPPER_GOVERNED_AUTONOMY_A2A_POLICY_ID = (
     "pepper-governed-autonomy-same-authority-a2a-v1"
 )
 PEPPER_GOVERNED_AUTONOMY_READY_MARKER = (
-    "PEPPER-GOVERNED-AUTONOMY-RUNTIME-AND-A2A-INTEGRATION-READY"
+    "PEPPER-GOVERNED-AUTONOMY-EXECUTION-PLANE-AND-A2A-CLOSURE-READY"
+)
+PEPPER_GOVERNED_AUTONOMY_LIVE_CONTINUATION_MARKER = (
+    "READY_FOR_LIVE_P18_9_1_AUTONOMOUS_CONTINUATION"
+)
+PEPPER_GOVERNED_AUTONOMY_INTERNAL_CONTINUATION_REASON = (
+    "governed_autonomy_internal_continuation"
 )
 PEPPER_GOVERNED_AUTONOMY_RUNTIME_SOURCE_SYSTEM = (
     "pepper-governed-autonomy-runtime"
@@ -740,6 +746,11 @@ def governed_ticket_lifecycle_action_ids(ticket_id: str) -> dict[str, str]:
         "monitor_execution": f"MONITOR_{token}_EXECUTION",
         "revise": f"REVISE_{token}",
     }
+
+
+def governed_autonomy_continuation_action_id(ticket_id: str) -> str:
+    token = governed_ticket_lifecycle_action_token(ticket_id)
+    return f"CONTINUE_{token}_GOVERNED_AUTONOMY"
 
 
 def governed_ticket_recovery_authorization_text(ticket_id: str) -> str:
@@ -3294,9 +3305,9 @@ def validate_governed_autonomy_activation_record(
         "01AH_envelope_lifecycle_classification": "01AH_ENVELOPE_WRONG_LIFECYCLE_PHASE",
         "governed_autonomy_activation_recorded": True,
         "governed_autonomy_status": "activation_recorded_live_lineage_blocked",
-        "live_lineage_activation_authorized": False,
-        "live_lineage_activation_status": "blocked_requires_separate_authority",
-        "live_lineage_activation_blocker_code": "LIVE_LINEAGE_ACTIVATION_AUTHORITY_GAP",
+        "live_lineage_activation_authorized": True,
+        "live_lineage_activation_status": "active_authority_ready_for_continuation",
+        "live_lineage_activation_blocker_code": None,
         "same_authority_subset_validated": True,
         "dispatch_performed": False,
         "execution_started": False,
@@ -3397,13 +3408,6 @@ def validate_governed_autonomy_runtime_state_record(
         "same_authority_subset_validated": True,
         "legacy_human_recovery_retry_micro_gates_required": False,
         "legacy_run_mutation_performed": False,
-        "kanban_run_created": False,
-        "dispatch_performed": False,
-        "execution_started": False,
-        "worker_execution": False,
-        "worker_process_started": False,
-        "Kanban_dispatch": False,
-        "lineage_dispatch_performed": False,
         "Git_commands_executed": 0,
         "Docker_commands_executed": 0,
         "Graphify_commands_executed": 0,
@@ -3452,13 +3456,36 @@ def validate_governed_autonomy_runtime_state_record(
     current_side_effects = record.get("current_invocation_side_effects")
     if not isinstance(current_side_effects, dict):
         raise ProductRuntimeConflict("governed-autonomy runtime side effects are invalid")
+    direct_dispatch_authorized = (
+        record.get("runtime_decision") == "DIRECT"
+        and record.get("governed_autonomy_continuation_reason")
+        == PEPPER_GOVERNED_AUTONOMY_INTERNAL_CONTINUATION_REASON
+    )
+    for key in (
+        "dispatch_performed",
+        "Kanban_dispatch",
+        "execution_started",
+        "worker_execution",
+        "worker_process_started",
+        "lineage_dispatch_performed",
+    ):
+        value = record.get(key, False)
+        if not isinstance(value, bool):
+            raise ProductRuntimeConflict(f"governed-autonomy runtime {key} is invalid")
+        if current_side_effects.get(key, False) is not value:
+            raise ProductRuntimeConflict(f"governed-autonomy runtime side effect {key} mismatch")
+        if value and not direct_dispatch_authorized:
+            raise ProductRuntimeConflict(
+                f"governed-autonomy runtime forbidden side effect {key} mismatch"
+            )
+    kanban_run_created = record.get("kanban_run_created", False)
+    if not isinstance(kanban_run_created, bool):
+        raise ProductRuntimeConflict("governed-autonomy runtime kanban_run_created is invalid")
+    if kanban_run_created and not direct_dispatch_authorized:
+        raise ProductRuntimeConflict("governed-autonomy runtime forbidden run creation mismatch")
+    if kanban_run_created and _int_or_none(record.get("kanban_run_id")) is None:
+        raise ProductRuntimeConflict("governed-autonomy runtime Kanban run id is invalid")
     forbidden_side_effects = {
-        "dispatch_performed": False,
-        "Kanban_dispatch": False,
-        "execution_started": False,
-        "worker_execution": False,
-        "worker_process_started": False,
-        "lineage_dispatch_performed": False,
         "Git_mutation": False,
         "auto_retry": False,
         "auto_rollback": False,
@@ -3468,10 +3495,14 @@ def validate_governed_autonomy_runtime_state_record(
             raise ProductRuntimeConflict(
                 f"governed-autonomy runtime forbidden side effect {key} mismatch"
             )
+    a2a_dispatch_performed = current_side_effects.get(
+        "A2A_dispatch_performed",
+        bool(record.get("A2A_dispatch_performed")),
+    )
     if record.get("runtime_decision") == "A2A_DELEGATION":
-        if current_side_effects.get("A2A_dispatch_performed") is not True:
+        if a2a_dispatch_performed is not True:
             raise ProductRuntimeConflict("governed-autonomy A2A runtime side effect mismatch")
-    elif current_side_effects.get("A2A_dispatch_performed") is not False:
+    elif a2a_dispatch_performed is not False:
         raise ProductRuntimeConflict("governed-autonomy A2A side effect mismatch")
     return record
 
@@ -4191,7 +4222,10 @@ def get_current_ticket_governed_autonomy_status(
         "governed_autonomy_runtime_status": runtime_state["governed_autonomy_runtime_status"],
         "runtime_decision": runtime_state["runtime_decision"],
         "runtime_state_SHA256": runtime_state["runtime_state_SHA256"],
-        "process_continuation_count": runtime_state["process_continuation_count"],
+        "process_continuation_count": _effective_governed_autonomy_process_continuation_count(
+            runtime_state
+        ),
+        "recorded_process_continuation_count": runtime_state["process_continuation_count"],
         "self_repair_count": runtime_state["self_repair_count"],
         "task_local_tool_candidate_count": runtime_state["task_local_tool_candidate_count"],
         "command_evaluation_count": runtime_state["command_evaluation_count"],
@@ -4206,6 +4240,18 @@ def get_current_ticket_governed_autonomy_status(
         "next_autonomous_action": runtime_state.get("next_autonomous_action"),
         "next_human_action": runtime_state.get("next_human_action"),
         "latest_runtime_side_effects": runtime_state["current_invocation_side_effects"],
+        "kanban_run_created": bool(runtime_state.get("kanban_run_created")),
+        "kanban_run_id": runtime_state.get("kanban_run_id"),
+        "workspace_path": runtime_state.get("workspace_path"),
+        "dispatch_performed": bool(runtime_state.get("dispatch_performed")),
+        "execution_started": bool(runtime_state.get("execution_started")),
+        "worker_execution": bool(runtime_state.get("worker_execution")),
+        "worker_process_started": bool(runtime_state.get("worker_process_started")),
+        "Kanban_dispatch": bool(runtime_state.get("Kanban_dispatch")),
+        "lineage_dispatch_performed": bool(runtime_state.get("lineage_dispatch_performed")),
+        "live_autonomous_continuation_marker": runtime_state.get(
+            "live_autonomous_continuation_marker"
+        ),
         "governed_autonomy_runtime": _governed_autonomy_runtime_summary(runtime_state),
     })
     return result
@@ -4293,6 +4339,7 @@ def continue_current_ticket_governed_autonomy(
     delegate_runner: Any | None = None,
     delegate_result: dict[str, Any] | None = None,
     delegate_parent_agent: Any | None = None,
+    spawn_fn: Any = None,
     project_id: str | None = None,
     ticket_id: str | None = None,
 ) -> dict[str, Any]:
@@ -4331,14 +4378,24 @@ def continue_current_ticket_governed_autonomy(
     )
     if activation is None:
         raise ProductRuntimeConflict("governed autonomy continuation requires active server-derived authority")
-    authority = _require_current_governed_autonomy_authority_match(
-        projection=projection,
-        activation=activation,
-    )
     previous = load_current_ticket_governed_autonomy_runtime_state(
         projection_record=projection,
         activation_record=activation,
     )
+    if _governed_autonomy_active_execution_replay(previous, projection):
+        result = _governed_autonomy_runtime_operational_result(
+            previous,
+            activation_record=activation,
+            idempotent_replay=True,
+        )
+        result["non_consuming_observation"] = True
+        result["observation_status"] = "governed_autonomy_execution_already_active"
+        return result
+    authority = _require_current_governed_autonomy_authority_match(
+        projection=projection,
+        activation=activation,
+    )
+    decision = _select_governed_autonomy_runtime_decision(request)
     provider_readiness = _executor_provider_readiness(str(projection["assignee_profile"]))
     if provider_readiness.get("ok") is not True:
         record = _build_governed_autonomy_runtime_stop_record(
@@ -4358,8 +4415,36 @@ def continue_current_ticket_governed_autonomy(
             activation_record=activation,
             idempotent_replay=False,
         )
-
-    decision = _select_governed_autonomy_runtime_decision(request)
+    if decision == "DIRECT":
+        worker_credential_probe = _preflight_pepper_governed_worker_credentials(
+            projection,
+            enabled=spawn_fn is None,
+        )
+        if not worker_credential_probe.get("ok"):
+            record = _build_governed_autonomy_runtime_stop_record(
+                request=request,
+                projection=projection,
+                activation=activation,
+                previous=previous,
+                runtime_decision="STOP_FOR_HUMAN",
+                blocker_code=worker_credential_probe.get("blocker_code")
+                or "WORKER_CREDENTIAL_AUTHORITY_MISMATCH",
+                blocker_detail=worker_credential_probe.get("blocker_detail")
+                or "governed worker credential probe failed",
+                validation_failed=True,
+                provider_readiness={
+                    **provider_readiness,
+                    "worker_credential_probe": worker_credential_probe,
+                },
+            )
+            _persist_governed_autonomy_runtime_state(record)
+            return _governed_autonomy_runtime_operational_result(
+                record,
+                activation_record=activation,
+                idempotent_replay=False,
+            )
+        provider_readiness = dict(provider_readiness)
+        provider_readiness["worker_credential_probe"] = worker_credential_probe
     budget_blocker = _governed_autonomy_runtime_budget_blocker(
         activation,
         previous,
@@ -4424,6 +4509,8 @@ def continue_current_ticket_governed_autonomy(
             activation=activation,
             previous=previous,
             provider_readiness=provider_readiness,
+            envelope=authority,
+            spawn_fn=spawn_fn,
         )
     _persist_governed_autonomy_runtime_state(record)
     return _governed_autonomy_runtime_operational_result(
@@ -5025,7 +5112,12 @@ def _validate_governed_autonomy_activation_request_guards(
         if isinstance(current_next_action, dict)
         else None
     )
-    if request.next_action_id not in {None, current_next_action_id}:
+    if request.next_action_id not in {
+        None,
+        current_next_action_id,
+        binding.execution_recovery_next_action_id,
+        governed_autonomy_continuation_action_id(binding.ticket_id),
+    }:
         raise ProductRuntimeConflict(
             f"governed autonomy activation is bounded to active action {current_next_action_id}"
         )
@@ -7100,21 +7192,22 @@ def _build_governed_autonomy_activation_record(
         "same_authority_subset_validated": True,
         "same_authority_subset": same_authority,
         "same_authority_delegation_policy_id": PEPPER_GOVERNED_AUTONOMY_A2A_POLICY_ID,
-        "same_authority_delegation_status": "blocked_metadata_only",
-        "same_authority_delegation_authorized": False,
-        "same_authority_delegation_blocker_code": "A2A_RUNTIME_UNAVAILABLE_WITHOUT_TASK_LOCAL_AUTHORITY",
+        "same_authority_delegation_status": "canonical_hermes_delegate_task_available_with_parent_agent",
+        "same_authority_delegation_authorized": True,
+        "same_authority_delegation_blocker_code": None,
         "same_authority_delegation_blocker_detail": (
-            "No canonical OpenCode/A2A dispatcher is available; task-local delegation "
-            "requires a separate 01AH-scoped authority that still cannot activate live lineage."
+            "Canonical Hermes delegate_task can run a bounded same-authority child when "
+            "the tool invocation provides parent_agent context; otherwise continuation stops."
         ),
-        "opencode_runtime_dispatcher_found": False,
-        "delegate_task_runtime_kind": "local_subagent_not_opencode_a2a",
-        "live_lineage_activation_authorized": False,
-        "live_lineage_activation_status": "blocked_requires_separate_authority",
-        "live_lineage_activation_blocker_code": "LIVE_LINEAGE_ACTIVATION_AUTHORITY_GAP",
+        "opencode_runtime_dispatcher_found": True,
+        "delegate_task_runtime_kind": "canonical_hermes_delegate_task",
+        "live_lineage_activation_authorized": True,
+        "live_lineage_activation_status": "active_authority_ready_for_continuation",
+        "live_lineage_activation_blocker_code": None,
         "live_lineage_activation_blocker_detail": (
-            f"{binding.ticket_id} live lineage activation, retry execution, and run creation "
-            "require separate human/runtime authority."
+            f"{binding.ticket_id} same-authority continuation may create exactly one new "
+            "Kanban run through the canonical projected-task worker lifecycle while the "
+            "backend-derived authority and active_execution_count=0 still match."
         ),
         "dispatch_performed": False,
         "execution_started": False,
@@ -7168,6 +7261,43 @@ def _runtime_counter(previous: dict[str, Any] | None, key: str) -> int:
     return int(previous.get(key) or 0)
 
 
+def _governed_autonomy_runtime_record_consumed_process(
+    record: dict[str, Any] | None,
+) -> bool:
+    if not isinstance(record, dict):
+        return False
+    side_effects = record.get("current_invocation_side_effects")
+    if not isinstance(side_effects, dict):
+        side_effects = {}
+    if any(
+        side_effects.get(key) is True
+        for key in (
+            "dispatch_performed",
+            "Kanban_dispatch",
+            "execution_started",
+            "worker_execution",
+            "worker_process_started",
+            "A2A_dispatch_performed",
+        )
+    ):
+        return True
+    if record.get("kanban_run_created") or record.get("lineage_dispatch_performed"):
+        return True
+    return str(record.get("runtime_decision") or "") == "TASK_LOCAL_SELF_EXTENSION" and str(
+        record.get("governed_autonomy_runtime_status") or ""
+    ).startswith("task_local_self_extension")
+
+
+def _effective_governed_autonomy_process_continuation_count(
+    previous: dict[str, Any] | None,
+) -> int:
+    if previous is None:
+        return 0
+    if _governed_autonomy_runtime_record_consumed_process(previous):
+        return _runtime_counter(previous, "process_continuation_count")
+    return 0
+
+
 def _governed_autonomy_runtime_budget_blocker(
     activation: dict[str, Any],
     previous: dict[str, Any] | None,
@@ -7176,7 +7306,10 @@ def _governed_autonomy_runtime_budget_blocker(
     request: CurrentTicketGovernedAutonomyContinuationRequest,
 ) -> tuple[str, str] | None:
     limits = _governed_autonomy_runtime_budget_limits(activation)
-    if _runtime_counter(previous, "process_continuation_count") + 1 > limits["max_continuations"]:
+    if requested_decision != "STOP_FOR_HUMAN" and (
+        _effective_governed_autonomy_process_continuation_count(previous) + 1
+        > limits["max_continuations"]
+    ):
         return "GOVERNED_AUTONOMY_PROCESS_CONTINUATION_BUDGET_EXHAUSTED", (
             "process continuation budget is exhausted"
         )
@@ -7214,6 +7347,7 @@ def _governed_autonomy_runtime_budget_blocker(
 def _governed_autonomy_runtime_counts(
     previous: dict[str, Any] | None,
     *,
+    process_continuation_increment: int = 1,
     self_repair_increment: int = 0,
     tool_candidate_increment: int = 0,
     command_evaluation_increment: int = 0,
@@ -7221,7 +7355,10 @@ def _governed_autonomy_runtime_counts(
     validation_failure_increment: int = 0,
 ) -> dict[str, int]:
     return {
-        "process_continuation_count": _runtime_counter(previous, "process_continuation_count") + 1,
+        "process_continuation_count": (
+            _effective_governed_autonomy_process_continuation_count(previous)
+            + process_continuation_increment
+        ),
         "self_repair_count": _runtime_counter(previous, "self_repair_count") + self_repair_increment,
         "task_local_tool_candidate_count": (
             _runtime_counter(previous, "task_local_tool_candidate_count") + tool_candidate_increment
@@ -7345,6 +7482,49 @@ def _governed_autonomy_runtime_source_run(
     }
 
 
+def _governed_autonomy_activation_source_run(
+    activation: dict[str, Any],
+) -> dict[str, Any]:
+    reference = activation.get("governed_autonomy_envelope_reference")
+    if not isinstance(reference, dict):
+        return {
+            "source_run_id": None,
+            "source_run_status": None,
+            "source_run_outcome": None,
+            "historical_source_run_immutable": True,
+        }
+    return {
+        "source_run_id": reference.get("source_run_id"),
+        "source_run_status": reference.get("source_run_status"),
+        "source_run_outcome": reference.get("source_run_outcome"),
+        "historical_source_run_immutable": True,
+    }
+
+
+def _governed_autonomy_active_execution_replay(
+    previous: dict[str, Any] | None,
+    projection: dict[str, Any],
+) -> bool:
+    if previous is None or previous.get("runtime_decision") != "DIRECT":
+        return False
+    if not previous.get("kanban_run_created") or not previous.get("execution_started"):
+        return False
+    run_id = _int_or_none(previous.get("kanban_run_id"))
+    if run_id is None:
+        return False
+    task_visibility, runs = _governed_autonomy_kanban_visibility(projection)
+    if isinstance(task_visibility, dict):
+        if (
+            _int_or_none(task_visibility.get("current_run_id")) == run_id
+            and str(task_visibility.get("status") or "").strip().lower() == "running"
+        ):
+            return True
+    for run in runs:
+        if _int_or_none(run.get("id")) == run_id:
+            return _execution_is_active(run)
+    return False
+
+
 def _governed_autonomy_provider_readiness_reference(
     provider_readiness: dict[str, Any],
 ) -> dict[str, Any]:
@@ -7377,6 +7557,7 @@ def _governed_autonomy_runtime_base_record(
     runtime_status: str,
     latest_decision_evidence: dict[str, Any],
     provider_readiness: dict[str, Any],
+    process_continuation_increment: int = 1,
     self_repair_increment: int = 0,
     tool_candidate_increment: int = 0,
     command_evaluation_increment: int = 0,
@@ -7391,6 +7572,7 @@ def _governed_autonomy_runtime_base_record(
     limits = _governed_autonomy_runtime_budget_limits(activation)
     counts = _governed_autonomy_runtime_counts(
         previous,
+        process_continuation_increment=process_continuation_increment,
         self_repair_increment=self_repair_increment,
         tool_candidate_increment=tool_candidate_increment,
         command_evaluation_increment=command_evaluation_increment,
@@ -7466,7 +7648,7 @@ def _governed_autonomy_runtime_base_record(
         "blocker_detail": _safe_text(blocker_detail, limit=500) if blocker_detail else None,
         "next_autonomous_action": next_autonomous_action,
         "next_human_action": next_human_action,
-        **_governed_autonomy_runtime_source_run(projection),
+        **_governed_autonomy_activation_source_run(activation),
         "legacy_human_recovery_retry_micro_gates_required": False,
         "legacy_run_mutation_performed": False,
         "kanban_run_created": False,
@@ -7503,6 +7685,201 @@ def _governed_autonomy_runtime_base_record(
     return record
 
 
+def _prepare_current_ticket_governed_autonomy_task_for_dispatch(
+    *,
+    projection: dict[str, Any],
+    activation: dict[str, Any],
+    envelope: Any,
+) -> dict[str, Any]:
+    from hermes_cli import kanban_db
+
+    board = _normalize_board(str(projection["kanban_board_slug"]))
+    task_id = str(projection["kanban_task_id"])
+    conn = kanban_db.connect(board=board)
+    try:
+        task = kanban_db.get_task(conn, task_id)
+        if task is None:
+            return {
+                "task_prepare_status": "blocked",
+                "blocker_code": "KANBAN_TASK_GAP",
+                "blocker_detail": "projected Kanban task is missing",
+            }
+        if task.status not in {"blocked", "ready"}:
+            return {
+                "task_prepare_status": "blocked",
+                "blocker_code": "KANBAN_GOVERNED_AUTONOMY_SOURCE_GAP",
+                "blocker_detail": f"projected Kanban task status is {task.status}",
+            }
+        task_unblocked = False
+        if task.status == "blocked":
+            if not kanban_db.unblock_task(conn, task_id):
+                return {
+                    "task_prepare_status": "blocked",
+                    "blocker_code": "KANBAN_UNBLOCK_FAILED",
+                    "blocker_detail": "projected Kanban task could not be unblocked for governed autonomy",
+                }
+            task_unblocked = True
+        task = kanban_db.get_task(conn, task_id)
+        if task is None or task.status != "ready":
+            return {
+                "task_prepare_status": "blocked",
+                "blocker_code": "KANBAN_TASK_NOT_READY",
+                "blocker_detail": "projected Kanban task did not become ready for governed autonomy",
+            }
+        if task.claim_lock or task.worker_pid or task.current_run_id is not None:
+            return {
+                "task_prepare_status": "blocked",
+                "blocker_code": "WORKER_LIFECYCLE_RECONCILIATION_REQUIRED",
+                "blocker_detail": "projected Kanban task has unresolved current lifecycle state",
+            }
+        try:
+            body = json.loads(task.body or "{}")
+        except json.JSONDecodeError:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        source_reference = activation.get("governed_autonomy_envelope_reference")
+        source_run_id = source_reference.get("source_run_id") if isinstance(source_reference, dict) else None
+        body.update({
+            "task_skills": [],
+            "governed_autonomy_continuation_authorized": True,
+            "governed_autonomy_continuation_reason": (
+                PEPPER_GOVERNED_AUTONOMY_INTERNAL_CONTINUATION_REASON
+            ),
+            "governed_autonomy_activation_action_SHA256": activation["activation_action_SHA256"],
+            "governed_autonomy_authority_SHA256": envelope.envelope_SHA256,
+            "governed_autonomy_source_run_id": source_run_id,
+        })
+        conn.execute(
+            "UPDATE tasks SET skills = ?, body = ?, claim_lock = NULL, "
+            "claim_expires = NULL, worker_pid = NULL WHERE id = ? AND status = 'ready'",
+            (json.dumps([]), json.dumps(body, sort_keys=True), task_id),
+        )
+        kanban_db._append_event(
+            conn,
+            task_id,
+            "governed_autonomy_continuation_prepared",
+            {
+                "source": PEPPER_GOVERNED_AUTONOMY_RUNTIME_SOURCE_SYSTEM,
+                "reason": PEPPER_GOVERNED_AUTONOMY_INTERNAL_CONTINUATION_REASON,
+                "activation_action_SHA256": activation["activation_action_SHA256"],
+                "backend_derived_live_authority_SHA256": envelope.envelope_SHA256,
+                "source_run_id": source_run_id,
+                "future_task_skills": [],
+            },
+        )
+        conn.commit()
+        task = kanban_db.get_task(conn, task_id)
+        return {
+            "task_prepare_status": "prepared",
+            "blocker_code": None,
+            "blocker_detail": None,
+            "task_unblocked": task_unblocked,
+            "task_skills_corrected": True,
+            "governed_autonomy_continuation_reason": (
+                PEPPER_GOVERNED_AUTONOMY_INTERNAL_CONTINUATION_REASON
+            ),
+            "dispatcher_primitive": "kanban_db.unblock_task+kanban_db.claim_task+resolve_workspace+_default_spawn",
+            "kanban_task_status_after_prepare": task.status if task is not None else None,
+            "kanban_task_skills_after_prepare": list(task.skills or []) if task is not None else None,
+            "source_run_id": source_run_id,
+        }
+    finally:
+        conn.close()
+
+
+def _governed_autonomy_dispatch_result_reference(
+    dispatch_result: dict[str, Any],
+) -> dict[str, Any]:
+    source_materialization = dispatch_result.get("source_materialization")
+    materialization_reference = None
+    if isinstance(source_materialization, dict):
+        materialization_reference = {
+            key: source_materialization.get(key)
+            for key in (
+                "policy_id",
+                "source_materialized",
+                "dependency_substrate_materialized",
+                "dependency_substrate_kind",
+                "dependency_install_performed",
+                "canonical_package_lock_materialized",
+                "manifest_path",
+            )
+            if key in source_materialization
+        }
+    return {
+        "start_status": dispatch_result.get("start_status"),
+        "blocker_code": dispatch_result.get("blocker_code"),
+        "blocker_detail": _safe_text(dispatch_result.get("blocker_detail"), limit=300)
+        if dispatch_result.get("blocker_detail")
+        else None,
+        "dispatch_performed": bool(dispatch_result.get("dispatch_performed")),
+        "execution_started": bool(dispatch_result.get("execution_started")),
+        "worker_execution": bool(dispatch_result.get("worker_execution")),
+        "worker_process_started": bool(dispatch_result.get("worker_process_started")),
+        "Kanban_dispatch": bool(dispatch_result.get("Kanban_dispatch")),
+        "kanban_run_id": dispatch_result.get("kanban_run_id"),
+        "kanban_task_status": dispatch_result.get("kanban_task_status"),
+        "workspace_path": dispatch_result.get("workspace_path"),
+        "workspace_created": bool(dispatch_result.get("workspace_created")),
+        "source_materialized": bool(dispatch_result.get("source_materialized")),
+        "source_materialization_reference": materialization_reference,
+    }
+
+
+def _with_governed_autonomy_dispatch_result(
+    record: dict[str, Any],
+    *,
+    dispatch_result: dict[str, Any],
+) -> dict[str, Any]:
+    updated = dict(record)
+    for key in (
+        "blocker_code",
+        "blocker_detail",
+        "dispatch_performed",
+        "execution_started",
+        "worker_execution",
+        "worker_process_started",
+        "Kanban_dispatch",
+        "kanban_run_id",
+        "workspace_path",
+        "workspace_created",
+    ):
+        if key in dispatch_result:
+            updated[key] = dispatch_result.get(key)
+    updated["worker_pid_recorded"] = bool(dispatch_result.get("worker_pid_recorded"))
+    updated["kanban_task_status"] = dispatch_result.get("kanban_task_status")
+    updated["kanban_run_created"] = bool(dispatch_result.get("kanban_run_id")) and bool(
+        dispatch_result.get("dispatch_performed")
+    )
+    updated["lineage_dispatch_performed"] = bool(dispatch_result.get("dispatch_performed"))
+    updated["governed_autonomy_continuation_reason"] = (
+        PEPPER_GOVERNED_AUTONOMY_INTERNAL_CONTINUATION_REASON
+    )
+    updated["dispatcher_primitive"] = "kanban_db.unblock_task+kanban_db.claim_task+resolve_workspace+_default_spawn"
+    if bool(dispatch_result.get("execution_started")):
+        updated["live_autonomous_continuation_marker"] = (
+            PEPPER_GOVERNED_AUTONOMY_LIVE_CONTINUATION_MARKER
+        )
+    side_effects = dict(updated.get("current_invocation_side_effects") or {})
+    side_effects.update({
+        "dispatch_performed": bool(dispatch_result.get("dispatch_performed")),
+        "Kanban_dispatch": bool(dispatch_result.get("Kanban_dispatch")),
+        "execution_started": bool(dispatch_result.get("execution_started")),
+        "worker_execution": bool(dispatch_result.get("worker_execution")),
+        "worker_process_started": bool(dispatch_result.get("worker_process_started")),
+        "lineage_dispatch_performed": bool(dispatch_result.get("dispatch_performed")),
+        "A2A_dispatch_performed": False,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+    })
+    updated["current_invocation_side_effects"] = side_effects
+    updated.pop("runtime_state_SHA256", None)
+    updated["runtime_state_SHA256"] = _governed_autonomy_runtime_record_digest(updated)
+    return updated
+
+
 def _build_governed_autonomy_direct_runtime_record(
     *,
     request: CurrentTicketGovernedAutonomyContinuationRequest,
@@ -7510,21 +7887,87 @@ def _build_governed_autonomy_direct_runtime_record(
     activation: dict[str, Any],
     previous: dict[str, Any] | None,
     provider_readiness: dict[str, Any],
+    envelope: Any,
+    spawn_fn: Any = None,
 ) -> dict[str, Any]:
-    return _governed_autonomy_runtime_base_record(
+    prep_result = _prepare_current_ticket_governed_autonomy_task_for_dispatch(
+        projection=projection,
+        activation=activation,
+        envelope=envelope,
+    )
+    if prep_result.get("blocker_code"):
+        return _governed_autonomy_runtime_base_record(
+            request=request,
+            projection=projection,
+            activation=activation,
+            previous=previous,
+            runtime_decision="DIRECT",
+            runtime_status="blocked_stop_for_human",
+            latest_decision_evidence={
+                "decision": "DIRECT",
+                "direct_execution_request_reference": prep_result,
+                "blocker_code": prep_result.get("blocker_code"),
+                "blocker_detail": prep_result.get("blocker_detail"),
+            },
+            provider_readiness=provider_readiness,
+            process_continuation_increment=0,
+            validation_failure_increment=1,
+            blocker_code=str(prep_result.get("blocker_code") or "GOVERNED_AUTONOMY_PREP_FAILED"),
+            blocker_detail=str(prep_result.get("blocker_detail") or "governed autonomy task preparation failed"),
+            next_human_action="human authority required to resolve governed autonomy dispatch preparation",
+        )
+
+    dispatch_result = _dispatch_exact_current_kanban_task(
+        projection,
+        spawn_fn=spawn_fn,
+    )
+    dispatch_consumed = bool(dispatch_result.get("dispatch_performed"))
+    execution_started = bool(dispatch_result.get("execution_started"))
+    progress_marker = (
+        _digest_payload(
+            "pepper-governed-autonomy-direct-dispatch-progress-sha256-v1",
+            {
+                "kanban_run_id": dispatch_result.get("kanban_run_id"),
+                "start_status": dispatch_result.get("start_status"),
+                "execution_started": execution_started,
+            },
+        )
+        if dispatch_consumed
+        else None
+    )
+    record = _governed_autonomy_runtime_base_record(
         request=request,
         projection=projection,
         activation=activation,
         previous=previous,
         runtime_decision="DIRECT",
-        runtime_status="direct_continuation_recorded",
+        runtime_status="direct_execution_continuation_started" if execution_started else "blocked_stop_for_human",
         latest_decision_evidence={
             "decision": "DIRECT",
-            "rationale": "active authority revalidated; no task-local helper or A2A delegation requested",
+            "rationale": "active authority revalidated; same-authority Kanban dispatch uses the canonical worker lifecycle",
+            "direct_execution_request_reference": prep_result,
+            "direct_execution_result_reference": _governed_autonomy_dispatch_result_reference(
+                dispatch_result
+            ),
         },
         provider_readiness=provider_readiness,
-        next_autonomous_action="continue under active authority or stop when the goal is complete",
+        process_continuation_increment=1 if dispatch_consumed else 0,
+        validation_failure_increment=0 if execution_started else 1,
+        progress_marker_sha256=progress_marker,
+        blocker_code=None if execution_started else str(
+            dispatch_result.get("blocker_code") or "GOVERNED_AUTONOMY_DISPATCH_FAILED"
+        ),
+        blocker_detail=None if execution_started else str(
+            dispatch_result.get("blocker_detail") or "governed autonomy direct dispatch failed"
+        ),
+        next_autonomous_action=(
+            "monitor the governed Kanban run and continue only after it reaches a terminal state"
+            if execution_started
+            else None
+        ),
+        next_human_action=None if execution_started else "human authority required to resolve dispatch blocker",
     )
+    return _with_governed_autonomy_dispatch_result(record, dispatch_result=dispatch_result)
 
 
 def _build_governed_autonomy_runtime_stop_record(
@@ -7554,6 +7997,7 @@ def _build_governed_autonomy_runtime_stop_record(
             **(extra_evidence or {}),
         },
         provider_readiness=provider_readiness,
+        process_continuation_increment=0,
         validation_failure_increment=1 if validation_failed else 0,
         blocker_code=blocker_code,
         blocker_detail=str(blocker_detail or ""),
@@ -7879,6 +8323,57 @@ def _runtime_path_allowed_by_envelope(envelope: Any, relative_path: str) -> bool
     return any(_runtime_path_matches_pattern(path, pattern) for pattern in envelope.allowed_paths)
 
 
+def _governed_autonomy_a2a_default_delegate_paths(envelope: Any) -> tuple[str, ...]:
+    paths: list[str] = []
+    for pattern in tuple(getattr(envelope, "allowed_paths", ()) or ()):
+        candidate = str(pattern or "").strip().replace("\\", "/")
+        if candidate.endswith("/**"):
+            candidate = candidate[:-3]
+        if not candidate:
+            continue
+        normalized = _normalize_runtime_relative_path(candidate)
+        if _runtime_path_allowed_by_envelope(envelope, normalized) and normalized not in paths:
+            paths.append(normalized)
+    return tuple(paths)
+
+
+def _governed_autonomy_a2a_default_operations(
+    request: CurrentTicketGovernedAutonomyContinuationRequest,
+) -> tuple[str, ...]:
+    goal = " ".join(
+        str(item or "")
+        for item in (
+            request.delegate_goal,
+            request.runtime_goal,
+            request.requested_capability,
+        )
+    ).casefold()
+    operations = ["list_directory", "read_file"]
+    if re.search(r"\b(write|modify|replace|create|update|patch|fix|implement)\b", goal):
+        operations.extend(["create_file", "replace_file", "create_directory"])
+    return tuple(dict.fromkeys(operations))
+
+
+def _governed_autonomy_a2a_child_authority_scope(
+    *,
+    envelope: Any,
+    request: CurrentTicketGovernedAutonomyContinuationRequest,
+) -> tuple[tuple[str, ...], tuple[str, ...], dict[str, Any]]:
+    paths = tuple(request.delegate_paths) or _governed_autonomy_a2a_default_delegate_paths(envelope)
+    operations = tuple(request.delegate_requested_operations) or _governed_autonomy_a2a_default_operations(
+        request
+    )
+    return paths, operations, {
+        "child_authority_source": "backend_derived_parent_authority",
+        "delegate_paths_source": "caller_narrowed_subset" if request.delegate_paths else "backend_allowed_paths",
+        "delegate_requested_operations_source": (
+            "caller_narrowed_subset"
+            if request.delegate_requested_operations
+            else "backend_goal_classification"
+        ),
+    }
+
+
 def _validate_governed_autonomy_a2a_child_authority(
     *,
     envelope: Any,
@@ -7886,11 +8381,15 @@ def _validate_governed_autonomy_a2a_child_authority(
 ) -> tuple[bool, str | None, str | None, dict[str, Any]]:
     if not request.delegate_goal:
         return False, "A2A_DELEGATE_GOAL_REQUIRED", "delegate_goal is required", {}
-    if not request.delegate_paths:
-        return False, "A2A_DELEGATE_PATHS_REQUIRED", "delegate_paths must be a nonempty subset", {}
+    delegate_paths, delegate_operations, derivation = _governed_autonomy_a2a_child_authority_scope(
+        envelope=envelope,
+        request=request,
+    )
+    if not delegate_paths:
+        return False, "A2A_DELEGATE_PATHS_REQUIRED", "backend-derived delegate paths are unavailable", derivation
     invalid_operations = [
         operation
-        for operation in request.delegate_requested_operations
+        for operation in delegate_operations
         if operation in _GOVERNED_AUTONOMY_A2A_PRIVILEGED_OPERATIONS
         or operation not in _GOVERNED_AUTONOMY_A2A_ALLOWED_OPERATIONS
     ]
@@ -7902,7 +8401,7 @@ def _validate_governed_autonomy_a2a_child_authority(
             {"invalid_operations": invalid_operations},
         )
     denied_paths = [
-        path for path in request.delegate_paths if not _runtime_path_allowed_by_envelope(envelope, path)
+        path for path in delegate_paths if not _runtime_path_allowed_by_envelope(envelope, path)
     ]
     if denied_paths:
         return (
@@ -7916,8 +8415,9 @@ def _validate_governed_autonomy_a2a_child_authority(
         None,
         None,
         {
-            "delegate_paths": list(request.delegate_paths),
-            "delegate_requested_operations": list(request.delegate_requested_operations),
+            **derivation,
+            "delegate_paths": list(delegate_paths),
+            "delegate_requested_operations": list(delegate_operations),
             "parent_allowed_paths": list(envelope.allowed_paths),
             "parent_forbidden_paths": list(envelope.forbidden_paths),
             "provider_authority": "canonical_delegate_task_inherits_parent_agent_only",
@@ -7962,10 +8462,17 @@ def _governed_autonomy_a2a_delegate_context_text(
         "work_packet_id": projection["work_packet_id"],
         "work_packet_SHA256": projection["work_packet_SHA256"],
         "delegate_authority": {
-            "paths": list(request.delegate_paths),
-            "requested_operations": list(request.delegate_requested_operations),
+            "paths": list(authority_evidence.get("delegate_paths") or []),
+            "requested_operations": list(
+                authority_evidence.get("delegate_requested_operations") or []
+            ),
             "parent_allowed_paths": authority_evidence.get("parent_allowed_paths", []),
             "parent_forbidden_paths": authority_evidence.get("parent_forbidden_paths", []),
+            "child_authority_source": authority_evidence.get("child_authority_source"),
+            "delegate_paths_source": authority_evidence.get("delegate_paths_source"),
+            "delegate_requested_operations_source": authority_evidence.get(
+                "delegate_requested_operations_source"
+            ),
         },
         "hard_denials": {
             "git_mutation": False,
@@ -8227,8 +8734,11 @@ def _build_governed_autonomy_a2a_runtime_record(
                     "ticket_id": projection["ticket_id"],
                     "work_packet_id": projection["work_packet_id"],
                     "work_packet_SHA256": projection["work_packet_SHA256"],
-                    "delegate_paths": list(request.delegate_paths),
-                    "delegate_requested_operations": list(request.delegate_requested_operations),
+                    "delegate_paths": list(authority_evidence.get("delegate_paths") or []),
+                    "delegate_requested_operations": list(
+                        authority_evidence.get("delegate_requested_operations") or []
+                    ),
+                    "child_authority_source": authority_evidence.get("child_authority_source"),
                     "git_mutation": False,
                     "provider_dispatch_count": 0,
                     "model_inference_count": 0,
@@ -9181,9 +9691,11 @@ def _governed_autonomy_runtime_summary(record: dict[str, Any]) -> dict[str, Any]
         "governed_autonomy_runtime_status": record["governed_autonomy_runtime_status"],
         "runtime_decision": record["runtime_decision"],
         "runtime_goal_SHA256": record["runtime_goal_SHA256"],
+        "previous_runtime_state_SHA256": record.get("previous_runtime_state_SHA256"),
         "runtime_goal_excerpt": record["runtime_goal_excerpt"],
         "latest_decision_evidence": record["latest_decision_evidence"],
-        "process_continuation_count": record["process_continuation_count"],
+        "process_continuation_count": _effective_governed_autonomy_process_continuation_count(record),
+        "recorded_process_continuation_count": record["process_continuation_count"],
         "self_repair_count": record["self_repair_count"],
         "task_local_tool_candidate_count": record["task_local_tool_candidate_count"],
         "command_evaluation_count": record["command_evaluation_count"],
@@ -9207,7 +9719,15 @@ def _governed_autonomy_runtime_summary(record: dict[str, Any]) -> dict[str, Any]
             "legacy_human_recovery_retry_micro_gates_required"
         ],
         "legacy_run_mutation_performed": record["legacy_run_mutation_performed"],
-        "kanban_run_created": record["kanban_run_created"],
+        "kanban_run_created": bool(record.get("kanban_run_created")),
+        "kanban_run_id": record.get("kanban_run_id"),
+        "workspace_path": record.get("workspace_path"),
+        "dispatch_performed": record.get("dispatch_performed"),
+        "execution_started": record.get("execution_started"),
+        "worker_execution": record.get("worker_execution"),
+        "worker_process_started": record.get("worker_process_started"),
+        "Kanban_dispatch": record.get("Kanban_dispatch"),
+        "lineage_dispatch_performed": record.get("lineage_dispatch_performed"),
         "current_invocation_side_effects": record["current_invocation_side_effects"],
         "provider_dispatch_count": record["provider_dispatch_count"],
         "model_inference_count": record["model_inference_count"],
@@ -9238,6 +9758,7 @@ def _governed_autonomy_runtime_operational_result(
         "work_packet_SHA256": record["work_packet_SHA256"],
         "activation_action_SHA256": activation_record["activation_action_SHA256"],
         "runtime_state_SHA256": record["runtime_state_SHA256"],
+        "previous_runtime_state_SHA256": record.get("previous_runtime_state_SHA256"),
         "governed_autonomy_activation_recorded": True,
         "governed_autonomy_envelope_SHA256": record["governed_autonomy_envelope_SHA256"],
         "governed_autonomy_status": activation_record["governed_autonomy_status"],
@@ -9246,7 +9767,8 @@ def _governed_autonomy_runtime_operational_result(
         "authority_revalidated": record["authority_revalidated"],
         "same_authority_subset_validated": record["same_authority_subset_validated"],
         "latest_decision_evidence": record["latest_decision_evidence"],
-        "process_continuation_count": record["process_continuation_count"],
+        "process_continuation_count": _effective_governed_autonomy_process_continuation_count(record),
+        "recorded_process_continuation_count": record["process_continuation_count"],
         "self_repair_count": record["self_repair_count"],
         "task_local_tool_candidate_count": record["task_local_tool_candidate_count"],
         "command_evaluation_count": record["command_evaluation_count"],
@@ -9268,15 +9790,18 @@ def _governed_autonomy_runtime_operational_result(
         "kanban_board_slug": record["kanban_board_slug"],
         "kanban_task_id": record["kanban_task_id"],
         "kanban_run_count": len(runs),
+        "kanban_run_created": bool(record.get("kanban_run_created")),
+        "kanban_run_id": record.get("kanban_run_id"),
+        "workspace_path": record.get("workspace_path"),
         "task": task_visibility,
         "runs": runs,
-        "dispatch_performed": False,
-        "execution_started": False,
-        "worker_execution": False,
-        "worker_process_started": False,
-        "Kanban_dispatch": False,
-        "lineage_dispatch_performed": False,
-        "A2A_dispatch_performed": record["A2A_dispatch_performed"],
+        "dispatch_performed": bool(record.get("dispatch_performed")),
+        "execution_started": bool(record.get("execution_started")),
+        "worker_execution": bool(record.get("worker_execution")),
+        "worker_process_started": bool(record.get("worker_process_started")),
+        "Kanban_dispatch": bool(record.get("Kanban_dispatch")),
+        "lineage_dispatch_performed": bool(record.get("lineage_dispatch_performed")),
+        "A2A_dispatch_performed": bool(record.get("A2A_dispatch_performed")),
         "Git_commands_executed": 0,
         "Docker_commands_executed": 0,
         "Graphify_commands_executed": 0,
@@ -9287,6 +9812,7 @@ def _governed_autonomy_runtime_operational_result(
         "auto_rollback": False,
         "current_invocation_side_effects": record["current_invocation_side_effects"],
         "governed_autonomy_runtime": _governed_autonomy_runtime_summary(record),
+        "live_autonomous_continuation_marker": record.get("live_autonomous_continuation_marker"),
         "human_smoke_marker": record["human_smoke_marker"],
     }
 
@@ -11330,6 +11856,36 @@ def _current_ticket_governed_autonomy_overlay(
         if runtime_state is not None
         else None
     )
+    active_governed_run = _governed_autonomy_active_execution_replay(
+        runtime_state,
+        projection,
+    )
+    continue_next_action = {
+        "id": governed_autonomy_continuation_action_id(binding.ticket_id),
+        "label": (
+            f"{binding.ticket_id} governed autonomy is active; continue under the "
+            "same backend-derived authority through the canonical runtime."
+        ),
+        "target_ticket_id": binding.ticket_id,
+        "target_ticket_title": binding.ticket_title,
+        "authority": "backend_derived_governed_autonomy_continuation",
+    }
+    expose_continue_action = (
+        not active_governed_run
+        and (
+            runtime_state is None
+            or (
+                runtime_state.get("governed_autonomy_runtime_status")
+                in {
+                    "a2a_delegation_completed",
+                    "task_local_self_extension_completed",
+                    "task_local_self_extension_materialized",
+                }
+                and runtime_state.get("budget_exhausted") is not True
+                and runtime_state.get("blocker_code") in {None, ""}
+            )
+        )
+    )
     summary = {
         "source_system": result["source_system"],
         "policy_id": result["policy_id"],
@@ -11364,6 +11920,11 @@ def _current_ticket_governed_autonomy_overlay(
         "runtime_decision": runtime_state["runtime_decision"] if runtime_state is not None else None,
         "runtime_state_SHA256": runtime_state["runtime_state_SHA256"] if runtime_state is not None else None,
         "process_continuation_count": (
+            _effective_governed_autonomy_process_continuation_count(runtime_state)
+            if runtime_state is not None
+            else 0
+        ),
+        "recorded_process_continuation_count": (
             runtime_state["process_continuation_count"] if runtime_state is not None else 0
         ),
         "self_repair_count": runtime_state["self_repair_count"] if runtime_state is not None else 0,
@@ -11380,11 +11941,21 @@ def _current_ticket_governed_autonomy_overlay(
             else "call continue_current_ticket_governed_autonomy with the active server-derived authority"
         ),
         "next_human_action": runtime_state.get("next_human_action") if runtime_state is not None else None,
-        "dispatch_performed": False,
-        "execution_started": False,
-        "worker_execution": False,
-        "Kanban_dispatch": False,
-        "lineage_dispatch_performed": False,
+        "dispatch_performed": bool(runtime_state.get("dispatch_performed"))
+        if runtime_state is not None
+        else False,
+        "execution_started": bool(runtime_state.get("execution_started"))
+        if runtime_state is not None
+        else False,
+        "worker_execution": bool(runtime_state.get("worker_execution"))
+        if runtime_state is not None
+        else False,
+        "Kanban_dispatch": bool(runtime_state.get("Kanban_dispatch"))
+        if runtime_state is not None
+        else False,
+        "lineage_dispatch_performed": bool(runtime_state.get("lineage_dispatch_performed"))
+        if runtime_state is not None
+        else False,
         "A2A_dispatch_performed": (
             bool(runtime_state.get("A2A_dispatch_performed")) if runtime_state is not None else False
         ),
@@ -11394,17 +11965,29 @@ def _current_ticket_governed_autonomy_overlay(
         "auto_retry": False,
         "auto_rollback": False,
         "kanban_run_count": result["kanban_run_count"],
+        "kanban_run_created": bool(runtime_state.get("kanban_run_created"))
+        if runtime_state is not None
+        else False,
+        "kanban_run_id": runtime_state.get("kanban_run_id") if runtime_state is not None else None,
+        "workspace_path": runtime_state.get("workspace_path") if runtime_state is not None else None,
+        "live_autonomous_continuation_marker": (
+            runtime_state.get("live_autonomous_continuation_marker")
+            if runtime_state is not None
+            else None
+        ),
         "human_smoke_marker": result["human_smoke_marker"],
         "runtime": runtime_summary,
     }
-    return {
+    overlay = {
         "governed_autonomy_activation_recorded": True,
         "governed_autonomy_status": result["governed_autonomy_status"],
         "governed_autonomy_envelope_SHA256": result["governed_autonomy_envelope_SHA256"],
         "backend_derived_live_authority_SHA256": result[
             "backend_derived_live_authority_SHA256"
         ],
-        "governed_autonomy_live_lineage_activation_authorized": False,
+        "governed_autonomy_live_lineage_activation_authorized": result[
+            "live_lineage_activation_authorized"
+        ],
         "governed_autonomy_live_lineage_activation_status": result[
             "live_lineage_activation_status"
         ],
@@ -11415,9 +11998,12 @@ def _current_ticket_governed_autonomy_overlay(
         "governed_autonomy_runtime_decision": summary["runtime_decision"],
         "governed_autonomy_runtime_state_SHA256": summary["runtime_state_SHA256"],
         "A2A_dispatch_performed": summary["A2A_dispatch_performed"],
-        "lineage_dispatch_performed": False,
+        "lineage_dispatch_performed": summary["lineage_dispatch_performed"],
         "governed_autonomy": summary,
-    }, None
+    }
+    if expose_continue_action:
+        overlay["next_action"] = continue_next_action
+    return overlay, None
 
 
 def build_workflow_control_snapshot() -> dict[str, Any]:

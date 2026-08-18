@@ -947,12 +947,16 @@ def _continue_current_ticket_governed_autonomy(args: dict[str, Any], **_kwargs) 
                 "governed autonomy continuation uses persisted server-derived authority; "
                 "do not supply governed_autonomy_envelope"
             )
-        delegate_paths = args.get("delegate_paths") or []
-        if not isinstance(delegate_paths, list):
-            raise ValueError("delegate_paths must be an array when supplied")
-        delegate_operations = args.get("delegate_requested_operations") or []
-        if not isinstance(delegate_operations, list):
-            raise ValueError("delegate_requested_operations must be an array when supplied")
+        forbidden = [
+            key
+            for key in ("delegate_paths", "delegate_requested_operations")
+            if key in args
+        ]
+        if forbidden:
+            raise ValueError(
+                "A2A child scope and operations derive server-side from the active authority; "
+                f"do not supply {', '.join(forbidden)}"
+            )
         result = pr.continue_current_ticket_governed_autonomy(
             runtime_goal=str(args.get("runtime_goal") or ""),
             observed_failure=str(args.get("observed_failure") or "").strip() or None,
@@ -966,8 +970,8 @@ def _continue_current_ticket_governed_autonomy(args: dict[str, Any], **_kwargs) 
             task_local_source_text=args.get("task_local_source_text"),
             task_local_command=str(args.get("task_local_command") or "").strip() or None,
             delegate_goal=str(args.get("delegate_goal") or "").strip() or None,
-            delegate_paths=tuple(str(item) for item in delegate_paths),
-            delegate_requested_operations=tuple(str(item) for item in delegate_operations),
+            delegate_paths=(),
+            delegate_requested_operations=(),
             delegate_parent_agent=_kwargs.get("parent_agent"),
             project_id=str(args.get("project_id") or "").strip() or None,
             ticket_id=str(args.get("ticket_id") or "").strip() or None,
@@ -984,14 +988,14 @@ def _continue_current_ticket_governed_autonomy(args: dict[str, Any], **_kwargs) 
         "recovery_state": updated_context.get("recovery_state"),
         "governed_autonomy": updated_context.get("governed_autonomy"),
         "next_action": updated_context.get("next_action"),
-        "dispatch_performed": False,
-        "execution_started": False,
-        "worker_execution": False,
-        "Kanban_dispatch": False,
-        "lineage_dispatch_performed": False,
-        "Git_mutation": False,
-        "auto_retry": False,
-        "auto_rollback": False,
+        "dispatch_performed": result.get("dispatch_performed", False),
+        "execution_started": result.get("execution_started", False),
+        "worker_execution": result.get("worker_execution", False),
+        "Kanban_dispatch": result.get("Kanban_dispatch", False),
+        "lineage_dispatch_performed": result.get("lineage_dispatch_performed", False),
+        "Git_mutation": result.get("Git_mutation", False),
+        "auto_retry": result.get("auto_retry", False),
+        "auto_rollback": result.get("auto_rollback", False),
     })
 
 
@@ -1352,17 +1356,7 @@ _CONTINUE_CURRENT_TICKET_GOVERNED_AUTONOMY_SCHEMA = {
         },
         "delegate_goal": {
             "type": "string",
-            "description": "A2A child goal for canonical Hermes delegate_task under inherited parent-agent authority.",
-        },
-        "delegate_paths": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": "A2A child filesystem paths. Must be a subset of the active server-derived WorkPacket allowed paths.",
-        },
-        "delegate_requested_operations": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": "A2A child operations. Git mutation, provider/model, network, Docker, Graphify, dependency install, and worker control are denied.",
+            "description": "Optional A2A child goal for canonical Hermes delegate_task. Backend derives child scope and filesystem operations from the active authority.",
         },
         "project_id": {
             "type": "string",
@@ -1631,7 +1625,8 @@ registry.register(
             "current Pepper ticket. Revalidates same authority, live budgets, credentials, and "
             "privileged-operation denials before recording DIRECT, task-local self-extension, "
             "canonical Hermes delegate_task A2A delegation, or STOP_FOR_HUMAN runtime state. "
-            "Does not create Kanban runs, retry/recover execution, mutate Git, or invoke Docker/Graphify."
+            "DIRECT may create one same-authority Kanban run through the canonical projected-task "
+            "dispatch lifecycle; no legacy retry/recovery authorization, Git, Docker, or Graphify."
         ),
         "parameters": _CONTINUE_CURRENT_TICKET_GOVERNED_AUTONOMY_SCHEMA,
     },

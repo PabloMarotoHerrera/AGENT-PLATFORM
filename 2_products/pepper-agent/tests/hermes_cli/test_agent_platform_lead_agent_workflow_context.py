@@ -337,6 +337,8 @@ def test_pepper_toolset_exposes_no_arbitrary_shell_or_file_authority(monkeypatch
     assert "continuation_lineage" not in activation_params["properties"]
     assert continuation_params["required"] == ["runtime_goal"]
     assert "governed_autonomy_envelope" not in continuation_params["properties"]
+    assert "delegate_paths" not in continuation_params["properties"]
+    assert "delegate_requested_operations" not in continuation_params["properties"]
     assert not (names & {"terminal", "process", "read_file", "write_file", "patch", "search_files"})
 
 
@@ -366,6 +368,9 @@ def test_lead_agent_prompt_requires_tool_backed_state() -> None:
     assert "status-only" in prompt
     assert "server-derived authority" in prompt
     assert "Do not ask for or supply GovernedAutonomyEnvelope JSON" in prompt
+    assert "without a GovernedAutonomyEnvelope, delegate paths, or delegate operations" in prompt
+    assert "DIRECT may start exactly one same-authority Kanban run" in prompt
+    assert "backend-derived child scope/operations" in prompt
     assert "prepare_current_ticket_review" in prompt
     assert "accept_current_ticket_review" in prompt
     assert "PREPARE_P18_9_0_REVIEW" in prompt
