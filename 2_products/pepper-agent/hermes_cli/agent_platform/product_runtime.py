@@ -7129,6 +7129,13 @@ _FRONTEND_DEPENDENCY_SENTINEL_ENTRIES = (
     "react-dom/package.json",
     "@vitejs/plugin-react/package.json",
 )
+_PACKAGE_DEPENDENCY_SECTIONS = (
+    "dependencies",
+    "devDependencies",
+    "optionalDependencies",
+    "peerDependencies",
+)
+_LOCAL_FILE_DEPENDENCY_PREFIX = "file:"
 
 
 class ProductRuntimeDependencyGap(ProductRuntimeConflict):
@@ -7239,6 +7246,9 @@ def _materialize_workpacket_dependency_substrate(
 
     substrates: list[dict[str, Any]] = []
     copied_destinations: set[str] = set()
+    local_package_sources: list[dict[str, Any]] = []
+    copied_local_package_source_roots: set[str] = set()
+    local_package_source_copied_file_count = 0
     for spec in frontend_specs:
         package_dir = Path(spec.working_directory)
         try:
@@ -7248,6 +7258,19 @@ def _materialize_workpacket_dependency_substrate(
                 VALIDATION_RUNTIME_UNAVAILABLE,
                 "validation package cwd is outside scratch workspace",
             ) from exc
+        dependency_entries = _package_dependency_entries(resolved_source, package_rel)
+        required_package_names = frozenset(
+            str(entry["name"]) for entry in dependency_entries
+        )
+        local_source_records, copied_count = _materialize_local_file_package_sources(
+            resolved_source,
+            workspace,
+            package_rel,
+            dependency_entries,
+            copied_package_roots=copied_local_package_source_roots,
+        )
+        local_package_sources.extend(local_source_records)
+        local_package_source_copied_file_count += copied_count
         candidates = _dependency_root_candidates(
             package_rel,
             source_root=resolved_source,
@@ -7264,10 +7287,15 @@ def _materialize_workpacket_dependency_substrate(
         for source_root_path, destination_root in candidates:
             if not source_root_path.is_dir():
                 continue
-            if not any(
+            has_runtime_sentinel = any(
                 (source_root_path / entry).exists()
                 for entry in _FRONTEND_DEPENDENCY_SENTINEL_ENTRIES
-            ):
+            )
+            has_declared_package = _dependency_root_contains_declared_package(
+                source_root_path,
+                required_package_names,
+            )
+            if not has_runtime_sentinel and not has_declared_package:
                 continue
             destination_key = destination_root.resolve(strict=False).as_posix().casefold()
             if destination_key in copied_destinations:
@@ -7281,6 +7309,7 @@ def _materialize_workpacket_dependency_substrate(
                     workspace_root=workspace,
                     package_rel=package_rel,
                     authority=authority,
+                    required_package_names=required_package_names,
                 )
             )
         resolved_vitest = validation_tool._resolve_node_module_entry(  # noqa: SLF001
@@ -7311,7 +7340,17 @@ def _materialize_workpacket_dependency_substrate(
         "product_diff_excluded_roots": sorted(
             item["scratch_dependency_root_relative"] for item in substrates
         ),
+        "local_package_sources_materialized": bool(local_package_sources),
+        "local_package_source_materializations": sorted(
+            local_package_sources,
+            key=lambda item: (
+                str(item["local_package_source_relative"]),
+                str(item["package_name"]),
+            ),
+        ),
+        "local_package_source_copied_file_count": local_package_source_copied_file_count,
         "dependency_install_performed": False,
+        "canonical_package_lock_materialized": False,
     }
 
 
@@ -7329,7 +7368,11 @@ def _empty_dependency_materialization_record(authority: Any) -> dict[str, Any]:
             _SCRATCH_DEPENDENCY_EXCLUDED_DIR_NAMES
         ),
         "product_diff_excluded_roots": [],
+        "local_package_sources_materialized": False,
+        "local_package_source_materializations": [],
+        "local_package_source_copied_file_count": 0,
         "dependency_install_performed": False,
+        "canonical_package_lock_materialized": False,
     }
 
 
@@ -7349,6 +7392,140 @@ def _dependency_root_candidates(
         if normalized not in rels:
             rels.append(normalized)
     return tuple((source_root / rel, workspace_root / rel) for rel in rels)
+
+
+def _package_dependency_entries(
+    source_root: Path,
+    package_rel: str,
+) -> tuple[dict[str, str], ...]:
+    package_json = source_root / package_rel / "package.json"
+    try:
+        data = json.loads(package_json.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ()
+    if not isinstance(data, dict):
+        return ()
+    entries: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for section in _PACKAGE_DEPENDENCY_SECTIONS:
+        dependencies = data.get(section)
+        if not isinstance(dependencies, dict):
+            continue
+        for raw_name, raw_specifier in dependencies.items():
+            name = _normalize_package_dependency_name(raw_name)
+            if name is None:
+                continue
+            key = (section, name)
+            if key in seen:
+                continue
+            seen.add(key)
+            entries.append({
+                "name": name,
+                "specifier": str(raw_specifier or ""),
+                "section": section,
+            })
+    return tuple(entries)
+
+
+def _normalize_package_dependency_name(value: object) -> str | None:
+    text = str(value or "").strip().replace("\\", "/")
+    if not text or any(ord(character) < 32 or ord(character) == 127 for character in text):
+        return None
+    parts = text.split("/")
+    if any(part in {"", ".", ".."} for part in parts):
+        return None
+    if text.startswith("@"):
+        return text if len(parts) == 2 else None
+    return text if len(parts) == 1 else None
+
+
+def _dependency_root_contains_declared_package(
+    dependency_root: Path,
+    package_names: frozenset[str],
+) -> bool:
+    return any(
+        (dependency_root / package_name).exists()
+        or (dependency_root / package_name).is_symlink()
+        for package_name in package_names
+    )
+
+
+def _materialize_local_file_package_sources(
+    source_root: Path,
+    workspace_root: Path,
+    package_rel: str,
+    dependency_entries: tuple[dict[str, str], ...],
+    *,
+    copied_package_roots: set[str],
+) -> tuple[list[dict[str, Any]], int]:
+    records: list[dict[str, Any]] = []
+    copied_files: set[str] = set()
+    package_source = source_root / package_rel
+    for entry in dependency_entries:
+        target = _local_file_dependency_target(
+            source_root,
+            package_source,
+            str(entry["specifier"]),
+        )
+        if target is None:
+            continue
+        target_rel = target.relative_to(source_root).as_posix()
+        if target_rel in copied_package_roots:
+            continue
+        copied_package_roots.add(target_rel)
+        before = len(copied_files)
+        _copy_materialized_directory(
+            target,
+            workspace_root / target_rel,
+            source_root=source_root,
+            workspace_root=workspace_root,
+            copied_files=copied_files,
+            clean=True,
+        )
+        copied_count = len(copied_files) - before
+        records.append({
+            "package_name": entry["name"],
+            "dependency_section": entry["section"],
+            "source_package_relative": package_rel,
+            "local_package_source_relative": target_rel,
+            "scratch_local_package_source": str(workspace_root / target_rel),
+            "copied_file_count": copied_count,
+            "dependency_install_performed": False,
+        })
+    return records, len(copied_files)
+
+
+def _local_file_dependency_target(
+    source_root: Path,
+    package_source: Path,
+    specifier: str,
+) -> Path | None:
+    text = str(specifier or "").strip()
+    if not text.casefold().startswith(_LOCAL_FILE_DEPENDENCY_PREFIX):
+        return None
+    raw_target = text[len(_LOCAL_FILE_DEPENDENCY_PREFIX) :].strip()
+    if not raw_target:
+        return None
+    target_path = Path(raw_target)
+    if not target_path.is_absolute():
+        target_path = package_source / target_path
+    try:
+        target = target_path.resolve(strict=True)
+        target.relative_to(source_root)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    if not target.is_dir() or not (target / "package.json").is_file():
+        return None
+    return target
+
+
+def _dependency_module_name_from_relative_path(relative_path: str) -> str | None:
+    parts = tuple(part for part in relative_path.replace("\\", "/").split("/") if part)
+    if not parts:
+        return None
+    if parts[0].startswith("@"):
+        return "/".join(parts[:2]) if len(parts) >= 2 else None
+    return parts[0]
 
 
 def _normalize_dependency_root_relative_path(value: str) -> str:
@@ -7376,6 +7553,7 @@ def _copy_dependency_substrate_root(
     workspace_root: Path,
     package_rel: str,
     authority: Any,
+    required_package_names: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     from hermes_cli.agent_platform.runtime_adapter.path_containment import is_reparse_or_symlink
 
@@ -7405,6 +7583,7 @@ def _copy_dependency_substrate_root(
     copied_bytes = 0
     excluded_dirs: set[str] = set()
     excluded_reparse_dirs: list[dict[str, str]] = []
+    materialized_reparse_dirs: list[dict[str, str]] = []
     try:
         for root, dirnames, filenames in os.walk(source_dependency_root):
             root_path = Path(root)
@@ -7428,12 +7607,33 @@ def _copy_dependency_substrate_root(
                     try:
                         target.relative_to(source_dependency_root)
                     except ValueError:
-                        excluded_dirs.add(child_rel)
-                        excluded_reparse_dirs.append({
-                            "relative_path": child_rel,
-                            "resolved_target": str(target),
-                            "reason": "workspace_package_reparse_point_excluded",
-                        })
+                        package_name = _dependency_module_name_from_relative_path(child_rel)
+                        if package_name in required_package_names:
+                            (
+                                reparse_files,
+                                reparse_dirs,
+                                reparse_bytes,
+                            ) = _copy_dependency_reparse_directory_as_physical_snapshot(
+                                target,
+                                scratch_dependency_root / child_rel,
+                                source_root=source_root,
+                                workspace_root=workspace_root,
+                            )
+                            copied_files += reparse_files
+                            copied_dirs += reparse_dirs
+                            copied_bytes += reparse_bytes
+                            materialized_reparse_dirs.append({
+                                "relative_path": child_rel,
+                                "resolved_target": str(target),
+                                "reason": "required_workspace_package_reparse_point_materialized_as_physical_copy",
+                            })
+                        else:
+                            excluded_dirs.add(child_rel)
+                            excluded_reparse_dirs.append({
+                                "relative_path": child_rel,
+                                "resolved_target": str(target),
+                                "reason": "workspace_package_reparse_point_excluded",
+                            })
                         continue
                     raise ProductRuntimeDependencyGap(
                         DEPENDENCY_MATERIALIZATION_FAILED,
@@ -7501,9 +7701,90 @@ def _copy_dependency_substrate_root(
             excluded_reparse_dirs,
             key=lambda item: item["relative_path"],
         ),
+        "materialized_reparse_directories": sorted(
+            materialized_reparse_dirs,
+            key=lambda item: item["relative_path"],
+        ),
         "dependency_install_performed": False,
         "canonical_package_lock_materialized": False,
     }
+
+
+def _copy_dependency_reparse_directory_as_physical_snapshot(
+    source_dir: Path,
+    destination_dir: Path,
+    *,
+    source_root: Path,
+    workspace_root: Path,
+) -> tuple[int, int, int]:
+    from hermes_cli.agent_platform.runtime_adapter.path_containment import is_reparse_or_symlink
+
+    try:
+        source = source_dir.resolve(strict=True)
+        source.relative_to(source_root)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise ProductRuntimeDependencyGap(
+            DEPENDENCY_MATERIALIZATION_FAILED,
+            "workspace dependency reparse target escapes canonical source root",
+        ) from exc
+    if not source.is_dir():
+        raise ProductRuntimeDependencyGap(
+            DEPENDENCY_MATERIALIZATION_FAILED,
+            "workspace dependency reparse target is not a directory",
+        )
+
+    _remove_materialized_destination(destination_dir, workspace_root=workspace_root)
+    _ensure_materialized_directory(destination_dir, workspace_root=workspace_root)
+
+    copied_files = 0
+    copied_dirs = 1
+    copied_bytes = 0
+    try:
+        for root, dirnames, filenames in os.walk(source):
+            root_path = Path(root)
+            rel_snapshot = root_path.relative_to(source).as_posix()
+            kept_dirnames: list[str] = []
+            for dirname in dirnames:
+                child = root_path / dirname
+                child_rel = child.relative_to(source_root).as_posix()
+                if dirname in _SCRATCH_DEPENDENCY_EXCLUDED_DIR_NAMES:
+                    continue
+                if _should_skip_materialized_relative_path(child_rel, is_dir=True):
+                    continue
+                if is_reparse_or_symlink(child):
+                    raise ProductRuntimeDependencyGap(
+                        DEPENDENCY_MATERIALIZATION_FAILED,
+                        "workspace dependency source contains a reparse point",
+                    )
+                kept_dirnames.append(dirname)
+            dirnames[:] = kept_dirnames
+            dest_root = destination_dir if rel_snapshot == "." else destination_dir / rel_snapshot
+            _ensure_materialized_directory(dest_root, workspace_root=workspace_root)
+            copied_dirs += len(kept_dirnames)
+            for filename in filenames:
+                source_file = root_path / filename
+                source_rel = source_file.relative_to(source_root).as_posix()
+                if _should_skip_materialized_relative_path(source_rel, is_dir=False):
+                    continue
+                if is_reparse_or_symlink(source_file):
+                    raise ProductRuntimeDependencyGap(
+                        DEPENDENCY_MATERIALIZATION_FAILED,
+                        "workspace dependency source contains a symlinked file",
+                    )
+                dest_file = dest_root / filename
+                _assert_materialized_destination(dest_file, workspace_root=workspace_root)
+                size = source_file.stat().st_size
+                shutil.copy2(source_file, dest_file)
+                copied_files += 1
+                copied_bytes += size
+    except ProductRuntimeDependencyGap:
+        raise
+    except Exception as exc:
+        raise ProductRuntimeDependencyGap(
+            DEPENDENCY_MATERIALIZATION_FAILED,
+            "workspace dependency physical copy failed",
+        ) from exc
+    return copied_files, copied_dirs, copied_bytes
 
 
 def _sha256_file_or_none(path: Path) -> str | None:
@@ -13947,6 +14228,29 @@ def _current_ticket_governed_autonomy_overlay(
                 "recovery_state": "not_required",
                 "next_action": terminal_next_action,
             })
+    elif terminal_reconciliation is not None:
+        overlay.update({
+            "readiness": "governed_autonomy_execution_terminal_reconciled",
+            "workflow_state": f"{binding.ticket_id}-GOVERNED-AUTONOMY-TERMINAL-VALIDATION-BLOCKED",
+            "workflow_status": "governed_autonomy_validation_blocked",
+            "queue_state": "governed_autonomy_kanban_execution_terminal",
+            "execution_state": "no_active_executions",
+            "active_execution_count": 0,
+            "validation_state": "governed_autonomy_validation_blocked",
+            "review_state": "candidate_available_validation_blocked",
+            "recovery_state": "terminal_governed_run_review_required",
+            "next_action": {
+                "id": governed_autonomy_continuation_action_id(binding.ticket_id),
+                "label": (
+                    f"{binding.ticket_id} governed-autonomy run reached terminal validation blockage "
+                    "after worker execution; inspect evidence or provide an explicit fresh-execution request."
+                ),
+                "target_ticket_id": binding.ticket_id,
+                "target_ticket_title": binding.ticket_title,
+                "authority": "backend_derived_governed_autonomy_continuation",
+                "required_human_action": "terminal_governed_run_review_or_fresh_execution_request",
+            },
+        })
     elif expose_continue_action:
         overlay["next_action"] = continue_next_action
     elif not effective_authority["continuation_eligible"]:

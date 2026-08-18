@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import shutil
+import subprocess
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -222,6 +224,46 @@ def _write_fixture_file(root: Path, relative_path: str, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     return path
+
+
+def _node_import_meta_resolve(
+    node: str,
+    cwd: Path,
+    specifier: str,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            node,
+            "--input-type=module",
+            "-e",
+            "try { console.log(await import.meta.resolve(process.argv[1])); } "
+            "catch (err) { console.error(err.code + ': ' + err.message); process.exit(1); }",
+            specifier,
+        ],
+        cwd=cwd,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def _make_directory_reparse_point_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=True)
+        return
+    except (OSError, NotImplementedError) as exc:
+        symlink_error = exc
+    if sys.platform == "win32":
+        result = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            return
+        pytest.skip(f"directory junction creation unavailable: {result.stderr}")
+    pytest.skip(f"directory symlink creation unavailable: {symlink_error}")
 
 
 def _source_materialization_authority(
@@ -1275,10 +1317,7 @@ def test_dependency_substrate_excludes_workspace_package_reparse_points(
     )
     linked_package = source_root / "2_products/pepper-agent/node_modules/@hermes/shared"
     linked_package.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        linked_package.symlink_to(workspace_package, target_is_directory=True)
-    except (OSError, NotImplementedError) as exc:
-        pytest.skip(f"directory symlink creation unavailable: {exc}")
+    _make_directory_reparse_point_or_skip(linked_package, workspace_package)
     authority = _source_materialization_authority(
         workspace,
         allowed_paths=(
@@ -1313,6 +1352,184 @@ def test_dependency_substrate_excludes_workspace_package_reparse_points(
     assert not (
         workspace / "2_products/pepper-agent/node_modules/@hermes/shared"
     ).exists()
+
+
+def test_dependency_substrate_recreates_package_local_and_workspace_dependency_topology(
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node executable unavailable for import.meta.resolve proof")
+
+    source_root = tmp_path / "source"
+    workspace_before = tmp_path / "workspace-before"
+    workspace_after = tmp_path / "workspace-after"
+    workspace_before.mkdir()
+    workspace_after.mkdir()
+    web_package_rel = "2_products/pepper-agent/web"
+    root_modules_rel = "2_products/pepper-agent/node_modules"
+
+    _write_fixture_file(
+        source_root,
+        f"{web_package_rel}/package.json",
+        json.dumps({
+            "name": "web",
+            "type": "module",
+            "scripts": {"test": "vitest run"},
+            "dependencies": {
+                "@hermes/shared": "file:../apps/shared",
+                "@nous-research/ui": "0.18.2",
+            },
+        }),
+    )
+    _write_fixture_file(
+        source_root,
+        f"{web_package_rel}/src/agent-platform/shell/shell.test.tsx",
+        "test('fixture', () => {})\n",
+    )
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/apps/shared/package.json",
+        json.dumps({
+            "name": "@hermes/shared",
+            "type": "module",
+            "exports": {".": "./src/index.js"},
+        }),
+    )
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/apps/shared/src/index.js",
+        "export const shared = true;\n",
+    )
+    _write_fixture_file(
+        source_root,
+        f"{web_package_rel}/node_modules/@nous-research/ui/package.json",
+        json.dumps({
+            "name": "@nous-research/ui",
+            "type": "module",
+            "exports": {
+                ".": "./dist/index.js",
+                "./ui/*": "./dist/ui/*.js",
+            },
+        }),
+    )
+    _write_fixture_file(
+        source_root,
+        f"{web_package_rel}/node_modules/@nous-research/ui/dist/index.js",
+        "export const ui = true;\n",
+    )
+    _write_fixture_file(
+        source_root,
+        f"{web_package_rel}/node_modules/@nous-research/ui/dist/ui/components/badge.js",
+        "export const Badge = 'badge';\n",
+    )
+    for sentinel in (
+        "vitest/vitest.mjs",
+        "vite/package.json",
+        "react/package.json",
+        "react-dom/package.json",
+        "@vitejs/plugin-react/package.json",
+    ):
+        _write_fixture_file(source_root, f"{root_modules_rel}/{sentinel}", "{}\n")
+
+    shared_package = source_root / "2_products/pepper-agent/apps/shared"
+    linked_package = source_root / f"{root_modules_rel}/@hermes/shared"
+    linked_package.parent.mkdir(parents=True, exist_ok=True)
+    _make_directory_reparse_point_or_skip(linked_package, shared_package)
+
+    canonical_web = source_root / web_package_rel
+    assert _node_import_meta_resolve(node, canonical_web, "@hermes/shared").returncode == 0
+    assert (
+        _node_import_meta_resolve(
+            node,
+            canonical_web,
+            "@nous-research/ui/ui/components/badge",
+        ).returncode
+        == 0
+    )
+
+    work_packet = SimpleNamespace(
+        validation_steps=(
+            SimpleNamespace(
+                validation_id="V-FRONTEND",
+                description="Focused frontend tests validate scratch state.",
+                expected_result="The focused frontend tests pass.",
+                command=None,
+            ),
+        ),
+        source_ticket=SimpleNamespace(ticket_type="implementation"),
+    )
+    allowed_paths = (
+        f"{web_package_rel}/src/agent-platform/shell/shell.test.tsx",
+    )
+
+    before_authority = _source_materialization_authority(
+        workspace_before,
+        allowed_paths=allowed_paths,
+    )
+    pr._materialize_workpacket_scratch_source_tree(before_authority, source_root=source_root)
+    pr._copy_dependency_substrate_root(
+        source_root / root_modules_rel,
+        workspace_before / root_modules_rel,
+        source_root=source_root,
+        workspace_root=workspace_before,
+        package_rel=web_package_rel,
+        authority=before_authority,
+        required_package_names=frozenset(),
+    )
+    before_web = workspace_before / web_package_rel
+    assert _node_import_meta_resolve(node, before_web, "@hermes/shared").returncode != 0
+    assert (
+        _node_import_meta_resolve(
+            node,
+            before_web,
+            "@nous-research/ui/ui/components/badge",
+        ).returncode
+        != 0
+    )
+
+    after_authority = _source_materialization_authority(
+        workspace_after,
+        allowed_paths=allowed_paths,
+    )
+    pr._materialize_workpacket_scratch_source_tree(after_authority, source_root=source_root)
+    record = pr._materialize_workpacket_dependency_substrate(
+        after_authority,
+        work_packet,
+        source_root=source_root,
+    )
+
+    after_web = workspace_after / web_package_rel
+    shared_result = _node_import_meta_resolve(node, after_web, "@hermes/shared")
+    ui_result = _node_import_meta_resolve(
+        node,
+        after_web,
+        "@nous-research/ui/ui/components/badge",
+    )
+    assert shared_result.returncode == 0, shared_result.stderr
+    assert ui_result.returncode == 0, ui_result.stderr
+    assert "node_modules/@hermes/shared/src/index.js" in shared_result.stdout.replace("\\", "/")
+    assert "web/node_modules/@nous-research/ui" in ui_result.stdout.replace("\\", "/")
+    assert (workspace_after / "2_products/pepper-agent/apps/shared/src/index.js").is_file()
+    assert (workspace_after / f"{root_modules_rel}/@hermes/shared/src/index.js").is_file()
+    assert (
+        workspace_after
+        / f"{web_package_rel}/node_modules/@nous-research/ui/dist/ui/components/badge.js"
+    ).is_file()
+    assert not (workspace_after / f"{root_modules_rel}/@hermes/shared").is_symlink()
+    assert record["dependency_install_performed"] is False
+    assert record["canonical_package_lock_materialized"] is False
+    assert record["local_package_sources_materialized"] is True
+    assert record["local_package_source_copied_file_count"] >= 2
+    assert sorted(record["product_diff_excluded_roots"]) == [
+        "2_products/pepper-agent/node_modules",
+        "2_products/pepper-agent/web/node_modules",
+    ]
+    assert shared_package.joinpath("src/index.js").read_text(encoding="utf-8") == (
+        "export const shared = true;\n"
+    )
 
 
 def test_current_ticket_lifecycle_binding_derives_actions_and_paths(
@@ -5509,6 +5726,61 @@ def test_current_p18_9_1_governed_autonomy_reconciles_owned_terminal_validation_
         assert all(run.id != run_6 + 1 for run in runs)
     finally:
         conn.close()
+
+
+def test_current_p18_9_1_governed_autonomy_terminal_validation_block_not_worker_start_failed(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, projected, _authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
+    )
+
+    from hermes_cli import kanban_db
+
+    run_4 = _force_p18_9_1_blocked_run_4(pr, kanban_db, projected, monkeypatch)
+    _activate_p18_9_1_governed_autonomy_for_test(pr, monkeypatch)
+    _patch_synthetic_scratch_materialization(monkeypatch, pr)
+    monkeypatch.setattr(kanban_db, "_pid_alive", lambda pid: int(pid) == 6616)
+    started = pr.continue_current_ticket_governed_autonomy(
+        runtime_goal="Continue P18.9.1 under governed autonomy before terminal validation block.",
+        strategy="DIRECT",
+        spawn_fn=lambda _task, _workspace, board=None, env_overlay=None: 6616,
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+    run_5 = started["kanban_run_id"]
+    assert run_5 == run_4 + 1
+
+    _finish_projected_run_as_terminal(
+        kanban_db,
+        projected,
+        run_5,
+        status="blocked",
+        outcome="blocked",
+        summary=(
+            "governed validation ran; shell tests passed but non-shell suites blocked "
+            "because @hermes/shared and @nous-research/ui could not resolve"
+        ),
+    )
+
+    status = pr.get_current_ticket_governed_autonomy_status(
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+    assert status["governed_autonomy_runtime_status"] == "direct_execution_terminal_blocked"
+    assert status["terminal_run_reconciled"] is True
+    assert status["terminal_run_id"] == run_5
+    assert status["validation_infrastructure_failure"] is False
+
+    workflow = pr.build_workflow_control_snapshot()
+    assert workflow["workflow_status"] == "governed_autonomy_validation_blocked"
+    assert workflow["validation_state"] == "governed_autonomy_validation_blocked"
+    assert workflow["execution_state"] == "no_active_executions"
+    assert "worker start failed" not in workflow["next_action"]["label"]
+    assert "terminal validation blockage" in workflow["next_action"]["label"]
+    assert workflow["governed_autonomy"]["terminal_run_id"] == run_5
 
 
 def test_current_p18_9_1_governed_autonomy_fresh_execution_after_terminal_run_is_idempotent(
