@@ -6209,7 +6209,10 @@ def test_current_p18_9_1_governed_autonomy_resumes_legacy_pending_fresh_request_
 
     pending_request_text = (
         "Start a fresh governed P18.9.1 execution because the governed validation "
-        "dependency substrate has been materially corrected since terminal run 6."
+        "dependency substrate has been materially corrected since terminal run 6. "
+        "Preserve all previous runs as immutable historical evidence. Create a new "
+        "workspace from current canonical source and execute using the corrected "
+        "Pepper worker and native Hermes conversation loop."
     )
     pending_request = pr.CurrentTicketGovernedAutonomyContinuationRequest(
         runtime_goal=(
@@ -6228,6 +6231,13 @@ def test_current_p18_9_1_governed_autonomy_resumes_legacy_pending_fresh_request_
         terminal_reconciliation=terminal_reconciliation,
     )
     assert pending_ref is not None
+    assert pending_ref["human_request_text_SHA256"] == (
+        "f5b743d309ab84df5a4ee736b0f951797a5d1a43a453ae260204de8042c967ad"
+    )
+    pending_ref = dict(pending_ref)
+    pending_ref["fresh_execution_request_SHA256"] = (
+        "e3b52f46b77e46374beb0608632304765a4654edd48e99bb74747a66214a9bc3"
+    )
     legacy_pending_record = pr._governed_autonomy_runtime_base_record(
         request=pending_request,
         projection=authority,
@@ -6271,6 +6281,73 @@ def test_current_p18_9_1_governed_autonomy_resumes_legacy_pending_fresh_request_
         pending_ref,
     )
 
+    intervening_budget_stop = pr._build_governed_autonomy_runtime_stop_record(
+        request=pr.CurrentTicketGovernedAutonomyContinuationRequest(
+            runtime_goal=(
+                "Record the exhausted budget observation that previously hid the "
+                "pending fresh request."
+            ),
+            strategy="DIRECT",
+            resume_pending_fresh_execution_request_SHA256=pending_ref[
+                "fresh_execution_request_SHA256"
+            ],
+            project_id="PEPPER",
+            ticket_id="P18.9.1",
+        ),
+        projection=authority,
+        activation=activation,
+        previous=legacy_pending_record,
+        runtime_decision="STOP_FOR_HUMAN",
+        blocker_code="GOVERNED_AUTONOMY_VALIDATION_FAILURE_BUDGET_EXHAUSTED",
+        blocker_detail="validation failure budget is exhausted",
+        validation_failed=False,
+        provider_readiness=_ready_executor_provider_payload(),
+        extra_evidence={"fresh_execution_request_reference": pending_ref},
+    )
+    pr._persist_governed_autonomy_runtime_state(intervening_budget_stop)
+    assert intervening_budget_stop["fresh_execution_requested"] is False
+    assert intervening_budget_stop["previous_runtime_state_SHA256"] == legacy_pending_record[
+        "runtime_state_SHA256"
+    ]
+
+    missing_sha = "0" * 64
+    with pytest.raises(pr.ProductRuntimeConflict):
+        pr.continue_current_ticket_governed_autonomy(
+            runtime_goal="Try an arbitrary pending request identity.",
+            strategy="DIRECT",
+            resume_pending_fresh_execution_request_SHA256=missing_sha,
+            spawn_fn=lambda *_args, **_kwargs: pytest.fail("missing SHA must not spawn"),
+            project_id="PEPPER",
+            ticket_id="P18.9.1",
+        )
+    with pytest.raises(pr.ProductRuntimeConflict):
+        pr.continue_current_ticket_governed_autonomy(
+            runtime_goal="Try a mismatched pending request identity and text.",
+            strategy="DIRECT",
+            fresh_execution_request_text=pending_request_text + " Mismatched.",
+            resume_pending_fresh_execution_request_SHA256=pending_ref[
+                "fresh_execution_request_SHA256"
+            ],
+            spawn_fn=lambda *_args, **_kwargs: pytest.fail("mismatch must not spawn"),
+            project_id="PEPPER",
+            ticket_id="P18.9.1",
+        )
+    assert pr.load_current_ticket_governed_autonomy_runtime_state(
+        projection_record=authority,
+        activation_record=activation,
+    )["runtime_state_SHA256"] == intervening_budget_stop["runtime_state_SHA256"]
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        runs_after_failed_identity = kanban_db.list_runs(
+            conn,
+            projected["kanban_task_id"],
+        )
+        assert [run.id for run in runs_after_failed_identity] == [
+            run.id for run in runs_before
+        ]
+    finally:
+        conn.close()
+
     spawn_calls: list[dict] = []
 
     def spawn(task, workspace, board=None, env_overlay=None):
@@ -6283,9 +6360,13 @@ def test_current_p18_9_1_governed_autonomy_resumes_legacy_pending_fresh_request_
         return 6727
 
     resumed = pr.continue_current_ticket_governed_autonomy(
-        runtime_goal="Resume the already-recorded fresh P18.9.1 request from triage.",
+        runtime_goal=(
+            "Resume the already-recorded fresh P18.9.1 request by identity from triage."
+        ),
         strategy="DIRECT",
-        fresh_execution_request_text=pending_request_text,
+        resume_pending_fresh_execution_request_SHA256=pending_ref[
+            "fresh_execution_request_SHA256"
+        ],
         spawn_fn=spawn,
         project_id="PEPPER",
         ticket_id="P18.9.1",
@@ -6300,6 +6381,15 @@ def test_current_p18_9_1_governed_autonomy_resumes_legacy_pending_fresh_request_
     assert resumed["fresh_execution_request_SHA256"] == pending_ref[
         "fresh_execution_request_SHA256"
     ]
+    assert resumed["latest_decision_evidence"][
+        "fresh_execution_request_recognition_status"
+    ] == "pending_fresh_execution_request_resolved"
+    assert resumed["latest_decision_evidence"][
+        "fresh_execution_request_matched_record_source"
+    ] == "history"
+    assert resumed["latest_decision_evidence"][
+        "fresh_execution_request_matched_lineage_distance"
+    ] == 1
     assert resumed["prior_terminal_run_id"] == run_6
     prep_ref = resumed["latest_decision_evidence"]["direct_execution_request_reference"]
     assert prep_ref["task_prepare_status"] == "prepared"
@@ -6359,7 +6449,9 @@ def test_current_p18_9_1_governed_autonomy_resumes_legacy_pending_fresh_request_
     active_replay = pr.continue_current_ticket_governed_autonomy(
         runtime_goal="Replay the resumed fresh request while its run is active.",
         strategy="DIRECT",
-        fresh_execution_request_text=pending_request_text,
+        resume_pending_fresh_execution_request_SHA256=pending_ref[
+            "fresh_execution_request_SHA256"
+        ],
         spawn_fn=lambda *_args, **_kwargs: pytest.fail("active replay must not spawn"),
         project_id="PEPPER",
         ticket_id="P18.9.1",
@@ -6379,7 +6471,9 @@ def test_current_p18_9_1_governed_autonomy_resumes_legacy_pending_fresh_request_
     terminal_replay = pr.continue_current_ticket_governed_autonomy(
         runtime_goal="Replay the resumed fresh request after it terminalized.",
         strategy="DIRECT",
-        fresh_execution_request_text=pending_request_text,
+        resume_pending_fresh_execution_request_SHA256=pending_ref[
+            "fresh_execution_request_SHA256"
+        ],
         spawn_fn=lambda *_args, **_kwargs: pytest.fail("terminal replay must not spawn"),
         project_id="PEPPER",
         ticket_id="P18.9.1",

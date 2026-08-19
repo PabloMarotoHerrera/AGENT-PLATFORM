@@ -340,7 +340,40 @@ def test_pepper_toolset_exposes_no_arbitrary_shell_or_file_authority(monkeypatch
     assert "delegate_paths" not in continuation_params["properties"]
     assert "delegate_requested_operations" not in continuation_params["properties"]
     assert "fresh_execution_request_text" in continuation_params["properties"]
+    assert "resume_pending_fresh_execution_request_SHA256" in continuation_params[
+        "properties"
+    ]
     assert not (names & {"terminal", "process", "read_file", "write_file", "patch", "search_files"})
+
+
+def test_continue_governed_autonomy_tool_forwards_pending_fresh_request_sha(
+    monkeypatch,
+) -> None:
+    import tools.pepper_workflow_tools as pepper_tools
+
+    captured: dict[str, object] = {}
+
+    class RuntimeStub:
+        def continue_current_ticket_governed_autonomy(self, **kwargs):
+            captured.update(kwargs)
+            return {"dispatch_performed": False, "execution_started": False}
+
+        def build_lead_agent_operational_context(self):
+            return {}
+
+    monkeypatch.setattr(pepper_tools, "_runtime", lambda: RuntimeStub())
+    pending_sha = "a" * 64
+
+    result = json.loads(pepper_tools._continue_current_ticket_governed_autonomy({
+        "runtime_goal": "Resume pending governed autonomy request by identity.",
+        "strategy": "DIRECT",
+        "resume_pending_fresh_execution_request_SHA256": pending_sha,
+        "project_id": "PEPPER",
+        "ticket_id": "P18.9.1",
+    }))
+
+    assert result["success"] is True
+    assert captured["resume_pending_fresh_execution_request_SHA256"] == pending_sha
 
 
 def test_lead_agent_prompt_requires_tool_backed_state() -> None:
@@ -372,6 +405,8 @@ def test_lead_agent_prompt_requires_tool_backed_state() -> None:
     assert "without a GovernedAutonomyEnvelope, delegate paths, or delegate operations" in prompt
     assert "DIRECT may start exactly one same-authority Kanban run" in prompt
     assert "fresh_execution_request_text" in prompt
+    assert "resume_pending_fresh_execution_request_SHA256" in prompt
+    assert "do not paraphrase the original request" in prompt
     assert "replaying the same fresh request must not create another run" in prompt
     assert "backend-derived child scope/operations" in prompt
     assert "prepare_current_ticket_review" in prompt

@@ -976,6 +976,10 @@ def _continue_current_ticket_governed_autonomy(args: dict[str, Any], **_kwargs) 
             fresh_execution_request_text=(
                 str(args.get("fresh_execution_request_text") or "").strip() or None
             ),
+            resume_pending_fresh_execution_request_SHA256=(
+                str(args.get("resume_pending_fresh_execution_request_SHA256") or "").strip()
+                or None
+            ),
             project_id=str(args.get("project_id") or "").strip() or None,
             ticket_id=str(args.get("ticket_id") or "").strip() or None,
         )
@@ -1369,6 +1373,15 @@ _CONTINUE_CURRENT_TICKET_GOVERNED_AUTONOMY_SCHEMA = {
                 "which remains an idempotent terminal reconciliation."
             ),
         },
+        "resume_pending_fresh_execution_request_SHA256": {
+            "type": "string",
+            "description": (
+                "SHA-256 identity of an already-recorded pending fresh same-authority "
+                "execution request. Use this to resume a persisted pending request without "
+                "re-supplying its full human text; if both fields are supplied, the text "
+                "must digest to this same identity."
+            ),
+        },
         "project_id": {
             "type": "string",
             "description": "Optional governed project guard. Must be PEPPER if supplied.",
@@ -1638,8 +1651,9 @@ registry.register(
             "canonical Hermes delegate_task A2A delegation, or STOP_FOR_HUMAN runtime state. "
             "DIRECT may create one same-authority Kanban run through the canonical projected-task "
             "dispatch lifecycle; after an owned terminal run, a new attempt requires "
-            "fresh_execution_request_text. No legacy retry/recovery authorization, Git, Docker, "
-            "or Graphify."
+            "fresh_execution_request_text, while an already-recorded pending request may be "
+            "resumed by resume_pending_fresh_execution_request_SHA256. No legacy retry/recovery "
+            "authorization, Git, Docker, or Graphify."
         ),
         "parameters": _CONTINUE_CURRENT_TICKET_GOVERNED_AUTONOMY_SCHEMA,
     },

@@ -168,6 +168,7 @@ PEPPER_GOVERNED_AUTONOMY_RUNTIME_DIGEST_ALGORITHM = (
 PEPPER_GOVERNED_AUTONOMY_FRESH_EXECUTION_DIGEST_ALGORITHM = (
     "agent-platform-pepper-governed-autonomy-fresh-execution-request-sha256-v1"
 )
+PEPPER_GOVERNED_AUTONOMY_PENDING_FRESH_REQUEST_HISTORY_LIMIT = 64
 PEPPER_GOVERNED_AUTONOMY_AUTHORITY_DIGEST_ALGORITHM = (
     "agent-platform-pepper-governed-autonomy-backend-derived-live-authority-sha256-v1"
 )
@@ -609,6 +610,7 @@ class CurrentTicketGovernedAutonomyContinuationRequest(BaseModel):
     delegate_requested_operations: tuple[str, ...] = ()
     delegate_result: dict[str, Any] | None = None
     fresh_execution_request_text: str | None = Field(default=None, max_length=1024)
+    resume_pending_fresh_execution_request_SHA256: str | None = Field(default=None, max_length=64)
     project_id: str | None = Field(default=None, max_length=128)
     ticket_id: str | None = Field(default=None, max_length=128)
 
@@ -634,6 +636,15 @@ class CurrentTicketGovernedAutonomyContinuationRequest(BaseModel):
             return None
         if not _SAFE_ID.fullmatch(value):
             raise ValueError("invalid guarded identifier")
+        return value
+
+    @field_validator("resume_pending_fresh_execution_request_SHA256")
+    @classmethod
+    def optional_pending_fresh_request_sha_must_be_safe(cls, value: str | None) -> str | None:
+        if value in {None, ""}:
+            return None
+        if not _SAFE_SHA256.fullmatch(value):
+            raise ValueError("invalid pending fresh execution request SHA256")
         return value
 
     @field_validator("task_local_tool_name")
@@ -5387,6 +5398,7 @@ def continue_current_ticket_governed_autonomy(
     delegate_result: dict[str, Any] | None = None,
     delegate_parent_agent: Any | None = None,
     fresh_execution_request_text: str | None = None,
+    resume_pending_fresh_execution_request_SHA256: str | None = None,
     spawn_fn: Any = None,
     project_id: str | None = None,
     ticket_id: str | None = None,
@@ -5408,6 +5420,7 @@ def continue_current_ticket_governed_autonomy(
         delegate_requested_operations=tuple(delegate_requested_operations or ()),
         delegate_result=delegate_result,
         fresh_execution_request_text=fresh_execution_request_text,
+        resume_pending_fresh_execution_request_SHA256=resume_pending_fresh_execution_request_SHA256,
         project_id=project_id,
         ticket_id=ticket_id,
     )
@@ -5442,7 +5455,88 @@ def continue_current_ticket_governed_autonomy(
         previous=previous,
         effective_authority=effective_authority,
     )
-    if _governed_autonomy_active_execution_replay(previous, projection):
+    decision = _select_governed_autonomy_runtime_decision(request)
+    terminal_reconciliation = _governed_autonomy_runtime_terminal_reconciliation(
+        previous,
+        effective_authority=effective_authority,
+    )
+    text_fresh_execution_request = _governed_autonomy_fresh_execution_request_reference(
+        request,
+        projection=projection,
+        activation=activation,
+        terminal_reconciliation=terminal_reconciliation,
+    )
+    resume_pending_sha = request.resume_pending_fresh_execution_request_SHA256
+    if text_fresh_execution_request is not None and resume_pending_sha:
+        text_sha = text_fresh_execution_request["fresh_execution_request_SHA256"]
+        if text_sha != resume_pending_sha:
+            raise ProductRuntimeConflict(
+                "fresh execution request text digest does not match "
+                "resume_pending_fresh_execution_request_SHA256"
+            )
+    requested_fresh_sha = resume_pending_sha or (
+        text_fresh_execution_request.get("fresh_execution_request_SHA256")
+        if text_fresh_execution_request is not None
+        else None
+    )
+    fresh_execution_resolution = (
+        _governed_autonomy_resolve_pending_fresh_execution_request(
+            previous=previous,
+            projection=projection,
+            activation=activation,
+            fresh_execution_request_SHA256=requested_fresh_sha,
+        )
+    )
+    if resume_pending_sha and fresh_execution_resolution["status"] == "missing":
+        raise ProductRuntimeConflict(
+            "pending fresh execution request SHA256 was not found for the current "
+            "ticket authority"
+        )
+    if fresh_execution_resolution["status"] in {"pending", "realized"}:
+        fresh_execution_request = fresh_execution_resolution[
+            "fresh_execution_request_reference"
+        ]
+    else:
+        fresh_execution_request = text_fresh_execution_request
+    fresh_resolution_evidence = (
+        _governed_autonomy_fresh_execution_request_resolution_evidence(
+            fresh_execution_resolution,
+            fresh_execution_request=fresh_execution_request,
+            requested_sha=resume_pending_sha,
+        )
+    )
+    fresh_execution_request_pending_replay = (
+        decision == "DIRECT"
+        and fresh_execution_resolution["status"] == "pending"
+    )
+    if (
+        decision == "DIRECT"
+        and fresh_execution_resolution["status"] == "realized"
+    ):
+        realized_record = fresh_execution_resolution["fresh_execution_request_record"]
+        result = _governed_autonomy_runtime_operational_result(
+            realized_record,
+            activation_record=activation,
+            idempotent_replay=True,
+            effective_authority=effective_authority,
+        )
+        result["fresh_execution_requested"] = True
+        result["fresh_execution_duplicate_suppressed"] = True
+        result["fresh_execution_request_SHA256"] = fresh_execution_request[
+            "fresh_execution_request_SHA256"
+        ]
+        result["fresh_execution_request_reference"] = fresh_execution_request
+        result["non_consuming_observation"] = True
+        result["observation_status"] = (
+            "governed_autonomy_execution_already_active"
+            if _governed_autonomy_active_execution_replay(realized_record, projection)
+            else "governed_autonomy_fresh_execution_request_replayed"
+        )
+        return result
+    if requested_fresh_sha is None and _governed_autonomy_active_execution_replay(
+        previous,
+        projection,
+    ):
         result = _governed_autonomy_runtime_operational_result(
             previous,
             activation_record=activation,
@@ -5452,24 +5546,6 @@ def continue_current_ticket_governed_autonomy(
         result["non_consuming_observation"] = True
         result["observation_status"] = "governed_autonomy_execution_already_active"
         return result
-    decision = _select_governed_autonomy_runtime_decision(request)
-    terminal_reconciliation = _governed_autonomy_runtime_terminal_reconciliation(
-        previous,
-        effective_authority=effective_authority,
-    )
-    fresh_execution_request = _governed_autonomy_fresh_execution_request_reference(
-        request,
-        projection=projection,
-        activation=activation,
-        terminal_reconciliation=terminal_reconciliation,
-    )
-    fresh_execution_request_pending_replay = (
-        decision == "DIRECT"
-        and _governed_autonomy_fresh_execution_request_pending_replay(
-            previous,
-            fresh_execution_request,
-        )
-    )
     if terminal_reconciliation is not None and decision == "DIRECT":
         if _governed_autonomy_fresh_execution_request_already_consumed(
             previous,
@@ -5486,6 +5562,7 @@ def continue_current_ticket_governed_autonomy(
             result["fresh_execution_request_SHA256"] = fresh_execution_request[
                 "fresh_execution_request_SHA256"
             ]
+            result["fresh_execution_request_reference"] = fresh_execution_request
             result["non_consuming_observation"] = True
             result["observation_status"] = "governed_autonomy_fresh_execution_request_replayed"
             return result
@@ -5500,7 +5577,11 @@ def continue_current_ticket_governed_autonomy(
             result["observation_status"] = "governed_autonomy_execution_terminal_reconciled"
             return result
 
-    if fresh_execution_request is not None and terminal_reconciliation is None:
+    if (
+        fresh_execution_request is not None
+        and terminal_reconciliation is None
+        and fresh_execution_resolution["status"] != "pending"
+    ):
         record = _build_governed_autonomy_runtime_stop_record(
             request=request,
             projection=projection,
@@ -5512,7 +5593,7 @@ def continue_current_ticket_governed_autonomy(
             validation_failed=True,
             provider_readiness={"ok": True},
             extra_evidence={
-                "fresh_execution_request_reference": fresh_execution_request,
+                **fresh_resolution_evidence,
             },
         )
         _persist_governed_autonomy_runtime_state(record)
@@ -5535,7 +5616,7 @@ def continue_current_ticket_governed_autonomy(
             validation_failed=True,
             provider_readiness={"ok": True},
             extra_evidence={
-                "fresh_execution_request_reference": fresh_execution_request,
+                **fresh_resolution_evidence,
             },
         )
         _persist_governed_autonomy_runtime_state(record)
@@ -5612,6 +5693,7 @@ def continue_current_ticket_governed_autonomy(
             blocker_detail=budget_blocker[1],
             validation_failed=False,
             provider_readiness=provider_readiness,
+            extra_evidence=fresh_resolution_evidence,
         )
         _persist_governed_autonomy_runtime_state(record)
         return _governed_autonomy_runtime_operational_result(
@@ -5661,6 +5743,8 @@ def continue_current_ticket_governed_autonomy(
             provider_readiness=provider_readiness,
             envelope=authority,
             terminal_reconciliation=terminal_reconciliation,
+            fresh_execution_request=fresh_execution_request,
+            fresh_execution_request_resolution_evidence=fresh_resolution_evidence,
             spawn_fn=spawn_fn,
         )
     _persist_governed_autonomy_runtime_state(record)
@@ -9404,6 +9488,20 @@ def _governed_autonomy_fresh_execution_request_reference(
     return reference
 
 
+def _governed_autonomy_fresh_execution_request_created_attempt(
+    record: dict[str, Any] | None,
+) -> bool:
+    if not isinstance(record, dict):
+        return False
+    return bool(
+        record.get("kanban_run_created")
+        or record.get("dispatch_performed")
+        or record.get("lineage_dispatch_performed")
+        or record.get("execution_started")
+        or _int_or_none(record.get("kanban_run_id")) is not None
+    )
+
+
 def _governed_autonomy_fresh_execution_request_already_consumed(
     previous: dict[str, Any] | None,
     fresh_execution_request: dict[str, Any] | None,
@@ -9416,11 +9514,225 @@ def _governed_autonomy_fresh_execution_request_already_consumed(
         "fresh_execution_request_SHA256"
     ):
         return False
-    return bool(
-        previous.get("kanban_run_created")
-        or previous.get("lineage_dispatch_performed")
-        or previous.get("execution_started")
+    return _governed_autonomy_fresh_execution_request_created_attempt(previous)
+
+
+def _governed_autonomy_runtime_history_record_from_entry(
+    value: object,
+) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    record = value.get("record") if isinstance(value.get("record"), dict) else value
+    return record if isinstance(record, dict) else None
+
+
+def _governed_autonomy_runtime_lineage_records_newest_first(
+    previous: dict[str, Any] | None,
+    *,
+    ticket_id: str,
+    limit: int = PEPPER_GOVERNED_AUTONOMY_PENDING_FRESH_REQUEST_HISTORY_LIMIT,
+) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    if isinstance(previous, dict):
+        records.append({
+            "record": previous,
+            "source": "current",
+            "lineage_distance": 0,
+        })
+    if not isinstance(previous, dict) or limit <= 0:
+        return records
+    expected_sha = previous.get("previous_runtime_state_SHA256")
+    if not isinstance(expected_sha, str) or not _SAFE_SHA256.fullmatch(expected_sha):
+        return records
+    path = governed_autonomy_runtime_history_path_for_ticket(ticket_id)
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()[-limit:]
+    except OSError:
+        return records
+    history_by_sha: dict[str, dict[str, Any]] = {}
+    for line in lines:
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        record = _governed_autonomy_runtime_history_record_from_entry(entry)
+        if record is None:
+            continue
+        runtime_sha = record.get("runtime_state_SHA256")
+        if isinstance(runtime_sha, str) and _SAFE_SHA256.fullmatch(runtime_sha):
+            history_by_sha[runtime_sha] = record
+    seen: set[str] = set()
+    distance = 1
+    while (
+        isinstance(expected_sha, str)
+        and _SAFE_SHA256.fullmatch(expected_sha)
+        and expected_sha not in seen
+        and distance <= limit
+    ):
+        seen.add(expected_sha)
+        record = history_by_sha.get(expected_sha)
+        if record is None:
+            break
+        records.append({
+            "record": record,
+            "source": "history",
+            "lineage_distance": distance,
+        })
+        expected_sha = record.get("previous_runtime_state_SHA256")
+        distance += 1
+    return records
+
+
+def _governed_autonomy_validate_runtime_lineage_candidate(
+    record: dict[str, Any],
+    *,
+    projection: dict[str, Any],
+    activation: dict[str, Any],
+) -> dict[str, Any]:
+    validated = validate_governed_autonomy_runtime_state_record(
+        record,
+        projection_record=projection,
+        activation_record=activation,
     )
+    activation_reference = _validated_governed_autonomy_envelope_reference(
+        activation.get("governed_autonomy_envelope_reference")
+    )
+    stable = _governed_autonomy_stable_authority_comparison(
+        projection=projection,
+        activation_reference=activation_reference,
+    )
+    if not stable["same_authority"]:
+        raise ProductRuntimeConflict("governed-autonomy runtime stable authority mismatch")
+    return validated
+
+
+def _governed_autonomy_resolve_pending_fresh_execution_request(
+    *,
+    previous: dict[str, Any] | None,
+    projection: dict[str, Any],
+    activation: dict[str, Any],
+    fresh_execution_request_SHA256: str | None,
+) -> dict[str, Any]:
+    if not fresh_execution_request_SHA256:
+        return {
+            "status": "not_requested",
+            "recognition_status": "fresh_execution_request_not_supplied",
+            "history_limit": PEPPER_GOVERNED_AUTONOMY_PENDING_FRESH_REQUEST_HISTORY_LIMIT,
+            "scanned_record_count": 0,
+        }
+    if not _SAFE_SHA256.fullmatch(fresh_execution_request_SHA256):
+        raise ProductRuntimeConflict("invalid pending fresh execution request SHA256")
+    scanned = 0
+    later_execution_attempt: dict[str, Any] | None = None
+    for item in _governed_autonomy_runtime_lineage_records_newest_first(
+        previous,
+        ticket_id=str(projection["ticket_id"]),
+    ):
+        scanned += 1
+        try:
+            record = _governed_autonomy_validate_runtime_lineage_candidate(
+                item["record"],
+                projection=projection,
+                activation=activation,
+            )
+        except ProductRuntimeConflict as exc:
+            return {
+                "status": "missing",
+                "recognition_status": "blocked_by_incompatible_runtime_history",
+                "blocker_detail": _safe_text(exc, limit=300),
+                "history_limit": PEPPER_GOVERNED_AUTONOMY_PENDING_FRESH_REQUEST_HISTORY_LIMIT,
+                "scanned_record_count": scanned,
+            }
+        if (
+            record.get("fresh_execution_requested") is True
+            and record.get("fresh_execution_request_SHA256") == fresh_execution_request_SHA256
+        ):
+            reference = record.get("fresh_execution_request_reference")
+            if (
+                not isinstance(reference, dict)
+                or reference.get("fresh_execution_request_SHA256")
+                != fresh_execution_request_SHA256
+            ):
+                return {
+                    "status": "missing",
+                    "recognition_status": "matching_runtime_record_malformed",
+                    "matched_runtime_state_SHA256": record.get("runtime_state_SHA256"),
+                    "history_limit": PEPPER_GOVERNED_AUTONOMY_PENDING_FRESH_REQUEST_HISTORY_LIMIT,
+                    "scanned_record_count": scanned,
+                }
+            realized = _governed_autonomy_fresh_execution_request_created_attempt(record)
+            if later_execution_attempt is not None and not realized:
+                return {
+                    "status": "missing",
+                    "recognition_status": "blocked_by_later_execution_attempt",
+                    "matched_runtime_state_SHA256": record.get("runtime_state_SHA256"),
+                    "blocking_runtime_state_SHA256": later_execution_attempt.get(
+                        "runtime_state_SHA256"
+                    ),
+                    "history_limit": PEPPER_GOVERNED_AUTONOMY_PENDING_FRESH_REQUEST_HISTORY_LIMIT,
+                    "scanned_record_count": scanned,
+                }
+            return {
+                "status": "realized" if realized else "pending",
+                "recognition_status": (
+                    "fresh_execution_request_already_realized"
+                    if realized
+                    else "pending_fresh_execution_request_resolved"
+                ),
+                "fresh_execution_request_reference": reference,
+                "fresh_execution_request_record": record,
+                "matched_runtime_state_SHA256": record.get("runtime_state_SHA256"),
+                "matched_record_source": item.get("source"),
+                "matched_lineage_distance": item.get("lineage_distance"),
+                "history_limit": PEPPER_GOVERNED_AUTONOMY_PENDING_FRESH_REQUEST_HISTORY_LIMIT,
+                "scanned_record_count": scanned,
+            }
+        if _governed_autonomy_fresh_execution_request_created_attempt(record):
+            later_execution_attempt = record
+    return {
+        "status": "missing",
+        "recognition_status": "pending_fresh_execution_request_not_found",
+        "history_limit": PEPPER_GOVERNED_AUTONOMY_PENDING_FRESH_REQUEST_HISTORY_LIMIT,
+        "scanned_record_count": scanned,
+    }
+
+
+def _governed_autonomy_fresh_execution_request_resolution_evidence(
+    resolution: dict[str, Any],
+    *,
+    fresh_execution_request: dict[str, Any] | None = None,
+    requested_sha: str | None = None,
+) -> dict[str, Any]:
+    status = resolution.get("status")
+    if status == "not_requested" and fresh_execution_request is None and not requested_sha:
+        return {}
+    evidence = {
+        "fresh_execution_request_recognition_status": resolution.get(
+            "recognition_status"
+        ),
+        "fresh_execution_request_resolution_status": status,
+        "fresh_execution_request_history_limit": resolution.get("history_limit"),
+        "fresh_execution_request_scanned_record_count": resolution.get(
+            "scanned_record_count"
+        ),
+    }
+    if requested_sha:
+        evidence["resume_pending_fresh_execution_request_SHA256"] = requested_sha
+    if resolution.get("matched_runtime_state_SHA256"):
+        evidence["fresh_execution_request_matched_runtime_state_SHA256"] = (
+            resolution["matched_runtime_state_SHA256"]
+        )
+    if resolution.get("matched_record_source"):
+        evidence["fresh_execution_request_matched_record_source"] = resolution[
+            "matched_record_source"
+        ]
+    if resolution.get("matched_lineage_distance") is not None:
+        evidence["fresh_execution_request_matched_lineage_distance"] = resolution[
+            "matched_lineage_distance"
+        ]
+    if fresh_execution_request is not None:
+        evidence["fresh_execution_request_reference"] = fresh_execution_request
+    return evidence
 
 
 def _governed_autonomy_fresh_execution_request_pending_replay(
@@ -9935,14 +10247,17 @@ def _build_governed_autonomy_direct_runtime_record(
     provider_readiness: dict[str, Any],
     envelope: Any,
     terminal_reconciliation: dict[str, Any] | None = None,
+    fresh_execution_request: dict[str, Any] | None = None,
+    fresh_execution_request_resolution_evidence: dict[str, Any] | None = None,
     spawn_fn: Any = None,
 ) -> dict[str, Any]:
-    fresh_execution_request = _governed_autonomy_fresh_execution_request_reference(
-        request,
-        projection=projection,
-        activation=activation,
-        terminal_reconciliation=terminal_reconciliation,
-    )
+    if fresh_execution_request is None:
+        fresh_execution_request = _governed_autonomy_fresh_execution_request_reference(
+            request,
+            projection=projection,
+            activation=activation,
+            terminal_reconciliation=terminal_reconciliation,
+        )
     prep_result = _prepare_current_ticket_governed_autonomy_task_for_dispatch(
         projection=projection,
         activation=activation,
@@ -9963,6 +10278,7 @@ def _build_governed_autonomy_direct_runtime_record(
                 "blocker_code": prep_result.get("blocker_code"),
                 "blocker_detail": prep_result.get("blocker_detail"),
                 "fresh_execution_request_reference": fresh_execution_request,
+                **(fresh_execution_request_resolution_evidence or {}),
             },
             provider_readiness=provider_readiness,
             process_continuation_increment=0,
@@ -10011,6 +10327,7 @@ def _build_governed_autonomy_direct_runtime_record(
             "rationale": "active authority revalidated; same-authority Kanban dispatch uses the canonical worker lifecycle",
             "direct_execution_request_reference": prep_result,
             "fresh_execution_request_reference": fresh_execution_request,
+            **(fresh_execution_request_resolution_evidence or {}),
             "direct_execution_result_reference": _governed_autonomy_dispatch_result_reference(
                 dispatch_result
             ),
