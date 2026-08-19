@@ -9295,10 +9295,8 @@ def _governed_autonomy_candidate_changes_reference(
     }
 
 
-def _governed_autonomy_validation_infrastructure_failure(
-    run: dict[str, Any],
-) -> bool:
-    text = " ".join(
+def _governed_autonomy_terminal_run_text(run: dict[str, Any]) -> str:
+    return " ".join(
         str(run.get(key) or "")
         for key in (
             "status",
@@ -9309,6 +9307,76 @@ def _governed_autonomy_validation_infrastructure_failure(
             "error",
         )
     ).casefold()
+
+
+def _governed_autonomy_candidate_changes_available(
+    candidate_changes: dict[str, Any] | None,
+) -> bool:
+    if not isinstance(candidate_changes, dict):
+        return False
+    if candidate_changes.get("available") is not True:
+        return False
+    return (_int_or_none(candidate_changes.get("files_changed")) or 0) > 0
+
+
+def _governed_autonomy_terminal_validated_candidate_review_required(
+    run: dict[str, Any],
+    *,
+    candidate_changes: dict[str, Any] | None,
+    validation_infrastructure_failure: bool,
+) -> bool:
+    if validation_infrastructure_failure:
+        return False
+    if not _governed_autonomy_candidate_changes_available(candidate_changes):
+        return False
+    text = _governed_autonomy_terminal_run_text(run)
+    normalized = text.replace("_", " ").replace("-", " ")
+    review_or_git_boundary = any(
+        marker in normalized
+        for marker in (
+            "review required",
+            "human git",
+            "human only",
+            "git authority",
+            "git mutation authority",
+            "git mutation prohibited",
+            "git handoff",
+            "canonical repository merge",
+            "merge is human only",
+        )
+    )
+    validation_passed = any(
+        marker in normalized
+        for marker in (
+            "validation passed",
+            "validation: passed",
+            "validation=passed",
+            "workpacket validation passed",
+            "governed v2 validation passed",
+        )
+    ) or ("tests passed" in normalized and "validation" in normalized)
+    if not review_or_git_boundary or not validation_passed:
+        return False
+    if re.search(
+        r"(validation infrastructure|product validation|validation) failure\s*(is|=|:)\s*true",
+        normalized,
+    ):
+        return False
+    return not any(
+        marker in normalized
+        for marker in (
+            "validation failed",
+            "product validation failed",
+            "governed v2 validation failed",
+            "tests failed",
+        )
+    )
+
+
+def _governed_autonomy_validation_infrastructure_failure(
+    run: dict[str, Any],
+) -> bool:
+    text = _governed_autonomy_terminal_run_text(run)
     validation_hint = "workpacket_validation" in text or "validation" in text
     infrastructure_hint = any(
         marker in text
@@ -9373,9 +9441,15 @@ def _governed_autonomy_runtime_terminal_reconciliation(
     validation_infra_failure = _governed_autonomy_validation_infrastructure_failure(
         owned_run,
     )
+    validated_review_required = _governed_autonomy_terminal_validated_candidate_review_required(
+        owned_run,
+        candidate_changes=candidate_changes,
+        validation_infrastructure_failure=validation_infra_failure,
+    )
     if completed:
         runtime_status = "direct_execution_terminal_completed"
         blocker_code = None
+        validation_passed = True
         next_action = {
             "id": action_ids["review_prepare"],
             "target_ticket_id": record["ticket_id"],
@@ -9386,6 +9460,7 @@ def _governed_autonomy_runtime_terminal_reconciliation(
     elif validation_infra_failure:
         runtime_status = "direct_execution_terminal_blocked_validation_repairable"
         blocker_code = "GOVERNED_AUTONOMY_VALIDATION_INFRASTRUCTURE_REPAIRABLE"
+        validation_passed = False
         next_action = {
             "id": governed_autonomy_continuation_action_id(str(record["ticket_id"])),
             "target_ticket_id": record["ticket_id"],
@@ -9397,9 +9472,24 @@ def _governed_autonomy_runtime_terminal_reconciliation(
             "after validation tool infrastructure is repaired"
         )
         next_human_action = None
+    elif validated_review_required:
+        runtime_status = "direct_execution_terminal_validated_review_required"
+        blocker_code = None
+        validation_passed = True
+        next_action = {
+            "id": action_ids["review_prepare"],
+            "target_ticket_id": record["ticket_id"],
+            "required_human_action": "review_validation_preparation",
+            "human_git_handoff_required": True,
+        }
+        next_autonomous_action = None
+        next_human_action = (
+            "prepare governed review validation and preserve human Git handoff authority"
+        )
     else:
         runtime_status = "direct_execution_terminal_blocked"
         blocker_code = "GOVERNED_AUTONOMY_TERMINAL_RUN_BLOCKED"
+        validation_passed = False
         next_action = None
         next_autonomous_action = None
         next_human_action = "human review or recovery authority required for terminal governed run"
@@ -9416,10 +9506,16 @@ def _governed_autonomy_runtime_terminal_reconciliation(
         "validation_observation_reference": {
             "tool_name": "workpacket_validation",
             "infrastructure_failure": validation_infra_failure,
+            "validation_passed": validation_passed,
+            "validated_candidate_review_required": validated_review_required,
             "error_excerpt": _safe_text(detail, limit=500),
         },
         "source_materialization_reference": materialization_reference,
         "candidate_changes_reference": candidate_changes,
+        "candidate_changes_available": _governed_autonomy_candidate_changes_available(
+            candidate_changes,
+        ),
+        "validated_candidate_review_required": validated_review_required,
         "blocker_code": blocker_code,
         "blocker_detail": _safe_text(detail, limit=500) if blocker_code else None,
         "next_autonomous_action": next_autonomous_action,
@@ -9785,6 +9881,12 @@ def _governed_autonomy_apply_terminal_reconciliation(
         ],
         "candidate_changes_reference": terminal_reconciliation[
             "candidate_changes_reference"
+        ],
+        "candidate_changes_available": terminal_reconciliation[
+            "candidate_changes_available"
+        ],
+        "validated_candidate_review_required": terminal_reconciliation[
+            "validated_candidate_review_required"
         ],
         "blocker_code": terminal_reconciliation["blocker_code"],
         "blocker_detail": terminal_reconciliation["blocker_detail"],
@@ -14607,7 +14709,7 @@ def _current_ticket_governed_autonomy_overlay(
                 "label",
                 f"{binding.ticket_id} governed-autonomy execution completed; prepare review validation.",
             )
-            overlay.update({
+            review_ready_overlay = {
                 "readiness": "governed_autonomy_execution_completed",
                 "workflow_state": f"{binding.ticket_id}-GOVERNED-AUTONOMY-EXECUTION-COMPLETED",
                 "workflow_status": "execution_completed",
@@ -14618,7 +14720,26 @@ def _current_ticket_governed_autonomy_overlay(
                 "review_state": "ready_for_review_validation",
                 "recovery_state": "not_required",
                 "next_action": terminal_next_action,
-            })
+            }
+            if terminal_reconciliation.get("validated_candidate_review_required") is True:
+                terminal_next_action["label"] = (
+                    f"{binding.ticket_id} governed-autonomy candidate validated; prepare human review "
+                    "and Git handoff."
+                )
+                terminal_next_action["required_human_action"] = (
+                    "review_validation_preparation_and_human_git_handoff"
+                )
+                review_ready_overlay.update({
+                    "readiness": "governed_autonomy_validated_candidate_review_ready",
+                    "workflow_state": (
+                        f"{binding.ticket_id}-GOVERNED-AUTONOMY-AWAITING-HUMAN-GIT-HANDOFF"
+                    ),
+                    "governed_workflow_state": "awaiting_human_git_handoff",
+                    "human_git_handoff_transition_required": True,
+                    "git_handoff_required": True,
+                    "git_handoff_state": "human_git_authority_preserved",
+                })
+            overlay.update(review_ready_overlay)
     elif terminal_reconciliation is not None:
         overlay.update({
             "readiness": "governed_autonomy_execution_terminal_reconciled",

@@ -645,16 +645,23 @@ def _write_p18_9_1_terminal_candidate_fixture(
 ) -> None:
     source_root = projection_home / "terminal-candidate-source"
     nav_relative_path = "2_products/pepper-agent/web/src/agent-platform/shell/navigation.ts"
-    _write_fixture_file(
-        source_root,
-        nav_relative_path,
-        "export const nav = 'canonical';\n",
-    )
-    _write_fixture_file(
-        workspace,
-        nav_relative_path,
-        "export const nav = 'canonical';\nexport const p18_9_1_terminal = true;\n",
-    )
+    modified_files = {
+        nav_relative_path: (
+            "export const nav = 'canonical';\n",
+            "export const nav = 'canonical';\nexport const p18_9_1_terminal = true;\n",
+        ),
+        "2_products/pepper-agent/web/src/agent-platform/shell/routing.ts": (
+            "export const route = 'canonical';\n",
+            "export const route = 'compact-navigation';\n",
+        ),
+        "2_products/pepper-agent/web/src/agent-platform/shell/compact-nav.ts": (
+            "export const compact = false;\n",
+            "export const compact = true;\n",
+        ),
+    }
+    for relative_path, (source_text, workspace_text) in modified_files.items():
+        _write_fixture_file(source_root, relative_path, source_text)
+        _write_fixture_file(workspace, relative_path, workspace_text)
     _write_fixture_file(
         workspace,
         "2_products/pepper-agent/web/src/agent-platform/shell/P18.9.1-implementation-report.txt",
@@ -5781,6 +5788,247 @@ def test_current_p18_9_1_governed_autonomy_terminal_validation_block_not_worker_
     assert "worker start failed" not in workflow["next_action"]["label"]
     assert "terminal validation blockage" in workflow["next_action"]["label"]
     assert workflow["governed_autonomy"]["terminal_run_id"] == run_5
+
+
+def test_current_p18_9_1_governed_autonomy_terminal_validated_candidate_routes_to_handoff(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, projected, _authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
+    )
+
+    from hermes_cli import kanban_db
+
+    run_4 = _force_p18_9_1_blocked_run_4(pr, kanban_db, projected, monkeypatch)
+    _activate_p18_9_1_governed_autonomy_for_test(pr, monkeypatch)
+    _patch_synthetic_scratch_materialization(monkeypatch, pr)
+    live_pids = {6815, 6816, 6817}
+    monkeypatch.setattr(kanban_db, "_pid_alive", lambda pid: int(pid) in live_pids)
+
+    run_5_started = pr.continue_current_ticket_governed_autonomy(
+        runtime_goal="Continue P18.9.1 before synthetic run 7 validated candidate.",
+        strategy="DIRECT",
+        spawn_fn=lambda _task, _workspace, board=None, env_overlay=None: 6815,
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+    run_5 = run_5_started["kanban_run_id"]
+    assert run_5 == run_4 + 1
+    _finish_projected_run_as_terminal(
+        kanban_db,
+        projected,
+        run_5,
+        status="blocked",
+        outcome="blocked",
+        summary="synthetic terminal run 5 requires a fresh governed attempt",
+    )
+
+    run_6_started = pr.continue_current_ticket_governed_autonomy(
+        runtime_goal="Start synthetic fresh P18.9.1 governed run 6.",
+        strategy="DIRECT",
+        fresh_execution_request_text="Launch synthetic fresh governed P18.9.1 run 6.",
+        spawn_fn=lambda _task, _workspace, board=None, env_overlay=None: 6816,
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+    run_6 = run_6_started["kanban_run_id"]
+    assert run_6 == run_5 + 1
+    _finish_projected_run_as_terminal(
+        kanban_db,
+        projected,
+        run_6,
+        status="blocked",
+        outcome="blocked",
+        summary="synthetic terminal run 6 requires a final fresh governed attempt",
+    )
+
+    run_7_started = pr.continue_current_ticket_governed_autonomy(
+        runtime_goal="Start synthetic fresh P18.9.1 governed run 7.",
+        strategy="DIRECT",
+        fresh_execution_request_text="Launch synthetic fresh governed P18.9.1 run 7.",
+        spawn_fn=lambda _task, _workspace, board=None, env_overlay=None: 6817,
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+    run_7 = run_7_started["kanban_run_id"]
+    assert run_7 == run_6 + 1
+    run_7_workspace = Path(run_7_started["workspace_path"])
+    _write_p18_9_1_terminal_candidate_fixture(pr, projection_home, run_7_workspace)
+    run_7_manifest = (
+        run_7_workspace / pr.PEPPER_SCRATCH_SOURCE_MATERIALIZATION_MANIFEST
+    ).read_bytes()
+    run_7_summary = (
+        "worker process started; candidate produced; workpacket_validation invoked; "
+        "validation infrastructure failure = false; product validation failure = false; "
+        "governed V2 validation passed; 7 files, 123 tests passed; "
+        "Git mutation authority = false; terminal reason: review-required because "
+        "canonical repository merge is human-only."
+    )
+    _finish_projected_run_as_terminal(
+        kanban_db,
+        projected,
+        run_7,
+        status="blocked",
+        outcome="blocked",
+        summary=run_7_summary,
+    )
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        runs_before = kanban_db.list_runs(conn, projected["kanban_task_id"])
+        run_7_before = next(run for run in runs_before if run.id == run_7)
+        run_7_snapshot = {
+            "id": run_7_before.id,
+            "status": run_7_before.status,
+            "outcome": run_7_before.outcome,
+            "summary": run_7_before.summary,
+            "error": run_7_before.error,
+            "ended_at": run_7_before.ended_at,
+        }
+    finally:
+        conn.close()
+
+    status = pr.get_current_ticket_governed_autonomy_status(
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+    assert status["governed_autonomy_runtime_status"] == (
+        "direct_execution_terminal_validated_review_required"
+    )
+    assert status["terminal_run_reconciled"] is True
+    assert status["terminal_run_id"] == run_7
+    assert status["validation_infrastructure_failure"] is False
+    assert status["validated_candidate_review_required"] is True
+    assert status["candidate_changes_available"] is True
+    assert status["candidate_changes_reference"]["files_changed"] == 4
+    assert status["candidate_changes_reference"]["modified_file_count"] == 3
+    assert status["candidate_changes_reference"]["created_file_count"] == 1
+    assert status["validation_observation_reference"]["validation_passed"] is True
+    assert status["blocker_code"] is None
+    assert status["next_action"]["id"] == (
+        pr.governed_ticket_lifecycle_action_ids("P18.9.1")["review_prepare"]
+    )
+    assert status["Git_mutation"] is False
+
+    workflow = pr.build_workflow_control_snapshot()
+    assert workflow["readiness"] == "governed_autonomy_validated_candidate_review_ready"
+    assert workflow["workflow_state"] == (
+        "P18.9.1-GOVERNED-AUTONOMY-AWAITING-HUMAN-GIT-HANDOFF"
+    )
+    assert workflow["workflow_status"] == "execution_completed"
+    assert workflow["validation_state"] == "execution_completed_pending_validation"
+    assert workflow["review_state"] == "ready_for_review_validation"
+    assert workflow["recovery_state"] == "not_required"
+    assert workflow["governed_workflow_state"] == "awaiting_human_git_handoff"
+    assert workflow["git_handoff_required"] is True
+    assert workflow["git_handoff_state"] == "human_git_authority_preserved"
+    assert workflow["next_action"]["id"] == status["next_action"]["id"]
+    assert workflow["next_action"]["required_human_action"] == (
+        "review_validation_preparation_and_human_git_handoff"
+    )
+    assert "human review" in workflow["next_action"]["label"]
+    assert "Git handoff" in workflow["next_action"]["label"]
+    assert workflow["governed_autonomy"]["terminal_run_id"] == run_7
+    assert workflow["governed_autonomy"]["validated_candidate_review_required"] is True
+    assert workflow["governed_autonomy"]["validation_infrastructure_failure"] is False
+
+    replay = pr.continue_current_ticket_governed_autonomy(
+        runtime_goal="Reconcile synthetic run 7 without creating run 8.",
+        strategy="DIRECT",
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("run 7 replay must not spawn"),
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+    assert replay["idempotent_replay"] is True
+    assert replay["terminal_run_id"] == run_7
+    assert replay["validated_candidate_review_required"] is True
+    assert replay["next_action"]["id"] == status["next_action"]["id"]
+    assert replay["Git_mutation"] is False
+
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        runs_after = kanban_db.list_runs(conn, projected["kanban_task_id"])
+        run_7_after = next(run for run in runs_after if run.id == run_7)
+        assert [run.id for run in runs_after] == [run.id for run in runs_before]
+        assert runs_after[-1].id == run_7
+        assert all(run.id != run_7 + 1 for run in runs_after)
+        assert {
+            "id": run_7_after.id,
+            "status": run_7_after.status,
+            "outcome": run_7_after.outcome,
+            "summary": run_7_after.summary,
+            "error": run_7_after.error,
+            "ended_at": run_7_after.ended_at,
+        } == run_7_snapshot
+    finally:
+        conn.close()
+    assert (
+        run_7_workspace / pr.PEPPER_SCRATCH_SOURCE_MATERIALIZATION_MANIFEST
+    ).read_bytes() == run_7_manifest
+
+
+def test_current_p18_9_1_governed_autonomy_terminal_product_validation_failure_stays_blocked(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, projected, _authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
+    )
+
+    from hermes_cli import kanban_db
+
+    run_4 = _force_p18_9_1_blocked_run_4(pr, kanban_db, projected, monkeypatch)
+    _activate_p18_9_1_governed_autonomy_for_test(pr, monkeypatch)
+    _patch_synthetic_scratch_materialization(monkeypatch, pr)
+    monkeypatch.setattr(kanban_db, "_pid_alive", lambda pid: int(pid) == 6825)
+    started = pr.continue_current_ticket_governed_autonomy(
+        runtime_goal="Continue P18.9.1 before genuine product validation failure.",
+        strategy="DIRECT",
+        spawn_fn=lambda _task, _workspace, board=None, env_overlay=None: 6825,
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+    run_5 = started["kanban_run_id"]
+    assert run_5 == run_4 + 1
+    _write_p18_9_1_terminal_candidate_fixture(
+        pr,
+        projection_home,
+        Path(started["workspace_path"]),
+    )
+    _finish_projected_run_as_terminal(
+        kanban_db,
+        projected,
+        run_5,
+        status="blocked",
+        outcome="blocked",
+        summary=(
+            "candidate produced; workpacket_validation invoked; validation infrastructure "
+            "failure = false; product validation failure = true; validation failed; "
+            "tests failed; review-required text alone must not bypass failure handling"
+        ),
+    )
+
+    status = pr.get_current_ticket_governed_autonomy_status(
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+    assert status["governed_autonomy_runtime_status"] == "direct_execution_terminal_blocked"
+    assert status["terminal_run_reconciled"] is True
+    assert status["terminal_run_id"] == run_5
+    assert status["validation_infrastructure_failure"] is False
+    assert status["candidate_changes_available"] is True
+    assert status["validated_candidate_review_required"] is False
+    assert status["validation_observation_reference"]["validation_passed"] is False
+    assert status["blocker_code"] == "GOVERNED_AUTONOMY_TERMINAL_RUN_BLOCKED"
+
+    workflow = pr.build_workflow_control_snapshot()
+    assert workflow["workflow_status"] == "governed_autonomy_validation_blocked"
+    assert workflow["validation_state"] == "governed_autonomy_validation_blocked"
+    assert workflow["review_state"] == "candidate_available_validation_blocked"
+    assert workflow["next_action"]["id"] == "CONTINUE_P18_9_1_GOVERNED_AUTONOMY"
+    assert workflow["governed_autonomy"]["validated_candidate_review_required"] is False
 
 
 def test_current_p18_9_1_governed_autonomy_fresh_execution_after_terminal_run_is_idempotent(
