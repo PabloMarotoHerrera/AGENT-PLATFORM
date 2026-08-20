@@ -2,14 +2,27 @@ import type { PluginManifest } from "@/plugins";
 
 export const AGENT_PLATFORM_NAVIGATION_GROUP_ID = "agent-platform" as const;
 
-export type ShellNavigationGroupId =
+export type CompactShellNavigationGroupId =
+  | "control"
+  | "work"
+  | "agents"
+  | "automation"
+  | "resources"
+  | "system";
+
+export type LegacyShellNavigationGroupId =
   | typeof AGENT_PLATFORM_NAVIGATION_GROUP_ID
   | "hermes-tools"
   | "extensions"
   | "administration";
 
+export type ShellNavigationGroupId =
+  | LegacyShellNavigationGroupId
+  | CompactShellNavigationGroupId;
+
 export interface ShellNavigationItem {
   readonly groupId?: typeof AGENT_PLATFORM_NAVIGATION_GROUP_ID;
+  readonly label?: string;
   readonly path: string;
 }
 
@@ -26,14 +39,41 @@ export interface FilteredPluginManifests {
 
 const PRODUCT_ROUTE_ROOT = "/agent-platform";
 
-const HERMES_TOOL_PATHS = new Set([
-  "/chat",
-  "/sessions",
-  "/files",
-  "/models",
-  "/cron",
-  "/skills",
-]);
+const COMPACT_SHELL_NAVIGATION_GROUP_ORDER: readonly CompactShellNavigationGroupId[] = [
+  "control",
+  "work",
+  "agents",
+  "automation",
+  "resources",
+  "system",
+];
+
+const PRODUCT_ROUTE_GROUPS: readonly [RegExp, CompactShellNavigationGroupId][] = [
+  [/^\/agent-platform\/overview(?:\/|$)/, "control"],
+  [/^\/agent-platform\/(?:projects|approvals|executions)(?:\/|$)/, "work"],
+  [/^\/agent-platform\/settings(?:\/|$)/, "system"],
+];
+
+const BUILTIN_ROUTE_GROUPS: Readonly<Record<string, CompactShellNavigationGroupId>> = Object.freeze({
+  "/chat": "control",
+  "/sessions": "work",
+  "/files": "resources",
+  "/analytics": "control",
+  "/models": "resources",
+  "/logs": "system",
+  "/cron": "automation",
+  "/skills": "agents",
+  "/plugins": "automation",
+  "/mcp": "automation",
+  "/pairing": "automation",
+  "/channels": "automation",
+  "/webhooks": "automation",
+  "/profiles": "agents",
+  "/config": "system",
+  "/env": "system",
+  "/system": "system",
+  "/docs": "resources",
+});
 
 export function isAgentPlatformRoutePath(path: string): boolean {
   let decodedPath = path;
@@ -108,44 +148,57 @@ export function filterProtectedPluginManifests(
   });
 }
 
+function normalizeNavigationPath(path: string): string {
+  try {
+    return new URL(path, "https://agent-platform.invalid").pathname.replace(/\/$/, "") || "/";
+  } catch {
+    return path.split(/[?#]/, 1)[0]?.replace(/\/$/, "") || path;
+  }
+}
+
+function resolveProductRouteGroup(path: string): CompactShellNavigationGroupId {
+  const normalizedPath = normalizeNavigationPath(path).toLowerCase();
+  for (const [pattern, groupId] of PRODUCT_ROUTE_GROUPS) {
+    if (pattern.test(normalizedPath)) return groupId;
+  }
+  return "resources";
+}
+
+function resolveNavigationGroup(item: ShellNavigationItem): CompactShellNavigationGroupId {
+  if (item.groupId === AGENT_PLATFORM_NAVIGATION_GROUP_ID) {
+    return resolveProductRouteGroup(item.path);
+  }
+
+  const normalizedPath = normalizeNavigationPath(item.path).toLowerCase();
+  return BUILTIN_ROUTE_GROUPS[normalizedPath] ?? "automation";
+}
+
+function defaultCompactNavigationLabel(id: CompactShellNavigationGroupId): string {
+  return id.toUpperCase();
+}
+
 export function groupShellNavigation<T extends ShellNavigationItem>(
   coreItems: readonly T[],
   extensionItems: readonly T[],
-  labels: Readonly<Record<ShellNavigationGroupId, string>>,
+  labels: Readonly<Partial<Record<ShellNavigationGroupId, string>>>,
 ): readonly ShellNavigationGroup<T>[] {
-  const grouped: Record<ShellNavigationGroupId, T[]> = {
-    "agent-platform": [],
-    "hermes-tools": [],
-    extensions: [...extensionItems],
-    administration: [],
-  };
+  const grouped = Object.fromEntries(
+    COMPACT_SHELL_NAVIGATION_GROUP_ORDER.map((id) => [id, [] as T[]]),
+  ) as Record<CompactShellNavigationGroupId, T[]>;
 
-  for (const item of coreItems) {
-    if (item.groupId === AGENT_PLATFORM_NAVIGATION_GROUP_ID) {
-      grouped["agent-platform"].push(item);
-    } else if (HERMES_TOOL_PATHS.has(item.path)) {
-      grouped["hermes-tools"].push(item);
-    } else {
-      grouped.administration.push(item);
-    }
+  for (const item of [...coreItems, ...extensionItems]) {
+    grouped[resolveNavigationGroup(item)].push(item);
   }
 
-  const order: readonly ShellNavigationGroupId[] = [
-    "agent-platform",
-    "hermes-tools",
-    "extensions",
-    "administration",
-  ];
-
   return Object.freeze(
-    order.flatMap((id) =>
+    COMPACT_SHELL_NAVIGATION_GROUP_ORDER.flatMap((id) =>
       grouped[id].length === 0
         ? []
         : [
             Object.freeze({
               id,
               items: Object.freeze(grouped[id]),
-              label: labels[id],
+              label: labels[id] ?? defaultCompactNavigationLabel(id),
             }),
           ],
     ),

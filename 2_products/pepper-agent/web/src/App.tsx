@@ -127,8 +127,8 @@ function UnknownRouteFallback({ pluginsLoading }: { pluginsLoading: boolean }) {
 
 const CHAT_NAV_ITEM: NavItem = {
   path: "/chat",
-  labelKey: "chat",
-  label: "Chat",
+  labelKey: "leadAgent",
+  label: "Lead Agent",
   icon: Terminal,
 };
 
@@ -369,12 +369,14 @@ export default function App() {
   );
   const shellNavigationLabels = useMemo(
     () => ({
-      "agent-platform": productBrandIdentity?.product.displayName ?? t.app.brand,
-      "hermes-tools": `${productBrandIdentity?.upstream.displayName ?? t.app.brand} Tools`,
-      extensions: "Extensions",
-      administration: "Administration",
+      control: "CONTROL",
+      work: "WORK",
+      agents: "AGENTS",
+      automation: "AUTOMATION",
+      resources: "RESOURCES",
+      system: "SYSTEM",
     }),
-    [productBrandIdentity, t.app.brand],
+    [],
   );
   const filteredPluginManifests = useMemo(
     () => filterProtectedPluginManifests(manifests),
