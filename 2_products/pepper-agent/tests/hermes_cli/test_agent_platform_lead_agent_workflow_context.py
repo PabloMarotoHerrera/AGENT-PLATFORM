@@ -320,6 +320,7 @@ def test_pepper_toolset_exposes_no_arbitrary_shell_or_file_authority(monkeypatch
         "continue_current_ticket_governed_autonomy",
         "prepare_current_ticket_review",
         "accept_current_ticket_review",
+        "submit_current_ticket_review_decision",
     }.issubset(names)
     assert {
         "get_repository_context",
@@ -331,6 +332,7 @@ def test_pepper_toolset_exposes_no_arbitrary_shell_or_file_authority(monkeypatch
     by_name = {definition["function"]["name"]: definition["function"] for definition in definitions}
     activation_params = by_name["activate_current_ticket_governed_autonomy"]["parameters"]
     continuation_params = by_name["continue_current_ticket_governed_autonomy"]["parameters"]
+    review_decision_params = by_name["submit_current_ticket_review_decision"]["parameters"]
     assert activation_params["required"] == ["human_request_text"]
     assert "governed_autonomy_envelope" not in activation_params["properties"]
     assert "capability_gap" not in activation_params["properties"]
@@ -342,6 +344,12 @@ def test_pepper_toolset_exposes_no_arbitrary_shell_or_file_authority(monkeypatch
     assert "fresh_execution_request_text" in continuation_params["properties"]
     assert "resume_pending_fresh_execution_request_SHA256" in continuation_params[
         "properties"
+    ]
+    assert review_decision_params["required"] == ["decision", "feedback"]
+    assert review_decision_params["properties"]["decision"]["enum"] == [
+        "accept",
+        "changes_requested",
+        "reject",
     ]
     assert not (names & {"terminal", "process", "read_file", "write_file", "patch", "search_files"})
 
@@ -405,9 +413,13 @@ def test_lead_agent_prompt_requires_tool_backed_state() -> None:
     assert "without a GovernedAutonomyEnvelope, delegate paths, or delegate operations" in prompt
     assert "DIRECT may start exactly one same-authority Kanban run" in prompt
     assert "fresh_execution_request_text" in prompt
+    assert "runtime substrate changed" in prompt
     assert "resume_pending_fresh_execution_request_SHA256" in prompt
     assert "do not paraphrase the original request" in prompt
     assert "replaying the same fresh request must not create another run" in prompt
+    assert "submit_current_ticket_review_decision" in prompt
+    assert "accept, changes_requested, and reject" in prompt
+    assert "Do not route human review accept, changes_requested, or reject decisions" in prompt
     assert "backend-derived child scope/operations" in prompt
     assert "prepare_current_ticket_review" in prompt
     assert "accept_current_ticket_review" in prompt

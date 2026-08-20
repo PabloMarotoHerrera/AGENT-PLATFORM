@@ -168,6 +168,15 @@ PEPPER_GOVERNED_AUTONOMY_RUNTIME_DIGEST_ALGORITHM = (
 PEPPER_GOVERNED_AUTONOMY_FRESH_EXECUTION_DIGEST_ALGORITHM = (
     "agent-platform-pepper-governed-autonomy-fresh-execution-request-sha256-v1"
 )
+PEPPER_REVIEW_DECISION_ACTION_SCHEMA_VERSION = 1
+PEPPER_REVIEW_DECISION_ACTION_POLICY_ID = "pepper-current-ticket-review-decision-v1"
+PEPPER_REVIEW_DECISION_ACTION_SOURCE_SYSTEM = "pepper-current-ticket-review-decision"
+PEPPER_REVIEW_DECISION_DIGEST_ALGORITHM = (
+    "agent-platform-pepper-current-ticket-review-decision-sha256-v1"
+)
+PEPPER_REVIEW_REVISION_REQUEST_DIGEST_ALGORITHM = (
+    "agent-platform-pepper-current-ticket-review-revision-request-sha256-v1"
+)
 PEPPER_GOVERNED_AUTONOMY_PENDING_FRESH_REQUEST_HISTORY_LIMIT = 64
 PEPPER_GOVERNED_AUTONOMY_AUTHORITY_DIGEST_ALGORITHM = (
     "agent-platform-pepper-governed-autonomy-backend-derived-live-authority-sha256-v1"
@@ -178,6 +187,9 @@ _GOVERNED_TICKET_RECOVERY_STORE_DIR = Path("agent-platform") / "pepper-recovery-
 _GOVERNED_TICKET_REVIEW_PREPARE_STORE_DIR = Path("agent-platform") / "pepper-review-prepare-action"
 _GOVERNED_TICKET_REVIEW_ACCEPTANCE_STORE_DIR = (
     Path("agent-platform") / "pepper-review-human-acceptance-action"
+)
+_GOVERNED_TICKET_REVIEW_DECISION_STORE_DIR = (
+    Path("agent-platform") / "pepper-review-decision-action"
 )
 _GOVERNED_TICKET_AUTONOMY_STORE_DIR = (
     Path("agent-platform") / "pepper-governed-autonomy-action"
@@ -218,6 +230,14 @@ _GOVERNED_TICKET_AUTHORITY_PATH_SPECS = {
     "review_acceptance_history": (
         _GOVERNED_TICKET_REVIEW_ACCEPTANCE_STORE_DIR,
         "review-acceptance.history.jsonl",
+    ),
+    "review_decision": (
+        _GOVERNED_TICKET_REVIEW_DECISION_STORE_DIR,
+        "review-decision.json",
+    ),
+    "review_decision_history": (
+        _GOVERNED_TICKET_REVIEW_DECISION_STORE_DIR,
+        "review-decision.history.jsonl",
     ),
     "governed_autonomy_activation": (
         _GOVERNED_TICKET_AUTONOMY_STORE_DIR,
@@ -753,6 +773,45 @@ class CurrentTicketReviewAcceptanceRequest(BaseModel):
         if _CONTROL_CHARS.search(value):
             raise ValueError("human_acceptance_text contains control characters")
         return unicodedata.normalize("NFC", value)
+
+
+class CurrentTicketReviewDecisionRequest(BaseModel):
+    """Request body for a bounded human review decision on the current ticket."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
+
+    decision: Literal["accept", "changes_requested", "reject"]
+    feedback: str = Field(min_length=1, max_length=4096)
+    reviewer_id: str = Field(default="pepper-chat-human", min_length=1, max_length=128)
+    reviewed_run_id: int | None = Field(default=None, ge=1)
+    project_id: str | None = Field(default=None, max_length=128)
+    ticket_id: str | None = Field(default=None, max_length=128)
+    next_action_id: str | None = Field(default=None, max_length=128)
+
+    @field_validator("reviewer_id")
+    @classmethod
+    def reviewer_must_be_safe(cls, value: str) -> str:
+        if _CONTROL_CHARS.search(value):
+            raise ValueError("reviewer_id contains control characters")
+        if not _SAFE_ID.fullmatch(value):
+            raise ValueError("invalid reviewer_id")
+        return value
+
+    @field_validator("project_id", "ticket_id", "next_action_id")
+    @classmethod
+    def optional_guards_must_be_safe(cls, value: str | None) -> str | None:
+        if value in {None, ""}:
+            return None
+        if not _SAFE_ID.fullmatch(value):
+            raise ValueError("invalid guarded identifier")
+        return value
+
+    @field_validator("feedback")
+    @classmethod
+    def feedback_must_be_text(cls, value: str) -> str:
+        if "\x00" in value or _CONTROL_CHARS.search(value.replace("\n", "")):
+            raise ValueError("feedback contains control characters")
+        return unicodedata.normalize("NFC", value).strip()
 
 
 def _utc_now_iso() -> str:
@@ -2168,6 +2227,24 @@ def p18_9_0_review_acceptance_history_path() -> Path:
     )
 
 
+def review_decision_record_path_for_ticket(ticket_id: str) -> Path:
+    """Return the profile-scoped current-ticket human review-decision path."""
+
+    return governed_ticket_lifecycle_authority_path(
+        "review_decision",
+        ticket_id=ticket_id,
+    )
+
+
+def review_decision_history_path_for_ticket(ticket_id: str) -> Path:
+    """Return the append-only current-ticket human review-decision history path."""
+
+    return governed_ticket_lifecycle_authority_path(
+        "review_decision_history",
+        ticket_id=ticket_id,
+    )
+
+
 def load_p18_9_0_execution_start_record(
     *,
     projection_record: dict[str, Any] | None = None,
@@ -2457,6 +2534,94 @@ def load_p18_9_0_review_acceptance_record(
         record,
         projection_record=projection_record,
         review_prepare_record=review_prepare_record,
+    )
+
+
+def _review_decision_record_digest(record: dict[str, Any]) -> str:
+    payload = {
+        key: value
+        for key, value in record.items()
+        if key != "review_decision_SHA256"
+    }
+    return _digest_payload(PEPPER_REVIEW_DECISION_DIGEST_ALGORITHM, payload)
+
+
+def validate_current_ticket_review_decision_record(
+    record: dict[str, Any],
+    *,
+    projection_record: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Validate persisted human review-decision provenance for the current ticket."""
+
+    if not isinstance(record, dict):
+        raise ProductRuntimeConflict("review-decision record must be an object")
+    if record.get("review_decision_SHA256") != _review_decision_record_digest(record):
+        raise ProductRuntimeConflict("review-decision record digest mismatch")
+    projection = projection_record if projection_record is not None else _load_current_projection_record()
+    _validate_execution_start_authority(projection)
+    binding, identity = _current_ticket_identity_fields(projection)
+    expected = {
+        "schema_version": PEPPER_REVIEW_DECISION_ACTION_SCHEMA_VERSION,
+        "policy_id": PEPPER_REVIEW_DECISION_ACTION_POLICY_ID,
+        "source_system": PEPPER_REVIEW_DECISION_ACTION_SOURCE_SYSTEM,
+        **identity,
+        "approval_publication_SHA256": projection["approval_publication_SHA256"],
+        "dependency_plan_SHA256": projection["dependency_plan_SHA256"],
+        "projection_SHA256": projection["projection_SHA256"],
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+        "WorkPacket_authority_preserved": True,
+        "same_authority_revision": True,
+        "Git_mutation": False,
+        "Docker_commands_executed": 0,
+        "Graphify_commands_executed": 0,
+        "auto_retry": False,
+        "auto_rollback": False,
+    }
+    for key, value in expected.items():
+        if record.get(key) != value:
+            raise ProductRuntimeConflict(f"review-decision record {key} mismatch")
+    decision = record.get("review_decision")
+    if decision not in {"accept", "changes_requested", "reject"}:
+        raise ProductRuntimeConflict("review-decision value is invalid")
+    expected_review_state = {
+        "accept": "accepted",
+        "changes_requested": "correction_required",
+        "reject": "rejected",
+    }[str(decision)]
+    if record.get("review_state") != expected_review_state:
+        raise ProductRuntimeConflict("review-decision review state mismatch")
+    if record.get("reviewer_id") and not _SAFE_ID.fullmatch(str(record["reviewer_id"])):
+        raise ProductRuntimeConflict("review-decision reviewer_id mismatch")
+    if _int_or_none(record.get("reviewed_run_id")) is None:
+        raise ProductRuntimeConflict("review-decision reviewed run is invalid")
+    if record.get("reviewed_candidate_SHA256") in {None, ""}:
+        raise ProductRuntimeConflict("review-decision candidate digest is missing")
+    feedback_sha = record.get("bounded_review_feedback_SHA256")
+    if not isinstance(feedback_sha, str) or not _SAFE_SHA256.fullmatch(feedback_sha):
+        raise ProductRuntimeConflict("review-decision feedback digest is invalid")
+    if record.get("target_ticket_id") != binding.ticket_id:
+        raise ProductRuntimeConflict("review-decision target ticket mismatch")
+    return record
+
+
+def load_current_ticket_review_decision_record(
+    *,
+    projection_record: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Load and validate current-ticket human review-decision provenance."""
+
+    projection = projection_record if projection_record is not None else _load_current_projection_record()
+    path = review_decision_record_path_for_ticket(str(projection["ticket_id"]))
+    if not path.exists():
+        return None
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ProductRuntimeConflict("review-decision record is unreadable") from exc
+    return validate_current_ticket_review_decision_record(
+        record,
+        projection_record=projection,
     )
 
 
@@ -4951,6 +5116,142 @@ def accept_current_ticket_review(
     return _review_acceptance_operational_result(record, idempotent_replay=False)
 
 
+def submit_current_ticket_review_decision(
+    *,
+    decision: Literal["accept", "changes_requested", "reject"],
+    feedback: str,
+    reviewer_id: str = "pepper-chat-human",
+    reviewed_run_id: int | None = None,
+    project_id: str | None = None,
+    ticket_id: str | None = None,
+    next_action_id: str | None = None,
+    spawn_fn: Any = None,
+) -> dict[str, Any]:
+    """Record a bounded human review decision for the current governed ticket."""
+
+    request = CurrentTicketReviewDecisionRequest(
+        decision=decision,
+        feedback=feedback,
+        reviewer_id=reviewer_id,
+        reviewed_run_id=reviewed_run_id,
+        project_id=project_id,
+        ticket_id=ticket_id,
+        next_action_id=next_action_id,
+    )
+    projection = _load_current_projection_record()
+    _validate_execution_start_authority(projection)
+    binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
+    _validate_review_decision_request_guards(request, binding=binding)
+    existing = None
+    try:
+        existing = load_current_ticket_review_decision_record(projection_record=projection)
+    except ProductRuntimeConflict:
+        path = review_decision_record_path_for_ticket(binding.ticket_id)
+        _archive_existing_authority_record(
+            path,
+            review_decision_history_path_for_ticket(binding.ticket_id),
+            reason="superseded_or_invalid_review_decision_authority",
+        )
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+    if existing is not None:
+        existing_run_id = _int_or_none(existing.get("reviewed_run_id"))
+        requested_run_id = request.reviewed_run_id
+        if requested_run_id in {None, existing_run_id} and (
+            existing.get("review_decision") == request.decision
+            and existing.get("bounded_review_feedback_SHA256")
+            == _review_feedback_digest(request.feedback)
+        ):
+            return _review_decision_operational_result(existing, idempotent_replay=True)
+    target = _review_decision_target_from_governed_autonomy(projection)
+    if request.reviewed_run_id not in {None, int(target["reviewed_run_id"])}:
+        raise ProductRuntimeConflict(
+            f"review decision targets run {target['reviewed_run_id']}, not {request.reviewed_run_id}"
+        )
+    if request.decision == "changes_requested":
+        authority_blocker = _review_feedback_authority_blocker(
+            request.feedback,
+            projection=projection,
+        )
+        if authority_blocker is not None:
+            code, detail, referenced_paths = authority_blocker
+            return {
+                "source_system": PEPPER_REVIEW_DECISION_ACTION_SOURCE_SYSTEM,
+                "policy_id": PEPPER_REVIEW_DECISION_ACTION_POLICY_ID,
+                "idempotent_replay": False,
+                "project_id": binding.project_id,
+                "ticket_id": binding.ticket_id,
+                "review_decision": request.decision,
+                "reviewed_run_id": target["reviewed_run_id"],
+                "blocker_code": code,
+                "blocker_detail": detail,
+                "referenced_paths": list(referenced_paths),
+                "authority_expansion_required": True,
+                "dispatch_performed": False,
+                "execution_started": False,
+                "worker_execution": False,
+                "Kanban_dispatch": False,
+                "Git_mutation": False,
+                "auto_retry": False,
+                "auto_rollback": False,
+            }
+    provisional = _build_current_ticket_review_decision_record(
+        request=request,
+        projection=projection,
+        target=target,
+    )
+    if existing is not None:
+        if existing.get("review_decision_identity_SHA256") == provisional[
+            "review_decision_identity_SHA256"
+        ]:
+            return _review_decision_operational_result(existing, idempotent_replay=True)
+        if _int_or_none(existing.get("reviewed_run_id")) == int(target["reviewed_run_id"]):
+            raise ProductRuntimeConflict(
+                "a different review decision already exists for this reviewed run"
+            )
+    revision_result = None
+    if request.decision == "changes_requested":
+        revision_request = provisional["review_revision_request_reference"]
+        assert isinstance(revision_request, dict)
+        segment_reference = {
+            "budget_segment_origin": "human_review_changes_requested",
+            "review_decision_identity_SHA256": provisional[
+                "review_decision_identity_SHA256"
+            ],
+            "reviewed_run_id": target["reviewed_run_id"],
+            "reviewed_candidate_SHA256": target["candidate_SHA256"],
+            "historical_runtime_state_SHA256": target["previous_runtime"].get(
+                "runtime_state_SHA256"
+            ),
+        }
+        revision_result = continue_current_ticket_governed_autonomy(
+            runtime_goal=(
+                f"Start a same-authority governed revision for {binding.ticket_id} from "
+                "human review changes-requested feedback. Use current canonical source; "
+                "preserve accepted run direction and do not mutate Git."
+            ),
+            observed_failure=request.feedback,
+            strategy="DIRECT",
+            fresh_execution_request_override=revision_request,
+            human_review_revision_segment_reference=segment_reference,
+            spawn_fn=spawn_fn,
+            project_id=binding.project_id,
+            ticket_id=binding.ticket_id,
+        )
+    record = _build_current_ticket_review_decision_record(
+        request=request,
+        projection=projection,
+        target=target,
+        revision_result=_review_revision_result_reference(revision_result)
+        if revision_result is not None
+        else None,
+    )
+    _persist_current_ticket_review_decision_record(record)
+    return _review_decision_operational_result(record, idempotent_replay=False)
+
+
 def start_current_ticket_execution(
     *,
     human_authorization_text: str,
@@ -5399,6 +5700,8 @@ def continue_current_ticket_governed_autonomy(
     delegate_parent_agent: Any | None = None,
     fresh_execution_request_text: str | None = None,
     resume_pending_fresh_execution_request_SHA256: str | None = None,
+    fresh_execution_request_override: dict[str, Any] | None = None,
+    human_review_revision_segment_reference: dict[str, Any] | None = None,
     spawn_fn: Any = None,
     project_id: str | None = None,
     ticket_id: str | None = None,
@@ -5460,6 +5763,19 @@ def continue_current_ticket_governed_autonomy(
         previous,
         effective_authority=effective_authority,
     )
+    if fresh_execution_request_override is not None and (
+        request.fresh_execution_request_text
+        or request.resume_pending_fresh_execution_request_SHA256
+    ):
+        raise ProductRuntimeConflict(
+            "fresh execution request override cannot be combined with text or SHA resume"
+        )
+    override_fresh_execution_request = None
+    if fresh_execution_request_override is not None:
+        override_sha = fresh_execution_request_override.get("fresh_execution_request_SHA256")
+        if not isinstance(override_sha, str) or not _SAFE_SHA256.fullmatch(override_sha):
+            raise ProductRuntimeConflict("fresh execution request override digest is invalid")
+        override_fresh_execution_request = dict(fresh_execution_request_override)
     text_fresh_execution_request = _governed_autonomy_fresh_execution_request_reference(
         request,
         projection=projection,
@@ -5475,6 +5791,10 @@ def continue_current_ticket_governed_autonomy(
                 "resume_pending_fresh_execution_request_SHA256"
             )
     requested_fresh_sha = resume_pending_sha or (
+        override_fresh_execution_request.get("fresh_execution_request_SHA256")
+        if override_fresh_execution_request is not None
+        else None
+    ) or (
         text_fresh_execution_request.get("fresh_execution_request_SHA256")
         if text_fresh_execution_request is not None
         else None
@@ -5497,7 +5817,7 @@ def continue_current_ticket_governed_autonomy(
             "fresh_execution_request_reference"
         ]
     else:
-        fresh_execution_request = text_fresh_execution_request
+        fresh_execution_request = override_fresh_execution_request or text_fresh_execution_request
     fresh_resolution_evidence = (
         _governed_autonomy_fresh_execution_request_resolution_evidence(
             fresh_execution_resolution,
@@ -5508,6 +5828,12 @@ def continue_current_ticket_governed_autonomy(
     fresh_execution_request_pending_replay = (
         decision == "DIRECT"
         and fresh_execution_resolution["status"] == "pending"
+    )
+    human_review_revision_segment = (
+        human_review_revision_segment_reference is not None
+        and fresh_execution_request is not None
+        and fresh_execution_request.get("fresh_execution_provenance")
+        == "human_review_changes_requested"
     )
     if (
         decision == "DIRECT"
@@ -5681,6 +6007,7 @@ def continue_current_ticket_governed_autonomy(
         requested_decision=decision,
         request=request,
         fresh_execution_request_pending_replay=fresh_execution_request_pending_replay,
+        human_review_revision_segment=human_review_revision_segment,
     )
     if budget_blocker is not None:
         record = _build_governed_autonomy_runtime_stop_record(
@@ -5745,6 +6072,11 @@ def continue_current_ticket_governed_autonomy(
             terminal_reconciliation=terminal_reconciliation,
             fresh_execution_request=fresh_execution_request,
             fresh_execution_request_resolution_evidence=fresh_resolution_evidence,
+            budget_segment_reference=(
+                human_review_revision_segment_reference
+                if human_review_revision_segment
+                else None
+            ),
             spawn_fn=spawn_fn,
         )
     _persist_governed_autonomy_runtime_state(record)
@@ -8840,9 +9172,10 @@ def _governed_autonomy_runtime_budget_blocker(
     requested_decision: str,
     request: CurrentTicketGovernedAutonomyContinuationRequest,
     fresh_execution_request_pending_replay: bool = False,
+    human_review_revision_segment: bool = False,
 ) -> tuple[str, str] | None:
     limits = _governed_autonomy_runtime_budget_limits(activation)
-    if requested_decision != "STOP_FOR_HUMAN" and (
+    if not human_review_revision_segment and requested_decision != "STOP_FOR_HUMAN" and (
         _effective_governed_autonomy_process_continuation_count(previous) + 1
         > limits["max_continuations"]
     ):
@@ -8874,6 +9207,8 @@ def _governed_autonomy_runtime_budget_blocker(
                 "A2A delegation budget is exhausted"
             )
     if (
+        not human_review_revision_segment
+        and
         not fresh_execution_request_pending_replay
         and _runtime_counter(previous, "validation_failure_count")
         >= limits["max_no_progress_iterations"]
@@ -9945,10 +10280,12 @@ def _governed_autonomy_runtime_base_record(
     next_autonomous_action: str | None = None,
     next_human_action: str | None = None,
     fresh_execution_request: dict[str, Any] | None = None,
+    budget_segment_reference: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     limits = _governed_autonomy_runtime_budget_limits(activation)
+    budget_previous = None if budget_segment_reference is not None else previous
     counts = _governed_autonomy_runtime_counts(
-        previous,
+        budget_previous,
         process_continuation_increment=process_continuation_increment,
         self_repair_increment=self_repair_increment,
         tool_candidate_increment=tool_candidate_increment,
@@ -9961,7 +10298,7 @@ def _governed_autonomy_runtime_base_record(
         runtime_decision=runtime_decision,
     )
     no_progress_count, progress_markers = _governed_autonomy_runtime_no_progress(
-        previous,
+        budget_previous,
         fingerprint_sha256=fingerprint,
         progress_marker_sha256=progress_marker_sha256,
     )
@@ -10038,6 +10375,12 @@ def _governed_autonomy_runtime_base_record(
         "budget_limits": limits,
         "budget_remaining": remaining,
         "budget_exhausted": budget_exhausted,
+        "budget_segment_reference": budget_segment_reference,
+        "budget_segment_previous_runtime_state_SHA256": (
+            previous.get("runtime_state_SHA256")
+            if previous is not None and budget_segment_reference is not None
+            else None
+        ),
         "blocker_code": blocker_code,
         "blocker_detail": _safe_text(blocker_detail, limit=500) if blocker_detail else None,
         "next_autonomous_action": next_autonomous_action,
@@ -10187,6 +10530,14 @@ def _prepare_current_ticket_governed_autonomy_task_for_dispatch(
                 "prior_terminal_run_id": fresh_execution_request.get("prior_terminal_run_id"),
                 "fresh_execution_attempt_number": next_attempt_number,
                 "fresh_execution_workspace_path": str(fresh_workspace_path),
+                "fresh_execution_provenance": fresh_execution_request.get(
+                    "fresh_execution_provenance"
+                ),
+                "review_decision_SHA256": fresh_execution_request.get(
+                    "review_decision_SHA256"
+                ),
+                "reviewed_run_id": fresh_execution_request.get("reviewed_run_id"),
+                "revision_source_base": fresh_execution_request.get("revision_source_base"),
             })
         else:
             fresh_workspace_path = None
@@ -10216,6 +10567,22 @@ def _prepare_current_ticket_governed_autonomy_task_for_dispatch(
                 "fresh_execution_request_reference": fresh_execution_request,
                 "fresh_execution_workspace_path": str(fresh_workspace_path)
                 if fresh_workspace_path is not None
+                else None,
+                "fresh_execution_provenance": fresh_execution_request.get(
+                    "fresh_execution_provenance"
+                )
+                if fresh_execution_request is not None
+                else None,
+                "review_decision_SHA256": fresh_execution_request.get(
+                    "review_decision_SHA256"
+                )
+                if fresh_execution_request is not None
+                else None,
+                "reviewed_run_id": fresh_execution_request.get("reviewed_run_id")
+                if fresh_execution_request is not None
+                else None,
+                "revision_source_base": fresh_execution_request.get("revision_source_base")
+                if fresh_execution_request is not None
                 else None,
             },
         )
@@ -10351,6 +10718,7 @@ def _build_governed_autonomy_direct_runtime_record(
     terminal_reconciliation: dict[str, Any] | None = None,
     fresh_execution_request: dict[str, Any] | None = None,
     fresh_execution_request_resolution_evidence: dict[str, Any] | None = None,
+    budget_segment_reference: dict[str, Any] | None = None,
     spawn_fn: Any = None,
 ) -> dict[str, Any]:
     if fresh_execution_request is None:
@@ -10389,6 +10757,7 @@ def _build_governed_autonomy_direct_runtime_record(
             blocker_detail=str(prep_result.get("blocker_detail") or "governed autonomy task preparation failed"),
             next_human_action="human authority required to resolve governed autonomy dispatch preparation",
             fresh_execution_request=None,
+            budget_segment_reference=budget_segment_reference,
         )
 
     dispatch_result = _dispatch_exact_current_kanban_task(
@@ -10453,6 +10822,7 @@ def _build_governed_autonomy_direct_runtime_record(
         fresh_execution_request=(
             fresh_execution_request if fresh_execution_request_consumed else None
         ),
+        budget_segment_reference=budget_segment_reference,
     )
     return _with_governed_autonomy_dispatch_result(record, dispatch_result=dispatch_result)
 
@@ -12248,6 +12618,10 @@ def _governed_autonomy_runtime_summary(
         "budget_limits": record["budget_limits"],
         "budget_remaining": record["budget_remaining"],
         "budget_exhausted": record["budget_exhausted"],
+        "budget_segment_reference": record.get("budget_segment_reference"),
+        "budget_segment_previous_runtime_state_SHA256": record.get(
+            "budget_segment_previous_runtime_state_SHA256"
+        ),
         "blocker_code": record.get("blocker_code"),
         "blocker_detail": record.get("blocker_detail"),
         "next_autonomous_action": record.get("next_autonomous_action"),
@@ -12333,6 +12707,10 @@ def _governed_autonomy_runtime_operational_result(
         "budget_limits": record["budget_limits"],
         "budget_remaining": record["budget_remaining"],
         "budget_exhausted": record["budget_exhausted"],
+        "budget_segment_reference": record.get("budget_segment_reference"),
+        "budget_segment_previous_runtime_state_SHA256": record.get(
+            "budget_segment_previous_runtime_state_SHA256"
+        ),
         "blocker_code": record.get("blocker_code"),
         "blocker_detail": record.get("blocker_detail"),
         "next_autonomous_action": record.get("next_autonomous_action"),
@@ -13040,6 +13418,448 @@ def _review_prepare_workflow_blocker(
     return None
 
 
+def _review_decision_request_action_id(ticket_id: str) -> str:
+    return f"SUBMIT_{ticket_id.replace('.', '_').upper()}_REVIEW_DECISION"
+
+
+def _validate_review_decision_request_guards(
+    request: CurrentTicketReviewDecisionRequest,
+    *,
+    binding: CurrentTicketLifecycleBinding,
+) -> None:
+    if request.project_id not in {None, binding.project_id}:
+        raise ProductRuntimeConflict(f"review decision is bounded to project {binding.project_id}")
+    if request.ticket_id not in {None, binding.ticket_id}:
+        raise ProductRuntimeConflict(f"review decision is bounded to ticket {binding.ticket_id}")
+    allowed_actions = {
+        None,
+        binding.review_prepare_next_action_id,
+        _review_decision_request_action_id(binding.ticket_id),
+    }
+    if request.next_action_id not in allowed_actions:
+        raise ProductRuntimeConflict(
+            f"review decision requires {binding.review_prepare_next_action_id} or "
+            f"{_review_decision_request_action_id(binding.ticket_id)}"
+        )
+
+
+def _review_feedback_referenced_paths(feedback: str) -> tuple[str, ...]:
+    paths: list[str] = []
+    for match in re.finditer(r"(?:[A-Za-z0-9_.-]+[\\/])+[A-Za-z0-9_.-]+", feedback):
+        candidate = match.group(0).strip("`'\".,;:()[]{}<>").replace("\\", "/")
+        try:
+            normalized = _normalize_runtime_relative_path(candidate)
+        except ProductRuntimeConflict:
+            continue
+        if not normalized.startswith(("0_", "1_", "2_", "3_", "4_", "5_")):
+            continue
+        if normalized not in paths:
+            paths.append(normalized)
+    return tuple(paths)
+
+
+def _review_feedback_digest(feedback: str) -> str:
+    return _digest_payload(
+        "pepper-current-ticket-review-feedback-sha256-v1",
+        {"feedback": feedback},
+    )
+
+
+def _path_allowed_by_work_packet_scope(
+    relative_path: str,
+    *,
+    allowed_paths: tuple[str, ...],
+    forbidden_paths: tuple[str, ...],
+) -> bool:
+    if any(_runtime_path_matches_pattern(relative_path, pattern) for pattern in forbidden_paths):
+        return False
+    return any(_runtime_path_matches_pattern(relative_path, pattern) for pattern in allowed_paths)
+
+
+def _review_feedback_authority_blocker(
+    feedback: str,
+    *,
+    projection: dict[str, Any],
+) -> tuple[str, str, tuple[str, ...]] | None:
+    allowed_paths, forbidden_paths, _validation_steps_sha = (
+        _current_work_packet_scope_for_governed_autonomy(projection)
+    )
+    referenced_paths = _review_feedback_referenced_paths(feedback)
+    outside = tuple(
+        path
+        for path in referenced_paths
+        if not _path_allowed_by_work_packet_scope(
+            path,
+            allowed_paths=allowed_paths,
+            forbidden_paths=forbidden_paths,
+        )
+    )
+    if outside:
+        return (
+            "REVIEW_FEEDBACK_REQUIRES_AUTHORITY_EXPANSION",
+            "review feedback references paths outside the current WorkPacket authority: "
+            + ", ".join(outside[:5]),
+            referenced_paths,
+        )
+    return None
+
+
+def _review_decision_target_from_governed_autonomy(
+    projection: dict[str, Any],
+) -> dict[str, Any]:
+    activation = load_current_ticket_governed_autonomy_activation_record(
+        projection_record=projection,
+    )
+    if activation is None:
+        raise ProductRuntimeConflict("review decision requires active governed autonomy authority")
+    previous = load_current_ticket_governed_autonomy_runtime_state(
+        projection_record=projection,
+        activation_record=activation,
+    )
+    if previous is None:
+        raise ProductRuntimeConflict("review decision requires governed autonomy runtime evidence")
+    effective_authority = _resolve_effective_current_governed_autonomy_authority(
+        projection=projection,
+        activation=activation,
+        previous=previous,
+    )
+    _require_current_governed_autonomy_authority_match(
+        projection=projection,
+        activation=activation,
+        previous=previous,
+        effective_authority=effective_authority,
+    )
+    terminal_reconciliation = _governed_autonomy_runtime_terminal_reconciliation(
+        previous,
+        effective_authority=effective_authority,
+    )
+    if terminal_reconciliation is None:
+        raise ProductRuntimeConflict("review decision requires owned terminal run evidence")
+    if terminal_reconciliation.get("validated_candidate_review_required") is not True:
+        raise ProductRuntimeConflict("review decision requires a validated candidate awaiting review")
+    candidate_reference = terminal_reconciliation.get("candidate_changes_reference")
+    if not _governed_autonomy_candidate_changes_available(candidate_reference):
+        raise ProductRuntimeConflict("review decision requires candidate changes evidence")
+    return {
+        "activation": activation,
+        "previous_runtime": previous,
+        "effective_authority": effective_authority,
+        "terminal_reconciliation": terminal_reconciliation,
+        "reviewed_run_id": terminal_reconciliation["terminal_run_id"],
+        "candidate_reference": candidate_reference,
+        "candidate_SHA256": _digest_payload(
+            "pepper-current-ticket-reviewed-candidate-reference-sha256-v1",
+            {
+                "ticket_id": projection["ticket_id"],
+                "work_packet_SHA256": projection["work_packet_SHA256"],
+                "terminal_run_id": terminal_reconciliation["terminal_run_id"],
+                "candidate_changes_reference": candidate_reference,
+            },
+        ),
+    }
+
+
+def _review_decision_states(decision: str) -> dict[str, str]:
+    if decision == "accept":
+        return {
+            "review_validation_decision": "accept",
+            "review_validation_state": "completed",
+            "validation_state": "review_accepted",
+            "review_state": "accepted",
+            "workflow_status": "review_accepted_pending_human_git_handoff",
+            "governed_workflow_state": "awaiting_human_git_handoff",
+        }
+    if decision == "changes_requested":
+        return {
+            "review_validation_decision": "needs_correction",
+            "review_validation_state": "correction_required",
+            "validation_state": "review_changes_requested",
+            "review_state": "correction_required",
+            "workflow_status": "review_changes_requested_revision_started",
+            "governed_workflow_state": "awaiting_correction",
+        }
+    return {
+        "review_validation_decision": "cancelled",
+        "review_validation_state": "cancelled",
+        "validation_state": "review_rejected",
+        "review_state": "rejected",
+        "workflow_status": "review_rejected_no_execution",
+        "governed_workflow_state": "cancelled",
+    }
+
+
+def _review_revision_request_reference(
+    *,
+    projection: dict[str, Any],
+    target: dict[str, Any],
+    feedback_sha256: str,
+    feedback_excerpt: str,
+) -> dict[str, Any]:
+    payload = {
+        "project_id": projection["project_id"],
+        "ticket_id": projection["ticket_id"],
+        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
+        "work_packet_id": projection["work_packet_id"],
+        "work_packet_SHA256": projection["work_packet_SHA256"],
+        "projection_SHA256": projection["projection_SHA256"],
+        "activation_action_SHA256": target["activation"]["activation_action_SHA256"],
+        "reviewed_run_id": target["reviewed_run_id"],
+        "reviewed_candidate_SHA256": target["candidate_SHA256"],
+        "bounded_review_feedback_SHA256": feedback_sha256,
+        "revision_source_base": "current_canonical_source",
+    }
+    request_sha = _digest_payload(
+        PEPPER_REVIEW_REVISION_REQUEST_DIGEST_ALGORITHM,
+        payload,
+    )
+    return {
+        "fresh_execution_requested": True,
+        "fresh_execution_provenance": "human_review_changes_requested",
+        "transition_classification": "HUMAN_REVIEW_CHANGES_REQUESTED_REVISION",
+        "execution_attempt_reason": PEPPER_GOVERNED_AUTONOMY_FRESH_EXECUTION_REASON,
+        "fresh_execution_request_SHA256": request_sha,
+        "human_request_text_SHA256": feedback_sha256,
+        "human_request_text_excerpt": feedback_excerpt,
+        "same_ticket": True,
+        "same_work_packet_authority": True,
+        "same_kanban_task": True,
+        "same_authority_envelope": True,
+        "new_scratch_required": True,
+        "prior_terminal_run_id": target["reviewed_run_id"],
+        "reviewed_run_id": target["reviewed_run_id"],
+        "reviewed_candidate_SHA256": target["candidate_SHA256"],
+        "bounded_review_feedback_SHA256": feedback_sha256,
+        "revision_source_base": "current_canonical_source",
+        "reviewed_candidate_copied_to_revision_base": False,
+        "canonical_mutation_performed": False,
+    }
+
+
+def _build_current_ticket_review_decision_record(
+    *,
+    request: CurrentTicketReviewDecisionRequest,
+    projection: dict[str, Any],
+    target: dict[str, Any],
+    revision_result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
+    feedback_sha = _review_feedback_digest(request.feedback)
+    feedback_excerpt = _safe_text(request.feedback, limit=1200)
+    revision_request = None
+    if request.decision == "changes_requested":
+        revision_request = _review_revision_request_reference(
+            projection=projection,
+            target=target,
+            feedback_sha256=feedback_sha,
+            feedback_excerpt=feedback_excerpt,
+        )
+    states = _review_decision_states(request.decision)
+    identity = {
+        "project_id": binding.project_id,
+        "ticket_id": binding.ticket_id,
+        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
+        "work_packet_id": projection["work_packet_id"],
+        "work_packet_SHA256": projection["work_packet_SHA256"],
+        "projection_SHA256": projection["projection_SHA256"],
+        "activation_action_SHA256": target["activation"]["activation_action_SHA256"],
+        "reviewed_run_id": target["reviewed_run_id"],
+        "reviewed_candidate_SHA256": target["candidate_SHA256"],
+        "review_decision": request.decision,
+        "bounded_review_feedback_SHA256": feedback_sha,
+        "revision_request_SHA256": revision_request.get("fresh_execution_request_SHA256")
+        if revision_request is not None
+        else None,
+    }
+    decision_identity_sha = _digest_payload(
+        "pepper-current-ticket-review-decision-identity-sha256-v1",
+        identity,
+    )
+    if revision_request is not None:
+        revision_request = dict(revision_request)
+        revision_request["review_decision_SHA256"] = decision_identity_sha
+    record = {
+        "schema_version": PEPPER_REVIEW_DECISION_ACTION_SCHEMA_VERSION,
+        "policy_id": PEPPER_REVIEW_DECISION_ACTION_POLICY_ID,
+        "source_system": PEPPER_REVIEW_DECISION_ACTION_SOURCE_SYSTEM,
+        "created_at": _utc_now_iso(),
+        **_current_ticket_projection_identity_fields(projection),
+        "approval_publication_SHA256": projection["approval_publication_SHA256"],
+        "dependency_plan_SHA256": projection["dependency_plan_SHA256"],
+        "projection_SHA256": projection["projection_SHA256"],
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+        "target_ticket_id": binding.ticket_id,
+        "reviewed_run_id": target["reviewed_run_id"],
+        "reviewed_run_status": target["terminal_reconciliation"].get("terminal_run_status"),
+        "reviewed_run_outcome": target["terminal_reconciliation"].get("terminal_run_outcome"),
+        "reviewed_candidate_SHA256": target["candidate_SHA256"],
+        "reviewed_candidate_reference": target["candidate_reference"],
+        "review_decision": request.decision,
+        "review_decision_identity_SHA256": decision_identity_sha,
+        "reviewer_id": request.reviewer_id,
+        "bounded_review_feedback": request.feedback,
+        "bounded_review_feedback_excerpt": feedback_excerpt,
+        "bounded_review_feedback_SHA256": feedback_sha,
+        "current_authority_identity": {
+            "activation_action_SHA256": target["activation"]["activation_action_SHA256"],
+            "governed_autonomy_envelope_SHA256": target["activation"][
+                "governed_autonomy_envelope_SHA256"
+            ],
+            "work_packet_SHA256": projection["work_packet_SHA256"],
+            "projection_SHA256": projection["projection_SHA256"],
+        },
+        "review_revision_request_reference": revision_request,
+        "revision_source_base": "current_canonical_source"
+        if request.decision == "changes_requested"
+        else None,
+        "reviewed_candidate_copied_to_revision_base": False,
+        "WorkPacket_authority_preserved": True,
+        "same_authority_revision": True,
+        "capability_not_authority": True,
+        "human_review_input_authority_expansion": False,
+        "review_validation_decision": states["review_validation_decision"],
+        "review_validation_state": states["review_validation_state"],
+        "validation_state": states["validation_state"],
+        "review_state": states["review_state"],
+        "workflow_status": states["workflow_status"],
+        "governed_workflow_state": states["governed_workflow_state"],
+        "revision_attempt_result": revision_result,
+        "revision_attempt_started": bool(
+            revision_result and revision_result.get("execution_started")
+        ),
+        "revision_kanban_run_id": revision_result.get("kanban_run_id")
+        if revision_result
+        else None,
+        "revision_runtime_state_SHA256": revision_result.get("runtime_state_SHA256")
+        if revision_result
+        else None,
+        "dispatch_performed": bool(revision_result and revision_result.get("dispatch_performed")),
+        "execution_started": bool(revision_result and revision_result.get("execution_started")),
+        "worker_execution": bool(revision_result and revision_result.get("worker_execution")),
+        "Kanban_dispatch": bool(revision_result and revision_result.get("Kanban_dispatch")),
+        "Git_mutation": False,
+        "Docker_commands_executed": 0,
+        "Graphify_commands_executed": 0,
+        "auto_retry": False,
+        "auto_rollback": False,
+        "next_action": _review_decision_next_action(binding, request.decision),
+    }
+    record["review_decision_SHA256"] = _review_decision_record_digest(record)
+    return record
+
+
+def _review_decision_next_action(
+    binding: CurrentTicketLifecycleBinding,
+    decision: str,
+) -> dict[str, Any] | None:
+    if decision == "accept":
+        return {
+            "id": f"PREPARE_{binding.ticket_action_token}_HUMAN_GIT_HANDOFF",
+            "label": f"Prepare {binding.ticket_id} human Git handoff from accepted review.",
+            "target_ticket_id": binding.ticket_id,
+            "target_ticket_title": binding.ticket_title,
+            "required_human_action": "human_git_handoff",
+        }
+    if decision == "changes_requested":
+        return {
+            "id": governed_autonomy_continuation_action_id(binding.ticket_id),
+            "label": f"Monitor {binding.ticket_id} governed review-revision attempt.",
+            "target_ticket_id": binding.ticket_id,
+            "target_ticket_title": binding.ticket_title,
+            "authority": "backend_derived_governed_autonomy_continuation",
+            "required_human_action": "review_revision_monitoring",
+        }
+    return {
+        "id": f"{binding.ticket_action_token}_REVIEW_REJECTED_NO_EXECUTION",
+        "label": f"{binding.ticket_id} review rejected; separate human authority is required.",
+        "target_ticket_id": binding.ticket_id,
+        "target_ticket_title": binding.ticket_title,
+        "required_human_action": "separate_authority_for_future_execution",
+    }
+
+
+def _review_decision_operational_result(
+    record: dict[str, Any],
+    *,
+    idempotent_replay: bool,
+) -> dict[str, Any]:
+    return {
+        "source_system": record["source_system"],
+        "policy_id": record["policy_id"],
+        "idempotent_replay": idempotent_replay,
+        "project_id": record["project_id"],
+        "ticket_id": record["ticket_id"],
+        "ticket_title": record["ticket_title"],
+        "work_packet_id": record["work_packet_id"],
+        "work_packet_SHA256": record["work_packet_SHA256"],
+        "reviewed_run_id": record["reviewed_run_id"],
+        "reviewed_candidate_SHA256": record["reviewed_candidate_SHA256"],
+        "review_decision": record["review_decision"],
+        "review_decision_identity_SHA256": record["review_decision_identity_SHA256"],
+        "review_decision_SHA256": record["review_decision_SHA256"],
+        "bounded_review_feedback_SHA256": record["bounded_review_feedback_SHA256"],
+        "review_validation_decision": record["review_validation_decision"],
+        "review_validation_state": record["review_validation_state"],
+        "validation_state": record["validation_state"],
+        "review_state": record["review_state"],
+        "workflow_status": record["workflow_status"],
+        "governed_workflow_state": record["governed_workflow_state"],
+        "review_revision_request_reference": record.get("review_revision_request_reference"),
+        "revision_source_base": record.get("revision_source_base"),
+        "reviewed_candidate_copied_to_revision_base": record.get(
+            "reviewed_candidate_copied_to_revision_base"
+        ),
+        "revision_attempt_result": record.get("revision_attempt_result"),
+        "revision_attempt_started": bool(record.get("revision_attempt_started")),
+        "revision_kanban_run_id": record.get("revision_kanban_run_id"),
+        "revision_runtime_state_SHA256": record.get("revision_runtime_state_SHA256"),
+        "WorkPacket_authority_preserved": record["WorkPacket_authority_preserved"],
+        "same_authority_revision": record["same_authority_revision"],
+        "capability_not_authority": record["capability_not_authority"],
+        "human_review_input_authority_expansion": record[
+            "human_review_input_authority_expansion"
+        ],
+        "dispatch_performed": bool(record.get("dispatch_performed")),
+        "execution_started": bool(record.get("execution_started")),
+        "worker_execution": bool(record.get("worker_execution")),
+        "Kanban_dispatch": bool(record.get("Kanban_dispatch")),
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+        "next_action": record.get("next_action"),
+    }
+
+
+def _review_revision_result_reference(result: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "governed_autonomy_runtime_status": result.get("governed_autonomy_runtime_status"),
+        "runtime_state_SHA256": result.get("runtime_state_SHA256"),
+        "runtime_decision": result.get("runtime_decision"),
+        "fresh_execution_requested": bool(result.get("fresh_execution_requested")),
+        "fresh_execution_request_SHA256": result.get("fresh_execution_request_SHA256"),
+        "fresh_execution_request_reference": result.get("fresh_execution_request_reference"),
+        "budget_segment_reference": result.get("budget_segment_reference"),
+        "budget_segment_previous_runtime_state_SHA256": result.get(
+            "budget_segment_previous_runtime_state_SHA256"
+        ),
+        "process_continuation_count": result.get("process_continuation_count"),
+        "validation_failure_count": result.get("validation_failure_count"),
+        "budget_exhausted": bool(result.get("budget_exhausted")),
+        "dispatch_performed": bool(result.get("dispatch_performed")),
+        "execution_started": bool(result.get("execution_started")),
+        "worker_execution": bool(result.get("worker_execution")),
+        "Kanban_dispatch": bool(result.get("Kanban_dispatch")),
+        "kanban_run_created": bool(result.get("kanban_run_created")),
+        "kanban_run_id": result.get("kanban_run_id"),
+        "workspace_path": result.get("workspace_path"),
+        "blocker_code": result.get("blocker_code"),
+        "blocker_detail": result.get("blocker_detail"),
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+    }
+
+
 def _p18_9_0_acceptance_contract() -> dict[str, Any]:
     from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
         load_p18_9_0_generation_record,
@@ -13488,6 +14308,21 @@ def _persist_review_acceptance_record(record: dict[str, Any]) -> None:
         path,
         p18_9_0_review_acceptance_history_path(),
         reason="replaced_by_current_review_acceptance",
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+
+def _persist_current_ticket_review_decision_record(record: dict[str, Any]) -> None:
+    validate_current_ticket_review_decision_record(record)
+    ticket_id = str(record["ticket_id"])
+    path = review_decision_record_path_for_ticket(ticket_id)
+    _archive_existing_authority_record(
+        path,
+        review_decision_history_path_for_ticket(ticket_id),
+        reason="replaced_by_current_ticket_review_decision",
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -14779,6 +15614,54 @@ def _current_ticket_governed_autonomy_overlay(
     return overlay, None
 
 
+def _current_ticket_review_decision_overlay(
+    projection: dict[str, Any],
+) -> dict[str, Any] | None:
+    record = load_current_ticket_review_decision_record(projection_record=projection)
+    if record is None:
+        return None
+    binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
+    overlay = {
+        "review_decision_recorded": True,
+        "review_decision": record["review_decision"],
+        "review_decision_identity_SHA256": record["review_decision_identity_SHA256"],
+        "review_decision_SHA256": record["review_decision_SHA256"],
+        "reviewed_run_id": record["reviewed_run_id"],
+        "reviewed_candidate_SHA256": record["reviewed_candidate_SHA256"],
+        "current_ticket_review_decision": _review_decision_operational_result(
+            record,
+            idempotent_replay=True,
+        ),
+    }
+    if record["review_decision"] == "accept":
+        overlay.update({
+            "readiness": "review_accepted_pending_human_git_handoff",
+            "workflow_state": f"{binding.ticket_id}-REVIEW-ACCEPTED-AWAITING-HUMAN-GIT-HANDOFF",
+            "workflow_status": "review_accepted_pending_human_git_handoff",
+            "validation_state": "review_accepted",
+            "review_state": "accepted",
+            "recovery_state": "not_required",
+            "governed_workflow_state": "awaiting_human_git_handoff",
+            "git_handoff_required": True,
+            "git_handoff_state": "human_git_authority_preserved",
+            "next_action": record["next_action"],
+        })
+    elif record["review_decision"] == "reject":
+        overlay.update({
+            "readiness": "review_rejected_no_execution",
+            "workflow_state": f"{binding.ticket_id}-REVIEW-REJECTED-NO-EXECUTION",
+            "workflow_status": "review_rejected_no_execution",
+            "validation_state": "review_rejected",
+            "review_state": "rejected",
+            "recovery_state": "not_required_separate_authority_required",
+            "governed_workflow_state": "cancelled",
+            "git_handoff_required": False,
+            "git_handoff_state": "human_git_authority_preserved",
+            "next_action": record["next_action"],
+        })
+    return overlay
+
+
 def build_workflow_control_snapshot() -> dict[str, Any]:
     """Return the controlled cutover dashboard projection."""
 
@@ -14968,6 +15851,11 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
                     snapshot.update(autonomy_overlay)
                 if autonomy_blocker is not None:
                     remaining_blockers.append(autonomy_blocker)
+                review_decision_overlay = _current_ticket_review_decision_overlay(
+                    projection,
+                )
+                if review_decision_overlay is not None:
+                    snapshot.update(review_decision_overlay)
         except Exception as exc:  # pragma: no cover - defensive live-state guard
             remaining_blockers.append({
                 "id": f"{current_ticket_id}-GOVERNED-AUTONOMY-AUTHORITY",

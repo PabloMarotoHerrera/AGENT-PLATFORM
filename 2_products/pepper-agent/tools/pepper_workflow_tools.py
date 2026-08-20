@@ -1088,6 +1088,43 @@ def _accept_current_ticket_review(args: dict[str, Any], **_kwargs) -> str:
     })
 
 
+def _submit_current_ticket_review_decision(args: dict[str, Any], **_kwargs) -> str:
+    pr = _runtime()
+    try:
+        decision = str(args.get("decision") or "").strip().lower()
+        if decision not in {"accept", "changes_requested", "reject"}:
+            raise ValueError("decision must be accept, changes_requested, or reject")
+        feedback = str(args.get("feedback") or "").strip()
+        if not feedback:
+            raise ValueError("feedback is required")
+        if "?" in feedback or "¿" in feedback:
+            raise ValueError("review feedback must be a bounded decision, not a question")
+        reviewed_run_id = args.get("reviewed_run_id")
+        result = pr.submit_current_ticket_review_decision(
+            decision=decision,
+            feedback=feedback,
+            reviewer_id="pepper-chat-human",
+            reviewed_run_id=int(reviewed_run_id) if reviewed_run_id not in {None, ""} else None,
+            project_id=str(args.get("project_id") or "").strip() or None,
+            ticket_id=str(args.get("ticket_id") or "").strip() or None,
+            next_action_id=str(args.get("next_action_id") or "").strip() or None,
+        )
+        updated_context = pr.build_lead_agent_operational_context()
+    except Exception as exc:
+        return tool_error(str(exc) or "current ticket review decision failed", success=False)
+    return _result({
+        "source_tool": "submit_current_ticket_review_decision",
+        **result,
+        "current_ticket_id": updated_context.get("current_ticket_id"),
+        "workflow_state": updated_context.get("workflow_state"),
+        "workflow_status": updated_context.get("workflow_status"),
+        "validation_state": updated_context.get("validation_state"),
+        "review_state": updated_context.get("review_state"),
+        "git_handoff_state": updated_context.get("git_handoff_state"),
+        "next_action": updated_context.get("next_action"),
+    })
+
+
 _EMPTY_SCHEMA = {
     "type": "object",
     "properties": {},
@@ -1449,6 +1486,47 @@ _ACCEPT_CURRENT_TICKET_REVIEW_SCHEMA = {
 }
 
 
+_SUBMIT_CURRENT_TICKET_REVIEW_DECISION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "decision": {
+            "type": "string",
+            "enum": ["accept", "changes_requested", "reject"],
+            "description": "Human review outcome for the current validated candidate.",
+        },
+        "feedback": {
+            "type": "string",
+            "description": (
+                "Bounded human review feedback. For changes_requested, include the exact "
+                "bounded revision findings inside current WorkPacket authority."
+            ),
+        },
+        "reviewed_run_id": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Optional guard for the reviewed governed-autonomy run ID.",
+        },
+        "project_id": {
+            "type": "string",
+            "description": "Optional governed project guard. Must be PEPPER if supplied.",
+        },
+        "ticket_id": {
+            "type": "string",
+            "description": "Optional governed ticket guard. Must equal the current ticket if supplied.",
+        },
+        "next_action_id": {
+            "type": "string",
+            "description": (
+                "Optional next-action guard. May be PREPARE_<ticket>_REVIEW or "
+                "SUBMIT_<ticket>_REVIEW_DECISION."
+            ),
+        },
+    },
+    "required": ["decision", "feedback"],
+    "additionalProperties": False,
+}
+
+
 registry.register(
     name="get_current_project",
     toolset=TOOLSET,
@@ -1695,6 +1773,24 @@ registry.register(
     handler=_accept_current_ticket_review,
     emoji="A",
     max_result_size_chars=24000,
+)
+
+registry.register(
+    name="submit_current_ticket_review_decision",
+    toolset=TOOLSET,
+    schema={
+        "name": "submit_current_ticket_review_decision",
+        "description": (
+            "Record a bounded human review decision for the current validated Pepper "
+            "candidate: accept, changes_requested, or reject. changes_requested may start "
+            "one same-authority governed revision attempt through existing fresh execution; "
+            "reject starts no execution. No Git, Docker, Graphify, auto-retry, or rollback."
+        ),
+        "parameters": _SUBMIT_CURRENT_TICKET_REVIEW_DECISION_SCHEMA,
+    },
+    handler=_submit_current_ticket_review_decision,
+    emoji="R",
+    max_result_size_chars=36000,
 )
 
 registry.register(

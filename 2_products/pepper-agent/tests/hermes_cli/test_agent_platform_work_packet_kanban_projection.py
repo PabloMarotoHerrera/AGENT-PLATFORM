@@ -757,6 +757,113 @@ def _activate_p18_9_1_governed_autonomy_for_test(
     return {"activation": activation}
 
 
+_P18_9_1_REVIEW_CHANGES_FEEDBACK = "\n".join([
+    "ISSUE 1: Primary Pepper groups must be exactly control, work, agents, automation, resources, system. No seventh top-level Extensions group. Extension/plugin functionality must remain reachable via existing architecture.",
+    "ISSUE 2: Contextual detail routes must be reachable and absent from primary navigation item output. Tests must prove the actual distinction behaviorally.",
+    "ISSUE 3: Do not expand source-text inspection testing.",
+    "PRESERVE: Lead Agent label; compact IA direction; inherited Hermes surfaces mapped into Pepper; existing router; existing plugin loader; existing extension registry; protected /agent-platform ownership; route compatibility.",
+    "EXCLUDE: P18.9.1-implementation-report.txt must not become canonical product content.",
+])
+
+
+def _start_p18_9_1_validated_review_ready_run_7(
+    pr,
+    projection_home: Path,
+    projected: dict,
+    monkeypatch,
+    *,
+    pids: tuple[int, int, int] = (6915, 6916, 6917),
+) -> dict:
+    from hermes_cli import kanban_db
+
+    run_4 = _force_p18_9_1_blocked_run_4(pr, kanban_db, projected, monkeypatch)
+    _activate_p18_9_1_governed_autonomy_for_test(pr, monkeypatch)
+    _patch_synthetic_scratch_materialization(monkeypatch, pr)
+    live_pids = set(pids)
+    monkeypatch.setattr(kanban_db, "_pid_alive", lambda pid: int(pid) in live_pids)
+    run_5_started = pr.continue_current_ticket_governed_autonomy(
+        runtime_goal="Continue P18.9.1 before synthetic validated review fixture run 7.",
+        strategy="DIRECT",
+        spawn_fn=lambda _task, _workspace, board=None, env_overlay=None: pids[0],
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+    run_5 = run_5_started["kanban_run_id"]
+    assert run_5 == run_4 + 1
+    _finish_projected_run_as_terminal(
+        kanban_db,
+        projected,
+        run_5,
+        status="blocked",
+        outcome="blocked",
+        summary="synthetic run 5 terminal before review-ready run 7",
+    )
+    run_6_started = pr.continue_current_ticket_governed_autonomy(
+        runtime_goal="Start synthetic fresh P18.9.1 governed run 6 before review fixture.",
+        strategy="DIRECT",
+        fresh_execution_request_text="Launch synthetic fresh governed P18.9.1 run 6 before review fixture.",
+        spawn_fn=lambda _task, _workspace, board=None, env_overlay=None: pids[1],
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+    run_6 = run_6_started["kanban_run_id"]
+    assert run_6 == run_5 + 1
+    _finish_projected_run_as_terminal(
+        kanban_db,
+        projected,
+        run_6,
+        status="blocked",
+        outcome="blocked",
+        summary="synthetic run 6 terminal before review-ready run 7",
+    )
+    run_7_started = pr.continue_current_ticket_governed_autonomy(
+        runtime_goal="Start synthetic fresh P18.9.1 governed run 7 for review fixture.",
+        strategy="DIRECT",
+        fresh_execution_request_text="Launch synthetic fresh governed P18.9.1 run 7 for review fixture.",
+        spawn_fn=lambda _task, _workspace, board=None, env_overlay=None: pids[2],
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+    run_7 = run_7_started["kanban_run_id"]
+    assert run_7 == run_6 + 1
+    run_7_workspace = Path(run_7_started["workspace_path"])
+    _write_p18_9_1_terminal_candidate_fixture(pr, projection_home, run_7_workspace)
+    run_7_summary = (
+        "worker process started; candidate produced; workpacket_validation invoked; "
+        "validation infrastructure failure = false; product validation failure = false; "
+        "governed V2 validation passed; 7 files, 123 tests passed; "
+        "Git mutation authority = false; terminal reason: review-required because "
+        "canonical repository merge is human-only."
+    )
+    _finish_projected_run_as_terminal(
+        kanban_db,
+        projected,
+        run_7,
+        status="blocked",
+        outcome="blocked",
+        summary=run_7_summary,
+    )
+    runtime_state = pr.load_current_ticket_governed_autonomy_runtime_state(
+        projection_record=_projection_authority_record(projected),
+    )
+    assert runtime_state is not None
+    status = pr.get_current_ticket_governed_autonomy_status(
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+    assert status["validated_candidate_review_required"] is True
+    assert status["terminal_run_id"] == run_7
+    return {
+        "run_4": run_4,
+        "run_5": run_5,
+        "run_6": run_6,
+        "run_7": run_7,
+        "run_7_workspace": run_7_workspace,
+        "run_7_runtime_state": runtime_state,
+        "status": status,
+    }
+
+
 def _write_governed_autonomy_activation_record_for_test(pr, record: dict) -> None:
     path = pr.governed_autonomy_activation_record_path_for_ticket(str(record["ticket_id"]))
     path.write_text(
@@ -6029,6 +6136,320 @@ def test_current_p18_9_1_governed_autonomy_terminal_product_validation_failure_s
     assert workflow["review_state"] == "candidate_available_validation_blocked"
     assert workflow["next_action"]["id"] == "CONTINUE_P18_9_1_GOVERNED_AUTONOMY"
     assert workflow["governed_autonomy"]["validated_candidate_review_required"] is False
+
+
+def test_current_p18_9_1_review_accept_routes_to_human_git_handoff_without_execution(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, projected, _authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
+    )
+    fixture = _start_p18_9_1_validated_review_ready_run_7(
+        pr,
+        projection_home,
+        projected,
+        monkeypatch,
+    )
+
+    accepted = pr.submit_current_ticket_review_decision(
+        decision="accept",
+        feedback="Human accepts the validated P18.9.1 run 7 candidate for human Git handoff.",
+        reviewed_run_id=fixture["run_7"],
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+
+    assert accepted["review_decision"] == "accept"
+    assert accepted["review_validation_decision"] == "accept"
+    assert accepted["review_state"] == "accepted"
+    assert accepted["governed_workflow_state"] == "awaiting_human_git_handoff"
+    assert accepted["dispatch_performed"] is False
+    assert accepted["execution_started"] is False
+    assert accepted["Git_mutation"] is False
+
+    workflow = pr.build_workflow_control_snapshot()
+    assert workflow["workflow_status"] == "review_accepted_pending_human_git_handoff"
+    assert workflow["review_state"] == "accepted"
+    assert workflow["git_handoff_required"] is True
+    assert workflow["git_handoff_state"] == "human_git_authority_preserved"
+    assert workflow["next_action"]["id"] == "PREPARE_P18_9_1_HUMAN_GIT_HANDOFF"
+
+    from hermes_cli import kanban_db
+
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        runs = kanban_db.list_runs(conn, projected["kanban_task_id"])
+        assert runs[-1].id == fixture["run_7"]
+        assert all(run.id != fixture["run_7"] + 1 for run in runs)
+    finally:
+        conn.close()
+
+
+def test_current_p18_9_1_review_changes_requested_starts_same_authority_revision_segment(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, projected, _authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
+    )
+    fixture = _start_p18_9_1_validated_review_ready_run_7(
+        pr,
+        projection_home,
+        projected,
+        monkeypatch,
+        pids=(6925, 6926, 6927),
+    )
+    run_7_runtime = fixture["run_7_runtime_state"]
+    assert run_7_runtime["process_continuation_count"] >= 3
+    authority = _projection_authority_record(projected)
+    activation = pr.load_current_ticket_governed_autonomy_activation_record(
+        projection_record=authority,
+    )
+    assert activation is not None
+    budget_stop_request = pr.CurrentTicketGovernedAutonomyContinuationRequest(
+        runtime_goal="Synthetic ordinary continuation observed exhausted prior segment budget.",
+        strategy="STOP_FOR_HUMAN",
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+    exhausted_previous_segment = pr._build_governed_autonomy_runtime_stop_record(
+        request=budget_stop_request,
+        projection=authority,
+        activation=activation,
+        previous=run_7_runtime,
+        runtime_decision="STOP_FOR_HUMAN",
+        blocker_code="GOVERNED_AUTONOMY_PROCESS_CONTINUATION_BUDGET_EXHAUSTED",
+        blocker_detail="process continuation budget is exhausted",
+        validation_failed=False,
+        provider_readiness=_ready_executor_provider_payload(),
+    )
+    exhausted_previous_segment["process_continuation_count"] = exhausted_previous_segment[
+        "budget_limits"
+    ]["max_continuations"]
+    counts = {
+        key: exhausted_previous_segment[key]
+        for key in (
+            "process_continuation_count",
+            "self_repair_count",
+            "task_local_tool_candidate_count",
+            "command_evaluation_count",
+            "A2A_delegation_count",
+            "validation_failure_count",
+        )
+    }
+    exhausted_previous_segment["budget_remaining"] = (
+        pr._governed_autonomy_runtime_budget_remaining(
+            exhausted_previous_segment["budget_limits"],
+            counts,
+            no_progress_count=exhausted_previous_segment["no_progress_count"],
+        )
+    )
+    exhausted_previous_segment["budget_exhausted"] = True
+    exhausted_previous_segment.pop("runtime_state_SHA256", None)
+    exhausted_previous_segment["runtime_state_SHA256"] = (
+        pr._governed_autonomy_runtime_record_digest(exhausted_previous_segment)
+    )
+    pr._persist_governed_autonomy_runtime_state(exhausted_previous_segment)
+
+    from hermes_cli import kanban_db
+
+    revision_pid = 6928
+    monkeypatch.setattr(kanban_db, "_pid_alive", lambda pid: int(pid) == revision_pid)
+    run_7_manifest = (
+        fixture["run_7_workspace"] / pr.PEPPER_SCRATCH_SOURCE_MATERIALIZATION_MANIFEST
+    ).read_bytes()
+    changed = pr.submit_current_ticket_review_decision(
+        decision="changes_requested",
+        feedback=_P18_9_1_REVIEW_CHANGES_FEEDBACK,
+        reviewed_run_id=fixture["run_7"],
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+        spawn_fn=lambda _task, _workspace, board=None, env_overlay=None: revision_pid,
+    )
+
+    assert changed["review_decision"] == "changes_requested"
+    assert changed["review_validation_decision"] == "needs_correction"
+    assert changed["review_state"] == "correction_required"
+    assert changed["same_authority_revision"] is True
+    assert changed["capability_not_authority"] is True
+    assert changed["human_review_input_authority_expansion"] is False
+    assert changed["revision_attempt_started"] is True
+    assert changed["revision_kanban_run_id"] == fixture["run_7"] + 1
+    revision_result = changed["revision_attempt_result"]
+    assert revision_result["dispatch_performed"] is True
+    assert revision_result["execution_started"] is True
+    assert revision_result["process_continuation_count"] == 1
+    assert revision_result["budget_exhausted"] is False
+    assert revision_result["budget_segment_reference"]["budget_segment_origin"] == (
+        "human_review_changes_requested"
+    )
+    revision_request = changed["review_revision_request_reference"]
+    assert revision_request["fresh_execution_provenance"] == "human_review_changes_requested"
+    assert revision_request["prior_terminal_run_id"] == fixture["run_7"]
+    assert revision_request["revision_source_base"] == "current_canonical_source"
+    assert revision_request["reviewed_candidate_copied_to_revision_base"] is False
+
+    runtime_after = pr.load_current_ticket_governed_autonomy_runtime_state(
+        projection_record=authority,
+    )
+    assert runtime_after is not None
+    assert runtime_after["previous_runtime_state_SHA256"] == exhausted_previous_segment[
+        "runtime_state_SHA256"
+    ]
+    assert runtime_after["process_continuation_count"] == 1
+    assert runtime_after["budget_segment_previous_runtime_state_SHA256"] == (
+        exhausted_previous_segment["runtime_state_SHA256"]
+    )
+    assert run_7_runtime["process_continuation_count"] >= 3
+
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        task = kanban_db.get_task(conn, projected["kanban_task_id"])
+        runs = kanban_db.list_runs(conn, projected["kanban_task_id"])
+        events = kanban_db.list_events(conn, projected["kanban_task_id"])
+        assert task is not None
+        assert task.status == "running"
+        assert task.current_run_id == fixture["run_7"] + 1
+        assert task.worker_pid == revision_pid
+        assert [run.id for run in runs][-2:] == [fixture["run_7"], fixture["run_7"] + 1]
+        body = json.loads(task.body or "{}")
+        assert body["fresh_execution_provenance"] == "human_review_changes_requested"
+        assert body["reviewed_run_id"] == fixture["run_7"]
+        assert body["revision_source_base"] == "current_canonical_source"
+        assert any(
+            event.kind == "governed_autonomy_continuation_prepared"
+            and event.payload.get("fresh_execution_provenance")
+            == "human_review_changes_requested"
+            and event.payload.get("reviewed_run_id") == fixture["run_7"]
+            for event in events
+        )
+    finally:
+        conn.close()
+    revision_workspace = Path(revision_result["workspace_path"])
+    assert not (
+        revision_workspace
+        / "2_products/pepper-agent/web/src/agent-platform/shell/P18.9.1-implementation-report.txt"
+    ).exists()
+    assert (
+        fixture["run_7_workspace"] / pr.PEPPER_SCRATCH_SOURCE_MATERIALIZATION_MANIFEST
+    ).read_bytes() == run_7_manifest
+
+    replay = pr.submit_current_ticket_review_decision(
+        decision="changes_requested",
+        feedback=_P18_9_1_REVIEW_CHANGES_FEEDBACK,
+        reviewed_run_id=fixture["run_7"],
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("review decision replay must not spawn"),
+    )
+    assert replay["idempotent_replay"] is True
+    assert replay["revision_kanban_run_id"] == fixture["run_7"] + 1
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        runs_after_replay = kanban_db.list_runs(conn, projected["kanban_task_id"])
+        assert [run.id for run in runs_after_replay][-2:] == [
+            fixture["run_7"],
+            fixture["run_7"] + 1,
+        ]
+        assert all(run.id != fixture["run_7"] + 2 for run in runs_after_replay)
+    finally:
+        conn.close()
+
+
+def test_current_p18_9_1_review_changes_requested_requires_same_workpacket_authority(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, projected, _authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
+    )
+    fixture = _start_p18_9_1_validated_review_ready_run_7(
+        pr,
+        projection_home,
+        projected,
+        monkeypatch,
+        pids=(6935, 6936, 6937),
+    )
+
+    blocked = pr.submit_current_ticket_review_decision(
+        decision="changes_requested",
+        feedback=(
+            _P18_9_1_REVIEW_CHANGES_FEEDBACK
+            + " Also modify 2_products/pepper-agent/package-lock.json."
+        ),
+        reviewed_run_id=fixture["run_7"],
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("authority expansion must not spawn"),
+    )
+
+    assert blocked["blocker_code"] == "REVIEW_FEEDBACK_REQUIRES_AUTHORITY_EXPANSION"
+    assert blocked["authority_expansion_required"] is True
+    assert blocked["dispatch_performed"] is False
+    assert blocked["execution_started"] is False
+    assert blocked["Git_mutation"] is False
+    assert not pr.review_decision_record_path_for_ticket("P18.9.1").exists()
+
+    from hermes_cli import kanban_db
+
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        runs = kanban_db.list_runs(conn, projected["kanban_task_id"])
+        assert runs[-1].id == fixture["run_7"]
+        assert all(run.id != fixture["run_7"] + 1 for run in runs)
+    finally:
+        conn.close()
+
+
+def test_current_p18_9_1_review_reject_records_no_execution(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, projected, _authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
+    )
+    fixture = _start_p18_9_1_validated_review_ready_run_7(
+        pr,
+        projection_home,
+        projected,
+        monkeypatch,
+        pids=(6945, 6946, 6947),
+    )
+
+    rejected = pr.submit_current_ticket_review_decision(
+        decision="reject",
+        feedback="Human rejects the validated P18.9.1 candidate and requests no further execution.",
+        reviewed_run_id=fixture["run_7"],
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("reject must not spawn"),
+    )
+
+    assert rejected["review_decision"] == "reject"
+    assert rejected["review_validation_decision"] == "cancelled"
+    assert rejected["review_state"] == "rejected"
+    assert rejected["dispatch_performed"] is False
+    assert rejected["execution_started"] is False
+    assert rejected["Git_mutation"] is False
+    workflow = pr.build_workflow_control_snapshot()
+    assert workflow["workflow_status"] == "review_rejected_no_execution"
+    assert workflow["review_state"] == "rejected"
+    assert workflow["next_action"]["id"] == "P18_9_1_REVIEW_REJECTED_NO_EXECUTION"
+
+    from hermes_cli import kanban_db
+
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        runs = kanban_db.list_runs(conn, projected["kanban_task_id"])
+        assert runs[-1].id == fixture["run_7"]
+        assert all(run.id != fixture["run_7"] + 1 for run in runs)
+    finally:
+        conn.close()
 
 
 def test_current_p18_9_1_governed_autonomy_fresh_execution_after_terminal_run_is_idempotent(
