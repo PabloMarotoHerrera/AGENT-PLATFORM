@@ -177,6 +177,13 @@ function defaultCompactNavigationLabel(id: CompactShellNavigationGroupId): strin
   return id.toUpperCase();
 }
 
+function controlNavigationRank(item: ShellNavigationItem): number {
+  const normalizedPath = normalizeNavigationPath(item.path).toLowerCase();
+  if (normalizedPath === "/agent-platform/overview") return 0;
+  if (normalizedPath === "/chat") return 1;
+  return 2;
+}
+
 export function groupShellNavigation<T extends ShellNavigationItem>(
   coreItems: readonly T[],
   extensionItems: readonly T[],
@@ -189,6 +196,7 @@ export function groupShellNavigation<T extends ShellNavigationItem>(
   for (const item of [...coreItems, ...extensionItems]) {
     grouped[resolveNavigationGroup(item)].push(item);
   }
+  grouped.control.sort((left, right) => controlNavigationRank(left) - controlNavigationRank(right));
 
   return Object.freeze(
     COMPACT_SHELL_NAVIGATION_GROUP_ORDER.flatMap((id) =>

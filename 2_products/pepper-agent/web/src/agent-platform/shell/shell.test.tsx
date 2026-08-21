@@ -110,8 +110,8 @@ describe("shell navigation", () => {
   it("creates exactly the six compact Pepper groups in accepted order", () => {
     const groups = groupShellNavigation(
       [
-        { path: "/agent-platform/overview", label: "Overview", groupId: "agent-platform" as const },
         { path: "/chat", label: "Lead Agent" },
+        { path: "/agent-platform/overview", label: "Overview", groupId: "agent-platform" as const },
         { path: "/agent-platform/projects", label: "Projects", groupId: "agent-platform" as const },
         { path: "/skills", label: "Skills" },
         { path: "/cron", label: "Cron" },
