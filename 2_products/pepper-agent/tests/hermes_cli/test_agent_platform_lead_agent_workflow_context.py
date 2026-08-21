@@ -321,6 +321,7 @@ def test_pepper_toolset_exposes_no_arbitrary_shell_or_file_authority(monkeypatch
         "prepare_current_ticket_review",
         "accept_current_ticket_review",
         "submit_current_ticket_review_decision",
+        "complete_current_ticket_human_git_handoff",
     }.issubset(names)
     assert {
         "get_repository_context",
@@ -333,6 +334,7 @@ def test_pepper_toolset_exposes_no_arbitrary_shell_or_file_authority(monkeypatch
     activation_params = by_name["activate_current_ticket_governed_autonomy"]["parameters"]
     continuation_params = by_name["continue_current_ticket_governed_autonomy"]["parameters"]
     review_decision_params = by_name["submit_current_ticket_review_decision"]["parameters"]
+    handoff_completion_params = by_name["complete_current_ticket_human_git_handoff"]["parameters"]
     assert activation_params["required"] == ["human_request_text"]
     assert "governed_autonomy_envelope" not in activation_params["properties"]
     assert "capability_gap" not in activation_params["properties"]
@@ -351,6 +353,24 @@ def test_pepper_toolset_exposes_no_arbitrary_shell_or_file_authority(monkeypatch
         "changes_requested",
         "reject",
     ]
+    assert handoff_completion_params["required"] == [
+        "reviewed_run_id",
+        "reviewed_candidate_SHA256",
+        "review_decision_SHA256",
+        "commits",
+        "branch",
+        "push_attestation",
+        "approved_committed_paths",
+        "validation_evidence",
+    ]
+    handoff_properties = handoff_completion_params["properties"]
+    assert "commits" in handoff_properties
+    assert "approved_committed_paths" in handoff_properties
+    assert "excluded_paths" in handoff_properties
+    assert "human_attested_evidence" in handoff_properties
+    assert "git_command" not in handoff_properties
+    assert "shell_command" not in handoff_properties
+    assert "workspace_path" not in handoff_properties
     assert not (names & {"terminal", "process", "read_file", "write_file", "patch", "search_files"})
 
 
@@ -382,6 +402,60 @@ def test_continue_governed_autonomy_tool_forwards_pending_fresh_request_sha(
 
     assert result["success"] is True
     assert captured["resume_pending_fresh_execution_request_SHA256"] == pending_sha
+
+
+def test_complete_human_git_handoff_tool_forwards_evidence_only_lists(
+    monkeypatch,
+) -> None:
+    import tools.pepper_workflow_tools as pepper_tools
+
+    captured: dict[str, object] = {}
+
+    class RuntimeStub:
+        def complete_current_ticket_human_git_handoff(self, **kwargs):
+            captured.update(kwargs)
+            return {
+                "handoff_completion_recorded": True,
+                "dispatch_performed": False,
+                "execution_started": False,
+                "Git_mutation": False,
+            }
+
+        def build_lead_agent_operational_context(self):
+            return {"workflow_status": "completed", "git_handoff_state": "completed"}
+
+    monkeypatch.setattr(pepper_tools, "_runtime", lambda: RuntimeStub())
+
+    result = json.loads(pepper_tools._complete_current_ticket_human_git_handoff({
+        "reviewed_run_id": 11,
+        "reviewed_candidate_SHA256": "a" * 64,
+        "review_decision_SHA256": "b" * 64,
+        "commits": ["dc77d92", "467f3b412ddd51a237fc76ff5f297e0347308755"],
+        "branch": "p18-manual-to-hermes-workflow-migration",
+        "push_attestation": "Human pushed origin branch.",
+        "approved_committed_paths": [
+            "web/src/agent-platform/shell/navigation.ts",
+            "web/src/agent-platform/shell/shell.test.tsx",
+        ],
+        "excluded_paths": ["package-lock.json"],
+        "validation_evidence": ["Human validation passed."],
+        "human_attested_evidence": ["Second commit path set attested."],
+        "project_id": "PEPPER",
+        "ticket_id": "P18.9.1",
+        "next_action_id": "PREPARE_P18_9_1_HUMAN_GIT_HANDOFF",
+    }))
+
+    assert result["success"] is True
+    assert captured["commits"] == ["dc77d92", "467f3b412ddd51a237fc76ff5f297e0347308755"]
+    assert captured["approved_committed_paths"] == [
+        "web/src/agent-platform/shell/navigation.ts",
+        "web/src/agent-platform/shell/shell.test.tsx",
+    ]
+    assert captured["excluded_paths"] == ["package-lock.json"]
+    assert captured["validation_evidence"] == ["Human validation passed."]
+    assert captured["human_attested_evidence"] == ["Second commit path set attested."]
+    assert "spawn_fn" not in captured
+    assert "shell_command" not in captured
 
 
 def test_lead_agent_prompt_requires_tool_backed_state() -> None:
@@ -420,6 +494,10 @@ def test_lead_agent_prompt_requires_tool_backed_state() -> None:
     assert "submit_current_ticket_review_decision" in prompt
     assert "accept, changes_requested, and reject" in prompt
     assert "Do not route human review accept, changes_requested, or reject decisions" in prompt
+    assert "complete_current_ticket_human_git_handoff" in prompt
+    assert "PREPARE_<current-ticket>_HUMAN_GIT_HANDOFF" in prompt
+    assert "never execute Git yourself" in prompt
+    assert "evidence-only human Git handoff completion" in prompt
     assert "backend-derived child scope/operations" in prompt
     assert "prepare_current_ticket_review" in prompt
     assert "accept_current_ticket_review" in prompt

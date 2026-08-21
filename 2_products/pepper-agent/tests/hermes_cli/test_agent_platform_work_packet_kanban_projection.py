@@ -765,6 +765,105 @@ _P18_9_1_REVIEW_CHANGES_FEEDBACK = "\n".join([
     "EXCLUDE: P18.9.1-implementation-report.txt must not become canonical product content.",
 ])
 
+_P18_9_1_HANDOFF_BRANCH = "p18-manual-to-hermes-workflow-migration"
+_P18_9_1_HANDOFF_COMMITS = (
+    "dc77d92",
+    "467f3b412ddd51a237fc76ff5f297e0347308755",
+)
+_P18_9_1_HANDOFF_APPROVED_PATHS = (
+    "2_products/pepper-agent/web/src/agent-platform/shell/navigation.ts",
+    "2_products/pepper-agent/web/src/agent-platform/shell/shell.test.tsx",
+)
+_P18_9_1_HANDOFF_EXCLUDED_PATHS = (
+    "2_products/pepper-agent/package-lock.json",
+    "2_products/pepper-agent/web/src/agent-platform/shell/P18.9.1-implementation-report.txt",
+)
+
+
+def _p18_9_1_handoff_git_snapshot(
+    *,
+    branch: str = _P18_9_1_HANDOFF_BRANCH,
+    head: str = _P18_9_1_HANDOFF_COMMITS[-1],
+) -> dict[str, object]:
+    return {
+        "available": True,
+        "read_only": True,
+        "shell": False,
+        "branch": branch,
+        "head": head,
+        "status_branch": f"## {branch}...origin/{branch}",
+        "status_counts": {"modified": 1},
+        "status_entries": [" M 2_products/pepper-agent/package-lock.json"],
+        "skipped_status_entries": {},
+    }
+
+
+def _accepted_p18_9_1_review_for_handoff(
+    projection_home,
+    monkeypatch,
+    *,
+    pids: tuple[int, int, int] = (6955, 6956, 6957),
+) -> tuple[object, dict, dict, dict, dict]:
+    pr, projected, authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
+    )
+    fixture = _start_p18_9_1_validated_review_ready_run_7(
+        pr,
+        projection_home,
+        projected,
+        monkeypatch,
+        pids=pids,
+    )
+    accepted = pr.submit_current_ticket_review_decision(
+        decision="accept",
+        feedback="Human accepts the validated P18.9.1 candidate for human Git handoff.",
+        reviewed_run_id=fixture["run_7"],
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+    assert accepted["review_decision"] == "accept"
+    assert accepted["workflow_status"] == "review_accepted_pending_human_git_handoff"
+    return pr, projected, authority, fixture, accepted
+
+
+def _p18_9_1_handoff_completion_kwargs(
+    accepted: dict,
+    *,
+    commits: tuple[str, ...] = _P18_9_1_HANDOFF_COMMITS,
+    approved_paths: tuple[str, ...] = _P18_9_1_HANDOFF_APPROVED_PATHS,
+    excluded_paths: tuple[str, ...] = _P18_9_1_HANDOFF_EXCLUDED_PATHS,
+    branch: str = _P18_9_1_HANDOFF_BRANCH,
+    git_snapshot: dict[str, object] | None = None,
+    **overrides,
+) -> dict[str, object]:
+    final_snapshot = git_snapshot or _p18_9_1_handoff_git_snapshot(
+        branch=branch,
+        head=commits[-1],
+    )
+    data: dict[str, object] = {
+        "reviewed_run_id": int(accepted["reviewed_run_id"]),
+        "reviewed_candidate_SHA256": accepted["reviewed_candidate_SHA256"],
+        "review_decision_SHA256": accepted["review_decision_SHA256"],
+        "commits": commits,
+        "branch": branch,
+        "push_attestation": "Human pushed the handoff branch to origin.",
+        "approved_committed_paths": approved_paths,
+        "excluded_paths": excluded_paths,
+        "validation_evidence": (
+            "Human validation completed for the accepted P18.9.1 candidate after Git handoff.",
+        ),
+        "human_attested_evidence": (
+            "Human attests the second handoff commit contains exactly the approved shell paths.",
+        ),
+        "project_id": "PEPPER",
+        "ticket_id": "P18.9.1",
+        "next_action_id": "PREPARE_P18_9_1_HUMAN_GIT_HANDOFF",
+        "git_snapshot_fn": lambda: final_snapshot,
+    }
+    data.update(overrides)
+    return data
+
 
 def _start_p18_9_1_validated_review_ready_run_7(
     pr,
@@ -6185,6 +6284,382 @@ def test_current_p18_9_1_review_accept_routes_to_human_git_handoff_without_execu
         assert all(run.id != fixture["run_7"] + 1 for run in runs)
     finally:
         conn.close()
+
+
+def test_current_p18_9_1_human_git_handoff_completion_closes_ticket_and_exposes_successor(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, projected, authority, fixture, accepted = _accepted_p18_9_1_review_for_handoff(
+        projection_home,
+        monkeypatch,
+    )
+    from hermes_cli import kanban_db
+
+    review_record_path = pr.review_decision_record_path_for_ticket("P18.9.1")
+    review_record_before = review_record_path.read_bytes()
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        run_7_before = next(
+            run
+            for run in kanban_db.list_runs(conn, projected["kanban_task_id"])
+            if run.id == fixture["run_7"]
+        )
+        run_7_snapshot = {
+            "id": run_7_before.id,
+            "status": run_7_before.status,
+            "outcome": run_7_before.outcome,
+            "summary": run_7_before.summary,
+            "error": run_7_before.error,
+            "ended_at": run_7_before.ended_at,
+        }
+        run_ids_before = [run.id for run in kanban_db.list_runs(conn, projected["kanban_task_id"])]
+    finally:
+        conn.close()
+    expected_successor = bridge.resolve_canonical_next_ticket({
+        "project_id": "PEPPER",
+        "project_name": "Pepper",
+        "macroproject_id": authority["macroproject_id"],
+        "macroproject_title": "Pepper Product Personalization",
+        "current_ticket_id": None,
+        "closed_predecessor_ticket_id": "P18.9.1",
+        "workflow_status": "completed",
+        "workflow_state": "P18.9.1-COMPLETED",
+    }).asdict()
+
+    completed = pr.complete_current_ticket_human_git_handoff(
+        **_p18_9_1_handoff_completion_kwargs(accepted),
+    )
+
+    assert completed["handoff_completion_recorded"] is True
+    assert completed["idempotent_replay"] is False
+    assert completed["human_git_handoff_state"] == "completed"
+    assert completed["review_state"] == "accepted"
+    assert completed["validation_state"] == "review_accepted"
+    assert completed["recovery_state"] == "not_required"
+    assert completed["execution_state"] == "no_active_executions"
+    assert completed["workflow_status"] == "completed"
+    assert completed["governed_workflow_state"] == "completed"
+    assert completed["ordered_commit_SHAs"] == list(_P18_9_1_HANDOFF_COMMITS)
+    assert completed["ordered_commit_count"] == 2
+    assert completed["final_commit_SHA"] == _P18_9_1_HANDOFF_COMMITS[-1]
+    assert completed["branch"] == _P18_9_1_HANDOFF_BRANCH
+    assert completed["approved_committed_paths"] == list(_P18_9_1_HANDOFF_APPROVED_PATHS)
+    assert completed["excluded_paths"] == list(_P18_9_1_HANDOFF_EXCLUDED_PATHS)
+    assert completed["ticket_closed"] is True
+    assert completed["closed_predecessor_ticket_id"] == "P18.9.1"
+    assert completed["next_ticket_ready"] is True
+    assert completed["next_ticket_id"] == expected_successor["ticket_id"]
+    assert completed["next_ticket_authority"]["ticket_id"] == expected_successor["ticket_id"]
+    assert completed["next_action"]["id"] == expected_successor["next_action_id"]
+    assert completed["generic_ticket_completion_path_reused"] is True
+    assert completed["P17_human_git_handoff_authority_reused"] is True
+    assert completed["P18_governed_transition_reused"] is True
+    assert completed["dispatch_performed"] is False
+    assert completed["execution_started"] is False
+    assert completed["worker_execution"] is False
+    assert completed["Kanban_dispatch"] is False
+    assert completed["Git_commands_executed"] == 0
+    assert completed["Git_mutation"] is False
+    assert completed["Docker_commands_executed"] == 0
+    assert completed["Graphify_commands_executed"] == 0
+    assert not {
+        "commit_file_set",
+        "upstream_containment",
+        "commit_ancestry",
+    } & {item["id"] for item in completed["verification_evidence"]}
+    assert {item["id"] for item in completed["machine_verification_evidence"]} == {
+        "current_branch",
+        "final_commit_head",
+        "working_tree_status",
+    }
+
+    record = pr.load_current_ticket_human_git_handoff_completion_record(
+        projection_record=authority,
+    )
+    assert record is not None
+    assert record["completion_record_SHA256"] == completed["completion_record_SHA256"]
+    assert record["completion_order_evidence"]["multi_commit_handoff"] is True
+    assert pr.human_git_handoff_completion_record_path_for_ticket("P18.9.1").exists()
+    assert review_record_path.read_bytes() == review_record_before
+
+    workflow = pr.build_workflow_control_snapshot()
+    assert workflow["current_ticket_id"] is None
+    assert workflow["closed_predecessor_ticket_id"] == "P18.9.1"
+    assert workflow["workflow_status"] == "completed"
+    assert workflow["governed_workflow_state"] == "completed"
+    assert workflow["human_git_handoff_state"] == "completed"
+    assert workflow["next_ticket_id"] == expected_successor["ticket_id"]
+    assert workflow["next_action"]["id"] == expected_successor["next_action_id"]
+    assert workflow["Git_mutation"] is False
+
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        runs_after = kanban_db.list_runs(conn, projected["kanban_task_id"])
+        assert [run.id for run in runs_after] == run_ids_before
+        run_7_after = next(run for run in runs_after if run.id == fixture["run_7"])
+        assert {
+            "id": run_7_after.id,
+            "status": run_7_after.status,
+            "outcome": run_7_after.outcome,
+            "summary": run_7_after.summary,
+            "error": run_7_after.error,
+            "ended_at": run_7_after.ended_at,
+        } == run_7_snapshot
+    finally:
+        conn.close()
+
+    replay = pr.complete_current_ticket_human_git_handoff(
+        **_p18_9_1_handoff_completion_kwargs(
+            accepted,
+            git_snapshot={"available": False},
+            git_snapshot_fn=lambda: pytest.fail("handoff completion replay must not inspect Git"),
+        ),
+    )
+    assert replay["idempotent_replay"] is True
+    assert replay["completion_record_SHA256"] == completed["completion_record_SHA256"]
+
+    with pytest.raises(pr.ProductRuntimeConflict):
+        pr.complete_current_ticket_human_git_handoff(
+            **_p18_9_1_handoff_completion_kwargs(
+                accepted,
+                commits=(_P18_9_1_HANDOFF_COMMITS[-1],),
+                git_snapshot_fn=lambda: pytest.fail("conflicting replay must stop before Git inspection"),
+            ),
+        )
+
+
+def test_current_p18_9_1_human_git_handoff_completion_accepts_single_commit(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, _projected, authority, _fixture, accepted = _accepted_p18_9_1_review_for_handoff(
+        projection_home,
+        monkeypatch,
+        pids=(6965, 6966, 6967),
+    )
+
+    completed = pr.complete_current_ticket_human_git_handoff(
+        **_p18_9_1_handoff_completion_kwargs(
+            accepted,
+            commits=(_P18_9_1_HANDOFF_COMMITS[-1],),
+        ),
+    )
+
+    assert completed["handoff_completion_recorded"] is True
+    assert completed["ordered_commit_SHAs"] == [_P18_9_1_HANDOFF_COMMITS[-1]]
+    assert completed["ordered_commit_count"] == 1
+    record = pr.load_current_ticket_human_git_handoff_completion_record(
+        projection_record=authority,
+    )
+    assert record is not None
+    assert record["completion_order_evidence"]["multi_commit_handoff"] is False
+
+
+def test_current_p18_9_1_human_git_handoff_completion_requires_accepted_review(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, projected, _authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
+    )
+
+    blocked = pr.complete_current_ticket_human_git_handoff(
+        reviewed_run_id=11,
+        reviewed_candidate_SHA256="a" * 64,
+        review_decision_SHA256="b" * 64,
+        commits=_P18_9_1_HANDOFF_COMMITS,
+        branch=_P18_9_1_HANDOFF_BRANCH,
+        push_attestation="Human pushed the handoff branch to origin.",
+        approved_committed_paths=_P18_9_1_HANDOFF_APPROVED_PATHS,
+        excluded_paths=_P18_9_1_HANDOFF_EXCLUDED_PATHS,
+        validation_evidence=("Human validation completed.",),
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+        next_action_id="PREPARE_P18_9_1_HUMAN_GIT_HANDOFF",
+        git_snapshot_fn=lambda: pytest.fail("accepted-review gap must stop before Git inspection"),
+    )
+
+    assert blocked["handoff_completion_recorded"] is False
+    assert blocked["blocker_code"] == "ACCEPTED_REVIEW_AUTHORITY_GAP"
+    assert blocked["dispatch_performed"] is False
+    assert blocked["execution_started"] is False
+    assert blocked["Git_mutation"] is False
+    assert not pr.human_git_handoff_completion_record_path_for_ticket("P18.9.1").exists()
+
+    from hermes_cli import kanban_db
+
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        assert kanban_db.list_runs(conn, projected["kanban_task_id"]) == []
+    finally:
+        conn.close()
+
+
+def test_current_p18_9_1_human_git_handoff_completion_rejects_review_mismatches(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, _projected, _authority, _fixture, accepted = _accepted_p18_9_1_review_for_handoff(
+        projection_home,
+        monkeypatch,
+        pids=(6975, 6976, 6977),
+    )
+
+    wrong_run = pr.complete_current_ticket_human_git_handoff(
+        **_p18_9_1_handoff_completion_kwargs(
+            accepted,
+            reviewed_run_id=int(accepted["reviewed_run_id"]) + 1,
+            git_snapshot_fn=lambda: pytest.fail("run mismatch must stop before Git inspection"),
+        ),
+    )
+    wrong_candidate = pr.complete_current_ticket_human_git_handoff(
+        **_p18_9_1_handoff_completion_kwargs(
+            accepted,
+            reviewed_candidate_SHA256="c" * 64,
+            git_snapshot_fn=lambda: pytest.fail("candidate mismatch must stop before Git inspection"),
+        ),
+    )
+    wrong_review = pr.complete_current_ticket_human_git_handoff(
+        **_p18_9_1_handoff_completion_kwargs(
+            accepted,
+            review_decision_SHA256="d" * 64,
+            git_snapshot_fn=lambda: pytest.fail("review mismatch must stop before Git inspection"),
+        ),
+    )
+
+    assert wrong_run["blocker_code"] == "HUMAN_GIT_HANDOFF_REVIEWED_RUN_MISMATCH"
+    assert wrong_candidate["blocker_code"] == "HUMAN_GIT_HANDOFF_CANDIDATE_DIGEST_MISMATCH"
+    assert wrong_review["blocker_code"] == "HUMAN_GIT_HANDOFF_REVIEW_DECISION_DIGEST_MISMATCH"
+    assert not pr.human_git_handoff_completion_record_path_for_ticket("P18.9.1").exists()
+
+
+def test_current_p18_9_1_human_git_handoff_completion_requires_no_active_execution(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, projected, _authority, _fixture, accepted = _accepted_p18_9_1_review_for_handoff(
+        projection_home,
+        monkeypatch,
+        pids=(6985, 6986, 6987),
+    )
+
+    from hermes_cli import kanban_db
+
+    active_pid = 6988
+    monkeypatch.setattr(kanban_db, "_pid_alive", lambda pid: int(pid) == active_pid)
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        assert kanban_db.unblock_task(conn, projected["kanban_task_id"])
+        claimed = kanban_db.claim_task(
+            conn,
+            projected["kanban_task_id"],
+            claimer="synthetic-active-handoff-blocker",
+        )
+        assert claimed is not None
+        workspace = kanban_db.resolve_workspace(claimed, board=projected["kanban_board_slug"])
+        kanban_db.set_workspace_path(conn, claimed.id, str(workspace))
+        kanban_db._set_worker_pid(conn, claimed.id, active_pid)
+    finally:
+        conn.close()
+
+    blocked = pr.complete_current_ticket_human_git_handoff(
+        **_p18_9_1_handoff_completion_kwargs(
+            accepted,
+            git_snapshot_fn=lambda: pytest.fail("active execution must stop before Git inspection"),
+        ),
+    )
+
+    assert blocked["handoff_completion_recorded"] is False
+    assert blocked["blocker_code"] == "EXECUTION_ALREADY_ACTIVE"
+    assert blocked["dispatch_performed"] is False
+    assert blocked["execution_started"] is False
+    assert blocked["Git_mutation"] is False
+    assert not pr.human_git_handoff_completion_record_path_for_ticket("P18.9.1").exists()
+
+
+def test_current_p18_9_1_human_git_handoff_completion_exclusions_cannot_be_promoted(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, _projected, _authority, _fixture, accepted = _accepted_p18_9_1_review_for_handoff(
+        projection_home,
+        monkeypatch,
+        pids=(6995, 6996, 6997),
+    )
+
+    promoted_lockfile = pr.complete_current_ticket_human_git_handoff(
+        **_p18_9_1_handoff_completion_kwargs(
+            accepted,
+            approved_paths=(
+                *_P18_9_1_HANDOFF_APPROVED_PATHS,
+                "2_products/pepper-agent/package-lock.json",
+            ),
+            git_snapshot_fn=lambda: pytest.fail("excluded lockfile promotion must stop before Git"),
+        ),
+    )
+    promoted_report = pr.complete_current_ticket_human_git_handoff(
+        **_p18_9_1_handoff_completion_kwargs(
+            accepted,
+            approved_paths=(
+                *_P18_9_1_HANDOFF_APPROVED_PATHS,
+                "2_products/pepper-agent/web/src/agent-platform/shell/P18.9.1-implementation-report.txt",
+            ),
+            git_snapshot_fn=lambda: pytest.fail("excluded report promotion must stop before Git"),
+        ),
+    )
+
+    assert promoted_lockfile["blocker_code"] == "HUMAN_GIT_HANDOFF_EXCLUDED_PATH_PROMOTED"
+    assert "2_products/pepper-agent/package-lock.json" in promoted_lockfile["referenced_paths"]
+    assert promoted_report["blocker_code"] == "HUMAN_GIT_HANDOFF_EXCLUDED_PATH_PROMOTED"
+    assert (
+        "2_products/pepper-agent/web/src/agent-platform/shell/P18.9.1-implementation-report.txt"
+        in promoted_report["referenced_paths"]
+    )
+    assert not pr.human_git_handoff_completion_record_path_for_ticket("P18.9.1").exists()
+
+
+def test_p18_9_1_live_shape_human_git_handoff_completion_request_accepts_human_evidence(
+    projection_home,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    request = pr.CurrentTicketHumanGitHandoffCompletionRequest(
+        reviewed_run_id=11,
+        reviewed_candidate_SHA256="25538ecce152199221b25fde58631e63d7f3729fe1efe4bcb96ed107141ca86b",
+        review_decision_SHA256="f2b9a510bbcf1d1fe8d8f4d3c5ce04b6484e6d2868e9276d736bb1ec1ab7a38d",
+        commits=(
+            "dc77d92",
+            "467f3b412ddd51a237fc76ff5f297e0347308755",
+        ),
+        branch="p18-manual-to-hermes-workflow-migration",
+        push_attestation="Human pushed origin/p18-manual-to-hermes-workflow-migration.",
+        approved_committed_paths=(
+            "web/src/agent-platform/shell/navigation.ts",
+            "web/src/agent-platform/shell/shell.test.tsx",
+        ),
+        excluded_paths=(
+            "package-lock.json",
+            "P18.9.1-implementation-report.txt",
+        ),
+        validation_evidence=(
+            "Human-attested current branch and HEAD match the pushed handoff evidence.",
+        ),
+        human_attested_evidence=(
+            "Second commit contains exactly navigation.ts and shell.test.tsx.",
+        ),
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+        next_action_id="PREPARE_P18_9_1_HUMAN_GIT_HANDOFF",
+    )
+
+    assert request.reviewed_run_id == 11
+    assert request.commits == (
+        "dc77d92",
+        "467f3b412ddd51a237fc76ff5f297e0347308755",
+    )
+    assert request.branch == "p18-manual-to-hermes-workflow-migration"
 
 
 def test_current_p18_9_1_review_changes_requested_starts_same_authority_revision_segment(

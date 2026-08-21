@@ -1125,6 +1125,50 @@ def _submit_current_ticket_review_decision(args: dict[str, Any], **_kwargs) -> s
     })
 
 
+def _string_list_arg(args: dict[str, Any], name: str) -> list[str]:
+    value = args.get(name)
+    if value is None or value == "":
+        return []
+    if not isinstance(value, list):
+        raise ValueError(f"{name} must be a list")
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _complete_current_ticket_human_git_handoff(args: dict[str, Any], **_kwargs) -> str:
+    pr = _runtime()
+    try:
+        result = pr.complete_current_ticket_human_git_handoff(
+            reviewed_run_id=int(args.get("reviewed_run_id")),
+            reviewed_candidate_SHA256=str(args.get("reviewed_candidate_SHA256") or "").strip(),
+            review_decision_SHA256=str(args.get("review_decision_SHA256") or "").strip(),
+            commits=_string_list_arg(args, "commits"),
+            branch=str(args.get("branch") or "").strip(),
+            push_attestation=str(args.get("push_attestation") or "").strip(),
+            approved_committed_paths=_string_list_arg(args, "approved_committed_paths"),
+            excluded_paths=_string_list_arg(args, "excluded_paths"),
+            validation_evidence=_string_list_arg(args, "validation_evidence"),
+            human_attested_evidence=_string_list_arg(args, "human_attested_evidence"),
+            completed_by="pepper-chat-human",
+            project_id=str(args.get("project_id") or "").strip() or None,
+            ticket_id=str(args.get("ticket_id") or "").strip() or None,
+            next_action_id=str(args.get("next_action_id") or "").strip() or None,
+        )
+        updated_context = pr.build_lead_agent_operational_context()
+    except Exception as exc:
+        return tool_error(str(exc) or "current ticket human Git handoff completion failed", success=False)
+    return _result({
+        "source_tool": "complete_current_ticket_human_git_handoff",
+        **result,
+        "current_ticket_id": updated_context.get("current_ticket_id"),
+        "workflow_state": updated_context.get("workflow_state"),
+        "workflow_status": updated_context.get("workflow_status"),
+        "validation_state": updated_context.get("validation_state"),
+        "review_state": updated_context.get("review_state"),
+        "git_handoff_state": updated_context.get("git_handoff_state"),
+        "next_action": updated_context.get("next_action"),
+    })
+
+
 _EMPTY_SCHEMA = {
     "type": "object",
     "properties": {},
@@ -1527,6 +1571,85 @@ _SUBMIT_CURRENT_TICKET_REVIEW_DECISION_SCHEMA = {
 }
 
 
+_COMPLETE_CURRENT_TICKET_HUMAN_GIT_HANDOFF_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "reviewed_run_id": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Accepted reviewed run ID from the human review decision.",
+        },
+        "reviewed_candidate_SHA256": {
+            "type": "string",
+            "description": "Accepted candidate SHA256 from the human review decision.",
+        },
+        "review_decision_SHA256": {
+            "type": "string",
+            "description": "Accepted review decision SHA256 completed by human Git handoff.",
+        },
+        "commits": {
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 1,
+            "description": "Ordered human-created commit SHA list, one or more commits.",
+        },
+        "branch": {
+            "type": "string",
+            "description": "Bounded branch name where the human Git handoff was pushed.",
+        },
+        "push_attestation": {
+            "type": "string",
+            "description": "Bounded human attestation that the branch push completed.",
+        },
+        "approved_committed_paths": {
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 1,
+            "description": "Repository-relative paths approved as committed handoff content.",
+        },
+        "excluded_paths": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Repository-relative paths explicitly excluded from final handoff content.",
+        },
+        "validation_evidence": {
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 1,
+            "description": "Bounded validation references or human-attested validation results.",
+        },
+        "human_attested_evidence": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Additional bounded human attestations for facts not machine-verifiable.",
+        },
+        "project_id": {
+            "type": "string",
+            "description": "Optional governed project guard. Must be PEPPER if supplied.",
+        },
+        "ticket_id": {
+            "type": "string",
+            "description": "Optional governed ticket guard. Must equal the current ticket if supplied.",
+        },
+        "next_action_id": {
+            "type": "string",
+            "description": "Optional next-action guard for human Git handoff completion.",
+        },
+    },
+    "required": [
+        "reviewed_run_id",
+        "reviewed_candidate_SHA256",
+        "review_decision_SHA256",
+        "commits",
+        "branch",
+        "push_attestation",
+        "approved_committed_paths",
+        "validation_evidence",
+    ],
+    "additionalProperties": False,
+}
+
+
 registry.register(
     name="get_current_project",
     toolset=TOOLSET,
@@ -1791,6 +1914,24 @@ registry.register(
     handler=_submit_current_ticket_review_decision,
     emoji="R",
     max_result_size_chars=36000,
+)
+
+registry.register(
+    name="complete_current_ticket_human_git_handoff",
+    toolset=TOOLSET,
+    schema={
+        "name": "complete_current_ticket_human_git_handoff",
+        "description": (
+            "Record evidence that a human completed the accepted current ticket Git handoff. "
+            "It verifies bounded review/run/candidate/commit/branch evidence, closes the ticket "
+            "through the existing governed completion path, and exposes the roadmap-backed successor. "
+            "It never runs Git, starts execution, dispatches workers, retries, rolls back, Docker, or Graphify."
+        ),
+        "parameters": _COMPLETE_CURRENT_TICKET_HUMAN_GIT_HANDOFF_SCHEMA,
+    },
+    handler=_complete_current_ticket_human_git_handoff,
+    emoji="G",
+    max_result_size_chars=48000,
 )
 
 registry.register(
