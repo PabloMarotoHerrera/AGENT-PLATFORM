@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import hashlib
 import json
 
 import pytest
@@ -63,6 +64,33 @@ def _next_ticket_workflow(**overrides):
             "label": "Generate governed P18.9.1 Pepper Design System.",
             "target_ticket_id": "P18.9.1",
             "target_ticket_title": "Pepper Design System",
+            "required_human_action": "ticket_generation",
+        },
+    )
+    data.update(overrides)
+    return data
+
+
+def _p18_9_2_workflow(**overrides):
+    data = _workflow(
+        current_ticket_id=None,
+        current_ticket_title=None,
+        next_ticket_id="P18.9.2",
+        next_ticket_title="Control Center Overview",
+        workflow_state="P18.9.1-COMPLETED",
+        workflow_status="completed",
+        queue_state="p18_9_1_closed_next_ticket_ready",
+        closed_predecessor_ticket_id="P18.9.1",
+        validation_state="review_accepted",
+        review_state="accepted",
+        P18_9_ticket_generated=True,
+        next_ticket_ready=True,
+        next_ticket_generated=False,
+        next_action={
+            "id": "GENERATE_P18_9_2_REQUIRES_SEPARATE_HUMAN_ACTION",
+            "label": "Generate governed P18.9.2 Control Center Overview.",
+            "target_ticket_id": "P18.9.2",
+            "target_ticket_title": "Control Center Overview",
             "required_human_action": "ticket_generation",
         },
     )
@@ -1396,7 +1424,7 @@ def test_generated_ticket_approval_detail_binds_ticket_and_work_packet_authority
     assert detail["decisions"] == []
 
 
-def test_generated_ticket_approval_detail_exposes_exact_artifacts(bridge_home) -> None:
+def test_generated_ticket_approval_detail_exposes_compact_artifact_manifest(bridge_home) -> None:
     from hermes_cli.agent_platform import product_runtime as pr
 
     bridge.generate_p18_9_0_ticket(workflow=_workflow())
@@ -1405,28 +1433,304 @@ def test_generated_ticket_approval_detail_exposes_exact_artifacts(bridge_home) -
 
     detail = pr.build_approval_detail_source("P18.9.0")
     inspection = detail["artifact_inspection"]
-    exact = inspection["exact_contract"]
     work_packet = record["work_packet_compilation_result"]["work_packet"]
+    sections = {item["section_id"]: item for item in inspection["artifact_sections"]}
 
     assert inspection["inspection_status"] == "available"
     assert inspection["validated"] is True
     assert inspection["read_only"] is True
-    assert exact["ticket_spec"]["sha256"] == record["ticket_spec_SHA256"]
-    assert exact["ticket_spec"]["body"] == record["ticket_spec"]
-    assert exact["work_packet"]["id"] == record["work_packet_id"]
-    assert exact["work_packet"]["sha256"] == record["work_packet_SHA256"]
-    assert exact["work_packet"]["body"] == work_packet
-    assert exact["dependency_plan"]["body"] == record["dependency_plan"]
-    assert exact["lint_result"]["body"] == record["lint_report"]
-    assert exact["ticket_approval_record"]["body"] == record["ticket_approval_record"]
-    assert exact["bridge_record"]["sha256"] == record["bridge_SHA256"]
-    assert exact["bridge_record"]["body"] == record
+    assert inspection["exact_contract"] is None
+    assert set(sections) == {
+        "ticket_spec",
+        "work_packet",
+        "dependency_plan",
+        "lint_result",
+        "ticket_approval_record",
+        "bridge_metadata",
+        "bridge_record",
+    }
+    assert sections["ticket_spec"]["sha256"] == record["ticket_spec_SHA256"]
+    assert sections["ticket_spec"]["exact_body_available"] is True
+    assert sections["work_packet"]["id"] == record["work_packet_id"]
+    assert sections["work_packet"]["sha256"] == record["work_packet_SHA256"]
+    assert sections["bridge_record"]["sha256"] == record["bridge_SHA256"]
+    assert "body" not in sections["ticket_spec"]
+    assert "body" not in sections["work_packet"]
     assert inspection["derived_summary"]["scope"]["allowed_paths"] == (
         work_packet["repository_scope"]["allowed_paths"]
     )
     assert inspection["derived_summary"]["tool_authority"]["git_authority"] == "human_only"
     assert inspection["side_effect_authority"]["Git_mutation"] is False
     assert inspection["side_effect_authority"]["Kanban_dispatch"] is False
+
+    serialized = json.dumps(detail, ensure_ascii=False)
+    assert len(serialized) < 24000
+    assert "TicketArchitectBridgeGenerationRecord" in serialized
+    assert json.dumps(record["ticket_spec"], ensure_ascii=False) not in serialized
+
+
+def test_ticket_approval_artifact_sections_return_exact_bodies(bridge_home) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    bridge.generate_p18_9_0_ticket(workflow=_workflow())
+    record = bridge.load_p18_9_0_generation_record()
+    assert record is not None
+    work_packet = record["work_packet_compilation_result"]["work_packet"]
+
+    ticket_spec = pr.build_approval_artifact_section_source("P18.9.0", "ticket_spec")
+    packet = pr.build_approval_artifact_section_source("P18.9.0", "work_packet")
+    dependency_plan = pr.build_approval_artifact_section_source("P18.9.0", "dependency_plan")
+    lint_result = pr.build_approval_artifact_section_source("P18.9.0", "lint_result")
+    approval = pr.build_approval_artifact_section_source(
+        "P18.9.0",
+        "ticket_approval_record",
+    )
+    bridge_metadata = pr.build_approval_artifact_section_source(
+        "P18.9.0",
+        "bridge_metadata",
+    )
+
+    def exact_body(response: dict) -> object:
+        if not response["pagination"]["chunked"]:
+            return response["exact_body"]
+        chunks = [response["exact_body"]]
+        for chunk_index in range(1, response["pagination"]["total_chunks"]):
+            chunk = pr.build_approval_artifact_section_source(
+                "P18.9.0",
+                response["section_id"],
+                chunk_index=chunk_index,
+                max_chars=response["pagination"]["chunk_size_chars"],
+            )
+            chunks.append(chunk["exact_body"])
+        return json.loads("".join(chunks))
+
+    assert exact_body(ticket_spec) == record["ticket_spec"]
+    assert ticket_spec["artifact_identity"]["sha256"] == record["ticket_spec_SHA256"]
+    assert exact_body(packet) == work_packet
+    assert packet["artifact_identity"]["id"] == record["work_packet_id"]
+    assert packet["artifact_identity"]["sha256"] == record["work_packet_SHA256"]
+    assert exact_body(dependency_plan) == record["dependency_plan"]
+    assert exact_body(lint_result) == record["lint_report"]
+    assert exact_body(approval) == record["ticket_approval_record"]
+    metadata_body = exact_body(bridge_metadata)
+    assert isinstance(metadata_body, dict)
+    assert metadata_body["bridge_SHA256"] == record["bridge_SHA256"]
+    assert "ticket_spec" not in metadata_body
+    assert all(
+        section["inspection_status"] == "available"
+        and section["validated"] is True
+        and section["read_only"] is True
+        and section["decisions"] == []
+        for section in (
+            ticket_spec,
+            packet,
+            dependency_plan,
+            lint_result,
+            approval,
+            bridge_metadata,
+        )
+    )
+
+
+def test_ticket_approval_bridge_record_section_is_deterministically_chunked(bridge_home) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    bridge.generate_p18_9_0_ticket(workflow=_workflow())
+    record = bridge.load_p18_9_0_generation_record()
+    assert record is not None
+
+    first = pr.build_approval_artifact_section_source(
+        "P18.9.0",
+        "bridge_record",
+        chunk_index=0,
+        max_chars=1000,
+    )
+    chunks = [first["exact_body"]]
+    for chunk_index in range(1, first["pagination"]["total_chunks"]):
+        chunk = pr.build_approval_artifact_section_source(
+            "P18.9.0",
+            "bridge_record",
+            chunk_index=chunk_index,
+            max_chars=1000,
+        )
+        chunks.append(chunk["exact_body"])
+
+    reconstructed = "".join(chunks)
+    assert first["exact_body_format"] == "canonical_json_chunk"
+    assert json.loads(reconstructed) == record
+    assert first["pagination"]["chunked"] is True
+    assert first["artifact_identity"]["sha256"] == record["bridge_SHA256"]
+
+
+def test_p18_9_2_shaped_compact_manifest_and_exact_section_tools(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    bridge.generate_current_ticket(workflow=_p18_9_2_workflow())
+    record = bridge.load_generation_record(ticket_id="P18.9.2")
+    assert record is not None
+
+    regeneration_calls = []
+
+    def fail_regeneration(*args, **kwargs):
+        regeneration_calls.append((args, kwargs))
+        raise AssertionError("inspection must not regenerate ticket authority")
+
+    monkeypatch.setattr(bridge, "generate_p18_9_0_ticket", fail_regeneration)
+    monkeypatch.setattr(bridge, "generate_current_ticket", fail_regeneration)
+    monkeypatch.setattr(pr, "generate_current_governed_ticket", fail_regeneration)
+
+    manifest = _chat_tool_result(
+        "inspect_pending_approval",
+        {"approval_id": "P18.9.2"},
+    )
+    inspection = manifest["artifact_inspection"]
+    sections = {item["section_id"]: item for item in inspection["artifact_sections"]}
+
+    assert manifest["success"] is True
+    assert inspection["inspection_status"] == "available"
+    assert inspection["validated"] is True
+    assert inspection["read_only"] is True
+    assert inspection["exact_contract"] is None
+    assert set(sections) == {
+        "ticket_spec",
+        "work_packet",
+        "dependency_plan",
+        "lint_result",
+        "ticket_approval_record",
+        "bridge_metadata",
+        "bridge_record",
+    }
+    assert sections["ticket_spec"]["sha256"] == record["ticket_spec_SHA256"]
+    assert sections["work_packet"]["id"] == record["work_packet_id"]
+    assert sections["work_packet"]["sha256"] == record["work_packet_SHA256"]
+    assert len(json.dumps(manifest, ensure_ascii=False)) < 24000
+    assert "body" not in sections["ticket_spec"]
+    assert "body" not in sections["bridge_record"]
+
+    def read_tool_section(section_id: str):
+        first = _chat_tool_result(
+            "inspect_pending_approval_artifact_section",
+            {
+                "approval_id": "P18.9.2",
+                "section_id": section_id,
+                "max_chars": 1000,
+            },
+        )
+        assert first["success"] is True
+        if not first["pagination"]["chunked"]:
+            return first["exact_body"], first
+        chunks = [first["exact_body"]]
+        for chunk_index in range(1, first["pagination"]["total_chunks"]):
+            chunk = _chat_tool_result(
+                "inspect_pending_approval_artifact_section",
+                {
+                    "approval_id": "P18.9.2",
+                    "section_id": section_id,
+                    "chunk_index": chunk_index,
+                    "max_chars": 1000,
+                },
+            )
+            assert chunk["exact_body_serialized_SHA256"] == first[
+                "exact_body_serialized_SHA256"
+            ]
+            chunks.append(chunk["exact_body"])
+        return json.loads("".join(chunks)), first
+
+    ticket_spec, ticket_spec_response = read_tool_section("ticket_spec")
+    work_packet, work_packet_response = read_tool_section("work_packet")
+    dependency_plan, dependency_response = read_tool_section("dependency_plan")
+    lint_result, lint_response = read_tool_section("lint_result")
+    approval_record, approval_response = read_tool_section("ticket_approval_record")
+    bridge_metadata, bridge_response = read_tool_section("bridge_metadata")
+
+    assert ticket_spec == record["ticket_spec"]
+    assert work_packet == record["work_packet_compilation_result"]["work_packet"]
+    assert dependency_plan == record["dependency_plan"]
+    assert lint_result == record["lint_report"]
+    assert approval_record == record["ticket_approval_record"]
+    assert bridge_metadata["bridge_SHA256"] == record["bridge_SHA256"]
+    assert "work_packet_compilation_result" not in bridge_metadata
+    assert ticket_spec_response["artifact_identity"]["sha256"] == record[
+        "ticket_spec_SHA256"
+    ]
+    assert work_packet_response["artifact_identity"]["id"] == record["work_packet_id"]
+    assert work_packet_response["artifact_identity"]["sha256"] == record[
+        "work_packet_SHA256"
+    ]
+    assert dependency_response["artifact_identity"]["sha256"] == record[
+        "dependency_plan_SHA256"
+    ]
+    assert lint_response["artifact_identity"]["sha256"] == record["lint_report_SHA256"]
+    assert approval_response["artifact_identity"]["sha256"] == record[
+        "ticket_approval_record"
+    ]["approval_SHA256"]
+    assert bridge_response["artifact_identity"]["sha256"] == record["bridge_SHA256"]
+    assert bridge.load_approval_decision_record(
+        ticket_id="P18.9.2",
+        generation_record=record,
+    ) is None
+    assert regeneration_calls == []
+    assert inspection["side_effect_authority"]["worker_execution"] is False
+    assert inspection["side_effect_authority"]["Kanban_dispatch"] is False
+    assert inspection["side_effect_authority"]["Git_mutation"] is False
+
+
+def test_artifact_section_public_max_chunk_stays_under_tool_result_limit(
+    bridge_home,
+) -> None:
+    import tools.pepper_workflow_tools  # noqa: F401
+    from model_tools import handle_function_call
+    from tools.registry import registry
+
+    bridge.generate_current_ticket(workflow=_p18_9_2_workflow())
+    record = bridge.load_generation_record(ticket_id="P18.9.2")
+    assert record is not None
+
+    tool_name = "inspect_pending_approval_artifact_section"
+    configured_limit = registry.get_max_result_size(tool_name)
+    schema = registry.get_schema(tool_name)
+    assert schema is not None
+    public_max_chars = schema["parameters"]["properties"]["max_chars"]["maximum"]
+    assert public_max_chars == 20000
+
+    args = {
+        "approval_id": "P18.9.2",
+        "section_id": "bridge_record",
+        "chunk_index": 0,
+        "max_chars": public_max_chars,
+    }
+    raw = handle_function_call(tool_name, args)
+    first = json.loads(raw)
+
+    assert first["success"] is True
+    assert len(raw) < configured_limit
+    assert first["pagination"]["chunked"] is True
+    assert first["pagination"]["chunk_index"] == 0
+    assert first["pagination"]["total_chunks"] >= 2
+    assert first["pagination"]["chunk_size_chars"] == public_max_chars
+    assert first["pagination"]["next_chunk_index"] == 1
+    assert first["exact_body_serialized_SHA256"]
+
+    chunks = [first["exact_body"]]
+    section_sha256 = first["exact_body_serialized_SHA256"]
+    for chunk_index in range(1, first["pagination"]["total_chunks"]):
+        chunk_args = {**args, "chunk_index": chunk_index}
+        chunk_raw = handle_function_call(tool_name, chunk_args)
+        chunk = json.loads(chunk_raw)
+        assert chunk["success"] is True
+        assert len(chunk_raw) < configured_limit
+        assert chunk["pagination"]["chunk_index"] == chunk_index
+        assert chunk["pagination"]["total_chunks"] == first["pagination"]["total_chunks"]
+        assert chunk["pagination"]["chunk_size_chars"] == public_max_chars
+        assert chunk["exact_body_serialized_SHA256"] == section_sha256
+        chunks.append(chunk["exact_body"])
+
+    reconstructed = "".join(chunks)
+    assert hashlib.sha256(reconstructed.encode("utf-8")).hexdigest() == section_sha256
+    assert json.loads(reconstructed) == record
 
 
 @pytest.mark.parametrize(
@@ -1464,6 +1768,11 @@ def test_approval_detail_blocks_identity_mismatched_artifacts(
     )
     assert detail["decisions"] == []
 
+    section = pr.build_approval_artifact_section_source("P18.9.0", "ticket_spec")
+    assert section["inspection_status"] == "blocked"
+    assert section["blocker_code"] == pr.APPROVAL_ARTIFACT_IDENTITY_MISMATCH
+    assert section["exact_body"] is None
+
 
 def test_approval_detail_reports_missing_artifact_without_regeneration(
     bridge_home,
@@ -1492,6 +1801,11 @@ def test_approval_detail_reports_missing_artifact_without_regeneration(
     assert inspection["exact_contract"] is None
     assert inspection["record_path"] == str(path)
     assert not path.exists()
+
+    section = pr.build_approval_artifact_section_source("P18.9.0", "ticket_spec")
+    assert section["inspection_status"] == "blocked"
+    assert section["blocker_code"] == pr.APPROVAL_ARTIFACT_MISSING
+    assert section["exact_body"] is None
 
 
 def test_approval_detail_blocks_semantically_invalid_artifact_without_regeneration(
@@ -1540,6 +1854,39 @@ def test_approval_detail_blocks_semantically_invalid_artifact_without_regenerati
     assert inspection["side_effect_authority"]["Kanban_dispatch"] is False
     assert inspection["side_effect_authority"]["Git_mutation"] is False
 
+    section = pr.build_approval_artifact_section_source("P18.9.0", "ticket_spec")
+    assert section["inspection_status"] == "blocked"
+    assert section["blocker_code"] == pr.APPROVAL_ARTIFACT_VALIDATION_FAILED
+    assert section["validated"] is False
+    assert section["exact_body"] is None
+
+
+def test_approval_artifact_section_rejects_invalid_section_id(bridge_home) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    bridge.generate_p18_9_0_ticket(workflow=_workflow())
+
+    with pytest.raises(pr.ProductRuntimeNotFound, match=pr.APPROVAL_ARTIFACT_INVALID_SECTION):
+        pr.build_approval_artifact_section_source("P18.9.0", "not_a_section")
+
+
+def test_non_ticket_approval_artifact_sections_remain_unavailable(bridge_home) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+    from tools import write_approval as wa
+
+    record = wa.stage_write(
+        wa.MEMORY,
+        {"action": "add", "target": "user", "content": "Remember bounded fact"},
+        summary="Remember bounded fact",
+        origin="foreground",
+    )
+
+    detail = pr.build_approval_detail_source(record["id"])
+
+    assert "artifact_inspection" not in detail
+    with pytest.raises(pr.ProductRuntimeNotFound, match="only available for ticket approvals"):
+        pr.build_approval_artifact_section_source(record["id"], "ticket_spec")
+
 
 def test_ticket_approval_inspection_is_idempotent_and_tool_visible(bridge_home) -> None:
     from hermes_cli.agent_platform import product_runtime as pr
@@ -1553,6 +1900,10 @@ def test_ticket_approval_inspection_is_idempotent_and_tool_visible(bridge_home) 
     first = pr.build_approval_detail_source("P18.9.0")
     second = pr.build_approval_detail_source("P18.9.0")
     tool_result = _chat_tool_result("inspect_pending_approval")
+    section = _chat_tool_result(
+        "inspect_pending_approval_artifact_section",
+        {"approval_id": "P18.9.0", "section_id": "ticket_spec"},
+    )
     after = path.read_text(encoding="utf-8")
 
     assert first["artifact_inspection"] == second["artifact_inspection"]
@@ -1562,13 +1913,12 @@ def test_ticket_approval_inspection_is_idempotent_and_tool_visible(bridge_home) 
         generation_record=record,
     ) is None
     assert tool_result["artifact_inspection"]["inspection_status"] == "available"
-    assert tool_result["artifact_inspection"]["exact_contract"]["ticket_spec"]["body"] == (
-        record["ticket_spec"]
-    )
-    assert tool_result["artifact_inspection"]["exact_contract"]["work_packet"]["id"] == (
-        record["work_packet_id"]
-    )
+    assert tool_result["artifact_inspection"]["exact_contract"] is None
+    assert section["success"] is True
+    assert section["exact_body"] == record["ticket_spec"]
+    assert section["artifact_identity"]["sha256"] == record["ticket_spec_SHA256"]
     assert tool_result["auto_approval"] is False
+    assert section["auto_approval"] is False
 
 
 def test_p18_9_0_ticket_approve_persists_without_recompiling_or_executing(

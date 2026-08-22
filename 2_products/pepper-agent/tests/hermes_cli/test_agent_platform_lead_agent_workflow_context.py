@@ -307,6 +307,7 @@ def test_pepper_toolset_exposes_no_arbitrary_shell_or_file_authority(monkeypatch
         "get_workflow_control",
         "get_pending_approvals",
         "inspect_pending_approval",
+        "inspect_pending_approval_artifact_section",
         "decide_pending_approval",
         "get_execution_status",
         "get_review_status",

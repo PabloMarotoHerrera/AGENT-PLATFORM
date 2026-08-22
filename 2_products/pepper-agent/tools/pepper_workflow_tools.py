@@ -530,6 +530,32 @@ def _inspect_pending_approval(args: dict[str, Any], **_kwargs) -> str:
     return _result(payload)
 
 
+def _inspect_pending_approval_artifact_section(args: dict[str, Any], **_kwargs) -> str:
+    pr = _runtime()
+    approval_id = str(args.get("approval_id") or "").strip()
+    section_id = str(args.get("section_id") or "").strip()
+    if not approval_id:
+        return tool_error("approval_id is required")
+    if not section_id:
+        return tool_error("section_id is required")
+    chunk_index = args.get("chunk_index")
+    max_chars = args.get("max_chars")
+    try:
+        source = pr.build_approval_artifact_section_source(
+            approval_id,
+            section_id,
+            chunk_index=int(chunk_index) if chunk_index is not None else None,
+            max_chars=int(max_chars) if max_chars is not None else None,
+        )
+    except Exception as exc:
+        return tool_error(str(exc) or "approval artifact section inspection failed")
+    return _result({
+        "source_tool": "inspect_pending_approval_artifact_section",
+        **source,
+        "auto_approval": False,
+    })
+
+
 def _decide_pending_approval(args: dict[str, Any], **_kwargs) -> str:
     pr = _runtime()
     decision = str(args.get("decision") or "").strip().lower()
@@ -1721,6 +1747,56 @@ registry.register(
     },
     handler=_inspect_pending_approval,
     emoji="I",
+)
+
+registry.register(
+    name="inspect_pending_approval_artifact_section",
+    toolset=TOOLSET,
+    schema={
+        "name": "inspect_pending_approval_artifact_section",
+        "description": (
+            "Read one exact validated artifact section for a pending ticket approval "
+            "without approving, rejecting, regenerating, or executing it."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "approval_id": {
+                    "type": "string",
+                    "description": "Pending ticket approval id.",
+                },
+                "section_id": {
+                    "type": "string",
+                    "enum": [
+                        "ticket_spec",
+                        "work_packet",
+                        "dependency_plan",
+                        "lint_result",
+                        "ticket_approval_record",
+                        "bridge_metadata",
+                        "bridge_record",
+                    ],
+                    "description": "Artifact section id from the compact inspection manifest.",
+                },
+                "chunk_index": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Optional zero-based chunk index for large exact sections.",
+                },
+                "max_chars": {
+                    "type": "integer",
+                    "minimum": 1000,
+                    "maximum": 20000,
+                    "description": "Optional maximum characters per serialized exact-body chunk.",
+                },
+            },
+            "required": ["approval_id", "section_id"],
+            "additionalProperties": False,
+        },
+    },
+    handler=_inspect_pending_approval_artifact_section,
+    emoji="S",
+    max_result_size_chars=40000,
 )
 
 registry.register(

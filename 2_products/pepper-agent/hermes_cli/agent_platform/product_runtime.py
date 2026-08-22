@@ -28,6 +28,7 @@ APPROVAL_SOURCE_SYSTEM = "hermes-write-approval"
 APPROVAL_ARTIFACT_IDENTITY_MISMATCH = "APPROVAL_ARTIFACT_IDENTITY_MISMATCH"
 APPROVAL_ARTIFACT_MISSING = "APPROVAL_ARTIFACT_MISSING"
 APPROVAL_ARTIFACT_VALIDATION_FAILED = "APPROVAL_ARTIFACT_VALIDATION_FAILED"
+APPROVAL_ARTIFACT_INVALID_SECTION = "APPROVAL_ARTIFACT_INVALID_SECTION"
 CONTROLLED_EXECUTION_SOURCE_SYSTEM = "pepper-controlled-execution"
 CONTROLLED_CUTOVER_SCHEMA_VERSION = 1
 P18_7_COMMIT = "661f1362a7d019c1629e73ad04e4a70e966e394c"
@@ -1759,6 +1760,156 @@ def _ticket_approval_missing_or_undefined_fields(
     ]
 
 
+_TICKET_APPROVAL_ARTIFACT_SECTION_ORDER = (
+    "ticket_spec",
+    "work_packet",
+    "dependency_plan",
+    "lint_result",
+    "ticket_approval_record",
+    "bridge_metadata",
+    "bridge_record",
+)
+_DEFAULT_ARTIFACT_SECTION_CHARS = 12000
+_MIN_ARTIFACT_SECTION_CHARS = 1000
+_MAX_ARTIFACT_SECTION_CHARS = 20000
+
+
+def _ticket_approval_bridge_metadata(record: dict[str, Any]) -> dict[str, Any]:
+    metadata_keys = (
+        "schema_version",
+        "policy_id",
+        "created_at",
+        "source_next_action_id",
+        "source_workflow_status",
+        "generation_status",
+        "project_id",
+        "project_name",
+        "macroproject_id",
+        "macroproject_title",
+        "ticket_id",
+        "ticket_title",
+        "canonical_roadmap_authority",
+        "roadmap_authority_path",
+        "roadmap_authority_section",
+        "roadmap_dependency_ticket_ids",
+        "roadmap_dependency_metadata",
+        "idempotency_key",
+        "predecessor_ticket_id",
+        "canonical_next_ticket_authority",
+        "ticket_contract_SHA256",
+        "ticket_spec_SHA256",
+        "dependency_plan_SHA256",
+        "lint_report_SHA256",
+        "work_packet_id",
+        "work_packet_SHA256",
+        "workflow_transition_result_SHA256",
+        "human_ticket_approval_required",
+        "human_ticket_approval_present",
+        "ticket_execution_authorized",
+        "WorkPacket_execution_authorized",
+        "runtime_execution_authorized",
+        "worker_execution",
+        "Kanban_dispatch",
+        "Git_mutation",
+        "provider_dispatch_count",
+        "model_inference_count",
+        "Git_commands_executed",
+        "Docker_commands_executed",
+        "Graphify_commands_executed",
+        "WorkPacket_compilation_count",
+        "bridge_SHA256",
+    )
+    return {key: record[key] for key in metadata_keys if key in record}
+
+
+def _ticket_approval_section_body(record: dict[str, Any], section_id: str) -> Any:
+    if section_id == "ticket_spec":
+        return record.get("ticket_spec")
+    if section_id == "work_packet":
+        return _ticket_approval_work_packet_body(record)
+    if section_id == "dependency_plan":
+        return record.get("dependency_plan")
+    if section_id == "lint_result":
+        return record.get("lint_report")
+    if section_id == "ticket_approval_record":
+        return record.get("ticket_approval_record")
+    if section_id == "bridge_metadata":
+        return _ticket_approval_bridge_metadata(record)
+    if section_id == "bridge_record":
+        return record
+    raise ProductRuntimeNotFound(f"unknown approval artifact section: {section_id}")
+
+
+def _ticket_approval_section_type(section_id: str) -> str:
+    return {
+        "ticket_spec": "TicketSpec",
+        "work_packet": "WorkPacket",
+        "dependency_plan": "TicketDependencyPlan",
+        "lint_result": "TicketLintReport",
+        "ticket_approval_record": "TicketApprovalRecord",
+        "bridge_metadata": "TicketArchitectBridgeMetadata",
+        "bridge_record": "TicketArchitectBridgeGenerationRecord",
+    }[section_id]
+
+
+def _ticket_approval_section_identity(record: dict[str, Any], section_id: str) -> dict[str, Any]:
+    approval_record = record.get("ticket_approval_record")
+    if not isinstance(approval_record, dict):
+        approval_record = {}
+    identity: dict[str, Any] = {
+        "section_id": section_id,
+        "artifact_type": _ticket_approval_section_type(section_id),
+        "ticket_id": record.get("ticket_id"),
+    }
+    if section_id == "ticket_spec":
+        identity["sha256"] = record.get("ticket_spec_SHA256")
+    elif section_id == "work_packet":
+        identity["id"] = record.get("work_packet_id")
+        identity["sha256"] = record.get("work_packet_SHA256")
+    elif section_id == "dependency_plan":
+        identity["sha256"] = record.get("dependency_plan_SHA256")
+    elif section_id == "lint_result":
+        identity["sha256"] = record.get("lint_report_SHA256")
+    elif section_id == "ticket_approval_record":
+        identity["sha256"] = approval_record.get("approval_SHA256")
+    elif section_id in {"bridge_metadata", "bridge_record"}:
+        identity["sha256"] = record.get("bridge_SHA256")
+    return identity
+
+
+def _serialized_artifact_section_body(body: Any) -> str:
+    return json.dumps(body, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+
+
+def _bounded_artifact_section_chars(value: int | None) -> int:
+    if value is None:
+        return _DEFAULT_ARTIFACT_SECTION_CHARS
+    return max(
+        _MIN_ARTIFACT_SECTION_CHARS,
+        min(_MAX_ARTIFACT_SECTION_CHARS, int(value)),
+    )
+
+
+def _ticket_approval_artifact_section_descriptors(
+    record: dict[str, Any],
+    *,
+    exact_body_available: bool,
+) -> list[dict[str, Any]]:
+    descriptors: list[dict[str, Any]] = []
+    for section_id in _TICKET_APPROVAL_ARTIFACT_SECTION_ORDER:
+        body = _ticket_approval_section_body(record, section_id)
+        serialized = _serialized_artifact_section_body(body)
+        descriptors.append({
+            **_ticket_approval_section_identity(record, section_id),
+            "available": exact_body_available and body is not None,
+            "exact_body_available": exact_body_available and body is not None,
+            "serialized_length_chars": len(serialized),
+            "default_chunk_size_chars": _DEFAULT_ARTIFACT_SECTION_CHARS,
+            "requires_pagination_by_default": len(serialized) > _DEFAULT_ARTIFACT_SECTION_CHARS,
+        })
+    return descriptors
+
+
 def _ticket_approval_artifact_blocker(
     *,
     blocker_code: str,
@@ -1777,6 +1928,10 @@ def _ticket_approval_artifact_blocker(
         "approval_binding": _ticket_approval_binding_identity(record),
         "identity_mismatches": identity_mismatches or [],
         "exact_contract": None,
+        "artifact_sections": _ticket_approval_artifact_section_descriptors(
+            record,
+            exact_body_available=False,
+        ),
         "derived_summary": None,
         "missing_or_undefined_fields": [],
         "side_effect_authority": _ticket_approval_side_effect_authority(record),
@@ -1842,7 +1997,9 @@ def _ticket_approval_derived_summary(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _ticket_approval_artifact_inspection(record: dict[str, Any]) -> dict[str, Any]:
+def _validated_ticket_approval_artifact_record(
+    record: dict[str, Any],
+) -> tuple[dict[str, Any] | None, Path | None, dict[str, Any] | None]:
     from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
         TicketArchitectBridgeConflict,
         generation_record_path_for_ticket,
@@ -1858,14 +2015,14 @@ def _ticket_approval_artifact_inspection(record: dict[str, Any]) -> dict[str, An
             load_generation_record(ticket_id=ticket_id) if ticket_id else None
         )
     except TicketArchitectBridgeConflict as exc:
-        return _ticket_approval_artifact_blocker(
+        return None, path, _ticket_approval_artifact_blocker(
             blocker_code=APPROVAL_ARTIFACT_VALIDATION_FAILED,
             blocker_detail=str(exc) or "approval artifact validation failed",
             record=record,
             path=path,
         )
     if persisted_record is None:
-        return _ticket_approval_artifact_blocker(
+        return None, path, _ticket_approval_artifact_blocker(
             blocker_code=APPROVAL_ARTIFACT_MISSING,
             blocker_detail="persisted ticket approval artifact is unavailable",
             record=record,
@@ -1874,7 +2031,7 @@ def _ticket_approval_artifact_inspection(record: dict[str, Any]) -> dict[str, An
 
     identity_mismatches = _ticket_approval_identity_mismatches(record, persisted_record)
     if identity_mismatches:
-        return _ticket_approval_artifact_blocker(
+        return None, path, _ticket_approval_artifact_blocker(
             blocker_code=APPROVAL_ARTIFACT_IDENTITY_MISMATCH,
             blocker_detail=(
                 "approval binding does not match the persisted artifact identity"
@@ -1883,11 +2040,17 @@ def _ticket_approval_artifact_inspection(record: dict[str, Any]) -> dict[str, An
             path=path,
             identity_mismatches=identity_mismatches,
         )
+    return persisted_record, path, None
+
+
+def _ticket_approval_artifact_inspection(record: dict[str, Any]) -> dict[str, Any]:
+    persisted_record, path, blocker = _validated_ticket_approval_artifact_record(record)
+    if blocker is not None:
+        return blocker
+    if persisted_record is None:
+        raise ProductRuntimeConflict("ticket approval artifact validation did not produce a record")
 
     work_packet = _ticket_approval_work_packet_body(persisted_record)
-    approval_record = persisted_record.get("ticket_approval_record")
-    if not isinstance(approval_record, dict):
-        approval_record = {}
     return {
         "inspection_status": "available",
         "read_only": True,
@@ -1896,45 +2059,111 @@ def _ticket_approval_artifact_inspection(record: dict[str, Any]) -> dict[str, An
         "blocker_detail": None,
         "record_path": str(path) if path is not None else None,
         "approval_binding": _ticket_approval_binding_identity(persisted_record),
-        "exact_contract": {
-            "ticket_spec": {
-                "artifact_type": "TicketSpec",
-                "sha256": persisted_record.get("ticket_spec_SHA256"),
-                "body": persisted_record.get("ticket_spec"),
-            },
-            "work_packet": {
-                "artifact_type": "WorkPacket",
-                "id": persisted_record.get("work_packet_id"),
-                "sha256": persisted_record.get("work_packet_SHA256"),
-                "body": work_packet,
-            },
-            "dependency_plan": {
-                "artifact_type": "TicketDependencyPlan",
-                "sha256": persisted_record.get("dependency_plan_SHA256"),
-                "body": persisted_record.get("dependency_plan"),
-            },
-            "lint_result": {
-                "artifact_type": "TicketLintReport",
-                "sha256": persisted_record.get("lint_report_SHA256"),
-                "body": persisted_record.get("lint_report"),
-            },
-            "ticket_approval_record": {
-                "artifact_type": "TicketApprovalRecord",
-                "sha256": approval_record.get("approval_SHA256"),
-                "body": approval_record,
-            },
-            "bridge_record": {
-                "artifact_type": "TicketArchitectBridgeGenerationRecord",
-                "sha256": persisted_record.get("bridge_SHA256"),
-                "body": persisted_record,
-            },
-        },
+        "exact_contract": None,
+        "artifact_sections": _ticket_approval_artifact_section_descriptors(
+            persisted_record,
+            exact_body_available=True,
+        ),
         "derived_summary": _ticket_approval_derived_summary(persisted_record),
         "missing_or_undefined_fields": _ticket_approval_missing_or_undefined_fields(
             persisted_record,
             work_packet,
         ),
         "side_effect_authority": _ticket_approval_side_effect_authority(persisted_record),
+    }
+
+
+def build_approval_artifact_section_source(
+    approval_id: str,
+    section_id: str,
+    *,
+    chunk_index: int | None = None,
+    max_chars: int | None = None,
+) -> dict[str, Any]:
+    """Return one exact validated ticket-approval artifact section."""
+
+    normalized_section_id = _safe_text(section_id, limit=80).strip().lower()
+    if normalized_section_id not in _TICKET_APPROVAL_ARTIFACT_SECTION_ORDER:
+        raise ProductRuntimeNotFound(
+            f"{APPROVAL_ARTIFACT_INVALID_SECTION}: unknown approval artifact section"
+        )
+    subsystem, record = _find_pending(approval_id)
+    if subsystem != _TICKET_APPROVAL_KIND:
+        raise ProductRuntimeNotFound(
+            "approval artifact sections are only available for ticket approvals"
+        )
+
+    persisted_record, path, blocker = _validated_ticket_approval_artifact_record(record)
+    artifact_identity = _ticket_approval_section_identity(record, normalized_section_id)
+    if blocker is not None:
+        return {
+            "source_system": APPROVAL_SOURCE_SYSTEM,
+            "source_authority": "pepper-ticket-architect-bridge-authority",
+            "canonical_approval_authority": "pepper-controlled-human-decision-v1",
+            "approval_id": _safe_id(approval_id),
+            "section_id": normalized_section_id,
+            "artifact_type": _ticket_approval_section_type(normalized_section_id),
+            "artifact_identity": artifact_identity,
+            "inspection_status": "blocked",
+            "validated": False,
+            "read_only": True,
+            "blocker_code": blocker.get("blocker_code"),
+            "blocker_detail": blocker.get("blocker_detail"),
+            "record_path": blocker.get("record_path"),
+            "approval_binding": blocker.get("approval_binding"),
+            "exact_body": None,
+            "side_effect_authority": blocker.get("side_effect_authority"),
+            "decisions": [],
+        }
+    if persisted_record is None:
+        raise ProductRuntimeConflict("ticket approval artifact validation did not produce a record")
+
+    body = _ticket_approval_section_body(persisted_record, normalized_section_id)
+    artifact_identity = _ticket_approval_section_identity(
+        persisted_record,
+        normalized_section_id,
+    )
+    serialized = _serialized_artifact_section_body(body)
+    serialized_sha256 = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+    chunk_size = _bounded_artifact_section_chars(max_chars)
+    total_chunks = max(1, (len(serialized) + chunk_size - 1) // chunk_size)
+    chunked = total_chunks > 1 or chunk_index is not None
+    requested_chunk = 0 if chunk_index is None else int(chunk_index)
+    if requested_chunk < 0 or requested_chunk >= total_chunks:
+        raise ProductRuntimeNotFound("approval artifact section chunk is out of range")
+    start = requested_chunk * chunk_size
+    end = min(len(serialized), start + chunk_size)
+    exact_body: Any = serialized[start:end] if chunked else body
+    return {
+        "source_system": APPROVAL_SOURCE_SYSTEM,
+        "source_authority": "pepper-ticket-architect-bridge-authority",
+        "canonical_approval_authority": "pepper-controlled-human-decision-v1",
+        "approval_id": _safe_id(approval_id),
+        "section_id": normalized_section_id,
+        "artifact_type": _ticket_approval_section_type(normalized_section_id),
+        "artifact_identity": artifact_identity,
+        "inspection_status": "available",
+        "validated": True,
+        "read_only": True,
+        "blocker_code": None,
+        "blocker_detail": None,
+        "record_path": str(path) if path is not None else None,
+        "approval_binding": _ticket_approval_binding_identity(persisted_record),
+        "exact_body": exact_body,
+        "exact_body_format": "canonical_json_chunk" if chunked else "json",
+        "exact_body_serialized_SHA256": serialized_sha256,
+        "pagination": {
+            "chunked": chunked,
+            "chunk_index": requested_chunk,
+            "total_chunks": total_chunks,
+            "chunk_size_chars": chunk_size,
+            "start_offset": start if chunked else 0,
+            "end_offset": end if chunked else len(serialized),
+            "serialized_length_chars": len(serialized),
+            "next_chunk_index": requested_chunk + 1 if requested_chunk + 1 < total_chunks else None,
+        },
+        "side_effect_authority": _ticket_approval_side_effect_authority(persisted_record),
+        "decisions": [],
     }
 
 
