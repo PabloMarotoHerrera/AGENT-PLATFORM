@@ -880,6 +880,41 @@ def test_synthetic_successor_fixture_proves_generic_next_ticket_authority() -> N
         )
 
 
+def test_active_p18_9_roadmap_successor_after_p18_9_1_is_control_center_overview(
+    bridge_home,
+) -> None:
+    workflow = {
+        "project_id": "PEPPER",
+        "project_name": "Pepper",
+        "macroproject_id": "P18.9",
+        "macroproject_title": "Pepper Product Personalization",
+        "current_ticket_id": None,
+        "closed_predecessor_ticket_id": "P18.9.1",
+        "workflow_status": "completed",
+        "workflow_state": "P18.9.1-COMPLETED",
+    }
+
+    authority = bridge.resolve_canonical_next_ticket(workflow)
+    items_by_ticket = {
+        item["ticket_id"]: item
+        for item in bridge.resolve_roadmap_ticket_authorities()
+    }
+
+    assert authority.ticket_id == "P18.9.2"
+    assert authority.ticket_title == "Control Center Overview"
+    assert authority.next_action_id == "GENERATE_P18_9_2_REQUIRES_SEPARATE_HUMAN_ACTION"
+    assert authority.predecessor_ticket_id == "P18.9.1"
+    assert authority.authority_source == "accepted_closed_workflow_state+canonical_roadmap"
+    assert authority.canonical_roadmap_authority == bridge.CANONICAL_IMPLEMENTATION_ROADMAP_AUTHORITY
+    assert authority.roadmap_authority_path == bridge.CANONICAL_IMPLEMENTATION_ROADMAP_AUTHORITY_PATH
+    assert authority.roadmap_authority_section == bridge.CANONICAL_IMPLEMENTATION_ROADMAP_AUTHORITY_SECTION
+    assert items_by_ticket["P18.9.2"]["ticket_title"] == "Control Center Overview"
+    assert items_by_ticket["P18.9.4"]["ticket_title"] == "Work: Projects and Tickets Workspace"
+    assert items_by_ticket["P18.9.2"]["ticket_title"] != (
+        "Projects, Tickets, and Workflow State Workspace"
+    )
+
+
 def test_synthetic_implementation_contracts_materialize_generically() -> None:
     first = _synthetic_implementation_target(
         "P99.1",

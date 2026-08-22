@@ -643,18 +643,19 @@ Accepted P18.9 implementation sequence:
 | --- | --- | --- | --- |
 | `P18.9.0` | `Product Inventory, IA Decision, and Acceptance Contract` | `none` | Inventory Pepper product surfaces, make the first information-architecture decision, and define the acceptance contract for P18.9 personalization. |
 | `P18.9.1` | `Pepper Shell, Routing, and Compact Navigation` | `P18.9.0` | Implement the first coherent Pepper control-plane shell and compact workflow-first navigation under `/agent-platform`, without a permanent `Legacy Hermes Tools` product domain. |
-| `P18.9.2` | `Projects, Tickets, and Workflow State Workspace` | `P18.9.1` | Consolidate project, ticket, workflow-control, and next-action state into a Pepper-owned workspace. |
-| `P18.9.3` | `Approvals and Human Gates Workspace` | `P18.9.2` | Personalize governed approval, review, and human gate surfaces while preserving explicit human authority. |
-| `P18.9.4` | `Execution and Recovery Workspace` | `P18.9.3` | Rationalize execution, retry, recovery, and validation visibility without adding worker or dispatch authority. |
-| `P18.9.5` | `Repository Evidence and Planning Workspace` | `P18.9.2` | Present bounded repository-context and planning evidence as read-only Pepper product capability. |
-| `P18.9.6` | `Lead Agent Chat Personalization` | `P18.9.3` | Align Pepper Lead Agent chat prompts, affordances, and status copy with the governed control-plane workflow. |
-| `P18.9.7` | `Legacy Hermes Surface Rationalization` | `P18.9.1` | Classify and consolidate legacy Hermes tool surfaces so they appear as governed capabilities, not as a permanent top-level product domain. |
-| `P18.9.8` | `Safe Settings and Product Configuration UX` | `P18.9.1` | Refine safe settings and product configuration presentation while preserving deterministic, credential-free configuration boundaries. |
-| `P18.9.9` | `Operational Overview Personalization` | `P18.9.4` | Improve the Pepper operational overview around current status, blockers, and next governed action. |
-| `P18.9.10` | `Cross-Surface Empty, Blocked, and Recovery States` | `P18.9.4` | Normalize empty, blocked, failed, retry, and recovery-state UX across Pepper control-plane surfaces. |
-| `P18.9.11` | `Product-Wide Personalization Smoke` | `P18.9.2; P18.9.3; P18.9.4; P18.9.5; P18.9.6; P18.9.7; P18.9.8; P18.9.9; P18.9.10` | Validate the personalized Pepper control plane end to end without adding Git, Docker, Graphify, provider, or worker authority. |
-| `P18.9.12` | `Pepper Visual Identity and Design System` | `P18.9.1` | Resolve Pepper visual identity and design-system refinements separately from the first shell/navigation ticket. |
-| `P18.9.R` | `Personalization Closure` | `P18.9.11; P18.9.12` | Close P18.9 with evidence, residual risks, and next-roadmap handoff while preserving human Git authority. |
+| `P18.9.2` | `Control Center Overview` | `P18.9.1` | Implement the Pepper control-center overview successor after the accepted shell, routing, and compact-navigation handoff. |
+| `P18.9.3` | `Lead Agent Product Experience` | `P18.9.2` | Personalize the Pepper Lead Agent product experience while preserving governed workflow boundaries. |
+| `P18.9.4` | `Work: Projects and Tickets Workspace` | `P18.9.3` | Consolidate project and ticket work into the Pepper Work area. |
+| `P18.9.5` | `Work: Approvals Decision Experience` | `P18.9.4` | Personalize governed approval decision surfaces while preserving explicit human authority. |
+| `P18.9.6` | `Work: Execution Lifecycle, Review, Recovery, and Git Handoff UX` | `P18.9.5` | Rationalize execution, review, recovery, and human Git handoff visibility without adding worker, dispatch, or Git authority. |
+| `P18.9.7` | `Agents Product Architecture` | `P18.9.6` | Consolidate agent-facing product architecture in the Pepper control plane. |
+| `P18.9.8` | `Automation and Integrations Consolidation` | `P18.9.7` | Consolidate automation and integration surfaces under the accepted Pepper information architecture. |
+| `P18.9.9` | `Resources Consolidation` | `P18.9.8` | Consolidate resource surfaces under the accepted Pepper information architecture. |
+| `P18.9.10` | `Settings and Product Runtime Administration` | `P18.9.9` | Refine settings and product runtime administration while preserving deterministic, credential-free configuration boundaries. |
+| `P18.9.11` | `Governed Hermes Upstream Update Integration` | `P18.9.10` | Integrate governed Hermes upstream update visibility without expanding Git, Docker, Graphify, provider, or worker authority. |
+| `P18.9.12` | `Pepper Visual Identity and Design System` | `P18.9.11` | Resolve Pepper visual identity and design-system refinements separately from shell/routing/navigation. |
+| `P18.9.13` | `Product-wide Acceptance, Regression, and Documentation` | `P18.9.12` | Validate and document the personalized Pepper control plane end to end. |
+| `P18.9.R` | `Pepper Product Personalization Closure` | `P18.9.13` | Close P18.9 with evidence, residual risks, and next-roadmap handoff while preserving human Git authority. |
 
 Accepted P18.9 implementation ticket contracts:
 

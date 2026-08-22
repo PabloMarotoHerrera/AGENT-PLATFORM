@@ -6371,8 +6371,14 @@ def test_current_p18_9_1_human_git_handoff_completion_closes_ticket_and_exposes_
     assert completed["ticket_closed"] is True
     assert completed["closed_predecessor_ticket_id"] == "P18.9.1"
     assert completed["next_ticket_ready"] is True
+    assert completed["next_ticket_id"] == "P18.9.2"
+    assert completed["next_ticket_title"] == "Control Center Overview"
     assert completed["next_ticket_id"] == expected_successor["ticket_id"]
     assert completed["next_ticket_authority"]["ticket_id"] == expected_successor["ticket_id"]
+    assert completed["next_ticket_authority"]["ticket_title"] == "Control Center Overview"
+    assert completed["next_ticket_authority"]["roadmap_authority_path"] == (
+        bridge.CANONICAL_IMPLEMENTATION_ROADMAP_AUTHORITY_PATH
+    )
     assert completed["next_action"]["id"] == expected_successor["next_action_id"]
     assert completed["generic_ticket_completion_path_reused"] is True
     assert completed["P17_human_git_handoff_authority_reused"] is True
@@ -6417,6 +6423,7 @@ def test_current_p18_9_1_human_git_handoff_completion_closes_ticket_and_exposes_
     assert workflow["governed_workflow_state"] == "completed"
     assert workflow["human_git_handoff_state"] == "completed"
     assert workflow["next_ticket_id"] == expected_successor["ticket_id"]
+    assert workflow["next_ticket_title"] == "Control Center Overview"
     assert workflow["next_action"]["id"] == expected_successor["next_action_id"]
     assert workflow["Git_mutation"] is False
 
