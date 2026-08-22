@@ -14558,17 +14558,24 @@ def _human_git_handoff_completion_verification_evidence(
     final_commit = request.commits[-1]
     if head:
         if not _git_sha_matches(final_commit, head):
-            return evidence, (
-                "HUMAN_GIT_HANDOFF_HEAD_MISMATCH",
-                "read-only repository HEAD does not match supplied final commit",
-            )
-        evidence.append({
-            "id": "final_commit_head",
-            "classification": "MACHINE_VERIFIED",
-            "expected": final_commit,
-            "observed": head,
-            "source": "pepper_repository_tools.git_read_only_inspection",
-        })
+            evidence.append({
+                "id": "final_commit_head",
+                "classification": "MACHINE_OBSERVED",
+                "expected": final_commit,
+                "observed": head,
+                "relationship": "current_head_differs_from_final_handoff_commit",
+                "verification_scope": "current_head_only",
+                "source": "pepper_repository_tools.git_read_only_inspection",
+            })
+        else:
+            evidence.append({
+                "id": "final_commit_head",
+                "classification": "MACHINE_VERIFIED",
+                "expected": final_commit,
+                "observed": head,
+                "relationship": "exact_current_head",
+                "source": "pepper_repository_tools.git_read_only_inspection",
+            })
     else:
         evidence.append({
             "id": "final_commit_head",

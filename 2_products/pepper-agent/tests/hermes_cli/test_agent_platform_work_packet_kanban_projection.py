@@ -770,6 +770,18 @@ _P18_9_1_HANDOFF_COMMITS = (
     "dc77d92",
     "467f3b412ddd51a237fc76ff5f297e0347308755",
 )
+_P18_9_1_LIVE_HANDOFF_RUN_ID = 11
+_P18_9_1_LIVE_CANDIDATE_SHA256 = (
+    "25538ecce152199221b25fde58631e63d7f3729fe1efe4bcb96ed107141ca86b"
+)
+_P18_9_1_LIVE_REVIEW_DECISION_SHA256 = (
+    "f2b9a510bbcf1d1fe8d8f4d3c5ce04b6484e6d2868e9276d736bb1ec1ab7a38d"
+)
+_P18_9_1_LIVE_HANDOFF_COMMITS = (
+    "dc77d92e3c01d45a5d13db0161f79c5297ea33b7",
+    "467f3b412ddd51a237fc76ff5f297e0347308755",
+)
+_P18_9_1_POST_HANDOFF_CAPABILITY_HEAD = "8e383a878007894fb72c77e317a9a92b7ceeb4fa"
 _P18_9_1_HANDOFF_APPROVED_PATHS = (
     "2_products/pepper-agent/web/src/agent-platform/shell/navigation.ts",
     "2_products/pepper-agent/web/src/agent-platform/shell/shell.test.tsx",
@@ -863,6 +875,16 @@ def _p18_9_1_handoff_completion_kwargs(
     }
     data.update(overrides)
     return data
+
+
+def _evidence_item(result: dict, evidence_id: str) -> dict:
+    matches = [
+        item
+        for item in result["verification_evidence"]
+        if item.get("id") == evidence_id
+    ]
+    assert len(matches) == 1
+    return matches[0]
 
 
 def _start_p18_9_1_validated_review_ready_run_7(
@@ -6373,6 +6395,11 @@ def test_current_p18_9_1_human_git_handoff_completion_closes_ticket_and_exposes_
         "final_commit_head",
         "working_tree_status",
     }
+    final_head_evidence = _evidence_item(completed, "final_commit_head")
+    assert final_head_evidence["classification"] == "MACHINE_VERIFIED"
+    assert final_head_evidence["relationship"] == "exact_current_head"
+    assert final_head_evidence["expected"] == _P18_9_1_HANDOFF_COMMITS[-1]
+    assert final_head_evidence["observed"] == _P18_9_1_HANDOFF_COMMITS[-1]
 
     record = pr.load_current_ticket_human_git_handoff_completion_record(
         projection_record=authority,
@@ -6427,6 +6454,132 @@ def test_current_p18_9_1_human_git_handoff_completion_closes_ticket_and_exposes_
                 git_snapshot_fn=lambda: pytest.fail("conflicting replay must stop before Git inspection"),
             ),
         )
+
+
+def test_current_p18_9_1_human_git_handoff_completion_accepts_historical_advanced_head(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, _projected, authority, _fixture, _accepted = _accepted_p18_9_1_review_for_handoff(
+        projection_home,
+        monkeypatch,
+        pids=(7005, 7006, 7007),
+    )
+    review_record = pr.load_current_ticket_review_decision_record(
+        projection_record=authority,
+    )
+    assert review_record is not None
+    live_review = json.loads(json.dumps(review_record))
+    live_review.update({
+        "reviewed_run_id": _P18_9_1_LIVE_HANDOFF_RUN_ID,
+        "reviewed_candidate_SHA256": _P18_9_1_LIVE_CANDIDATE_SHA256,
+        "review_decision_SHA256": _P18_9_1_LIVE_REVIEW_DECISION_SHA256,
+        "reviewed_candidate_reference": {
+            "candidate_source": "live_p18_9_1_historical_handoff_fixture",
+            "historical_reviewed_run_id": _P18_9_1_LIVE_HANDOFF_RUN_ID,
+        },
+    })
+    monkeypatch.setattr(
+        pr,
+        "load_current_ticket_review_decision_record",
+        lambda *, projection_record=None: live_review,
+    )
+    advanced_head_snapshot = _p18_9_1_handoff_git_snapshot(
+        branch=_P18_9_1_HANDOFF_BRANCH,
+        head=_P18_9_1_POST_HANDOFF_CAPABILITY_HEAD,
+    )
+
+    completed = pr.complete_current_ticket_human_git_handoff(
+        **_p18_9_1_handoff_completion_kwargs(
+            live_review,
+            commits=_P18_9_1_LIVE_HANDOFF_COMMITS,
+            git_snapshot=advanced_head_snapshot,
+        ),
+    )
+
+    assert completed["handoff_completion_recorded"] is True
+    assert "blocker_code" not in completed
+    assert completed["human_git_handoff_state"] == "completed"
+    assert completed["workflow_status"] == "completed"
+    assert completed["governed_workflow_state"] == "completed"
+    assert completed["reviewed_run_id"] == _P18_9_1_LIVE_HANDOFF_RUN_ID
+    assert completed["reviewed_candidate_SHA256"] == _P18_9_1_LIVE_CANDIDATE_SHA256
+    assert completed["review_decision_SHA256"] == _P18_9_1_LIVE_REVIEW_DECISION_SHA256
+    assert completed["ordered_commit_SHAs"] == list(_P18_9_1_LIVE_HANDOFF_COMMITS)
+    assert completed["final_commit_SHA"] == _P18_9_1_LIVE_HANDOFF_COMMITS[-1]
+    final_head_evidence = _evidence_item(completed, "final_commit_head")
+    assert final_head_evidence == {
+        "id": "final_commit_head",
+        "classification": "MACHINE_OBSERVED",
+        "expected": _P18_9_1_LIVE_HANDOFF_COMMITS[-1],
+        "observed": _P18_9_1_POST_HANDOFF_CAPABILITY_HEAD,
+        "relationship": "current_head_differs_from_final_handoff_commit",
+        "verification_scope": "current_head_only",
+        "source": "pepper_repository_tools.git_read_only_inspection",
+    }
+    evidence_ids = {item["id"] for item in completed["verification_evidence"]}
+    assert "HUMAN_GIT_HANDOFF_HEAD_MISMATCH" not in evidence_ids
+    assert not {
+        "commit_ancestry",
+        "commit_file_set",
+        "commit_reachability",
+        "upstream_containment",
+    } & evidence_ids
+    assert {item["id"] for item in completed["machine_verification_evidence"]} == {
+        "current_branch",
+        "working_tree_status",
+    }
+    assert completed["Git_mutation"] is False
+    assert completed["execution_started"] is False
+    assert completed["Kanban_dispatch"] is False
+
+    replay = pr.complete_current_ticket_human_git_handoff(
+        **_p18_9_1_handoff_completion_kwargs(
+            live_review,
+            commits=_P18_9_1_LIVE_HANDOFF_COMMITS,
+            git_snapshot_fn=lambda: pytest.fail("historical replay must not inspect Git"),
+        ),
+    )
+    assert replay["idempotent_replay"] is True
+    assert replay["completion_identity_SHA256"] == completed["completion_identity_SHA256"]
+
+    with pytest.raises(pr.ProductRuntimeConflict):
+        pr.complete_current_ticket_human_git_handoff(
+            **_p18_9_1_handoff_completion_kwargs(
+                live_review,
+                commits=(_P18_9_1_LIVE_HANDOFF_COMMITS[-1],),
+                git_snapshot_fn=lambda: pytest.fail("historical conflict must stop before Git"),
+            ),
+        )
+
+
+def test_current_p18_9_1_human_git_handoff_completion_wrong_branch_fails_closed(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, _projected, _authority, _fixture, accepted = _accepted_p18_9_1_review_for_handoff(
+        projection_home,
+        monkeypatch,
+        pids=(7015, 7016, 7017),
+    )
+
+    blocked = pr.complete_current_ticket_human_git_handoff(
+        **_p18_9_1_handoff_completion_kwargs(
+            accepted,
+            git_snapshot=_p18_9_1_handoff_git_snapshot(
+                branch="p18-wrong-branch",
+                head=_P18_9_1_HANDOFF_COMMITS[-1],
+            ),
+        ),
+    )
+
+    assert blocked["handoff_completion_recorded"] is False
+    assert blocked["blocker_code"] == "HUMAN_GIT_HANDOFF_BRANCH_MISMATCH"
+    assert blocked["dispatch_performed"] is False
+    assert blocked["execution_started"] is False
+    assert blocked["Kanban_dispatch"] is False
+    assert blocked["Git_mutation"] is False
+    assert not pr.human_git_handoff_completion_record_path_for_ticket("P18.9.1").exists()
 
 
 def test_current_p18_9_1_human_git_handoff_completion_accepts_single_commit(
@@ -6626,13 +6779,10 @@ def test_p18_9_1_live_shape_human_git_handoff_completion_request_accepts_human_e
     from hermes_cli.agent_platform import product_runtime as pr
 
     request = pr.CurrentTicketHumanGitHandoffCompletionRequest(
-        reviewed_run_id=11,
-        reviewed_candidate_SHA256="25538ecce152199221b25fde58631e63d7f3729fe1efe4bcb96ed107141ca86b",
-        review_decision_SHA256="f2b9a510bbcf1d1fe8d8f4d3c5ce04b6484e6d2868e9276d736bb1ec1ab7a38d",
-        commits=(
-            "dc77d92",
-            "467f3b412ddd51a237fc76ff5f297e0347308755",
-        ),
+        reviewed_run_id=_P18_9_1_LIVE_HANDOFF_RUN_ID,
+        reviewed_candidate_SHA256=_P18_9_1_LIVE_CANDIDATE_SHA256,
+        review_decision_SHA256=_P18_9_1_LIVE_REVIEW_DECISION_SHA256,
+        commits=_P18_9_1_LIVE_HANDOFF_COMMITS,
         branch="p18-manual-to-hermes-workflow-migration",
         push_attestation="Human pushed origin/p18-manual-to-hermes-workflow-migration.",
         approved_committed_paths=(
@@ -6654,11 +6804,8 @@ def test_p18_9_1_live_shape_human_git_handoff_completion_request_accepts_human_e
         next_action_id="PREPARE_P18_9_1_HUMAN_GIT_HANDOFF",
     )
 
-    assert request.reviewed_run_id == 11
-    assert request.commits == (
-        "dc77d92",
-        "467f3b412ddd51a237fc76ff5f297e0347308755",
-    )
+    assert request.reviewed_run_id == _P18_9_1_LIVE_HANDOFF_RUN_ID
+    assert request.commits == _P18_9_1_LIVE_HANDOFF_COMMITS
     assert request.branch == "p18-manual-to-hermes-workflow-migration"
 
 
