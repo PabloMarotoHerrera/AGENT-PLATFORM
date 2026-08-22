@@ -1439,6 +1439,91 @@ def _execution_operational_summary() -> dict[str, Any]:
     }
 
 
+def _pending_generated_successor_ticket_approval_overlay(
+    workflow: dict[str, Any],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Project a generated successor ticket lifecycle without activating it."""
+
+    active_ticket_id = str(workflow.get("current_ticket_id") or "").strip()
+    if active_ticket_id:
+        return None, None
+    try:
+        canonical_next = resolve_canonical_next_ticket(workflow)
+    except Exception as exc:  # pragma: no cover - defensive live-state guard
+        return None, {
+            "id": "SUCCESSOR-TICKET-AUTHORITY",
+            "status": "blocked_by_unresolved_successor_authority",
+            "evidence": _safe_text(exc, limit=300),
+        }
+    ticket_id = str(canonical_next.get("ticket_id") or "").strip()
+    if not ticket_id:
+        return None, None
+    try:
+        from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
+            generated_record_to_workflow_overlay,
+            load_generation_record,
+        )
+
+        record = load_generation_record(ticket_id=ticket_id)
+        if record is None:
+            return None, None
+        generated_overlay = generated_record_to_workflow_overlay(record)
+    except Exception as exc:  # pragma: no cover - defensive live-state guard
+        return None, {
+            "id": f"{ticket_id}-SUCCESSOR-APPROVAL-AUTHORITY",
+            "status": "blocked_by_invalid_generated_successor_authority",
+            "evidence": _safe_text(exc, limit=300),
+        }
+    if generated_overlay.get("workflow_status") not in {
+        "awaiting_ticket_approval",
+        "ticket_approved",
+        "awaiting_correction",
+    }:
+        return None, None
+    ticket_title = str(
+        record.get("ticket_title") or generated_overlay.get("current_ticket_title") or ""
+    )
+    overlay = dict(generated_overlay)
+    pending = generated_overlay.get("workflow_status") == "awaiting_ticket_approval"
+    overlay.update({
+        "current_ticket_id": None,
+        "current_ticket_title": None,
+        "generated_successor_ticket_id": ticket_id,
+        "generated_successor_ticket_title": ticket_title,
+        "next_ticket_id": ticket_id,
+        "next_ticket_title": ticket_title,
+        "readiness": (
+            "successor_awaiting_ticket_approval"
+            if pending
+            else generated_overlay.get("readiness")
+        ),
+        "workflow_state": (
+            f"{ticket_id}-SUCCESSOR-AWAITING-TICKET-APPROVAL"
+            if pending
+            else generated_overlay.get("workflow_state")
+        ),
+        "workflow_status": generated_overlay.get("workflow_status"),
+        "approval_state": generated_overlay.get("approval_state"),
+        "pending_ticket_approval_count": int(
+            generated_overlay.get("pending_ticket_approval_count") or 0
+        ),
+        "queue_state": (
+            "awaiting_human_successor_ticket_approval"
+            if pending
+            else generated_overlay.get("queue_state")
+        ),
+        "canonical_next_ticket_authority": canonical_next,
+        "successor_ticket_generated_not_activated": True,
+        "ticket_execution_authorized": False,
+        "WorkPacket_execution_authorized": False,
+        "runtime_execution_authorized": False,
+        "worker_execution": False,
+        "Kanban_dispatch": False,
+        "Git_mutation": False,
+    })
+    return overlay, None
+
+
 def _subsystems() -> tuple[str, ...]:
     from tools import write_approval as wa
 
@@ -17679,6 +17764,13 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
                 "status": "blocked_by_unreadable_governed_autonomy_projection",
                 "evidence": _safe_text(exc, limit=300),
             })
+    pending_successor_overlay, pending_successor_blocker = (
+        _pending_generated_successor_ticket_approval_overlay(snapshot)
+    )
+    if pending_successor_overlay is not None:
+        snapshot.update(pending_successor_overlay)
+    if pending_successor_blocker is not None:
+        remaining_blockers.append(pending_successor_blocker)
     snapshot["blocker_count"] = len(remaining_blockers)
     snapshot["next_action_label"] = _next_action_label(snapshot.get("next_action"))
     return snapshot

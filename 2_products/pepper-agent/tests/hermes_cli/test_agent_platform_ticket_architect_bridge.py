@@ -1678,6 +1678,324 @@ def test_p18_9_2_shaped_compact_manifest_and_exact_section_tools(
     assert inspection["side_effect_authority"]["Git_mutation"] is False
 
 
+def test_workflow_control_projects_p18_9_2_pending_successor_approval_without_activation(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    bridge.generate_current_ticket(workflow=_p18_9_2_workflow())
+    record = bridge.load_generation_record(ticket_id="P18.9.2")
+    assert record is not None
+    monkeypatch.setattr(
+        pr,
+        "_p18_9_0_generation_overlay",
+        lambda: (_p18_9_2_workflow(), None),
+    )
+
+    snapshot = pr.build_workflow_control_snapshot()
+    context = pr.build_lead_agent_operational_context()
+
+    assert snapshot["current_ticket_id"] is None
+    assert snapshot["generated_successor_ticket_id"] == "P18.9.2"
+    assert snapshot["next_ticket_id"] == "P18.9.2"
+    assert snapshot["workflow_state"] == "P18.9.2-SUCCESSOR-AWAITING-TICKET-APPROVAL"
+    assert snapshot["workflow_status"] == "awaiting_ticket_approval"
+    assert snapshot["approval_state"] == "pending_ticket_approval"
+    assert snapshot["pending_approval_count"] == 1
+    assert snapshot["pending_ticket_approval_count"] == 1
+    assert snapshot["next_action"]["id"] == "APPROVE_P18_9_2"
+    assert snapshot["next_action"]["required_human_action"] == "ticket_approval"
+    assert snapshot["next_action"]["target_ticket_id"] == "P18.9.2"
+    assert snapshot["canonical_next_ticket_authority"]["ticket_id"] == "P18.9.2"
+    assert snapshot["generated_ticket_authority"]["ticket_spec_SHA256"] == record[
+        "ticket_spec_SHA256"
+    ]
+    assert snapshot["generated_ticket_authority"]["work_packet_id"] == record["work_packet_id"]
+    assert snapshot["generated_ticket_authority"]["work_packet_SHA256"] == record[
+        "work_packet_SHA256"
+    ]
+    assert snapshot["successor_ticket_generated_not_activated"] is True
+    assert snapshot["ticket_execution_authorized"] is False
+    assert snapshot["WorkPacket_execution_authorized"] is False
+    assert snapshot["worker_execution"] is False
+    assert snapshot["Kanban_dispatch"] is False
+    assert snapshot["Git_mutation"] is False
+    assert context["available"] is False
+    assert context["message"] == "no active governed ticket"
+    assert context["current_ticket_id"] is None
+    assert context["pending_ticket_approval_count"] == 1
+    assert context["next_action"]["id"] == "APPROVE_P18_9_2"
+    assert [item["id"] for item in context["approvals"]["items"]] == ["P18.9.2"]
+
+
+def test_workflow_control_projects_p18_9_2_successor_after_predecessor_handoff_overlay(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    bridge.generate_current_ticket(workflow=_p18_9_2_workflow())
+    monkeypatch.setattr(
+        pr,
+        "_p18_9_0_generation_overlay",
+        lambda: (
+            {
+                "current_ticket_id": "P18.9.1",
+                "current_ticket_title": P18_9_1_IMPLEMENTATION_TITLE,
+                "workflow_status": "review_accepted_pending_human_git_handoff",
+                "next_ticket_ready": False,
+            },
+            None,
+        ),
+    )
+    monkeypatch.setattr(
+        pr,
+        "_load_current_projection_record",
+        lambda: {"ticket_id": "P18.9.1"},
+    )
+    monkeypatch.setattr(
+        pr,
+        "_current_ticket_governed_autonomy_overlay",
+        lambda _p: (None, None),
+    )
+    monkeypatch.setattr(pr, "_current_ticket_review_decision_overlay", lambda _p: None)
+    monkeypatch.setattr(
+        pr,
+        "_current_ticket_human_git_handoff_completion_overlay",
+        lambda _p: _p18_9_2_workflow(),
+    )
+
+    snapshot = pr.build_workflow_control_snapshot()
+
+    assert snapshot["current_ticket_id"] is None
+    assert snapshot["closed_predecessor_ticket_id"] == "P18.9.1"
+    assert snapshot["generated_successor_ticket_id"] == "P18.9.2"
+    assert snapshot["workflow_status"] == "awaiting_ticket_approval"
+    assert snapshot["pending_ticket_approval_count"] == 1
+    assert snapshot["next_action"]["id"] == "APPROVE_P18_9_2"
+    assert snapshot["successor_ticket_generated_not_activated"] is True
+    assert snapshot["worker_execution"] is False
+    assert snapshot["Kanban_dispatch"] is False
+    assert snapshot["Git_mutation"] is False
+
+
+@pytest.mark.parametrize(
+    (
+        "decision",
+        "text",
+        "status",
+        "workflow_status",
+        "next_action_id",
+        "opposite_decision",
+        "opposite_text",
+    ),
+    (
+        (
+            "approve",
+            "Apruebo P18.9.2",
+            "approved",
+            "ticket_approved",
+            "P18_9_2_APPROVED_NO_EXECUTION",
+            "reject",
+            "Reject P18.9.2",
+        ),
+        (
+            "reject",
+            "Reject P18.9.2",
+            "rejected",
+            "awaiting_correction",
+            "REVISE_P18_9_2",
+            "approve",
+            "Approve P18.9.2",
+        ),
+    ),
+)
+def test_chat_explicit_p18_9_2_successor_decision_preserves_no_active_ticket(
+    bridge_home,
+    monkeypatch,
+    decision,
+    text,
+    status,
+    workflow_status,
+    next_action_id,
+    opposite_decision,
+    opposite_text,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    bridge.generate_current_ticket(workflow=_p18_9_2_workflow())
+    record = bridge.load_generation_record(ticket_id="P18.9.2")
+    assert record is not None
+    monkeypatch.setattr(
+        pr,
+        "_p18_9_0_generation_overlay",
+        lambda: (_p18_9_2_workflow(), None),
+    )
+
+    result = _chat_tool_result(
+        "decide_pending_approval",
+        {
+            "decision": decision,
+            "human_decision_text": text,
+            "approval_id": "P18.9.2",
+            "project_id": "PEPPER",
+            "ticket_id": "P18.9.2",
+            "next_action_id": "APPROVE_P18_9_2",
+            "ticket_spec_sha256": record["ticket_spec_SHA256"],
+            "work_packet_id": record["work_packet_id"],
+            "work_packet_sha256": record["work_packet_SHA256"],
+        },
+    )
+    replay = _chat_tool_result(
+        "decide_pending_approval",
+        {"decision": decision, "human_decision_text": text},
+    )
+    opposite = _chat_tool_result(
+        "decide_pending_approval",
+        {"decision": opposite_decision, "human_decision_text": opposite_text},
+    )
+    decision_record = bridge.load_approval_decision_record(
+        ticket_id="P18.9.2",
+        generation_record=record,
+    )
+    snapshot = pr.build_workflow_control_snapshot()
+
+    assert result["success"] is True
+    assert result["approval_id"] == "P18.9.2"
+    assert result["status"] == status
+    assert result["workflow_status"] == workflow_status
+    assert result["current_ticket_id"] is None
+    assert result["pending_approval_count"] == 0
+    assert result["pending_ticket_approval_count"] == 0
+    assert result["next_action"]["id"] == next_action_id
+    assert result["ticket_execution_authorized"] is False
+    assert result["WorkPacket_execution_authorized"] is False
+    assert result["worker_execution"] is False
+    assert result["Kanban_dispatch"] is False
+    assert result["Git_mutation"] is False
+    assert replay["status"] == status
+    assert replay["idempotent_replay"] is True
+    assert replay["applied"] is False
+    assert opposite["success"] is False
+    assert "opposite" in opposite["error"]
+    assert decision_record is not None
+    assert decision_record["approval_id"] == "P18.9.2"
+    assert decision_record["decision"] == decision
+    assert decision_record["ticket_spec_SHA256"] == record["ticket_spec_SHA256"]
+    assert decision_record["work_packet_id"] == record["work_packet_id"]
+    assert decision_record["work_packet_SHA256"] == record["work_packet_SHA256"]
+    assert decision_record["worker_execution"] is False
+    assert decision_record["Kanban_dispatch"] is False
+    assert decision_record["Git_mutation"] is False
+    assert pr.build_approval_inbox_source()["approvals"] == []
+    assert snapshot["current_ticket_id"] is None
+    assert snapshot["generated_successor_ticket_id"] == "P18.9.2"
+    assert snapshot["workflow_status"] == workflow_status
+    assert snapshot["pending_ticket_approval_count"] == 0
+    assert snapshot["next_action"]["id"] == next_action_id
+    assert snapshot["successor_ticket_generated_not_activated"] is True
+    assert snapshot["worker_execution"] is False
+    assert snapshot["Kanban_dispatch"] is False
+    assert snapshot["Git_mutation"] is False
+
+
+def test_chat_p18_9_2_successor_decision_rejects_noncanonical_pending_context(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    bridge.generate_current_ticket(workflow=_p18_9_2_workflow())
+    record = bridge.load_generation_record(ticket_id="P18.9.2")
+    assert record is not None
+    workflow = {
+        **_p18_9_2_workflow(),
+        **bridge.generated_record_to_workflow_overlay(record),
+        "current_ticket_id": None,
+        "generated_successor_ticket_id": "P18.9.2",
+        "next_ticket_id": "P18.9.2",
+        "canonical_next_ticket_authority": {
+            "ticket_id": "P18.9.1",
+            "ticket_title": P18_9_1_IMPLEMENTATION_TITLE,
+        },
+    }
+    monkeypatch.setattr(pr, "build_workflow_control_snapshot", lambda: workflow)
+
+    result = _chat_tool_result(
+        "decide_pending_approval",
+        {"decision": "approve", "human_decision_text": "Approve P18.9.2"},
+    )
+
+    assert result["success"] is False
+    assert "canonical roadmap next ticket" in result["error"]
+    assert bridge.load_approval_decision_record(ticket_id="P18.9.2") is None
+
+
+def test_chat_p18_9_2_successor_decision_rejects_conflicting_active_ticket(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    bridge.generate_current_ticket(workflow=_p18_9_2_workflow())
+    record = bridge.load_generation_record(ticket_id="P18.9.2")
+    assert record is not None
+    workflow = {
+        **_p18_9_2_workflow(),
+        **bridge.generated_record_to_workflow_overlay(record),
+        "current_ticket_id": "P18.9.1",
+        "current_ticket_title": P18_9_1_IMPLEMENTATION_TITLE,
+        "generated_successor_ticket_id": "P18.9.2",
+        "next_action": {
+            "id": "APPROVE_P18_9_2",
+            "target_ticket_id": "P18.9.2",
+            "target_ticket_title": "Control Center Overview",
+        },
+    }
+    monkeypatch.setattr(pr, "build_workflow_control_snapshot", lambda: workflow)
+
+    result = _chat_tool_result(
+        "decide_pending_approval",
+        {
+            "decision": "approve",
+            "human_decision_text": "Approve P18.9.2",
+            "approval_id": "P18.9.2",
+        },
+    )
+
+    assert result["success"] is False
+    assert "current pending ticket" in result["error"]
+    assert bridge.load_approval_decision_record(ticket_id="P18.9.2") is None
+
+
+def test_chat_p18_9_2_successor_decision_rejects_wrong_digest(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    bridge.generate_current_ticket(workflow=_p18_9_2_workflow())
+    monkeypatch.setattr(
+        pr,
+        "_p18_9_0_generation_overlay",
+        lambda: (_p18_9_2_workflow(), None),
+    )
+
+    result = _chat_tool_result(
+        "decide_pending_approval",
+        {
+            "decision": "approve",
+            "human_decision_text": "Approve P18.9.2",
+            "ticket_spec_sha256": "0" * 64,
+        },
+    )
+
+    assert result["success"] is False
+    assert "TicketSpec digest" in result["error"]
+    assert bridge.load_approval_decision_record(ticket_id="P18.9.2") is None
+
+
 def test_artifact_section_public_max_chunk_stays_under_tool_result_limit(
     bridge_home,
 ) -> None:

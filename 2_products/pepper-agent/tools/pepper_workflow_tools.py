@@ -65,6 +65,46 @@ def _approval_action_id(ticket_id: str) -> str:
     return f"APPROVE_{_ticket_action_token(ticket_id)}"
 
 
+def _pending_ticket_approval_items(context: dict[str, Any]) -> list[dict[str, Any]]:
+    approvals = context.get("approvals", {}).get("items", [])
+    if not isinstance(approvals, list):
+        return []
+    return [
+        approval
+        for approval in approvals
+        if isinstance(approval, dict)
+        and approval.get("request_type") == "ticket_approval"
+        and approval.get("status") == "pending"
+    ]
+
+
+def _workflow_control_context(context: dict[str, Any]) -> dict[str, Any]:
+    workflow_control = context.get("workflow_control")
+    return workflow_control if isinstance(workflow_control, dict) else {}
+
+
+def _default_ticket_approval_id(context: dict[str, Any]) -> str:
+    current_ticket_id = str(context.get("current_ticket_id") or "").strip()
+    if current_ticket_id:
+        return current_ticket_id
+    pending = _pending_ticket_approval_items(context)
+    if len(pending) == 1:
+        return str(pending[0].get("id") or "").strip()
+    if context.get("workflow_status") in {"ticket_approved", "awaiting_correction"}:
+        workflow_control = _workflow_control_context(context)
+        generated_successor_ticket_id = str(
+            workflow_control.get("generated_successor_ticket_id") or ""
+        ).strip()
+        if generated_successor_ticket_id:
+            return generated_successor_ticket_id
+        authority = workflow_control.get("generated_ticket_authority")
+        if not isinstance(authority, dict):
+            authority = context.get("generated_ticket_authority")
+        if isinstance(authority, dict):
+            return str(authority.get("ticket_id") or "").strip()
+    return ""
+
+
 def _validate_explicit_human_decision(
     *,
     decision: str,
@@ -115,16 +155,19 @@ def _validate_explicit_human_decision(
 
 def _validate_optional_current_approval_guards(args: dict[str, Any], context: dict[str, Any]) -> str:
     current_ticket_id = str(context.get("current_ticket_id") or "").strip()
-    if not current_ticket_id:
+    default_approval_id = _default_ticket_approval_id(context)
+    if not default_approval_id:
         raise ValueError("no current pending ticket approval is active")
-    approval_id = str(args.get("approval_id") or current_ticket_id).strip()
-    if approval_id != current_ticket_id:
+    approval_id = str(args.get("approval_id") or default_approval_id).strip()
+    if current_ticket_id and approval_id != current_ticket_id:
         raise ValueError("approval guard does not match the current pending ticket")
+    if not current_ticket_id and approval_id != default_approval_id:
+        raise ValueError("approval guard does not match the pending successor ticket")
     if str(args.get("project_id") or CURRENT_PROJECT_ID).strip() != CURRENT_PROJECT_ID:
         raise ValueError("active governed project must be PEPPER")
-    if str(args.get("ticket_id") or current_ticket_id).strip() != current_ticket_id:
+    if str(args.get("ticket_id") or approval_id).strip() != approval_id:
         raise ValueError("ticket guard does not match the current pending ticket")
-    expected_next_action = _approval_action_id(current_ticket_id)
+    expected_next_action = _approval_action_id(approval_id)
     next_action_id = str(args.get("next_action_id") or expected_next_action).strip()
     if next_action_id != expected_next_action:
         raise ValueError(f"approval next action must be {expected_next_action}")
@@ -158,17 +201,21 @@ def _validate_pending_current_ticket_approval(
     if context.get("macroproject_id") != "P18.9":
         raise ValueError("current macroproject is not P18.9")
     current_ticket_id = str(context.get("current_ticket_id") or "").strip()
-    if not current_ticket_id:
+    approval_id = str(approval.get("id") or "").strip()
+    effective_ticket_id = current_ticket_id or approval_id
+    if not effective_ticket_id:
         raise ValueError("no current active ticket approval")
+    if current_ticket_id and approval_id != current_ticket_id:
+        raise ValueError("approval target mismatch")
     next_action = context.get("next_action")
     if not isinstance(next_action, dict):
         raise ValueError("current next action is unavailable")
-    expected_next_action = _approval_action_id(current_ticket_id)
+    expected_next_action = _approval_action_id(effective_ticket_id)
     if next_action.get("id") != expected_next_action:
         raise ValueError(f"current next action is not {expected_next_action}")
-    if next_action.get("target_ticket_id") != current_ticket_id:
-        raise ValueError(f"current next action does not target {current_ticket_id}")
-    if approval.get("id") != current_ticket_id:
+    if next_action.get("target_ticket_id") != effective_ticket_id:
+        raise ValueError(f"current next action does not target {effective_ticket_id}")
+    if approval_id != effective_ticket_id:
         raise ValueError("approval target mismatch")
     if approval.get("status") != "pending":
         raise ValueError("approval is not pending")
@@ -177,8 +224,34 @@ def _validate_pending_current_ticket_approval(
     target = approval.get("target")
     if not isinstance(target, dict):
         raise ValueError("approval target is unavailable")
-    if current_ticket_id not in str(target.get("label") or ""):
-        raise ValueError(f"approval target does not match {current_ticket_id}")
+    if effective_ticket_id not in str(target.get("label") or ""):
+        raise ValueError(f"approval target does not match {effective_ticket_id}")
+    authority = context.get("workflow_control", {}).get("generated_ticket_authority")
+    if not isinstance(authority, dict):
+        authority = context.get("generated_ticket_authority")
+    if not isinstance(authority, dict):
+        raise ValueError("current generated ticket authority is unavailable")
+    authority_ticket_id = str(authority.get("ticket_id") or "").strip()
+    if authority_ticket_id and authority_ticket_id != effective_ticket_id:
+        raise ValueError("generated ticket authority does not match pending approval")
+    if not current_ticket_id:
+        workflow_control = _workflow_control_context(context)
+        canonical = workflow_control.get("canonical_next_ticket_authority")
+        if not isinstance(canonical, dict):
+            canonical = context.get("canonical_next_ticket_authority")
+        if (
+            not isinstance(canonical, dict)
+            or canonical.get("ticket_id") != effective_ticket_id
+        ):
+            raise ValueError("pending successor approval is not the canonical roadmap next ticket")
+        generated_successor_ticket_id = str(
+            workflow_control.get("generated_successor_ticket_id") or ""
+        ).strip()
+        if (
+            generated_successor_ticket_id
+            and generated_successor_ticket_id != effective_ticket_id
+        ):
+            raise ValueError("generated successor ticket does not match pending approval")
 
 
 def _validate_current_ticket_identity_context(context: dict[str, Any]) -> None:
@@ -187,7 +260,8 @@ def _validate_current_ticket_identity_context(context: dict[str, Any]) -> None:
     if context.get("macroproject_id") != "P18.9":
         raise ValueError("current macroproject is not P18.9")
     if not str(context.get("current_ticket_id") or "").strip():
-        raise ValueError("no current active ticket")
+        if not _default_ticket_approval_id(context):
+            raise ValueError("no current active ticket")
 
 
 def _validate_explicit_projection_request(value: object, *, current_ticket_id: str) -> str:
@@ -568,7 +642,7 @@ def _decide_pending_approval(args: dict[str, Any], **_kwargs) -> str:
         human_decision_text = _validate_explicit_human_decision(
             decision=decision,
             human_decision_text=args.get("human_decision_text"),
-            current_ticket_id=str(context["current_ticket_id"]),
+            current_ticket_id=approval_id,
         )
         _validate_optional_current_ticket_digests(args, context)
         approvals = context.get("approvals", {}).get("items", [])
