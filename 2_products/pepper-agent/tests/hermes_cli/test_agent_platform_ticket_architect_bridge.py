@@ -1396,6 +1396,181 @@ def test_generated_ticket_approval_detail_binds_ticket_and_work_packet_authority
     assert detail["decisions"] == []
 
 
+def test_generated_ticket_approval_detail_exposes_exact_artifacts(bridge_home) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    bridge.generate_p18_9_0_ticket(workflow=_workflow())
+    record = bridge.load_p18_9_0_generation_record()
+    assert record is not None
+
+    detail = pr.build_approval_detail_source("P18.9.0")
+    inspection = detail["artifact_inspection"]
+    exact = inspection["exact_contract"]
+    work_packet = record["work_packet_compilation_result"]["work_packet"]
+
+    assert inspection["inspection_status"] == "available"
+    assert inspection["validated"] is True
+    assert inspection["read_only"] is True
+    assert exact["ticket_spec"]["sha256"] == record["ticket_spec_SHA256"]
+    assert exact["ticket_spec"]["body"] == record["ticket_spec"]
+    assert exact["work_packet"]["id"] == record["work_packet_id"]
+    assert exact["work_packet"]["sha256"] == record["work_packet_SHA256"]
+    assert exact["work_packet"]["body"] == work_packet
+    assert exact["dependency_plan"]["body"] == record["dependency_plan"]
+    assert exact["lint_result"]["body"] == record["lint_report"]
+    assert exact["ticket_approval_record"]["body"] == record["ticket_approval_record"]
+    assert exact["bridge_record"]["sha256"] == record["bridge_SHA256"]
+    assert exact["bridge_record"]["body"] == record
+    assert inspection["derived_summary"]["scope"]["allowed_paths"] == (
+        work_packet["repository_scope"]["allowed_paths"]
+    )
+    assert inspection["derived_summary"]["tool_authority"]["git_authority"] == "human_only"
+    assert inspection["side_effect_authority"]["Git_mutation"] is False
+    assert inspection["side_effect_authority"]["Kanban_dispatch"] is False
+
+
+@pytest.mark.parametrize(
+    ("record_field", "mismatch_field", "tampered_digest"),
+    (
+        ("ticket_spec_SHA256", "TicketSpec_SHA256", "0" * 64),
+        ("work_packet_SHA256", "WorkPacket_SHA256", "1" * 64),
+    ),
+)
+def test_approval_detail_blocks_identity_mismatched_artifacts(
+    bridge_home,
+    record_field: str,
+    mismatch_field: str,
+    tampered_digest: str,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    bridge.generate_p18_9_0_ticket(workflow=_workflow())
+    record = bridge.load_p18_9_0_generation_record()
+    assert record is not None
+    record[record_field] = tampered_digest
+    record["bridge_SHA256"] = bridge._record_digest(record)
+    _write_generation_record(record)
+
+    detail = pr.build_approval_detail_source("P18.9.0")
+    inspection = detail["artifact_inspection"]
+
+    assert inspection["inspection_status"] == "blocked"
+    assert inspection["blocker_code"] == pr.APPROVAL_ARTIFACT_IDENTITY_MISMATCH
+    assert inspection["exact_contract"] is None
+    assert inspection["approval_binding"][mismatch_field] == tampered_digest
+    assert any(
+        mismatch["field"] == mismatch_field
+        for mismatch in inspection["identity_mismatches"]
+    )
+    assert detail["decisions"] == []
+
+
+def test_approval_detail_reports_missing_artifact_without_regeneration(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    bridge.generate_p18_9_0_ticket(workflow=_workflow())
+    record = bridge.load_p18_9_0_generation_record()
+    assert record is not None
+    path = bridge.generation_record_path_for_ticket("P18.9.0")
+    path.unlink()
+
+    def fail_regeneration(*_args, **_kwargs):
+        raise AssertionError("inspection must not regenerate ticket authority")
+
+    monkeypatch.setattr(bridge, "generate_p18_9_0_ticket", fail_regeneration)
+    monkeypatch.setattr(bridge, "generate_current_ticket", fail_regeneration)
+    monkeypatch.setattr(pr, "_current_pending_ticket_approval_record", lambda: record)
+
+    detail = pr.build_approval_detail_source("P18.9.0")
+    inspection = detail["artifact_inspection"]
+
+    assert inspection["inspection_status"] == "blocked"
+    assert inspection["blocker_code"] == pr.APPROVAL_ARTIFACT_MISSING
+    assert inspection["exact_contract"] is None
+    assert inspection["record_path"] == str(path)
+    assert not path.exists()
+
+
+def test_approval_detail_blocks_semantically_invalid_artifact_without_regeneration(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    bridge.generate_p18_9_0_ticket(workflow=_workflow())
+    record = bridge.load_p18_9_0_generation_record()
+    assert record is not None
+    corrupted = json.loads(json.dumps(record))
+    corrupted["ticket_spec"]["title"] = "Semantically Invalid TicketSpec Title"
+    corrupted["bridge_SHA256"] = bridge._record_digest(corrupted)
+    _write_generation_record(corrupted)
+
+    regeneration_calls = []
+
+    def fail_regeneration(*args, **kwargs):
+        regeneration_calls.append((args, kwargs))
+        raise AssertionError("inspection must not regenerate ticket authority")
+
+    monkeypatch.setattr(bridge, "generate_p18_9_0_ticket", fail_regeneration)
+    monkeypatch.setattr(bridge, "generate_current_ticket", fail_regeneration)
+    monkeypatch.setattr(pr, "generate_current_governed_ticket", fail_regeneration)
+    monkeypatch.setattr(pr, "_current_pending_ticket_approval_record", lambda: record)
+
+    detail = pr.build_approval_detail_source("P18.9.0")
+    inspection = detail["artifact_inspection"]
+
+    assert inspection["inspection_status"] == "blocked"
+    assert inspection["blocker_code"] == pr.APPROVAL_ARTIFACT_VALIDATION_FAILED
+    assert inspection["validated"] is False
+    assert inspection["exact_contract"] is None
+    assert detail["decisions"] == []
+    assert detail["approval"]["status"] == "pending"
+    assert bridge.load_approval_decision_record(
+        ticket_id="P18.9.0",
+        generation_record=record,
+    ) is None
+    assert regeneration_calls == []
+    assert inspection["side_effect_authority"]["ticket_execution_authorized"] is False
+    assert inspection["side_effect_authority"]["WorkPacket_execution_authorized"] is False
+    assert inspection["side_effect_authority"]["runtime_execution_authorized"] is False
+    assert inspection["side_effect_authority"]["worker_execution"] is False
+    assert inspection["side_effect_authority"]["Kanban_dispatch"] is False
+    assert inspection["side_effect_authority"]["Git_mutation"] is False
+
+
+def test_ticket_approval_inspection_is_idempotent_and_tool_visible(bridge_home) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    bridge.generate_p18_9_0_ticket(workflow=_workflow())
+    record = bridge.load_p18_9_0_generation_record()
+    assert record is not None
+    path = bridge.generation_record_path_for_ticket("P18.9.0")
+    before = path.read_text(encoding="utf-8")
+
+    first = pr.build_approval_detail_source("P18.9.0")
+    second = pr.build_approval_detail_source("P18.9.0")
+    tool_result = _chat_tool_result("inspect_pending_approval")
+    after = path.read_text(encoding="utf-8")
+
+    assert first["artifact_inspection"] == second["artifact_inspection"]
+    assert before == after
+    assert bridge.load_approval_decision_record(
+        ticket_id="P18.9.0",
+        generation_record=record,
+    ) is None
+    assert tool_result["artifact_inspection"]["inspection_status"] == "available"
+    assert tool_result["artifact_inspection"]["exact_contract"]["ticket_spec"]["body"] == (
+        record["ticket_spec"]
+    )
+    assert tool_result["artifact_inspection"]["exact_contract"]["work_packet"]["id"] == (
+        record["work_packet_id"]
+    )
+    assert tool_result["auto_approval"] is False
+
+
 def test_p18_9_0_ticket_approve_persists_without_recompiling_or_executing(
     bridge_home,
     monkeypatch,

@@ -516,7 +516,7 @@ def _inspect_pending_approval(args: dict[str, Any], **_kwargs) -> str:
     if not approval_id:
         return tool_error("approval_id is required when no pending approval can be selected")
     detail = pr.build_approval_detail_source(approval_id)
-    return _result({
+    payload = {
         "source_tool": "inspect_pending_approval",
         "source_system": detail.get("source_system", pr.APPROVAL_SOURCE_SYSTEM),
         "approval_state": "pending_approval_inspected",
@@ -524,7 +524,10 @@ def _inspect_pending_approval(args: dict[str, Any], **_kwargs) -> str:
         "evidence": detail.get("evidence", []),
         "decisions": detail.get("decisions", []),
         "auto_approval": False,
-    })
+    }
+    if "artifact_inspection" in detail:
+        payload["artifact_inspection"] = detail["artifact_inspection"]
+    return _result(payload)
 
 
 def _decide_pending_approval(args: dict[str, Any], **_kwargs) -> str:

@@ -286,6 +286,7 @@ def test_inspect_pending_approval_is_read_only_action(monkeypatch) -> None:
     assert result["approval"]["id"] == "approval-1"
     assert result["auto_approval"] is False
     assert result["decisions"] == []
+    assert "artifact_inspection" not in result
 
 
 def test_pepper_toolset_exposes_no_arbitrary_shell_or_file_authority(monkeypatch) -> None:

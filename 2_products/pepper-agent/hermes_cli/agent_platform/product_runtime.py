@@ -25,6 +25,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 APPROVAL_SOURCE_SYSTEM = "hermes-write-approval"
+APPROVAL_ARTIFACT_IDENTITY_MISMATCH = "APPROVAL_ARTIFACT_IDENTITY_MISMATCH"
+APPROVAL_ARTIFACT_MISSING = "APPROVAL_ARTIFACT_MISSING"
+APPROVAL_ARTIFACT_VALIDATION_FAILED = "APPROVAL_ARTIFACT_VALIDATION_FAILED"
 CONTROLLED_EXECUTION_SOURCE_SYSTEM = "pepper-controlled-execution"
 CONTROLLED_CUTOVER_SCHEMA_VERSION = 1
 P18_7_COMMIT = "661f1362a7d019c1629e73ad04e4a70e966e394c"
@@ -1610,6 +1613,331 @@ def _ticket_approval_evidence(record: dict[str, Any]) -> list[dict[str, str]]:
     ]
 
 
+def _ticket_approval_binding_identity(record: dict[str, Any]) -> dict[str, Any]:
+    approval_record = record.get("ticket_approval_record")
+    if not isinstance(approval_record, dict):
+        approval_record = {}
+    return {
+        "approval_id": _safe_id(record.get("ticket_id")),
+        "approval_status": "pending",
+        "request_type": "ticket_approval",
+        "ticket_id": record.get("ticket_id"),
+        "bridge_SHA256": record.get("bridge_SHA256"),
+        "TicketSpec_SHA256": record.get("ticket_spec_SHA256"),
+        "dependency_plan_SHA256": record.get("dependency_plan_SHA256"),
+        "lint_report_SHA256": record.get("lint_report_SHA256"),
+        "WorkPacket_ID": record.get("work_packet_id"),
+        "WorkPacket_SHA256": record.get("work_packet_SHA256"),
+        "ticket_approval_record_SHA256": approval_record.get("approval_SHA256"),
+        "workflow_transition_result_SHA256": record.get("workflow_transition_result_SHA256"),
+    }
+
+
+def _ticket_approval_work_packet_body(record: dict[str, Any]) -> dict[str, Any]:
+    compilation = record.get("work_packet_compilation_result")
+    if not isinstance(compilation, dict):
+        return {}
+    packet = compilation.get("work_packet")
+    return packet if isinstance(packet, dict) else {}
+
+
+def _ticket_approval_compilation_evidence(record: dict[str, Any]) -> dict[str, Any]:
+    compilation = record.get("work_packet_compilation_result")
+    if not isinstance(compilation, dict):
+        return {}
+    evidence = compilation.get("evidence")
+    return evidence if isinstance(evidence, dict) else {}
+
+
+def _ticket_approval_exact_artifact_identity(record: dict[str, Any]) -> dict[str, Any]:
+    work_packet = _ticket_approval_work_packet_body(record)
+    compilation_evidence = _ticket_approval_compilation_evidence(record)
+    dependency_plan = record.get("dependency_plan")
+    if not isinstance(dependency_plan, dict):
+        dependency_plan = {}
+    lint_report = record.get("lint_report")
+    if not isinstance(lint_report, dict):
+        lint_report = {}
+    return {
+        "ticket_id": work_packet.get("ticket_id") or record.get("ticket_id"),
+        "TicketSpec_SHA256": (
+            compilation_evidence.get("source_ticket_SHA256")
+            or work_packet.get("source_ticket_SHA256")
+        ),
+        "dependency_plan_SHA256": (
+            dependency_plan.get("plan_SHA256")
+            or compilation_evidence.get("dependency_plan_SHA256")
+        ),
+        "lint_report_SHA256": (
+            lint_report.get("report_SHA256")
+            or compilation_evidence.get("fresh_lint_report_SHA256")
+        ),
+        "WorkPacket_ID": work_packet.get("work_packet_id"),
+        "WorkPacket_SHA256": work_packet.get("work_packet_SHA256"),
+    }
+
+
+def _ticket_approval_identity_mismatches(
+    approval_record: dict[str, Any],
+    persisted_record: dict[str, Any],
+) -> list[dict[str, Any]]:
+    mismatches: list[dict[str, Any]] = []
+    approval_binding = _ticket_approval_binding_identity(approval_record)
+    persisted_binding = _ticket_approval_binding_identity(persisted_record)
+    for field_name in (
+        "approval_id",
+        "ticket_id",
+        "bridge_SHA256",
+        "TicketSpec_SHA256",
+        "dependency_plan_SHA256",
+        "lint_report_SHA256",
+        "WorkPacket_ID",
+        "WorkPacket_SHA256",
+        "ticket_approval_record_SHA256",
+        "workflow_transition_result_SHA256",
+    ):
+        if approval_binding.get(field_name) != persisted_binding.get(field_name):
+            mismatches.append({
+                "field": field_name,
+                "approval_binding": approval_binding.get(field_name),
+                "persisted_record": persisted_binding.get(field_name),
+            })
+
+    exact_identity = _ticket_approval_exact_artifact_identity(persisted_record)
+    for field_name in (
+        "ticket_id",
+        "TicketSpec_SHA256",
+        "dependency_plan_SHA256",
+        "lint_report_SHA256",
+        "WorkPacket_ID",
+        "WorkPacket_SHA256",
+    ):
+        if persisted_binding.get(field_name) != exact_identity.get(field_name):
+            mismatches.append({
+                "field": field_name,
+                "persisted_record": persisted_binding.get(field_name),
+                "exact_artifact": exact_identity.get(field_name),
+            })
+    return mismatches
+
+
+def _ticket_approval_side_effect_authority(record: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "inspection_read_only": True,
+        "ticket_execution_authorized": record.get("ticket_execution_authorized"),
+        "WorkPacket_execution_authorized": record.get("WorkPacket_execution_authorized"),
+        "runtime_execution_authorized": record.get("runtime_execution_authorized"),
+        "worker_execution": record.get("worker_execution"),
+        "Kanban_dispatch": record.get("Kanban_dispatch"),
+        "Git_mutation": record.get("Git_mutation"),
+        "provider_dispatch_count": record.get("provider_dispatch_count"),
+        "model_inference_count": record.get("model_inference_count"),
+        "Git_commands_executed": record.get("Git_commands_executed"),
+        "Docker_commands_executed": record.get("Docker_commands_executed"),
+        "Graphify_commands_executed": record.get("Graphify_commands_executed"),
+        "WorkPacket_compilation_count": record.get("WorkPacket_compilation_count"),
+    }
+
+
+def _ticket_approval_missing_or_undefined_fields(
+    record: dict[str, Any],
+    work_packet: dict[str, Any],
+) -> list[str]:
+    candidates = {
+        "ticket_contract": record.get("ticket_contract"),
+        "predecessor_ticket_id": record.get("predecessor_ticket_id"),
+        "canonical_next_ticket_authority": record.get("canonical_next_ticket_authority"),
+        "work_packet.repository_scope": work_packet.get("repository_scope"),
+        "work_packet.response_contract": work_packet.get("response_contract"),
+        "work_packet.tasks": work_packet.get("tasks"),
+        "work_packet.validation_steps": work_packet.get("validation_steps"),
+    }
+    return [
+        field_name
+        for field_name, value in candidates.items()
+        if value is None or value == "" or value == []
+    ]
+
+
+def _ticket_approval_artifact_blocker(
+    *,
+    blocker_code: str,
+    blocker_detail: str,
+    record: dict[str, Any],
+    path: Path | None,
+    identity_mismatches: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return {
+        "inspection_status": "blocked",
+        "read_only": True,
+        "validated": False,
+        "blocker_code": blocker_code,
+        "blocker_detail": blocker_detail,
+        "record_path": str(path) if path is not None else None,
+        "approval_binding": _ticket_approval_binding_identity(record),
+        "identity_mismatches": identity_mismatches or [],
+        "exact_contract": None,
+        "derived_summary": None,
+        "missing_or_undefined_fields": [],
+        "side_effect_authority": _ticket_approval_side_effect_authority(record),
+    }
+
+
+def _ticket_approval_derived_summary(record: dict[str, Any]) -> dict[str, Any]:
+    ticket_spec = record.get("ticket_spec")
+    if not isinstance(ticket_spec, dict):
+        ticket_spec = {}
+    work_packet = _ticket_approval_work_packet_body(record)
+    repository_scope = work_packet.get("repository_scope")
+    if not isinstance(repository_scope, dict):
+        repository_scope = {}
+    validation_steps = work_packet.get("validation_steps")
+    if not isinstance(validation_steps, list):
+        validation_steps = []
+    tasks = work_packet.get("tasks")
+    if not isinstance(tasks, list):
+        tasks = []
+    return {
+        "ticket_id": record.get("ticket_id"),
+        "ticket_title": record.get("ticket_title"),
+        "artifact_identity": _ticket_approval_binding_identity(record),
+        "ticket_spec": {
+            "ticket_type": ticket_spec.get("ticket_type"),
+            "objective": ticket_spec.get("objective"),
+            "task_count": len(ticket_spec.get("tasks") or []),
+            "validation_step_count": len(ticket_spec.get("validation_steps") or []),
+        },
+        "work_packet": {
+            "work_packet_id": work_packet.get("work_packet_id"),
+            "authority_boundary": work_packet.get("authority_boundary"),
+            "execution_ready": work_packet.get("execution_ready"),
+            "execution_mode": work_packet.get("execution_mode"),
+            "git_authority": work_packet.get("git_authority"),
+            "task_count": len(tasks),
+            "validation_step_count": len(validation_steps),
+        },
+        "scope": {
+            "allowed_paths": list(repository_scope.get("allowed_paths") or []),
+            "forbidden_paths": list(repository_scope.get("forbidden_paths") or []),
+        },
+        "tool_authority": {
+            "allowed_actions": list(repository_scope.get("allowed_actions") or []),
+            "forbidden_actions": list(repository_scope.get("forbidden_actions") or []),
+            "command_execution_authorized": False,
+            "git_authority": work_packet.get("git_authority"),
+        },
+        "validation": {
+            "steps": [
+                {
+                    "validation_id": step.get("validation_id"),
+                    "kind": step.get("kind"),
+                    "required": step.get("required"),
+                    "command_execution_authorized": step.get("command_execution_authorized"),
+                }
+                for step in validation_steps
+                if isinstance(step, dict)
+            ],
+        },
+        "side_effect_authority": _ticket_approval_side_effect_authority(record),
+    }
+
+
+def _ticket_approval_artifact_inspection(record: dict[str, Any]) -> dict[str, Any]:
+    from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
+        TicketArchitectBridgeConflict,
+        generation_record_path_for_ticket,
+        load_generation_record,
+    )
+
+    ticket_id = _safe_id(record.get("ticket_id"))
+    path: Path | None = None
+    if ticket_id:
+        path = generation_record_path_for_ticket(ticket_id)
+    try:
+        persisted_record = (
+            load_generation_record(ticket_id=ticket_id) if ticket_id else None
+        )
+    except TicketArchitectBridgeConflict as exc:
+        return _ticket_approval_artifact_blocker(
+            blocker_code=APPROVAL_ARTIFACT_VALIDATION_FAILED,
+            blocker_detail=str(exc) or "approval artifact validation failed",
+            record=record,
+            path=path,
+        )
+    if persisted_record is None:
+        return _ticket_approval_artifact_blocker(
+            blocker_code=APPROVAL_ARTIFACT_MISSING,
+            blocker_detail="persisted ticket approval artifact is unavailable",
+            record=record,
+            path=path,
+        )
+
+    identity_mismatches = _ticket_approval_identity_mismatches(record, persisted_record)
+    if identity_mismatches:
+        return _ticket_approval_artifact_blocker(
+            blocker_code=APPROVAL_ARTIFACT_IDENTITY_MISMATCH,
+            blocker_detail=(
+                "approval binding does not match the persisted artifact identity"
+            ),
+            record=record,
+            path=path,
+            identity_mismatches=identity_mismatches,
+        )
+
+    work_packet = _ticket_approval_work_packet_body(persisted_record)
+    approval_record = persisted_record.get("ticket_approval_record")
+    if not isinstance(approval_record, dict):
+        approval_record = {}
+    return {
+        "inspection_status": "available",
+        "read_only": True,
+        "validated": True,
+        "blocker_code": None,
+        "blocker_detail": None,
+        "record_path": str(path) if path is not None else None,
+        "approval_binding": _ticket_approval_binding_identity(persisted_record),
+        "exact_contract": {
+            "ticket_spec": {
+                "artifact_type": "TicketSpec",
+                "sha256": persisted_record.get("ticket_spec_SHA256"),
+                "body": persisted_record.get("ticket_spec"),
+            },
+            "work_packet": {
+                "artifact_type": "WorkPacket",
+                "id": persisted_record.get("work_packet_id"),
+                "sha256": persisted_record.get("work_packet_SHA256"),
+                "body": work_packet,
+            },
+            "dependency_plan": {
+                "artifact_type": "TicketDependencyPlan",
+                "sha256": persisted_record.get("dependency_plan_SHA256"),
+                "body": persisted_record.get("dependency_plan"),
+            },
+            "lint_result": {
+                "artifact_type": "TicketLintReport",
+                "sha256": persisted_record.get("lint_report_SHA256"),
+                "body": persisted_record.get("lint_report"),
+            },
+            "ticket_approval_record": {
+                "artifact_type": "TicketApprovalRecord",
+                "sha256": approval_record.get("approval_SHA256"),
+                "body": approval_record,
+            },
+            "bridge_record": {
+                "artifact_type": "TicketArchitectBridgeGenerationRecord",
+                "sha256": persisted_record.get("bridge_SHA256"),
+                "body": persisted_record,
+            },
+        },
+        "derived_summary": _ticket_approval_derived_summary(persisted_record),
+        "missing_or_undefined_fields": _ticket_approval_missing_or_undefined_fields(
+            persisted_record,
+            work_packet,
+        ),
+        "side_effect_authority": _ticket_approval_side_effect_authority(persisted_record),
+    }
+
+
 def build_approval_inbox_source() -> dict[str, Any]:
     """Return the bounded live approval inbox source for the active profile."""
 
@@ -1661,6 +1989,7 @@ def build_approval_detail_source(approval_id: str) -> dict[str, Any]:
             "canonical_approval_authority": "pepper-controlled-human-decision-v1",
             "approval": summary,
             "evidence": _ticket_approval_evidence(record),
+            "artifact_inspection": _ticket_approval_artifact_inspection(record),
             "decisions": [],
         }
 
