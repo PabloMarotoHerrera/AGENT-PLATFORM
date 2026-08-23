@@ -995,6 +995,7 @@ def load_generation_record(
     *,
     ticket_id: str,
     target: GovernedTicketGenerationTarget | None = None,
+    allow_terminal_rejected_historical: bool = False,
 ) -> dict[str, Any] | None:
     """Load and validate one persisted ticket-generation authority record."""
 
@@ -1010,7 +1011,19 @@ def load_generation_record(
         raise TicketArchitectBridgeConflict(
             f"{ticket_id} generated authority record is unreadable"
         ) from exc
-    return validate_generation_record(record, target=resolved_target)
+    try:
+        return validate_generation_record(record, target=resolved_target)
+    except (TicketArchitectBridgeConflict, TicketArchitectBridgeInputError) as exc:
+        if (
+            allow_terminal_rejected_historical
+            and target is None
+            and resolved_target is None
+        ):
+            return _validate_terminal_rejected_historical_generation_record(
+                record,
+                current_authority_error=exc,
+            )
+        raise
 
 
 def load_p18_9_0_approval_decision_record(
@@ -1068,6 +1081,22 @@ def validate_generation_record(
         raise TicketArchitectBridgeConflict("generated authority record digest mismatch")
     resolved_target = target or _target_from_record(record)
     _require_identity(record, target=resolved_target)
+    return _validate_generation_record_evidence(
+        record,
+        target=resolved_target,
+        require_artifact_identity=False,
+        require_ticket_spec_contract=True,
+    )
+
+
+def _validate_generation_record_evidence(
+    record: dict[str, Any],
+    *,
+    target: GovernedTicketGenerationTarget,
+    require_artifact_identity: bool,
+    require_ticket_spec_contract: bool,
+) -> dict[str, Any]:
+    """Validate self-contained generated evidence against an already resolved target."""
 
     try:
         project_spec = ProjectSpec.model_validate(record["project_spec"])
@@ -1088,32 +1117,41 @@ def validate_generation_record(
             "generated authority record contains invalid contract evidence"
         ) from exc
 
-    if project_spec.project_id != resolved_target.project_id:
-        raise TicketArchitectBridgeConflict(f"ProjectSpec must bind {resolved_target.project_id}")
-    if ticket_spec.project_id != resolved_target.project_id:
-        raise TicketArchitectBridgeConflict(f"TicketSpec must bind {resolved_target.project_id}")
-    if ticket_spec.ticket_id != resolved_target.ticket_id:
-        raise TicketArchitectBridgeConflict(f"TicketSpec must bind {resolved_target.ticket_id}")
-    if ticket_spec.title != resolved_target.ticket_title:
+    if require_artifact_identity:
+        _require_generation_artifact_identity(
+            record,
+            ticket_spec=ticket_spec,
+            dependency_plan=dependency_plan,
+            lint_report=lint_report,
+            compilation=compilation,
+            transition=transition,
+        )
+    if project_spec.project_id != target.project_id:
+        raise TicketArchitectBridgeConflict(f"ProjectSpec must bind {target.project_id}")
+    if ticket_spec.project_id != target.project_id:
+        raise TicketArchitectBridgeConflict(f"TicketSpec must bind {target.project_id}")
+    if ticket_spec.ticket_id != target.ticket_id:
+        raise TicketArchitectBridgeConflict(f"TicketSpec must bind {target.ticket_id}")
+    if ticket_spec.title != target.ticket_title:
         raise TicketArchitectBridgeConflict("TicketSpec title conflicts with roadmap")
-    if ticket_spec != _build_ticket_spec(resolved_target):
+    if require_ticket_spec_contract and ticket_spec != _build_ticket_spec(target):
         raise TicketArchitectBridgeConflict("TicketSpec conflicts with roadmap contract")
-    if context_pack.ticket_id != resolved_target.ticket_id:
-        raise TicketArchitectBridgeConflict(f"ContextPack must bind {resolved_target.ticket_id}")
-    if dependency_plan.ticket_ids != (resolved_target.ticket_id,):
+    if context_pack.ticket_id != target.ticket_id:
+        raise TicketArchitectBridgeConflict(f"ContextPack must bind {target.ticket_id}")
+    if dependency_plan.ticket_ids != (target.ticket_id,):
         raise TicketArchitectBridgeConflict(
-            f"dependency plan must contain only {resolved_target.ticket_id}"
+            f"dependency plan must contain only {target.ticket_id}"
         )
     if dependency_plan.blocked_ticket_ids:
         raise TicketArchitectBridgeConflict(
-            f"{resolved_target.ticket_id} dependency plan must be unblocked"
+            f"{target.ticket_id} dependency plan must be unblocked"
         )
-    if lint_report.ticket_ids != (resolved_target.ticket_id,):
-        raise TicketArchitectBridgeConflict(f"lint report must bind {resolved_target.ticket_id}")
+    if lint_report.ticket_ids != (target.ticket_id,):
+        raise TicketArchitectBridgeConflict(f"lint report must bind {target.ticket_id}")
     if lint_report.disposition is not TicketLintDisposition.PASS:
-        raise TicketArchitectBridgeConflict(f"{resolved_target.ticket_id} lint report must pass")
-    if compilation.work_packet.ticket_id != resolved_target.ticket_id:
-        raise TicketArchitectBridgeConflict(f"WorkPacket must bind {resolved_target.ticket_id}")
+        raise TicketArchitectBridgeConflict(f"{target.ticket_id} lint report must pass")
+    if compilation.work_packet.ticket_id != target.ticket_id:
+        raise TicketArchitectBridgeConflict(f"WorkPacket must bind {target.ticket_id}")
     if compilation.work_packet.execution_ready is not False:
         raise TicketArchitectBridgeConflict("WorkPacket must remain compile-only")
     if compilation.dependency_plan != dependency_plan:
@@ -1141,6 +1179,233 @@ def validate_generation_record(
         if record.get(field_name) is not False:
             raise TicketArchitectBridgeConflict(f"{field_name} must be false")
     return record
+
+
+def _require_generation_artifact_identity(
+    record: dict[str, Any],
+    *,
+    ticket_spec: TicketSpec,
+    dependency_plan: TicketDependencyPlan,
+    lint_report: TicketLintReport,
+    compilation: WorkPacketCompilationResult,
+    transition: GovernedWorkflowTransitionResult,
+) -> None:
+    expected = {
+        "ticket_spec_SHA256": compilation.evidence.source_ticket_SHA256,
+        "dependency_plan_SHA256": dependency_plan.plan_SHA256,
+        "lint_report_SHA256": lint_report.report_SHA256,
+        "work_packet_id": compilation.work_packet.work_packet_id,
+        "work_packet_SHA256": compilation.work_packet.work_packet_SHA256,
+        "workflow_transition_result_SHA256": transition.result_SHA256,
+    }
+    for key, value in expected.items():
+        if record.get(key) != value:
+            raise TicketArchitectBridgeConflict(f"generated authority {key} mismatch")
+    if compilation.work_packet.source_ticket != ticket_spec:
+        raise TicketArchitectBridgeConflict("WorkPacket must preserve TicketSpec")
+    if compilation.work_packet.source_ticket_SHA256 != record.get("ticket_spec_SHA256"):
+        raise TicketArchitectBridgeConflict("WorkPacket TicketSpec digest mismatch")
+
+
+def _validate_historical_generation_record(record: dict[str, Any]) -> dict[str, Any]:
+    """Validate persisted generation-time evidence without current roadmap drift checks."""
+
+    if not isinstance(record, dict):
+        raise TicketArchitectBridgeConflict("generated authority record must be an object")
+    if record.get("bridge_SHA256") != _record_digest(record):
+        raise TicketArchitectBridgeConflict("generated authority record digest mismatch")
+    target = _historical_target_from_record(record)
+    _require_historical_generation_identity(record, target=target)
+    return _validate_generation_record_evidence(
+        record,
+        target=target,
+        require_artifact_identity=True,
+        require_ticket_spec_contract=False,
+    )
+
+
+def _validate_terminal_rejected_historical_generation_record(
+    record: dict[str, Any],
+    *,
+    current_authority_error: Exception,
+) -> dict[str, Any]:
+    decision = _read_terminal_rejected_decision_candidate(record)
+    if decision is None:
+        raise current_authority_error
+    historical = _validate_historical_generation_record(record)
+    try:
+        _validate_terminal_rejected_decision_binding(historical, decision_record=decision)
+    except TicketArchitectBridgeConflict as exc:
+        raise current_authority_error from exc
+    return historical
+
+
+def _historical_target_from_record(record: dict[str, Any]) -> GovernedTicketGenerationTarget:
+    ticket_id = _safe_ticket_id(record.get("ticket_id"))
+    if ticket_id == CANONICAL_TICKET_ID:
+        return p18_9_0_generation_target()
+    canonical_authority = record.get("canonical_next_ticket_authority")
+    if not isinstance(canonical_authority, dict):
+        canonical_authority = {}
+    dependency_ticket_ids = (
+        canonical_authority.get("dependency_ticket_ids")
+        if canonical_authority.get("dependency_ticket_ids") is not None
+        else record.get("roadmap_dependency_ticket_ids")
+    )
+    ticket_contract = record.get("ticket_contract")
+    if not isinstance(ticket_contract, dict):
+        ticket_contract = canonical_authority.get("ticket_contract")
+    return GovernedTicketGenerationTarget(
+        project_id=str(record.get("project_id") or CANONICAL_PROJECT_ID),
+        project_name=str(record.get("project_name") or CANONICAL_PROJECT_NAME),
+        macroproject_id=str(record.get("macroproject_id") or CANONICAL_MACROPROJECT_ID),
+        macroproject_title=str(record.get("macroproject_title") or CANONICAL_MACROPROJECT_TITLE),
+        ticket_id=ticket_id,
+        ticket_title=str(
+            canonical_authority.get("ticket_title")
+            or record.get("ticket_title")
+            or ""
+        ),
+        next_action_id=str(
+            canonical_authority.get("next_action_id")
+            or record.get("source_next_action_id")
+            or canonical_generation_action_id(ticket_id)
+        ),
+        approval_next_action_id=approval_action_id(ticket_id),
+        approved_no_execution_next_action_id=approved_no_execution_action_id(ticket_id),
+        revise_next_action_id=revise_action_id(ticket_id),
+        canonical_roadmap_authority=str(
+            canonical_authority.get("canonical_roadmap_authority")
+            or record.get("canonical_roadmap_authority")
+            or ""
+        ),
+        roadmap_authority_path=canonical_roadmap_authority_path(
+            canonical_authority.get("roadmap_authority_path")
+            or record.get("roadmap_authority_path")
+        ),
+        roadmap_authority_section=str(
+            canonical_authority.get("roadmap_authority_section")
+            or record.get("roadmap_authority_section")
+            or ""
+        ),
+        dependency_ticket_ids=tuple(dependency_ticket_ids or ()),
+        roadmap_purpose=str(
+            record.get("roadmap_purpose")
+            or canonical_authority.get("roadmap_purpose")
+            or ""
+        )
+        or None,
+        predecessor_ticket_id=str(
+            record.get("predecessor_ticket_id")
+            or canonical_authority.get("predecessor_ticket_id")
+            or ""
+        )
+        or None,
+        readiness_state=str(canonical_authority.get("readiness_state") or "") or None,
+        authority_source=str(canonical_authority.get("authority_source") or "") or None,
+        ticket_contract=_json_ready_contract(ticket_contract)
+        if isinstance(ticket_contract, dict)
+        else None,
+    )
+
+
+def _require_historical_generation_identity(
+    record: dict[str, Any],
+    *,
+    target: GovernedTicketGenerationTarget,
+) -> None:
+    expected = {
+        "schema_version": TICKET_ARCHITECT_BRIDGE_SCHEMA_VERSION,
+        "policy_id": TICKET_ARCHITECT_BRIDGE_POLICY_ID,
+        "project_id": target.project_id,
+        "macroproject_id": target.macroproject_id,
+        "ticket_id": target.ticket_id,
+        "ticket_title": target.ticket_title,
+        "source_next_action_id": target.next_action_id,
+        "canonical_roadmap_authority": target.canonical_roadmap_authority,
+        "idempotency_key": target.idempotency_key,
+        "generation_status": "awaiting_ticket_approval",
+    }
+    for key, value in expected.items():
+        if record.get(key) != value:
+            raise TicketArchitectBridgeConflict(f"generated authority {key} mismatch")
+    if record.get("roadmap_authority_path") is not None and canonical_roadmap_authority_path(
+        record.get("roadmap_authority_path")
+    ) != target.roadmap_authority_path:
+        raise TicketArchitectBridgeConflict("generated authority roadmap_authority_path mismatch")
+    if record.get("roadmap_authority_section") not in {None, target.roadmap_authority_section}:
+        raise TicketArchitectBridgeConflict("generated authority roadmap_authority_section mismatch")
+    if record.get("roadmap_dependency_ticket_ids") is not None and record.get(
+        "roadmap_dependency_ticket_ids"
+    ) != list(target.dependency_ticket_ids):
+        raise TicketArchitectBridgeConflict("generated authority roadmap_dependency_ticket_ids mismatch")
+    if record.get("predecessor_ticket_id") not in {None, target.predecessor_ticket_id}:
+        raise TicketArchitectBridgeConflict("generated authority predecessor_ticket_id mismatch")
+    canonical_authority = record.get("canonical_next_ticket_authority")
+    if isinstance(canonical_authority, dict) and canonical_authority != _canonical_next_ticket_authority_projection(target):
+        raise TicketArchitectBridgeConflict("generated authority canonical_next_ticket_authority mismatch")
+    if record.get("ticket_contract") is not None and record.get("ticket_contract") != _json_ready_contract(
+        target.ticket_contract or {}
+    ):
+        raise TicketArchitectBridgeConflict("generated authority ticket_contract mismatch")
+    if record.get("ticket_contract_SHA256") is not None and record.get(
+        "ticket_contract_SHA256"
+    ) != _ticket_contract_digest(target.ticket_contract or {}):
+        raise TicketArchitectBridgeConflict("generated authority ticket_contract_SHA256 mismatch")
+
+
+def _read_approval_decision_record_unvalidated(ticket_id: str) -> dict[str, Any] | None:
+    safe_ticket_id = _safe_ticket_id(ticket_id)
+    path = approval_decision_record_path_for_ticket(safe_ticket_id)
+    if not path.exists():
+        return None
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise TicketArchitectBridgeConflict(
+            f"{safe_ticket_id} approval decision record is unreadable"
+        ) from exc
+    if not isinstance(record, dict):
+        raise TicketArchitectBridgeConflict("approval decision record must be an object")
+    if record.get("approval_publication_SHA256") != _approval_decision_record_digest(record):
+        raise TicketArchitectBridgeConflict("approval decision record digest mismatch")
+    return record
+
+
+def _read_terminal_rejected_decision_candidate(
+    generation: dict[str, Any],
+) -> dict[str, Any] | None:
+    decision = _read_approval_decision_record_unvalidated(
+        _safe_ticket_id(generation.get("ticket_id"))
+    )
+    if decision is None:
+        return None
+    if decision.get("decision") != HumanApprovalDecision.REJECT.value:
+        return None
+    if decision.get("status") != "rejected":
+        return None
+    return decision
+
+
+def _validate_terminal_rejected_decision_binding(
+    generation: dict[str, Any],
+    *,
+    decision_record: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    ticket_id = _safe_ticket_id(generation.get("ticket_id"))
+    decision = decision_record or _read_approval_decision_record_unvalidated(ticket_id)
+    if decision is None:
+        raise TicketArchitectBridgeConflict("terminal rejected decision is absent")
+    validated = _validate_approval_decision_record_with_generation(
+        decision,
+        ticket_id=ticket_id,
+        generation=generation,
+    )
+    if validated.get("decision") != HumanApprovalDecision.REJECT.value:
+        raise TicketArchitectBridgeConflict("terminal historical generation is not rejected")
+    if validated.get("status") != "rejected":
+        raise TicketArchitectBridgeConflict("terminal historical generation status is not rejected")
+    return validated
 
 
 def inspect_invalid_future_ticket_authority(
@@ -1303,14 +1568,47 @@ def validate_approval_decision_record(
     if record.get("approval_publication_SHA256") != _approval_decision_record_digest(record):
         raise TicketArchitectBridgeConflict("approval decision record digest mismatch")
     safe_ticket_id = _safe_ticket_id(ticket_id)
-    generation = (
-        validate_generation_record(generation_record)
-        if generation_record is not None
-        else load_generation_record(ticket_id=safe_ticket_id)
+    decision = record.get("decision")
+    generation = _approval_generation_record_for_decision(
+        decision=decision,
+        ticket_id=safe_ticket_id,
+        generation_record=generation_record,
     )
     if generation is None:
         raise TicketArchitectBridgeConflict("approval decision has no generated authority")
     if generation.get("ticket_id") != safe_ticket_id:
+        raise TicketArchitectBridgeConflict("approval decision generation ticket mismatch")
+    return _validate_approval_decision_record_with_generation(
+        record,
+        ticket_id=safe_ticket_id,
+        generation=generation,
+    )
+
+
+def _approval_generation_record_for_decision(
+    *,
+    decision: object,
+    ticket_id: str,
+    generation_record: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    allow_historical_rejected = decision == HumanApprovalDecision.REJECT.value
+    if generation_record is None:
+        return load_generation_record(ticket_id=ticket_id)
+    try:
+        return validate_generation_record(generation_record)
+    except (TicketArchitectBridgeConflict, TicketArchitectBridgeInputError):
+        if allow_historical_rejected:
+            return _validate_historical_generation_record(generation_record)
+        raise
+
+
+def _validate_approval_decision_record_with_generation(
+    record: dict[str, Any],
+    *,
+    ticket_id: str,
+    generation: dict[str, Any],
+) -> dict[str, Any]:
+    if generation.get("ticket_id") != ticket_id:
         raise TicketArchitectBridgeConflict("approval decision generation ticket mismatch")
     _require_approval_decision_identity(record, generation)
 
@@ -1543,8 +1841,17 @@ def _workflow_bound_to_generation_target(
 def generated_record_to_workflow_overlay(record: dict[str, Any]) -> dict[str, Any]:
     """Return workflow-control fields implied by a validated generated record."""
 
-    target = _target_from_record(record)
-    validated = validate_generation_record(record, target=target)
+    target: GovernedTicketGenerationTarget | None = None
+    try:
+        target = _target_from_record(record)
+        validated = validate_generation_record(record, target=target)
+    except (TicketArchitectBridgeConflict, TicketArchitectBridgeInputError) as exc:
+        validated = _validate_terminal_rejected_historical_generation_record(
+            record,
+            current_authority_error=exc,
+        )
+        if target is None:
+            target = _historical_target_from_record(validated)
     decision = load_approval_decision_record(
         ticket_id=target.ticket_id,
         generation_record=validated,
@@ -1592,7 +1899,10 @@ def _decided_record_to_workflow_overlay(
     generation_record: dict[str, Any],
     decision_record: dict[str, Any],
 ) -> dict[str, Any]:
-    target = _target_from_record(generation_record)
+    try:
+        target = _target_from_record(generation_record)
+    except (TicketArchitectBridgeConflict, TicketArchitectBridgeInputError):
+        target = _historical_target_from_record(generation_record)
     approved = decision_record["decision"] == HumanApprovalDecision.APPROVE.value
     workflow_state = (
         f"{target.ticket_id}-TICKET-APPROVED"
@@ -3344,15 +3654,14 @@ def _require_approval_decision_identity(
     record: dict[str, Any],
     generation: dict[str, Any],
 ) -> None:
-    target = _target_from_record(generation)
     expected = {
         "schema_version": TICKET_ARCHITECT_BRIDGE_SCHEMA_VERSION,
         "policy_id": TICKET_APPROVAL_PUBLICATION_POLICY_ID,
-        "approval_id": target.ticket_id,
-        "project_id": target.project_id,
-        "macroproject_id": target.macroproject_id,
-        "ticket_id": target.ticket_id,
-        "ticket_title": target.ticket_title,
+        "approval_id": generation["ticket_id"],
+        "project_id": generation["project_id"],
+        "macroproject_id": generation["macroproject_id"],
+        "ticket_id": generation["ticket_id"],
+        "ticket_title": generation["ticket_title"],
         "bridge_SHA256": generation["bridge_SHA256"],
         "ticket_spec_SHA256": generation["ticket_spec_SHA256"],
         "work_packet_id": generation["work_packet_id"],

@@ -1279,7 +1279,10 @@ def _p18_9_0_generation_overlay() -> tuple[dict[str, Any] | None, dict[str, Any]
                             overlay.update(review_overlay)
                             next_ticket_id = overlay.get("next_ticket_id")
                             if next_ticket_id:
-                                next_record = load_generation_record(ticket_id=str(next_ticket_id))
+                                next_record = load_generation_record(
+                                    ticket_id=str(next_ticket_id),
+                                    allow_terminal_rejected_historical=True,
+                                )
                                 if next_record is not None:
                                     overlay.update(generated_record_to_workflow_overlay(next_record))
                                     next_projection = _projection_record_for_generated_ticket(next_record)
@@ -1336,7 +1339,10 @@ def _p18_9_0_generation_overlay() -> tuple[dict[str, Any] | None, dict[str, Any]
                         overlay.update(review_overlay)
                         next_ticket_id = overlay.get("next_ticket_id")
                         if next_ticket_id:
-                            next_record = load_generation_record(ticket_id=str(next_ticket_id))
+                            next_record = load_generation_record(
+                                ticket_id=str(next_ticket_id),
+                                allow_terminal_rejected_historical=True,
+                            )
                             if next_record is not None:
                                 overlay.update(generated_record_to_workflow_overlay(next_record))
                                 next_projection = _projection_record_for_generated_ticket(next_record)
@@ -1464,7 +1470,10 @@ def _pending_generated_successor_ticket_approval_overlay(
             load_generation_record,
         )
 
-        record = load_generation_record(ticket_id=ticket_id)
+        record = load_generation_record(
+            ticket_id=ticket_id,
+            allow_terminal_rejected_historical=True,
+        )
         if record is None:
             return None, None
         generated_overlay = generated_record_to_workflow_overlay(record)

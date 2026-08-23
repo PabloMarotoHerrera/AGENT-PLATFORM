@@ -234,6 +234,15 @@ def _write_generation_record(record: dict) -> None:
     )
 
 
+def _write_approval_decision_record(record: dict) -> None:
+    path = bridge.approval_decision_record_path_for_ticket(record["ticket_id"])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
 def _make_stale_future_generation_record() -> dict:
     bridge.generate_current_ticket(workflow=_next_ticket_workflow())
     record = bridge.load_generation_record(ticket_id="P18.9.1")
@@ -242,6 +251,45 @@ def _make_stale_future_generation_record() -> dict:
     record["bridge_SHA256"] = bridge._record_digest(record)
     _write_generation_record(record)
     return record
+
+
+def _legacy_p18_9_2_generation_record(monkeypatch) -> dict:
+    workflow = _p18_9_2_workflow()
+    current_target = bridge.resolve_generation_target_from_workflow(workflow)
+    legacy_target = replace(
+        current_target,
+        roadmap_purpose=None,
+        ticket_contract=None,
+    )
+    original_build_ticket_spec = bridge._build_ticket_spec
+
+    def legacy_build_ticket_spec(target):
+        if target.ticket_id == "P18.9.2":
+            return bridge._build_default_ticket_spec(target)
+        return original_build_ticket_spec(target)
+
+    with monkeypatch.context() as context:
+        context.setattr(bridge, "_build_ticket_spec", legacy_build_ticket_spec)
+        record = bridge._build_generation_record(workflow, target=legacy_target)
+
+    assert "roadmap_purpose" not in record
+    assert "ticket_contract" not in record
+    assert "ticket_contract_SHA256" not in record
+    assert "roadmap_purpose" not in record["canonical_next_ticket_authority"]
+    assert "ticket_contract" not in record["canonical_next_ticket_authority"]
+    assert record["ticket_spec"]["objective"].startswith(
+        "Define the governed product architecture"
+    )
+    return record
+
+
+def _legacy_p18_9_2_decision_record(generation: dict, decision: str) -> dict:
+    return bridge._build_approval_decision_record(
+        generation,
+        decision=decision,
+        actor="historical-human",
+        decided_at=1_700_000_000.0,
+    )
 
 
 def test_generate_p18_9_0_bridge_success_and_persists(bridge_home) -> None:
@@ -539,6 +587,234 @@ def test_p18_9_2_materializes_control_center_overview_product_contract(
     assert record["Docker_commands_executed"] == 0
     assert record["Graphify_commands_executed"] == 0
     assert record["Git_commands_executed"] == 0
+
+
+def test_terminal_rejected_legacy_p18_9_2_record_reconstructs_after_current_authority_changes(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    record = _legacy_p18_9_2_generation_record(monkeypatch)
+    decision = _legacy_p18_9_2_decision_record(record, "reject")
+    _write_generation_record(record)
+    _write_approval_decision_record(decision)
+    current_target = bridge.resolve_generation_target_from_workflow(_p18_9_2_workflow())
+
+    with pytest.raises(
+        bridge.TicketArchitectBridgeConflict,
+        match="canonical_next_ticket_authority",
+    ):
+        bridge.validate_generation_record(record, target=current_target)
+    with pytest.raises(
+        bridge.TicketArchitectBridgeConflict,
+        match="canonical_next_ticket_authority",
+    ):
+        bridge.load_generation_record(ticket_id="P18.9.2")
+
+    loaded = bridge.load_generation_record(
+        ticket_id="P18.9.2",
+        allow_terminal_rejected_historical=True,
+    )
+    loaded_decision = bridge.load_approval_decision_record(
+        ticket_id="P18.9.2",
+        generation_record=loaded,
+    )
+    overlay = bridge.generated_record_to_workflow_overlay(loaded)
+    monkeypatch.setattr(
+        pr,
+        "_p18_9_0_generation_overlay",
+        lambda: (_p18_9_2_workflow(), None),
+    )
+    snapshot = pr.build_workflow_control_snapshot()
+
+    assert loaded is not None
+    assert loaded["bridge_SHA256"] == record["bridge_SHA256"]
+    assert loaded["ticket_spec_SHA256"] == record["ticket_spec_SHA256"]
+    assert loaded["work_packet_id"] == record["work_packet_id"]
+    assert loaded["work_packet_SHA256"] == record["work_packet_SHA256"]
+    assert loaded_decision is not None
+    assert loaded_decision["decision"] == "reject"
+    assert loaded_decision["ticket_spec_SHA256"] == record["ticket_spec_SHA256"]
+    assert loaded_decision["work_packet_id"] == record["work_packet_id"]
+    assert loaded_decision["work_packet_SHA256"] == record["work_packet_SHA256"]
+    assert overlay["workflow_state"] == "P18.9.2-AWAITING-CORRECTION"
+    assert overlay["workflow_status"] == "awaiting_correction"
+    assert overlay["next_action"]["id"] == "REVISE_P18_9_2"
+    assert overlay["ticket_execution_authorized"] is False
+    assert overlay["WorkPacket_execution_authorized"] is False
+    assert overlay["worker_execution"] is False
+    assert overlay["Kanban_dispatch"] is False
+    assert overlay["Git_mutation"] is False
+    assert snapshot["current_ticket_id"] is None
+    assert snapshot["generated_successor_ticket_id"] == "P18.9.2"
+    assert snapshot["workflow_state"] == "P18.9.2-AWAITING-CORRECTION"
+    assert snapshot["workflow_status"] == "awaiting_correction"
+    assert snapshot["pending_ticket_approval_count"] == 0
+    assert snapshot["next_action"]["id"] == "REVISE_P18_9_2"
+    assert snapshot["successor_ticket_generated_not_activated"] is True
+    assert snapshot["ticket_execution_authorized"] is False
+    assert snapshot["WorkPacket_execution_authorized"] is False
+    assert snapshot["runtime_execution_authorized"] is False
+    assert snapshot["worker_execution"] is False
+    assert snapshot["Kanban_dispatch"] is False
+    assert snapshot["Git_mutation"] is False
+
+
+def test_legacy_p18_9_2_pending_record_with_current_authority_drift_fails_closed(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    record = _legacy_p18_9_2_generation_record(monkeypatch)
+    _write_generation_record(record)
+
+    with pytest.raises(
+        bridge.TicketArchitectBridgeConflict,
+        match="canonical_next_ticket_authority",
+    ):
+        bridge.load_generation_record(ticket_id="P18.9.2")
+    with pytest.raises(
+        bridge.TicketArchitectBridgeConflict,
+        match="canonical_next_ticket_authority",
+    ):
+        bridge.load_generation_record(
+            ticket_id="P18.9.2",
+            allow_terminal_rejected_historical=True,
+        )
+    with pytest.raises(
+        bridge.TicketArchitectBridgeConflict,
+        match="canonical_next_ticket_authority",
+    ):
+        bridge.generated_record_to_workflow_overlay(record)
+    with pytest.raises(
+        bridge.TicketArchitectBridgeConflict,
+        match="canonical_next_ticket_authority",
+    ):
+        bridge.apply_ticket_approval_decision(
+            ticket_id="P18.9.2",
+            decision="approve",
+            actor="human.p18.9",
+        )
+
+
+def test_legacy_p18_9_2_approved_record_with_current_authority_drift_is_not_actionable(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    record = _legacy_p18_9_2_generation_record(monkeypatch)
+    decision = _legacy_p18_9_2_decision_record(record, "approve")
+    _write_generation_record(record)
+    _write_approval_decision_record(decision)
+
+    with pytest.raises(
+        bridge.TicketArchitectBridgeConflict,
+        match="canonical_next_ticket_authority",
+    ):
+        bridge.load_generation_record(ticket_id="P18.9.2")
+    with pytest.raises(
+        bridge.TicketArchitectBridgeConflict,
+        match="canonical_next_ticket_authority",
+    ):
+        bridge.load_generation_record(
+            ticket_id="P18.9.2",
+            allow_terminal_rejected_historical=True,
+        )
+    with pytest.raises(
+        bridge.TicketArchitectBridgeConflict,
+        match="canonical_next_ticket_authority",
+    ):
+        bridge.load_approval_decision_record(ticket_id="P18.9.2")
+    with pytest.raises(
+        bridge.TicketArchitectBridgeConflict,
+        match="canonical_next_ticket_authority",
+    ):
+        bridge.generated_record_to_workflow_overlay(record)
+
+
+def test_legacy_p18_9_2_rejected_record_requires_exact_terminal_decision_binding(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    record = _legacy_p18_9_2_generation_record(monkeypatch)
+    decision = _legacy_p18_9_2_decision_record(record, "reject")
+    decision["ticket_spec_SHA256"] = "0" * 64
+    decision["approval_publication_SHA256"] = bridge._approval_decision_record_digest(decision)
+    _write_generation_record(record)
+    _write_approval_decision_record(decision)
+
+    with pytest.raises(
+        bridge.TicketArchitectBridgeConflict,
+        match="canonical_next_ticket_authority",
+    ):
+        bridge.load_generation_record(ticket_id="P18.9.2")
+    with pytest.raises(
+        bridge.TicketArchitectBridgeConflict,
+        match="canonical_next_ticket_authority",
+    ):
+        bridge.load_generation_record(
+            ticket_id="P18.9.2",
+            allow_terminal_rejected_historical=True,
+        )
+
+
+def test_legacy_p18_9_2_rejected_historical_ticket_spec_tamper_fails_closed(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    record = _legacy_p18_9_2_generation_record(monkeypatch)
+    decision = _legacy_p18_9_2_decision_record(record, "reject")
+    record["ticket_spec"]["objective"] = "Tampered historical TicketSpec evidence."
+    record["bridge_SHA256"] = bridge._record_digest(record)
+    _write_generation_record(record)
+    _write_approval_decision_record(decision)
+
+    with pytest.raises(
+        bridge.TicketArchitectBridgeConflict,
+        match="WorkPacket must preserve TicketSpec",
+    ):
+        bridge.load_generation_record(
+            ticket_id="P18.9.2",
+            allow_terminal_rejected_historical=True,
+        )
+
+
+@pytest.mark.parametrize(
+    ("tamper", "message"),
+    (
+        (
+            lambda record: record.__setitem__("work_packet_id", "WP-P18-9-2-R0001-tampered"),
+            "work_packet_id mismatch",
+        ),
+        (
+            lambda record: record.__setitem__("work_packet_SHA256", "1" * 64),
+            "work_packet_SHA256 mismatch",
+        ),
+        (
+            lambda record: record["work_packet_compilation_result"]["work_packet"][
+                "source_ticket"
+            ].__setitem__("title", "Tampered historical source ticket binding"),
+            "invalid contract evidence",
+        ),
+    ),
+)
+def test_legacy_p18_9_2_rejected_historical_workpacket_tamper_fails_closed(
+    bridge_home,
+    monkeypatch,
+    tamper,
+    message,
+) -> None:
+    record = _legacy_p18_9_2_generation_record(monkeypatch)
+    decision = _legacy_p18_9_2_decision_record(record, "reject")
+    tamper(record)
+    record["bridge_SHA256"] = bridge._record_digest(record)
+    _write_generation_record(record)
+    _write_approval_decision_record(decision)
+
+    with pytest.raises(bridge.TicketArchitectBridgeConflict, match=message):
+        bridge.load_generation_record(
+            ticket_id="P18.9.2",
+            allow_terminal_rejected_historical=True,
+        )
 
 
 def test_later_p18_9_ticket_without_explicit_contract_uses_roadmap_purpose_not_p18_9_0_template(
