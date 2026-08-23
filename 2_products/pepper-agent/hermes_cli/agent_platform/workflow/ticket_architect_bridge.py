@@ -217,6 +217,7 @@ class GovernedTicketGenerationTarget:
     roadmap_authority_path: str
     roadmap_authority_section: str
     dependency_ticket_ids: tuple[str, ...] = ()
+    roadmap_purpose: str | None = None
     predecessor_ticket_id: str | None = None
     readiness_state: str | None = None
     authority_source: str | None = None
@@ -246,6 +247,7 @@ class CanonicalNextTicketAuthority:
     roadmap_authority_path: str
     roadmap_authority_section: str
     dependency_ticket_ids: tuple[str, ...]
+    roadmap_purpose: str | None
     predecessor_ticket_id: str | None
     readiness_state: str
     authority_source: str
@@ -267,6 +269,7 @@ class CanonicalNextTicketAuthority:
             roadmap_authority_path=canonical_roadmap_authority_path(self.roadmap_authority_path),
             roadmap_authority_section=self.roadmap_authority_section,
             dependency_ticket_ids=self.dependency_ticket_ids,
+            roadmap_purpose=self.roadmap_purpose,
             predecessor_ticket_id=self.predecessor_ticket_id,
             readiness_state=self.readiness_state,
             authority_source=self.authority_source,
@@ -290,6 +293,8 @@ class CanonicalNextTicketAuthority:
             "readiness_state": self.readiness_state,
             "authority_source": self.authority_source,
         }
+        if self.roadmap_purpose:
+            record["roadmap_purpose"] = self.roadmap_purpose
         if self.ticket_contract:
             record["ticket_contract"] = _json_ready_contract(self.ticket_contract)
             record["ticket_contract_SHA256"] = _ticket_contract_digest(self.ticket_contract)
@@ -377,6 +382,7 @@ def _target_from_record(record: dict[str, Any]) -> GovernedTicketGenerationTarge
             "authority_path": record.get("roadmap_authority_path"),
             "authority_section": record.get("roadmap_authority_section"),
             "dependency_ticket_ids": tuple(record.get("roadmap_dependency_ticket_ids") or ()),
+            "roadmap_purpose": record.get("roadmap_purpose"),
             "ticket_contract": record.get("ticket_contract"),
         }
     return GovernedTicketGenerationTarget(
@@ -397,6 +403,12 @@ def _target_from_record(record: dict[str, Any]) -> GovernedTicketGenerationTarge
         roadmap_authority_path=canonical_roadmap_authority_path(authority["authority_path"]),
         roadmap_authority_section=str(authority["authority_section"]),
         dependency_ticket_ids=tuple(authority.get("dependency_ticket_ids") or ()),
+        roadmap_purpose=str(
+            canonical_authority.get("roadmap_purpose")
+            or authority.get("roadmap_purpose")
+            or ""
+        )
+        or None,
         predecessor_ticket_id=str(record.get("predecessor_ticket_id") or "") or None,
         readiness_state=str(canonical_authority.get("readiness_state") or "") or None,
         authority_source=str(canonical_authority.get("authority_source") or "") or None,
@@ -482,6 +494,7 @@ def resolve_canonical_next_ticket(
         roadmap_authority_path=canonical_roadmap_authority_path(authority["authority_path"]),
         roadmap_authority_section=str(authority["authority_section"]),
         dependency_ticket_ids=tuple(authority.get("dependency_ticket_ids") or ()),
+        roadmap_purpose=str(authority.get("roadmap_purpose") or "") or None,
         predecessor_ticket_id=predecessor_ticket_id,
         readiness_state=readiness_state,
         authority_source=authority_source,
@@ -671,6 +684,7 @@ def _resolve_implementation_roadmap_ticket_authorities() -> tuple[dict[str, Any]
             ticket_id = _safe_ticket_id(cells[0])
             ticket_title = str(cells[1]).strip()
             dependency_ticket_ids = _parse_roadmap_dependency_ticket_ids(cells[2])
+            roadmap_purpose = str(cells[3]).strip() if len(cells) >= 4 else ""
             authority_path = CANONICAL_IMPLEMENTATION_ROADMAP_AUTHORITY_PATH
             authority_section = CANONICAL_IMPLEMENTATION_ROADMAP_AUTHORITY_SECTION
             authority_type = CANONICAL_IMPLEMENTATION_ROADMAP_AUTHORITY
@@ -687,6 +701,7 @@ def _resolve_implementation_roadmap_ticket_authorities() -> tuple[dict[str, Any]
                 "authority_type": authority_type,
                 "next_action_id": _roadmap_generation_action_id(ticket_id),
                 "dependency_ticket_ids": dependency_ticket_ids,
+                "roadmap_purpose": roadmap_purpose,
             })
         elif current_table == "contract" and len(cells) >= 3 and _is_safe_ticket_id(cells[0]):
             _append_roadmap_ticket_contract(contracts, cells)
@@ -1786,6 +1801,8 @@ def _build_ticket_spec(target: GovernedTicketGenerationTarget) -> TicketSpec:
     contract = target.ticket_contract or {}
     if contract:
         return _build_contract_ticket_spec(target, contract=contract)
+    if target.canonical_roadmap_authority == CANONICAL_IMPLEMENTATION_ROADMAP_AUTHORITY:
+        return _build_roadmap_purpose_ticket_spec(target)
     return _build_default_ticket_spec(target)
 
 
@@ -1891,6 +1908,150 @@ def _build_p18_9_0_ticket_spec(target: GovernedTicketGenerationTarget) -> Ticket
             completion_verdict="p18_9_0_inventory_ia_acceptance_contract_ready",
         ),
         recommended_commit_message="P18.9.0 Define product inventory IA acceptance contract",
+    )
+
+
+def _build_roadmap_purpose_ticket_spec(target: GovernedTicketGenerationTarget) -> TicketSpec:
+    ticket_type = _roadmap_purpose_ticket_type(target)
+    purpose = target.roadmap_purpose or f"Deliver the roadmap scope for {target.ticket_title}."
+    dependency_context = _roadmap_dependency_context(target)
+    context = _dedupe_texts((
+        "The active governed project is PEPPER, while P18.9 is the macroproject identifier.",
+        f"{target.ticket_id} is resolved from canonical implementation-roadmap authority.",
+        f"Roadmap purpose: {purpose}",
+        "Execution remains blocked until the generated ticket is explicitly approved by a human.",
+    ) + ((dependency_context,) if dependency_context else ()))
+    return TicketSpec(
+        project_id=target.project_id,
+        ticket_id=target.ticket_id,
+        title=target.ticket_title,
+        ticket_type=ticket_type,
+        objective=purpose,
+        context=context,
+        authority_references=_authority_references(target),
+        dependencies=(),
+        parallelization_hint=ParallelizationHint.UNSPECIFIED,
+        scope=_roadmap_purpose_scope(target),
+        constraints=_roadmap_purpose_constraints(target, ticket_type=ticket_type),
+        tasks=_roadmap_purpose_tasks(target, ticket_type=ticket_type, purpose=purpose),
+        acceptance_criteria=_roadmap_purpose_acceptance_criteria(
+            target,
+            ticket_type=ticket_type,
+        ),
+        validation_steps=(
+            TicketValidationStepSpec(
+                validation_id="V1",
+                description=(
+                    f"Human review confirms {target.ticket_id} carries the roadmap-derived "
+                    f"{ticket_type.value} intent."
+                ),
+                command=None,
+                expected_result=(
+                    "The reviewer can identify the roadmap purpose, bounded scope, "
+                    "acceptance criteria, and preserved execution boundary in the generated "
+                    "TicketSpec and WorkPacket."
+                ),
+            ),
+        ),
+        response_contract=TicketResponseContractSpec(
+            required_sections=_REQUIRED_RESPONSE_SECTIONS,
+            completion_verdict=_ticket_verdict_token(target.ticket_id, f"{ticket_type.value}_ready"),
+        ),
+        recommended_commit_message=(
+            f"{_ticket_commit_slug(target.ticket_id)} {ticket_type.value.title()} "
+            f"{target.ticket_title}"
+        ),
+    )
+
+
+def _roadmap_purpose_ticket_type(target: GovernedTicketGenerationTarget) -> TicketType:
+    marker = f"{target.ticket_id} {target.ticket_title} {target.roadmap_purpose or ''}".lower()
+    title_marker = target.ticket_title.lower()
+    if target.ticket_id.endswith(".R") or "closure" in marker or marker.startswith("close "):
+        return TicketType.CLOSURE
+    if "architecture" in title_marker:
+        return TicketType.ARCHITECTURE
+    if "documentation" in title_marker and "implementation" not in marker:
+        return TicketType.DOCUMENTATION
+    return TicketType.IMPLEMENTATION
+
+
+def _roadmap_purpose_scope(target: GovernedTicketGenerationTarget) -> RepositoryScopeSpec:
+    return RepositoryScopeSpec(
+        allowed_paths=(
+            "0_architecture/**",
+            "2_products/pepper-agent/docs/**",
+            "2_products/pepper-agent/hermes_cli/agent_platform/**",
+            "2_products/pepper-agent/tools/pepper_workflow_tools.py",
+            "2_products/pepper-agent/toolsets.py",
+            "2_products/pepper-agent/tests/hermes_cli/**",
+            "2_products/pepper-agent/web/src/agent-platform/**",
+            "2_products/pepper-agent/web/src/App.tsx",
+        ),
+        forbidden_paths=(
+            ".git/**",
+            ".opencode/**",
+            "graphify-out/**",
+            "4_external/sources/**",
+            "2_products/pepper-agent/AGENT_PLATFORM_UPSTREAM_BASELINE.json",
+        ),
+        allowed_actions=(
+            f"use the canonical roadmap purpose for {target.ticket_id} as ticket authority",
+            "reuse existing Pepper product runtime, route, navigation, read-model, and governance primitives before adding new surfaces",
+            f"add focused tests for {target.ticket_id} roadmap-derived behavior when needed",
+            "preserve human approval, execution, Kanban, Docker, Graphify, provider, model, and Git boundaries",
+        ),
+        forbidden_actions=_REQUIRED_FORBIDDEN_ACTIONS,
+    )
+
+
+def _roadmap_purpose_constraints(
+    target: GovernedTicketGenerationTarget,
+    *,
+    ticket_type: TicketType,
+) -> tuple[str, ...]:
+    return _dedupe_texts((
+        "Do not reuse P18.9.0 architecture/acceptance-contract template semantics unless the roadmap item is P18.9.0.",
+        f"Treat {target.ticket_id} as roadmap-derived {ticket_type.value} work for {target.ticket_title}.",
+        "Roadmap dependencies are preserved as roadmap metadata and context only; they must not create compile-only dependency-plan edges unless the full collection is generated.",
+        "No provider dispatch, model inference, Kanban dispatch, worker execution, Docker, Graphify, or Git mutation is authorized by Ticket Architect generation.",
+        f"Rollback posture: remove only {target.ticket_id} changes if superseded.",
+    ))
+
+
+def _roadmap_purpose_tasks(
+    target: GovernedTicketGenerationTarget,
+    *,
+    ticket_type: TicketType,
+    purpose: str,
+) -> tuple[str, ...]:
+    if ticket_type is TicketType.CLOSURE:
+        lead = f"Prepare closure evidence for {target.ticket_id}: {purpose}"
+    elif ticket_type is TicketType.ARCHITECTURE:
+        lead = f"Define roadmap-scoped product architecture for {target.ticket_id}: {purpose}"
+    elif ticket_type is TicketType.DOCUMENTATION:
+        lead = f"Document roadmap-scoped product behavior for {target.ticket_id}: {purpose}"
+    else:
+        lead = f"Implement roadmap-scoped product behavior for {target.ticket_id}: {purpose}"
+    return (
+        lead,
+        "Identify and reuse existing Pepper/Hermes authorities, read models, routes, and bounded frontend primitives before adding new code.",
+        "Preserve predecessor and neighboring-ticket boundaries stated by the canonical roadmap.",
+        "Add focused validation for the roadmap-derived behavior and for preserved authority boundaries.",
+    )
+
+
+def _roadmap_purpose_acceptance_criteria(
+    target: GovernedTicketGenerationTarget,
+    *,
+    ticket_type: TicketType,
+) -> tuple[str, ...]:
+    return (
+        f"TicketSpec type is `{ticket_type.value}` because that type is derived from the canonical roadmap item, not from the P18.9.0 template.",
+        f"The generated TicketSpec objective preserves the roadmap purpose for {target.ticket_id} {target.ticket_title}.",
+        "The TicketSpec contains no P18.9.0-only inventory, IA, architecture acceptance, or unresolved-question template text unless the ticket is P18.9.0.",
+        "The WorkPacket preserves the generated TicketSpec exactly and remains compile-only pending explicit human ticket approval.",
+        "No worker execution, Kanban dispatch, provider dispatch, model inference, Docker, Graphify, or Git mutation is introduced by generation.",
     )
 
 
@@ -2063,9 +2224,9 @@ def _scope(contract: dict[str, Any] | None = None) -> RepositoryScopeSpec:
         ),
         allowed_actions=(
             "inspect bounded Pepper product runtime, dashboard, repository-context, and workflow-control evidence",
-            "document product inventory and information architecture decisions",
-            "define acceptance contracts and unresolved product questions",
-            "add focused non-executing tests for the P18.9.0 contract if needed",
+            "preserve only the current roadmap-derived ticket intent and acceptance boundaries",
+            "add focused non-executing tests for the current roadmap ticket contract if needed",
+            "preserve human approval and execution boundaries",
         ),
         forbidden_actions=_REQUIRED_FORBIDDEN_ACTIONS,
     )
@@ -3112,6 +3273,8 @@ def _canonical_next_ticket_authority_projection(
         "readiness_state": target.readiness_state,
         "authority_source": target.authority_source,
     }
+    if target.roadmap_purpose:
+        record["roadmap_purpose"] = target.roadmap_purpose
     if target.ticket_contract:
         record["ticket_contract"] = _json_ready_contract(target.ticket_contract)
         record["ticket_contract_SHA256"] = _ticket_contract_digest(target.ticket_contract)

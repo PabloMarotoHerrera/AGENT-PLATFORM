@@ -98,6 +98,39 @@ def _p18_9_2_workflow(**overrides):
     return data
 
 
+def _later_p18_9_workflow(
+    *,
+    ticket_id: str,
+    ticket_title: str,
+    predecessor_ticket_id: str,
+    **overrides,
+):
+    data = _workflow(
+        current_ticket_id=None,
+        current_ticket_title=None,
+        next_ticket_id=ticket_id,
+        next_ticket_title=ticket_title,
+        workflow_state=f"{predecessor_ticket_id}-COMPLETED",
+        workflow_status="completed",
+        queue_state=f"{predecessor_ticket_id.lower().replace('.', '_')}_closed_next_ticket_ready",
+        closed_predecessor_ticket_id=predecessor_ticket_id,
+        validation_state="review_accepted",
+        review_state="accepted",
+        P18_9_ticket_generated=True,
+        next_ticket_ready=True,
+        next_ticket_generated=False,
+        next_action={
+            "id": f"GENERATE_{ticket_id.replace('.', '_')}_REQUIRES_SEPARATE_HUMAN_ACTION",
+            "label": f"Generate governed {ticket_id} {ticket_title}.",
+            "target_ticket_id": ticket_id,
+            "target_ticket_title": ticket_title,
+            "required_human_action": "ticket_generation",
+        },
+    )
+    data.update(overrides)
+    return data
+
+
 def _synthetic_roadmap_items() -> tuple[dict[str, object], ...]:
     return (
         {
@@ -388,6 +421,164 @@ def test_p18_9_1_materializes_implementation_contract_into_ticket_and_work_packe
     assert "Preserve route compatibility" in contract_text
     assert "No backend API, provider, worker, Kanban, Docker, Graphify, or Git authority changes" in contract_text
     assert "P18.9.12 - Pepper Visual Identity and Design System" in contract_text
+
+
+def test_p18_9_0_preserves_architecture_inventory_ia_acceptance_contract(bridge_home) -> None:
+    bridge.generate_p18_9_0_ticket(workflow=_workflow())
+    record = bridge.load_p18_9_0_generation_record()
+    assert record is not None
+
+    ticket_spec = record["ticket_spec"]
+    work_packet = record["work_packet_compilation_result"]["work_packet"]
+    allowed_actions = tuple(ticket_spec["scope"]["allowed_actions"])
+
+    assert ticket_spec["ticket_id"] == "P18.9.0"
+    assert ticket_spec["ticket_type"] == "architecture"
+    assert ticket_spec["objective"].startswith("Inventory Pepper product surfaces")
+    assert "information-architecture decision" in ticket_spec["objective"]
+    assert "acceptance contract for P18.9 personalization" in ticket_spec["objective"]
+    assert "document product inventory and information architecture decisions" in allowed_actions
+    assert "define acceptance contracts and unresolved product questions" in allowed_actions
+    assert "add focused non-executing tests for the P18.9.0 contract if needed" in allowed_actions
+    assert work_packet["source_ticket"] == ticket_spec
+    assert work_packet["authority_boundary"] == "compile_only"
+    assert work_packet["execution_ready"] is False
+    assert record["human_ticket_approval_required"] is True
+    assert record["worker_execution"] is False
+    assert record["Kanban_dispatch"] is False
+    assert record["Git_mutation"] is False
+
+
+def test_p18_9_2_materializes_control_center_overview_product_contract(
+    bridge_home,
+) -> None:
+    bridge.generate_current_ticket(workflow=_p18_9_2_workflow())
+    record = bridge.load_generation_record(ticket_id="P18.9.2")
+    assert record is not None
+
+    ticket_spec = record["ticket_spec"]
+    work_packet = record["work_packet_compilation_result"]["work_packet"]
+    ticket_text = json.dumps(ticket_spec, ensure_ascii=False, sort_keys=True)
+    packet_text = json.dumps(work_packet, ensure_ascii=False, sort_keys=True)
+    rejected_template_text = "add focused non-executing tests for the P18.9.0 contract if needed"
+
+    assert ticket_spec["ticket_id"] == "P18.9.2"
+    assert ticket_spec["title"] == "Control Center Overview"
+    assert ticket_spec["ticket_type"] == "implementation"
+    assert ticket_spec["objective"].startswith("Implement the Pepper Control Center Overview")
+    assert "Define the governed product architecture" not in ticket_spec["objective"]
+    assert rejected_template_text not in ticket_text
+    assert rejected_template_text not in packet_text
+    assert record["ticket_contract_SHA256"] == record["canonical_next_ticket_authority"][
+        "ticket_contract_SHA256"
+    ]
+    assert record["canonical_next_ticket_authority"]["roadmap_purpose"].startswith(
+        "Implement the Pepper control-center overview successor"
+    )
+
+    for phrase in (
+        "Overview must answer: What am I working on?",
+        "Overview must answer: What state is it in?",
+        "Overview must answer: Does anything require human attention?",
+        "Overview must answer: Is Pepper executing anything now?",
+        "Overview must answer: What is the next governed action?",
+        "Current Work summary",
+        "Next Governed Action summary",
+        "Needs Attention summary",
+        "Execution summary for idle execution and active execution status",
+        "Governed State summary",
+        "current project, macroproject, current/generated ticket, workflow control",
+        "next action, approvals, execution status, review state, validation state",
+        "recovery state, and human Git handoff state",
+        "P18.9.3 Lead Agent Product Experience",
+        "P18.9.4 Work: Projects and Tickets Workspace",
+        "P18.9.5 Work: Approvals Decision Experience",
+        "P18.9.6 Work: Execution Lifecycle, Review, Recovery, and Git Handoff UX",
+        "Overview remains before Lead Agent in CONTROL",
+        "/agent-platform/overview",
+        "RUNTIME_OVERVIEW_DESCRIPTOR",
+        "CONTROL: Overview, Lead Agent",
+        "Do not create a second workflow state machine",
+        "Do not create a synthetic health score",
+        "canonical route, CONTROL ordering, Current Work rendering",
+        "frontend typecheck, and production build",
+    ):
+        assert phrase in ticket_text
+
+    for forbidden in (
+        "full Projects/Tickets tables or editor",
+        "approval decision workspace",
+        "complete execution inspector",
+        "Lead Agent redesign",
+    ):
+        assert forbidden in ticket_text
+
+    assert work_packet["source_ticket"] == ticket_spec
+    assert work_packet["authority_boundary"] == "compile_only"
+    assert work_packet["execution_ready"] is False
+    assert work_packet["repository_scope"]["allowed_actions"] == ticket_spec["scope"][
+        "allowed_actions"
+    ]
+    assert work_packet["tasks"][0]["instruction"].startswith(
+        "Implement required surface: Current Work summary"
+    )
+    assert any(
+        "Current Work rendering validates" in step["description"]
+        for step in work_packet["validation_steps"]
+    )
+    assert record["human_ticket_approval_required"] is True
+    assert record["human_ticket_approval_present"] is False
+    assert record["ticket_execution_authorized"] is False
+    assert record["WorkPacket_execution_authorized"] is False
+    assert record["runtime_execution_authorized"] is False
+    assert record["worker_execution"] is False
+    assert record["Kanban_dispatch"] is False
+    assert record["Git_mutation"] is False
+    assert record["provider_dispatch_count"] == 0
+    assert record["model_inference_count"] == 0
+    assert record["Docker_commands_executed"] == 0
+    assert record["Graphify_commands_executed"] == 0
+    assert record["Git_commands_executed"] == 0
+
+
+def test_later_p18_9_ticket_without_explicit_contract_uses_roadmap_purpose_not_p18_9_0_template(
+    bridge_home,
+) -> None:
+    workflow = _later_p18_9_workflow(
+        ticket_id="P18.9.8",
+        ticket_title="Automation and Integrations Consolidation",
+        predecessor_ticket_id="P18.9.7",
+    )
+    bridge.generate_current_ticket(workflow=workflow)
+    record = bridge.load_generation_record(ticket_id="P18.9.8")
+    assert record is not None
+
+    ticket_spec = record["ticket_spec"]
+    work_packet = record["work_packet_compilation_result"]["work_packet"]
+    contract_text = json.dumps(ticket_spec, ensure_ascii=False, sort_keys=True)
+
+    assert ticket_spec["ticket_id"] == "P18.9.8"
+    assert ticket_spec["title"] == "Automation and Integrations Consolidation"
+    assert ticket_spec["ticket_type"] == "implementation"
+    assert ticket_spec["objective"] == (
+        "Consolidate automation and integration surfaces under the accepted Pepper information architecture."
+    )
+    assert "Roadmap purpose: Consolidate automation and integration surfaces" in contract_text
+    assert "Define the governed product architecture" not in contract_text
+    assert "add focused non-executing tests for the P18.9.0 contract if needed" not in contract_text
+    assert "product inventory and information architecture decisions" not in contract_text
+    assert "TicketSpec type is `implementation`" in contract_text
+    assert work_packet["source_ticket"] == ticket_spec
+    assert work_packet["authority_boundary"] == "compile_only"
+    assert work_packet["execution_ready"] is False
+    assert record["human_ticket_approval_required"] is True
+    assert record["worker_execution"] is False
+    assert record["Kanban_dispatch"] is False
+    assert record["provider_dispatch_count"] == 0
+    assert record["model_inference_count"] == 0
+    assert record["Docker_commands_executed"] == 0
+    assert record["Graphify_commands_executed"] == 0
+    assert record["Git_mutation"] is False
 
 
 def test_future_generation_rejects_stale_roadmap_authority_record(bridge_home) -> None:
