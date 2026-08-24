@@ -45,6 +45,8 @@ from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
     approved_no_execution_action_id,
     load_approval_decision_record,
     load_generation_record,
+    validate_historical_approved_predecessor_approval_decision_record,
+    validate_historical_approved_predecessor_generation_record,
     validate_approval_decision_record,
     validate_generation_record,
 )
@@ -229,10 +231,17 @@ def load_kanban_projection_record(
     ticket_id: str,
     generation_record: dict[str, Any] | None = None,
     decision_record: dict[str, Any] | None = None,
+    allow_terminal_completed_predecessor_historical: bool = False,
 ) -> dict[str, Any] | None:
     """Load and validate the persisted Kanban projection for one ticket."""
 
     safe_ticket_id = _safe_ticket_id(ticket_id)
+    _require_explicit_terminal_completed_predecessor_historical_authority(
+        ticket_id=safe_ticket_id,
+        generation_record=generation_record,
+        decision_record=decision_record,
+        allow_terminal_completed_predecessor_historical=allow_terminal_completed_predecessor_historical,
+    )
     path = kanban_projection_record_path_for_ticket(safe_ticket_id)
     if not path.exists():
         return None
@@ -247,6 +256,7 @@ def load_kanban_projection_record(
         ticket_id=safe_ticket_id,
         generation_record=generation_record,
         decision_record=decision_record,
+        allow_terminal_completed_predecessor_historical=allow_terminal_completed_predecessor_historical,
     )
 
 
@@ -272,6 +282,7 @@ def validate_kanban_projection_record(
     ticket_id: str,
     generation_record: dict[str, Any] | None = None,
     decision_record: dict[str, Any] | None = None,
+    allow_terminal_completed_predecessor_historical: bool = False,
 ) -> dict[str, Any]:
     """Validate projection mapping without touching dispatcher or execution."""
 
@@ -280,10 +291,16 @@ def validate_kanban_projection_record(
     if record.get("projection_SHA256") != _projection_record_digest(record):
         raise WorkPacketKanbanProjectionConflict("Kanban projection record digest mismatch")
     safe_ticket_id = _safe_ticket_id(ticket_id)
-    generation = (
-        validate_generation_record(generation_record)
-        if generation_record is not None
-        else load_generation_record(ticket_id=safe_ticket_id)
+    _require_explicit_terminal_completed_predecessor_historical_authority(
+        ticket_id=safe_ticket_id,
+        generation_record=generation_record,
+        decision_record=decision_record,
+        allow_terminal_completed_predecessor_historical=allow_terminal_completed_predecessor_historical,
+    )
+    generation = _generation_authority(
+        ticket_id=safe_ticket_id,
+        generation_record=generation_record,
+        allow_terminal_completed_predecessor_historical=allow_terminal_completed_predecessor_historical,
     )
     if generation is None:
         raise WorkPacketKanbanProjectionConflict("projection has no generated WorkPacket authority")
@@ -293,6 +310,7 @@ def validate_kanban_projection_record(
         ticket_id=safe_ticket_id,
         generation_record=generation,
         decision_record=decision_record,
+        allow_terminal_completed_predecessor_historical=allow_terminal_completed_predecessor_historical,
     )
     if decision is None:
         raise WorkPacketKanbanProjectionConflict("projection has no approval decision authority")
@@ -300,14 +318,63 @@ def validate_kanban_projection_record(
     return record
 
 
+def _require_explicit_terminal_completed_predecessor_historical_authority(
+    *,
+    ticket_id: str,
+    generation_record: dict[str, Any] | None,
+    decision_record: dict[str, Any] | None,
+    allow_terminal_completed_predecessor_historical: bool,
+) -> None:
+    if not allow_terminal_completed_predecessor_historical:
+        return
+    if generation_record is None:
+        raise WorkPacketKanbanProjectionConflict(
+            f"{ticket_id} historical predecessor generation authority must be supplied"
+        )
+    if decision_record is None:
+        raise WorkPacketKanbanProjectionConflict(
+            f"{ticket_id} historical predecessor approval decision authority must be supplied"
+        )
+
+
+def _generation_authority(
+    *,
+    ticket_id: str,
+    generation_record: dict[str, Any] | None,
+    allow_terminal_completed_predecessor_historical: bool,
+) -> dict[str, Any] | None:
+    if generation_record is not None:
+        if allow_terminal_completed_predecessor_historical:
+            return validate_historical_approved_predecessor_generation_record(
+                generation_record,
+            )
+        return validate_generation_record(generation_record)
+    if allow_terminal_completed_predecessor_historical:
+        raise WorkPacketKanbanProjectionConflict(
+            f"{ticket_id} historical predecessor generation authority must be supplied"
+        )
+    return load_generation_record(ticket_id=ticket_id)
+
+
 def _approval_decision_authority(
     *,
     ticket_id: str,
     generation_record: dict[str, Any],
     decision_record: dict[str, Any] | None = None,
+    allow_terminal_completed_predecessor_historical: bool = False,
 ) -> dict[str, Any] | None:
     safe_ticket_id = _safe_ticket_id(ticket_id)
     try:
+        if allow_terminal_completed_predecessor_historical:
+            if decision_record is not None:
+                return validate_historical_approved_predecessor_approval_decision_record(
+                    decision_record,
+                    ticket_id=safe_ticket_id,
+                    generation_record=generation_record,
+                )
+            raise WorkPacketKanbanProjectionConflict(
+                f"{safe_ticket_id} historical predecessor approval decision authority must be supplied"
+            )
         if decision_record is not None:
             return validate_approval_decision_record(
                 decision_record,

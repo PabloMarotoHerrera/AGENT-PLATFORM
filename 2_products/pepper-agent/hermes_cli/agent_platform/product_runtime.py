@@ -1251,7 +1251,6 @@ def _p18_9_0_generation_overlay() -> tuple[dict[str, Any] | None, dict[str, Any]
     try:
         from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
             generated_record_to_workflow_overlay,
-            load_generation_record,
             load_p18_9_0_generation_record,
         )
 
@@ -1279,11 +1278,20 @@ def _p18_9_0_generation_overlay() -> tuple[dict[str, Any] | None, dict[str, Any]
                             overlay.update(review_overlay)
                             next_ticket_id = overlay.get("next_ticket_id")
                             if next_ticket_id:
-                                next_record = load_generation_record(
-                                    ticket_id=str(next_ticket_id),
-                                    allow_terminal_rejected_historical=True,
+                                next_record, completed_predecessor, next_blocker = (
+                                    _successor_generation_or_completed_predecessor_evidence(
+                                        str(next_ticket_id),
+                                    )
                                 )
-                                if next_record is not None:
+                                if next_blocker is not None:
+                                    return overlay, next_blocker
+                                if completed_predecessor is not None:
+                                    overlay.update(
+                                        _terminal_completed_predecessor_traversal_overlay(
+                                            completed_predecessor,
+                                        )
+                                    )
+                                elif next_record is not None:
                                     overlay.update(generated_record_to_workflow_overlay(next_record))
                                     next_projection = _projection_record_for_generated_ticket(next_record)
                                     if next_projection is not None:
@@ -1339,11 +1347,20 @@ def _p18_9_0_generation_overlay() -> tuple[dict[str, Any] | None, dict[str, Any]
                         overlay.update(review_overlay)
                         next_ticket_id = overlay.get("next_ticket_id")
                         if next_ticket_id:
-                            next_record = load_generation_record(
-                                ticket_id=str(next_ticket_id),
-                                allow_terminal_rejected_historical=True,
+                            next_record, completed_predecessor, next_blocker = (
+                                _successor_generation_or_completed_predecessor_evidence(
+                                    str(next_ticket_id),
+                                )
                             )
-                            if next_record is not None:
+                            if next_blocker is not None:
+                                return overlay, next_blocker
+                            if completed_predecessor is not None:
+                                overlay.update(
+                                    _terminal_completed_predecessor_traversal_overlay(
+                                        completed_predecessor,
+                                    )
+                                )
+                            elif next_record is not None:
                                 overlay.update(generated_record_to_workflow_overlay(next_record))
                                 next_projection = _projection_record_for_generated_ticket(next_record)
                                 if next_projection is not None:
@@ -1397,6 +1414,188 @@ def _projection_record_for_generated_ticket(record: dict[str, Any]) -> dict[str,
         ticket_id=str(record["ticket_id"]),
         generation_record=record,
     )
+
+
+def load_terminal_completed_predecessor_evidence(ticket_id: str) -> dict[str, Any] | None:
+    """Load read-only terminal-completed predecessor evidence for traversal only."""
+
+    safe_ticket_id = _safe_id(ticket_id)
+    from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
+        load_historical_approved_predecessor_generation_authority,
+    )
+    from hermes_cli.agent_platform.workflow.work_packet_kanban_projection import (
+        load_kanban_projection_record,
+    )
+
+    authority = load_historical_approved_predecessor_generation_authority(
+        ticket_id=safe_ticket_id,
+    )
+    if authority is None:
+        return None
+    generation = authority["generation_record"]
+    decision = authority["approval_decision_record"]
+    projection = load_kanban_projection_record(
+        ticket_id=safe_ticket_id,
+        generation_record=generation,
+        decision_record=decision,
+        allow_terminal_completed_predecessor_historical=True,
+    )
+    if projection is None:
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor projection authority is absent"
+        )
+    execution_start = load_p18_9_0_execution_start_record(
+        projection_record=projection,
+    )
+    if execution_start is None:
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor execution-start authority is absent"
+        )
+    activation = load_current_ticket_governed_autonomy_activation_record(
+        projection_record=projection,
+    )
+    if activation is None:
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor governed-autonomy activation is absent"
+        )
+    runtime = load_current_ticket_governed_autonomy_runtime_state(
+        projection_record=projection,
+        activation_record=activation,
+    )
+    if runtime is None:
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor governed-autonomy runtime is absent"
+        )
+    review = load_current_ticket_review_decision_record(projection_record=projection)
+    if review is None:
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor accepted review decision is absent"
+        )
+    runtime_target = _terminal_completed_predecessor_runtime_review_target(
+        projection=projection,
+        runtime=runtime,
+    )
+    if int(review.get("reviewed_run_id") or 0) != int(runtime_target["reviewed_run_id"]):
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor review run does not match runtime evidence"
+        )
+    if review.get("reviewed_candidate_SHA256") != runtime_target["candidate_SHA256"]:
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor review candidate does not match runtime evidence"
+        )
+    handoff = load_current_ticket_human_git_handoff_completion_record(
+        projection_record=projection,
+        review_decision_record=review,
+    )
+    if handoff is None:
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor human Git handoff completion is absent"
+        )
+    return {
+        "verdict": "HISTORICAL_TERMINAL_COMPLETED_PREDECESSOR_TRAVERSAL_READY",
+        "semantics": "read_only_historical_completed_predecessor_traversal",
+        "current_actionable_authority": False,
+        "ticket_id": safe_ticket_id,
+        "generation_record": generation,
+        "approval_decision_record": decision,
+        "kanban_projection_record": projection,
+        "execution_start_record": execution_start,
+        "governed_autonomy_activation_record": activation,
+        "governed_autonomy_runtime_state": runtime,
+        "review_decision_record": review,
+        "human_git_handoff_completion_record": handoff,
+    }
+
+
+def _terminal_completed_predecessor_runtime_review_target(
+    *,
+    projection: dict[str, Any],
+    runtime: dict[str, Any],
+) -> dict[str, Any]:
+    terminal_reconciliation = _governed_autonomy_runtime_terminal_reconciliation(
+        runtime,
+    )
+    if terminal_reconciliation is None:
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor requires owned terminal runtime evidence"
+        )
+    if terminal_reconciliation.get("validated_candidate_review_required") is not True:
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor runtime is not validated for review"
+        )
+    candidate_reference = terminal_reconciliation.get("candidate_changes_reference")
+    if not _governed_autonomy_candidate_changes_available(candidate_reference):
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor candidate changes evidence is absent"
+        )
+    return {
+        "reviewed_run_id": terminal_reconciliation["terminal_run_id"],
+        "candidate_SHA256": _digest_payload(
+            "pepper-current-ticket-reviewed-candidate-reference-sha256-v1",
+            {
+                "ticket_id": projection["ticket_id"],
+                "work_packet_SHA256": projection["work_packet_SHA256"],
+                "terminal_run_id": terminal_reconciliation["terminal_run_id"],
+                "candidate_changes_reference": candidate_reference,
+            },
+        ),
+    }
+
+
+def _successor_generation_or_completed_predecessor_evidence(
+    ticket_id: str,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
+    from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
+        load_generation_record,
+    )
+
+    try:
+        record = load_generation_record(
+            ticket_id=ticket_id,
+            allow_terminal_rejected_historical=True,
+        )
+        return record, None, None
+    except Exception as generation_error:
+        try:
+            evidence = load_terminal_completed_predecessor_evidence(ticket_id)
+        except Exception as completed_error:
+            return None, None, {
+                "id": f"{ticket_id}-TERMINAL-COMPLETED-PREDECESSOR-AUTHORITY",
+                "status": "blocked_by_invalid_terminal_completed_predecessor_authority",
+                "evidence": _safe_text(completed_error, limit=300),
+            }
+        if evidence is not None:
+            return None, evidence, None
+        return None, None, {
+            "id": f"{ticket_id}-SUCCESSOR-GENERATED-AUTHORITY",
+            "status": "blocked_by_invalid_generated_successor_authority",
+            "evidence": _safe_text(generation_error, limit=300),
+        }
+
+
+def _terminal_completed_predecessor_traversal_overlay(
+    evidence: dict[str, Any],
+) -> dict[str, Any]:
+    overlay = _human_git_handoff_completion_overlay_from_record(
+        evidence["human_git_handoff_completion_record"],
+    )
+    overlay["historical_terminal_completed_predecessor_traversal"] = {
+        "verdict": evidence["verdict"],
+        "ticket_id": evidence["ticket_id"],
+        "current_actionable_authority": False,
+        "generation_bridge_SHA256": evidence["generation_record"]["bridge_SHA256"],
+        "approval_publication_SHA256": evidence["approval_decision_record"][
+            "approval_publication_SHA256"
+        ],
+        "projection_SHA256": evidence["kanban_projection_record"]["projection_SHA256"],
+        "review_decision_SHA256": evidence["review_decision_record"][
+            "review_decision_SHA256"
+        ],
+        "completion_record_SHA256": evidence["human_git_handoff_completion_record"][
+            "completion_record_SHA256"
+        ],
+    }
+    return overlay
 
 
 def _projection_overlay_for_record(record: dict[str, Any]) -> dict[str, Any]:
@@ -17506,14 +17705,9 @@ def _current_ticket_review_decision_overlay(
     return overlay
 
 
-def _current_ticket_human_git_handoff_completion_overlay(
-    projection: dict[str, Any],
+def _human_git_handoff_completion_overlay_from_record(
+    record: dict[str, Any],
 ) -> dict[str, Any] | None:
-    record = load_current_ticket_human_git_handoff_completion_record(
-        projection_record=projection,
-    )
-    if record is None:
-        return None
     return {
         "current_ticket_id": None,
         "current_ticket_title": None,
@@ -17566,6 +17760,17 @@ def _current_ticket_human_git_handoff_completion_overlay(
         "auto_rollback": False,
         "next_action": record["next_action"],
     }
+
+
+def _current_ticket_human_git_handoff_completion_overlay(
+    projection: dict[str, Any],
+) -> dict[str, Any] | None:
+    record = load_current_ticket_human_git_handoff_completion_record(
+        projection_record=projection,
+    )
+    if record is None:
+        return None
+    return _human_git_handoff_completion_overlay_from_record(record)
 
 
 def build_workflow_control_snapshot() -> dict[str, Any]:

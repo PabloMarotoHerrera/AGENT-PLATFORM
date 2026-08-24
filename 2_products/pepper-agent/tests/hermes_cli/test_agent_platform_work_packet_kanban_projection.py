@@ -810,6 +810,28 @@ def _p18_9_1_handoff_git_snapshot(
     }
 
 
+def _write_json_authority_record(path: Path, record: dict) -> None:
+    path.write_text(
+        json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _install_current_roadmap_authority_drift_for_test(monkeypatch) -> None:
+    original = bridge.resolve_roadmap_ticket_authority
+
+    def drifted(ticket_id: str) -> dict[str, object]:
+        authority = dict(original(ticket_id))
+        if ticket_id in {"P18.9.1", "P18.9.2"}:
+            contract = json.loads(json.dumps(authority.get("ticket_contract") or {}))
+            contract["objective"] = f"Evolved current objective for {ticket_id}."
+            authority["ticket_contract"] = contract
+            authority["roadmap_purpose"] = f"Evolved current purpose for {ticket_id}."
+        return authority
+
+    monkeypatch.setattr(bridge, "resolve_roadmap_ticket_authority", drifted)
+
+
 def _accepted_p18_9_1_review_for_handoff(
     projection_home,
     monkeypatch,
@@ -6986,6 +7008,187 @@ def test_current_p18_9_1_review_changes_requested_starts_same_authority_revision
         assert all(run.id != fixture["run_7"] + 2 for run in runs_after_replay)
     finally:
         conn.close()
+
+
+def test_terminal_completed_predecessor_evidence_requires_more_than_approval(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, _projected, _authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
+    )
+
+    with pytest.raises(pr.ProductRuntimeConflict, match="execution-start authority is absent"):
+        pr.load_terminal_completed_predecessor_evidence("P18.9.1")
+
+
+def test_historical_projection_validation_requires_explicit_generation_and_decision(
+    projection_home,
+    monkeypatch,
+) -> None:
+    _pr, _projected, projection_authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
+    )
+    historical_authority = bridge.load_historical_approved_predecessor_generation_authority(
+        ticket_id="P18.9.1",
+    )
+    assert historical_authority is not None
+    generation = historical_authority["generation_record"]
+    decision = historical_authority["approval_decision_record"]
+    _install_current_roadmap_authority_drift_for_test(monkeypatch)
+
+    with pytest.raises(bridge.TicketArchitectBridgeConflict):
+        bridge.load_generation_record(ticket_id="P18.9.1")
+
+    with pytest.raises(
+        projection.WorkPacketKanbanProjectionConflict,
+        match="generation authority must be supplied",
+    ):
+        projection.load_kanban_projection_record(
+            ticket_id="P18.9.1",
+            decision_record=decision,
+            allow_terminal_completed_predecessor_historical=True,
+        )
+
+    with pytest.raises(
+        projection.WorkPacketKanbanProjectionConflict,
+        match="approval decision authority must be supplied",
+    ):
+        projection.load_kanban_projection_record(
+            ticket_id="P18.9.1",
+            generation_record=generation,
+            allow_terminal_completed_predecessor_historical=True,
+        )
+
+    validated = projection.load_kanban_projection_record(
+        ticket_id="P18.9.1",
+        generation_record=generation,
+        decision_record=decision,
+        allow_terminal_completed_predecessor_historical=True,
+    )
+    assert validated is not None
+    assert validated["ticket_id"] == "P18.9.1"
+    assert validated["projection_SHA256"] == projection_authority["projection_SHA256"]
+
+    with pytest.raises(bridge.TicketArchitectBridgeConflict):
+        projection.project_current_approved_workpacket_to_kanban(
+            workflow=_approved_workflow_for_record(generation),
+            requested_project_id="PEPPER",
+            requested_ticket_id="P18.9.1",
+            requested_next_action_id="P18_9_1_APPROVED_NO_EXECUTION",
+        )
+
+
+def test_historical_terminal_completed_predecessor_traverses_to_rejected_successor(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, _projected, _authority, _fixture, accepted = _accepted_p18_9_1_review_for_handoff(
+        projection_home,
+        monkeypatch,
+    )
+
+    with pytest.raises(
+        pr.ProductRuntimeConflict,
+        match="human Git handoff completion is absent",
+    ):
+        pr.load_terminal_completed_predecessor_evidence("P18.9.1")
+
+    completed = pr.complete_current_ticket_human_git_handoff(
+        **_p18_9_1_handoff_completion_kwargs(accepted),
+    )
+    generation_workflow = pr.build_workflow_control_snapshot()
+    generated = bridge.generate_current_ticket(workflow=generation_workflow)
+    rejected = bridge.apply_ticket_approval_decision(
+        ticket_id="P18.9.2",
+        decision="reject",
+        actor="historical-human",
+    )
+    _install_current_roadmap_authority_drift_for_test(monkeypatch)
+
+    with pytest.raises(bridge.TicketArchitectBridgeConflict):
+        bridge.load_generation_record(ticket_id="P18.9.1")
+    with pytest.raises(bridge.TicketArchitectBridgeConflict):
+        bridge.load_generation_record(ticket_id="P18.9.2")
+    with pytest.raises(bridge.TicketArchitectBridgeConflict):
+        bridge.apply_ticket_approval_decision(
+            ticket_id="P18.9.1",
+            decision="approve",
+            actor="historical-human",
+        )
+    with pytest.raises(bridge.TicketArchitectBridgeConflict):
+        projection.load_kanban_projection_record(ticket_id="P18.9.1")
+
+    evidence = pr.load_terminal_completed_predecessor_evidence("P18.9.1")
+    assert evidence is not None
+    assert evidence["verdict"] == "HISTORICAL_TERMINAL_COMPLETED_PREDECESSOR_TRAVERSAL_READY"
+    assert evidence["current_actionable_authority"] is False
+    assert evidence["generation_record"]["ticket_id"] == "P18.9.1"
+    assert evidence["approval_decision_record"]["decision"] == "approve"
+    assert evidence["kanban_projection_record"]["ticket_id"] == "P18.9.1"
+    assert evidence["execution_start_record"]["ticket_id"] == "P18.9.1"
+    assert evidence["governed_autonomy_activation_record"]["ticket_id"] == "P18.9.1"
+    assert evidence["governed_autonomy_runtime_state"]["ticket_id"] == "P18.9.1"
+    assert evidence["review_decision_record"]["review_decision"] == "accept"
+    assert evidence["human_git_handoff_completion_record"]["workflow_status"] == "completed"
+
+    with pytest.raises(bridge.TicketArchitectBridgeConflict):
+        projection.project_current_approved_workpacket_to_kanban(
+            workflow=_approved_workflow_for_record(evidence["generation_record"]),
+            requested_project_id="PEPPER",
+            requested_ticket_id="P18.9.1",
+            requested_next_action_id="P18_9_1_APPROVED_NO_EXECUTION",
+        )
+
+    review_path = pr.review_decision_record_path_for_ticket("P18.9.1")
+    original_review = review_path.read_bytes()
+    review_record = json.loads(original_review.decode("utf-8"))
+    review_record["reviewed_candidate_SHA256"] = "0" * 64
+    review_record["review_decision_SHA256"] = pr._review_decision_record_digest(review_record)
+    _write_json_authority_record(review_path, review_record)
+    with pytest.raises(pr.ProductRuntimeConflict, match="review candidate"):
+        pr.load_terminal_completed_predecessor_evidence("P18.9.1")
+    review_path.write_bytes(original_review)
+
+    handoff_path = pr.human_git_handoff_completion_record_path_for_ticket("P18.9.1")
+    original_handoff = handoff_path.read_bytes()
+    handoff_record = json.loads(original_handoff.decode("utf-8"))
+    handoff_record["workflow_status"] = "tampered_completed"
+    handoff_record["completion_record_SHA256"] = (
+        pr._human_git_handoff_completion_record_digest(handoff_record)
+    )
+    _write_json_authority_record(handoff_path, handoff_record)
+    with pytest.raises(pr.ProductRuntimeConflict, match="workflow_status mismatch"):
+        pr.load_terminal_completed_predecessor_evidence("P18.9.1")
+    handoff_path.write_bytes(original_handoff)
+
+    loaded_rejected = bridge.load_generation_record(
+        ticket_id="P18.9.2",
+        allow_terminal_rejected_historical=True,
+    )
+    snapshot = pr.build_workflow_control_snapshot()
+
+    assert completed["closed_predecessor_ticket_id"] == "P18.9.1"
+    assert generated["ticket_id"] == "P18.9.2"
+    assert rejected["status"] == "rejected"
+    assert loaded_rejected is not None
+    assert snapshot["current_ticket_id"] is None
+    assert snapshot["generated_successor_ticket_id"] == "P18.9.2"
+    assert snapshot["workflow_state"] == "P18.9.2-AWAITING-CORRECTION"
+    assert snapshot["workflow_status"] == "awaiting_correction"
+    assert snapshot["pending_ticket_approval_count"] == 0
+    assert snapshot["next_action"]["id"] == "REVISE_P18_9_2"
+    traversal = snapshot["historical_terminal_completed_predecessor_traversal"]
+    assert traversal["verdict"] == "HISTORICAL_TERMINAL_COMPLETED_PREDECESSOR_TRAVERSAL_READY"
+    assert traversal["current_actionable_authority"] is False
+    assert snapshot["ticket_execution_authorized"] is False
+    assert snapshot["WorkPacket_execution_authorized"] is False
+    assert snapshot["runtime_execution_authorized"] is False
+    assert snapshot["worker_execution"] is False
+    assert snapshot["Kanban_dispatch"] is False
+    assert snapshot["Git_mutation"] is False
 
 
 def test_current_p18_9_1_review_changes_requested_requires_same_workpacket_authority(

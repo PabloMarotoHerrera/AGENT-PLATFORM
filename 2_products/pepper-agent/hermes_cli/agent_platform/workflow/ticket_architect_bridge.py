@@ -1408,6 +1408,74 @@ def _validate_terminal_rejected_decision_binding(
     return validated
 
 
+def validate_historical_approved_predecessor_generation_record(
+    record: dict[str, Any],
+) -> dict[str, Any]:
+    """Validate historical generation evidence for read-only predecessor traversal."""
+
+    return _validate_historical_generation_record(record)
+
+
+def validate_historical_approved_predecessor_approval_decision_record(
+    record: dict[str, Any],
+    *,
+    ticket_id: str,
+    generation_record: dict[str, Any],
+) -> dict[str, Any]:
+    """Validate approved historical decision evidence without granting action authority."""
+
+    safe_ticket_id = _safe_ticket_id(ticket_id)
+    generation = validate_historical_approved_predecessor_generation_record(
+        generation_record,
+    )
+    if generation.get("ticket_id") != safe_ticket_id:
+        raise TicketArchitectBridgeConflict(
+            "historical approved predecessor generation ticket mismatch"
+        )
+    validated = _validate_approval_decision_record_with_generation(
+        record,
+        ticket_id=safe_ticket_id,
+        generation=generation,
+    )
+    if validated.get("decision") != HumanApprovalDecision.APPROVE.value:
+        raise TicketArchitectBridgeConflict(
+            "historical predecessor decision is not approved"
+        )
+    if validated.get("status") != "approved":
+        raise TicketArchitectBridgeConflict(
+            "historical predecessor decision status is not approved"
+        )
+    return validated
+
+
+def load_historical_approved_predecessor_generation_authority(
+    *,
+    ticket_id: str,
+) -> dict[str, dict[str, Any]] | None:
+    """Load historical generated+approved evidence for terminal-completion proof."""
+
+    safe_ticket_id = _safe_ticket_id(ticket_id)
+    path = generation_record_path_for_ticket(safe_ticket_id)
+    if not path.exists():
+        return None
+    generation = validate_historical_approved_predecessor_generation_record(
+        _read_generation_record_unvalidated(path, ticket_id=safe_ticket_id),
+    )
+    decision = _read_approval_decision_record_unvalidated(safe_ticket_id)
+    if decision is None:
+        raise TicketArchitectBridgeConflict(
+            "historical approved predecessor decision is absent"
+        )
+    return {
+        "generation_record": generation,
+        "approval_decision_record": validate_historical_approved_predecessor_approval_decision_record(
+            decision,
+            ticket_id=safe_ticket_id,
+            generation_record=generation,
+        ),
+    }
+
+
 def inspect_invalid_future_ticket_authority(
     *,
     ticket_id: str,
