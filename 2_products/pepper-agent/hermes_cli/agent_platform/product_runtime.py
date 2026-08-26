@@ -1451,7 +1451,7 @@ def load_terminal_completed_predecessor_evidence(ticket_id: str) -> dict[str, An
         raise ProductRuntimeConflict(
             "terminal completed predecessor execution-start authority is absent"
         )
-    activation = load_current_ticket_governed_autonomy_activation_record(
+    activation = load_terminal_completed_predecessor_governed_autonomy_activation_record(
         projection_record=projection,
     )
     if activation is None:
@@ -1474,6 +1474,7 @@ def load_terminal_completed_predecessor_evidence(ticket_id: str) -> dict[str, An
     runtime_target = _terminal_completed_predecessor_runtime_review_target(
         projection=projection,
         runtime=runtime,
+        review=review,
     )
     if int(review.get("reviewed_run_id") or 0) != int(runtime_target["reviewed_run_id"]):
         raise ProductRuntimeConflict(
@@ -1511,6 +1512,7 @@ def _terminal_completed_predecessor_runtime_review_target(
     *,
     projection: dict[str, Any],
     runtime: dict[str, Any],
+    review: dict[str, Any],
 ) -> dict[str, Any]:
     terminal_reconciliation = _governed_autonomy_runtime_terminal_reconciliation(
         runtime,
@@ -1519,12 +1521,32 @@ def _terminal_completed_predecessor_runtime_review_target(
         raise ProductRuntimeConflict(
             "terminal completed predecessor requires owned terminal runtime evidence"
         )
-    if terminal_reconciliation.get("validated_candidate_review_required") is not True:
+    reviewed_run_id = _int_or_none(review.get("reviewed_run_id"))
+    if reviewed_run_id != _int_or_none(terminal_reconciliation.get("terminal_run_id")):
         raise ProductRuntimeConflict(
-            "terminal completed predecessor runtime is not validated for review"
+            "terminal completed predecessor review run does not match runtime evidence"
+        )
+    if (
+        review.get("reviewed_run_status")
+        and review.get("reviewed_run_status") != terminal_reconciliation.get("terminal_run_status")
+    ):
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor review run status does not match runtime evidence"
+        )
+    if (
+        review.get("reviewed_run_outcome")
+        and review.get("reviewed_run_outcome") != terminal_reconciliation.get("terminal_run_outcome")
+    ):
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor review run outcome does not match runtime evidence"
         )
     candidate_reference = terminal_reconciliation.get("candidate_changes_reference")
-    if not _governed_autonomy_candidate_changes_available(candidate_reference):
+    if terminal_reconciliation.get("validated_candidate_review_required") is not True:
+        candidate_reference = _terminal_completed_predecessor_review_candidate_reference(
+            review=review,
+            terminal_reconciliation=terminal_reconciliation,
+        )
+    elif not _governed_autonomy_candidate_changes_available(candidate_reference):
         raise ProductRuntimeConflict(
             "terminal completed predecessor candidate changes evidence is absent"
         )
@@ -1540,6 +1562,39 @@ def _terminal_completed_predecessor_runtime_review_target(
             },
         ),
     }
+
+
+def _terminal_completed_predecessor_review_candidate_reference(
+    *,
+    review: dict[str, Any],
+    terminal_reconciliation: dict[str, Any],
+) -> dict[str, Any]:
+    candidate_reference = review.get("reviewed_candidate_reference")
+    if not _governed_autonomy_candidate_changes_available(candidate_reference):
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor persisted review candidate evidence is absent"
+        )
+    if terminal_reconciliation.get("validation_infrastructure_failure") is True:
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor runtime validation infrastructure failed"
+        )
+    terminal_run = {
+        "status": terminal_reconciliation.get("terminal_run_status"),
+        "outcome": terminal_reconciliation.get("terminal_run_outcome"),
+        "failure_category": terminal_reconciliation.get("terminal_run_failure_category"),
+        "failure_summary": terminal_reconciliation.get("terminal_run_failure_summary"),
+        "summary": terminal_reconciliation.get("blocker_detail"),
+        "error": None,
+    }
+    if not _governed_autonomy_terminal_validated_candidate_review_required(
+        terminal_run,
+        candidate_changes=candidate_reference,
+        validation_infrastructure_failure=False,
+    ):
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor runtime is not validated for review"
+        )
+    return candidate_reference
 
 
 def _successor_generation_or_completed_predecessor_evidence(
@@ -3441,6 +3496,28 @@ def load_current_ticket_governed_autonomy_activation_record(
             "governed-autonomy activation record is unreadable"
         ) from exc
     return validate_governed_autonomy_activation_record(
+        record,
+        projection_record=projection,
+    )
+
+
+def load_terminal_completed_predecessor_governed_autonomy_activation_record(
+    *,
+    projection_record: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Load governed-autonomy activation evidence for historical traversal only."""
+
+    projection = projection_record
+    path = governed_autonomy_activation_record_path_for_ticket(str(projection["ticket_id"]))
+    if not path.exists():
+        return None
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor governed-autonomy activation record is unreadable"
+        ) from exc
+    return validate_terminal_completed_predecessor_governed_autonomy_activation_record(
         record,
         projection_record=projection,
     )
@@ -5581,6 +5658,250 @@ def validate_governed_autonomy_activation_record(
     if record.get("continuation_lineage_reference") != lineage:
         raise ProductRuntimeConflict("governed-autonomy continuation reference mismatch")
     return record
+
+
+def validate_terminal_completed_predecessor_governed_autonomy_activation_record(
+    record: dict[str, Any],
+    *,
+    projection_record: dict[str, Any],
+) -> dict[str, Any]:
+    """Validate 01AH activation evidence without re-deriving current authority."""
+
+    if not isinstance(record, dict):
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor governed-autonomy activation record must be an object"
+        )
+    if record.get("activation_action_SHA256") != _governed_autonomy_activation_record_digest(record):
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor governed-autonomy activation record digest mismatch"
+        )
+    projection = projection_record
+    _validate_execution_start_authority(projection)
+    _binding, identity = _current_ticket_identity_fields(projection)
+    envelope_reference = _validated_governed_autonomy_envelope_reference(
+        record.get("governed_autonomy_envelope_reference")
+    )
+    budget_reference = _validated_governed_autonomy_budget_reference(
+        record.get("governed_autonomy_budget")
+    )
+    if envelope_reference.get("budget") != budget_reference:
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor governed-autonomy authority budget mismatch"
+        )
+    same_authority = _governed_autonomy_same_authority_subset(
+        projection,
+        envelope_reference,
+    )
+    if not same_authority["same_authority"]:
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor governed-autonomy authority mismatch"
+        )
+    if record.get("governed_autonomy_envelope") is not None:
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor activation must store envelope reference only"
+        )
+    if record.get("capability_gap") is not None:
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor activation must store gap reference only"
+        )
+    if record.get("continuation_lineage") is not None:
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor activation must store lineage reference only"
+        )
+    if record.get("backend_derived_live_authority_reference") != envelope_reference:
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor backend authority reference mismatch"
+        )
+    gap_payload = record.get("capability_gap_reference")
+    gap = _validated_governed_autonomy_gap_reference(gap_payload) if gap_payload is not None else None
+    if gap is not None and gap["envelope_SHA256"] != envelope_reference["envelope_SHA256"]:
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor gap envelope digest mismatch"
+        )
+    lineage_payload = record.get("continuation_lineage_reference")
+    lineage = (
+        _validated_governed_autonomy_lineage_reference(lineage_payload)
+        if lineage_payload is not None
+        else None
+    )
+    if lineage is not None:
+        if lineage["envelope_SHA256"] != envelope_reference["envelope_SHA256"]:
+            raise ProductRuntimeConflict(
+                "terminal completed predecessor lineage envelope digest mismatch"
+            )
+        if gap is not None and lineage["gap_SHA256"] != gap["gap_SHA256"]:
+            raise ProductRuntimeConflict(
+                "terminal completed predecessor lineage gap digest mismatch"
+            )
+    expected = {
+        "schema_version": PEPPER_GOVERNED_AUTONOMY_ACTION_SCHEMA_VERSION,
+        "policy_id": PEPPER_GOVERNED_AUTONOMY_ACTION_POLICY_ID,
+        "source_system": PEPPER_GOVERNED_AUTONOMY_ACTION_SOURCE_SYSTEM,
+        **identity,
+        "approval_publication_SHA256": projection["approval_publication_SHA256"],
+        "projection_SHA256": projection["projection_SHA256"],
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+        "assignee_profile": projection["assignee_profile"],
+        "selected_profile": projection["selected_profile"],
+        "governed_autonomy_policy_id": envelope_reference["policy_id"],
+        "governed_autonomy_envelope_SHA256": envelope_reference["envelope_SHA256"],
+        "governed_autonomy_budget": budget_reference,
+        "backend_derived_live_authority_SHA256": envelope_reference["envelope_SHA256"],
+        "authority_derivation_source": "server_side_current_ticket_projection_and_kanban_run",
+        "01AH_envelope_lifecycle_classification": "01AH_ENVELOPE_WRONG_LIFECYCLE_PHASE",
+        "governed_autonomy_activation_recorded": True,
+        "governed_autonomy_status": "activation_recorded_live_lineage_blocked",
+        "live_lineage_activation_authorized": True,
+        "live_lineage_activation_status": "active_authority_ready_for_continuation",
+        "live_lineage_activation_blocker_code": None,
+        "same_authority_subset_validated": True,
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "worker_process_started": False,
+        "Kanban_dispatch": False,
+        "lineage_dispatch_performed": False,
+        "A2A_dispatch_performed": False,
+        "Git_commands_executed": 0,
+        "Docker_commands_executed": 0,
+        "Graphify_commands_executed": 0,
+        "provider_dispatch_count": 0,
+        "model_inference_count": 0,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+        "human_smoke_marker": PEPPER_GOVERNED_AUTONOMY_READY_MARKER,
+    }
+    expected_gap_sha = gap["gap_SHA256"] if gap is not None else None
+    expected_lineage_sha = lineage["lineage_SHA256"] if lineage is not None else None
+    mismatched_fields = [key for key, value in expected.items() if record.get(key) != value]
+    legacy_candidate = bool(mismatched_fields) and _governed_autonomy_activation_has_legacy_runtime_limit(record)
+    if legacy_candidate:
+        _validate_terminal_completed_predecessor_legacy_activation_compatibility(
+            record=record,
+            projection=projection,
+            expected=expected,
+            envelope_reference=envelope_reference,
+            same_authority=same_authority,
+            gap=gap,
+            lineage=lineage,
+        )
+        return record
+    if mismatched_fields:
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor governed-autonomy activation record "
+            f"{mismatched_fields[0]} mismatch"
+        )
+    if record.get("same_authority_subset") != same_authority:
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor same-authority subset mismatch"
+        )
+    if record.get("governed_autonomy_envelope_reference") != envelope_reference:
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor envelope reference mismatch"
+        )
+    if record.get("capability_gap_SHA256") != expected_gap_sha:
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor capability gap digest mismatch"
+        )
+    if record.get("capability_gap_reference") != gap:
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor capability gap reference mismatch"
+        )
+    if record.get("continuation_lineage_SHA256") != expected_lineage_sha:
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor continuation digest mismatch"
+        )
+    if record.get("continuation_lineage_reference") != lineage:
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor continuation reference mismatch"
+        )
+    return record
+
+
+def _validate_terminal_completed_predecessor_legacy_activation_compatibility(
+    *,
+    record: dict[str, Any],
+    projection: dict[str, Any],
+    expected: dict[str, Any],
+    envelope_reference: dict[str, Any],
+    same_authority: dict[str, Any],
+    gap: dict[str, Any] | None,
+    lineage: dict[str, Any] | None,
+) -> None:
+    if not _governed_autonomy_activation_has_legacy_runtime_limit(record):
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor activation record is not legacy-compatible"
+        )
+    try:
+        request = CurrentTicketGovernedAutonomyActivationRequest(
+            human_request_text=str(record.get("human_request_text") or ""),
+            authorizer_id=str(record.get("authorizer_id") or ""),
+            project_id=str(record.get("project_id") or "") or None,
+            ticket_id=str(record.get("ticket_id") or "") or None,
+            next_action_id=str(record.get("current_next_action_id") or "") or None,
+        )
+        _validate_governed_autonomy_activation_request_text(
+            request.human_request_text,
+            ticket_id=str(projection["ticket_id"]),
+        )
+    except Exception as exc:
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor legacy activation human authorization is invalid"
+        ) from exc
+
+    compatibility_expected = dict(expected)
+    compatibility_expected.update({
+        "same_authority_delegation_status": "blocked_metadata_only",
+        "same_authority_delegation_authorized": False,
+        "same_authority_delegation_blocker_code": "A2A_RUNTIME_UNAVAILABLE_WITHOUT_TASK_LOCAL_AUTHORITY",
+        "same_authority_delegation_blocker_detail": (
+            "No canonical OpenCode/A2A dispatcher is available; task-local delegation requires "
+            "a separate 01AH-scoped authority that still cannot activate live lineage."
+        ),
+        "opencode_runtime_dispatcher_found": False,
+        "delegate_task_runtime_kind": "local_subagent_not_opencode_a2a",
+        "live_lineage_activation_authorized": False,
+        "live_lineage_activation_status": "blocked_requires_separate_authority",
+        "live_lineage_activation_blocker_code": "LIVE_LINEAGE_ACTIVATION_AUTHORITY_GAP",
+        "live_lineage_activation_blocker_detail": (
+            f"{projection['ticket_id']} live lineage activation, retry execution, and run creation "
+            "require separate human/runtime authority."
+        ),
+        "human_smoke_marker": PEPPER_LEGACY_GOVERNED_AUTONOMY_READY_MARKER,
+    })
+    for key, value in compatibility_expected.items():
+        if record.get(key) != value:
+            raise ProductRuntimeConflict(
+                "terminal completed predecessor legacy governed-autonomy activation record "
+                f"{key} mismatch"
+            )
+    if record.get("requested_action") != "record_governed_autonomy_activation_status":
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor legacy activation action is invalid"
+        )
+    if record.get("same_authority_subset") != same_authority:
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor legacy same-authority subset mismatch"
+        )
+    expected_gap_sha = gap["gap_SHA256"] if gap is not None else None
+    if record.get("capability_gap_SHA256") != expected_gap_sha or record.get("capability_gap_reference") != gap:
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor legacy capability gap mismatch"
+        )
+    expected_lineage_sha = lineage["lineage_SHA256"] if lineage is not None else None
+    if (
+        record.get("continuation_lineage_SHA256") != expected_lineage_sha
+        or record.get("continuation_lineage_reference") != lineage
+    ):
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor legacy continuation lineage mismatch"
+        )
+    if record.get("backend_derived_live_authority_reference") != envelope_reference:
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor legacy backend authority reference mismatch"
+        )
 
 
 def validate_governed_autonomy_runtime_state_record(

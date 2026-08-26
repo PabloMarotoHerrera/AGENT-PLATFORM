@@ -832,6 +832,43 @@ def _install_current_roadmap_authority_drift_for_test(monkeypatch) -> None:
     monkeypatch.setattr(bridge, "resolve_roadmap_ticket_authority", drifted)
 
 
+def _install_legacy_governed_autonomy_activation_shape_for_test(
+    pr,
+    projection_record: dict,
+) -> dict:
+    path = pr.governed_autonomy_activation_record_path_for_ticket("P18.9.1")
+    record = json.loads(path.read_text(encoding="utf-8"))
+    record.update({
+        "same_authority_delegation_status": "blocked_metadata_only",
+        "same_authority_delegation_authorized": False,
+        "same_authority_delegation_blocker_code": "A2A_RUNTIME_UNAVAILABLE_WITHOUT_TASK_LOCAL_AUTHORITY",
+        "same_authority_delegation_blocker_detail": (
+            "No canonical OpenCode/A2A dispatcher is available; task-local delegation requires "
+            "a separate 01AH-scoped authority that still cannot activate live lineage."
+        ),
+        "opencode_runtime_dispatcher_found": False,
+        "delegate_task_runtime_kind": "local_subagent_not_opencode_a2a",
+        "live_lineage_activation_authorized": False,
+        "live_lineage_activation_status": "blocked_requires_separate_authority",
+        "live_lineage_activation_blocker_code": "LIVE_LINEAGE_ACTIVATION_AUTHORITY_GAP",
+        "live_lineage_activation_blocker_detail": (
+            f"{projection_record['ticket_id']} live lineage activation, retry execution, and run creation "
+            "require separate human/runtime authority."
+        ),
+        "human_smoke_marker": pr.PEPPER_LEGACY_GOVERNED_AUTONOMY_READY_MARKER,
+    })
+    record["activation_action_SHA256"] = pr._governed_autonomy_activation_record_digest(
+        record
+    )
+    _write_json_authority_record(path, record)
+    runtime_path = pr.governed_autonomy_runtime_state_path_for_ticket("P18.9.1")
+    runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
+    runtime["activation_action_SHA256"] = record["activation_action_SHA256"]
+    runtime["runtime_state_SHA256"] = pr._governed_autonomy_runtime_record_digest(runtime)
+    _write_json_authority_record(runtime_path, runtime)
+    return record
+
+
 def _accepted_p18_9_1_review_for_handoff(
     projection_home,
     monkeypatch,
@@ -7089,6 +7126,13 @@ def test_historical_terminal_completed_predecessor_traverses_to_rejected_success
         projection_home,
         monkeypatch,
     )
+    projection_authority = projection.load_kanban_projection_record(ticket_id="P18.9.1")
+    assert projection_authority is not None
+    legacy_activation = _install_legacy_governed_autonomy_activation_shape_for_test(
+        pr,
+        projection_authority,
+    )
+    assert legacy_activation["live_lineage_activation_authorized"] is False
 
     with pytest.raises(
         pr.ProductRuntimeConflict,
@@ -7120,6 +7164,27 @@ def test_historical_terminal_completed_predecessor_traverses_to_rejected_success
         )
     with pytest.raises(bridge.TicketArchitectBridgeConflict):
         projection.load_kanban_projection_record(ticket_id="P18.9.1")
+    historical_authority = bridge.load_historical_approved_predecessor_generation_authority(
+        ticket_id="P18.9.1",
+    )
+    assert historical_authority is not None
+    historical_projection = projection.load_kanban_projection_record(
+        ticket_id="P18.9.1",
+        generation_record=historical_authority["generation_record"],
+        decision_record=historical_authority["approval_decision_record"],
+        allow_terminal_completed_predecessor_historical=True,
+    )
+    assert historical_projection is not None
+    with pytest.raises(pr.ProductRuntimeAuthorityMismatch) as current_activation_error:
+        pr.load_current_ticket_governed_autonomy_activation_record(
+            projection_record=historical_projection,
+        )
+    assert current_activation_error.value.diagnostics["reason"] == (
+        "current_backend_stable_authority_unavailable"
+    )
+    assert current_activation_error.value.diagnostics["detail"] == (
+        "generated authority canonical_next_ticket_authority mismatch"
+    )
 
     evidence = pr.load_terminal_completed_predecessor_evidence("P18.9.1")
     assert evidence is not None
@@ -7130,6 +7195,7 @@ def test_historical_terminal_completed_predecessor_traverses_to_rejected_success
     assert evidence["kanban_projection_record"]["ticket_id"] == "P18.9.1"
     assert evidence["execution_start_record"]["ticket_id"] == "P18.9.1"
     assert evidence["governed_autonomy_activation_record"]["ticket_id"] == "P18.9.1"
+    assert evidence["governed_autonomy_activation_record"]["live_lineage_activation_authorized"] is False
     assert evidence["governed_autonomy_runtime_state"]["ticket_id"] == "P18.9.1"
     assert evidence["review_decision_record"]["review_decision"] == "accept"
     assert evidence["human_git_handoff_completion_record"]["workflow_status"] == "completed"
