@@ -3064,6 +3064,31 @@ def generate_current_governed_ticket(
     )
 
 
+def revise_generated_successor_ticket(
+    *,
+    human_authorization_text: str,
+    authorizer_id: str = "pepper-chat-human",
+    project_id: str | None = None,
+    ticket_id: str | None = None,
+    next_action_id: str | None = None,
+) -> dict[str, Any]:
+    """Revise the rejected generated successor ticket back to pending approval."""
+
+    from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
+        revise_rejected_successor_ticket,
+    )
+
+    workflow = build_workflow_control_snapshot()
+    return revise_rejected_successor_ticket(
+        workflow=workflow,
+        human_authorization_text=human_authorization_text,
+        authorizer_id=authorizer_id,
+        requested_project_id=project_id,
+        requested_ticket_id=ticket_id,
+        requested_next_action_id=next_action_id,
+    )
+
+
 def reconcile_invalid_current_generation_authority(
     *,
     project_id: str | None = None,

@@ -304,6 +304,50 @@ def _validate_explicit_generation_request(value: object) -> str:
     return raw
 
 
+def _validate_explicit_successor_revision_request(
+    value: object,
+    *,
+    rejected_ticket_id: str,
+    next_action_id: str,
+) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        raise ValueError("human_authorization_text is required")
+    normalized = _normalize_intent_text(raw)
+    if "?" in raw or "¿" in raw:
+        raise ValueError("revision authorization text must not be a question")
+    if any(
+        phrase in normalized
+        for phrase in (
+            "creo que",
+            "pienso que",
+            "tal vez",
+            "parece que",
+            "quizas",
+            "quiza",
+            "maybe",
+            "probably",
+            "what if",
+            "que pasa si",
+        )
+    ):
+        raise ValueError("revision authorization text is ambiguous")
+    if not rejected_ticket_id:
+        raise ValueError("rejected successor ticket is unavailable")
+    ticket_ids = _mentioned_ticket_ids(normalized)
+    if ticket_ids and rejected_ticket_id not in ticket_ids:
+        raise ValueError("revision authorization text targets a different ticket")
+    action_named = bool(next_action_id) and next_action_id.lower() in normalized
+    if rejected_ticket_id not in ticket_ids and not action_named:
+        raise ValueError("revision authorization text must name the rejected successor ticket")
+    if not re.search(
+        r"\b(revise|revision|correct|correction|regenerate|regen|corrige|corregir|correccion|revisar|revisa|regenera|regenerar)\b",
+        normalized,
+    ):
+        raise ValueError("explicit rejected-successor revision authorization text is required")
+    return raw
+
+
 def _validate_explicit_reconciliation_request(value: object) -> str:
     raw = str(value or "").strip()
     if not raw:
@@ -462,6 +506,16 @@ def _generation_request_text_from_args_or_user_task(
     kwargs: dict[str, Any],
 ) -> object:
     value = args.get("human_request_text")
+    if str(value or "").strip():
+        return value
+    return kwargs.get("user_task")
+
+
+def _revision_authorization_text_from_args_or_user_task(
+    args: dict[str, Any],
+    kwargs: dict[str, Any],
+) -> object:
+    value = args.get("human_authorization_text")
     if str(value or "").strip():
         return value
     return kwargs.get("user_task")
@@ -791,6 +845,68 @@ def _generate_current_ticket(args: dict[str, Any], **_kwargs) -> str:
         "source_tool": "generate_current_ticket",
         "human_request_text": human_request_text,
         **result,
+    })
+
+
+def _revise_generated_successor_ticket(args: dict[str, Any], **_kwargs) -> str:
+    pr = _runtime()
+    try:
+        context = pr.build_lead_agent_operational_context()
+        workflow_control = _workflow_control_context(context)
+        next_action = context.get("next_action")
+        if not isinstance(next_action, dict):
+            next_action = workflow_control.get("next_action")
+        if not isinstance(next_action, dict):
+            raise ValueError("current next action is unavailable")
+        ticket_id = str(
+            args.get("ticket_id")
+            or workflow_control.get("generated_successor_ticket_id")
+            or context.get("next_ticket_id")
+            or next_action.get("target_ticket_id")
+            or ""
+        ).strip()
+        next_action_id = str(next_action.get("id") or "").strip()
+        human_authorization_text = _validate_explicit_successor_revision_request(
+            _revision_authorization_text_from_args_or_user_task(args, _kwargs),
+            rejected_ticket_id=ticket_id,
+            next_action_id=next_action_id,
+        )
+        result = pr.revise_generated_successor_ticket(
+            human_authorization_text=human_authorization_text,
+            authorizer_id="pepper-chat-human",
+            project_id=str(args.get("project_id") or "").strip() or None,
+            ticket_id=str(args.get("ticket_id") or "").strip() or None,
+            next_action_id=str(args.get("next_action_id") or "").strip() or None,
+        )
+        updated_context = pr.build_lead_agent_operational_context()
+    except Exception as exc:
+        return tool_error(str(exc) or "generated successor revision failed", success=False)
+    return _result({
+        "source_tool": "revise_generated_successor_ticket",
+        "human_authorization_text": human_authorization_text,
+        **result,
+        "current_ticket_id": updated_context.get("current_ticket_id"),
+        "next_ticket_id": updated_context.get("next_ticket_id"),
+        "next_ticket_title": updated_context.get("next_ticket_title"),
+        "workflow_state": updated_context.get("workflow_state"),
+        "workflow_status": updated_context.get("workflow_status"),
+        "approval_state": updated_context.get("approval_state"),
+        "pending_approval_count": updated_context.get("pending_approval_count"),
+        "pending_ticket_approval_count": updated_context.get("pending_ticket_approval_count"),
+        "queue_state": updated_context.get("queue_state"),
+        "execution_state": updated_context.get("execution_state"),
+        "active_execution_count": updated_context.get("active_execution_count"),
+        "next_action": updated_context.get("next_action"),
+        "ticket_execution_authorized": False,
+        "WorkPacket_execution_authorized": False,
+        "runtime_execution_authorized": False,
+        "worker_execution": False,
+        "Kanban_dispatch": False,
+        "Git_mutation": False,
+        "auto_approval": False,
+        "auto_execution": False,
+        "auto_retry": False,
+        "auto_rollback": False,
     })
 
 
@@ -1313,6 +1429,34 @@ _GENERATE_CURRENT_TICKET_SCHEMA = {
             "description": "Exact user text that explicitly requests generation of the current canonical next governed ticket.",
         },
     },
+    "additionalProperties": False,
+}
+
+
+_REVISE_GENERATED_SUCCESSOR_TICKET_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "human_authorization_text": {
+            "type": "string",
+            "description": (
+                "Exact user phrase explicitly authorizing correction/regeneration of "
+                "the current rejected generated successor ticket."
+            ),
+        },
+        "project_id": {
+            "type": "string",
+            "description": "Optional governed project guard. Must be PEPPER if supplied.",
+        },
+        "ticket_id": {
+            "type": "string",
+            "description": "Optional governed ticket guard. Must equal the rejected successor ticket if supplied.",
+        },
+        "next_action_id": {
+            "type": "string",
+            "description": "Optional next-action guard. Must equal REVISE_<ticket-token> if supplied.",
+        },
+    },
+    "required": ["human_authorization_text"],
     "additionalProperties": False,
 }
 
@@ -2127,6 +2271,24 @@ registry.register(
     handler=_reconcile_invalid_current_generation_authority,
     emoji="X",
     max_result_size_chars=24000,
+)
+
+
+registry.register(
+    name="revise_generated_successor_ticket",
+    toolset=TOOLSET,
+    schema={
+        "name": "revise_generated_successor_ticket",
+        "description": (
+            "Apply explicit human correction authorization for only the current rejected "
+            "generated successor ticket. Regenerates that same canonical ticket into pending "
+            "approval; no approval, execution, Kanban dispatch, Docker, Graphify, or Git."
+        ),
+        "parameters": _REVISE_GENERATED_SUCCESSOR_TICKET_SCHEMA,
+    },
+    handler=_revise_generated_successor_ticket,
+    emoji="C",
+    max_result_size_chars=32000,
 )
 
 

@@ -15,6 +15,7 @@ import json
 from pathlib import Path
 import re
 import threading
+import unicodedata
 from typing import Any
 
 from pydantic import BaseModel
@@ -105,6 +106,12 @@ TICKET_APPROVAL_PUBLICATION_DIGEST_ALGORITHM = (
 TICKET_ARCHITECT_RECONCILIATION_DIGEST_ALGORITHM = (
     "agent-platform-ticket-architect-stale-authority-reconciliation-sha256-v1"
 )
+TICKET_ARCHITECT_REJECTED_SUCCESSOR_REVISION_POLICY_ID = (
+    "pepper-ticket-architect-rejected-successor-revision-v1"
+)
+TICKET_ARCHITECT_REJECTED_SUCCESSOR_REVISION_DIGEST_ALGORITHM = (
+    "agent-platform-ticket-architect-rejected-successor-revision-sha256-v1"
+)
 TICKET_ARCHITECT_CONTRACT_DIGEST_ALGORITHM = (
     "agent-platform-ticket-architect-roadmap-contract-sha256-v1"
 )
@@ -138,6 +145,7 @@ CANONICAL_APPROVAL_ID = "P18.9.0"
 _STORE_DIR = Path("agent-platform") / "pepper-ticket-architect-bridge"
 _APPROVAL_DECISION_STORE_FILE = "P18.9.0.approval-decision.json"
 _RECONCILIATION_STORE_DIR = _STORE_DIR / "reconciliation-history"
+_REVISION_STORE_DIR = _STORE_DIR / "revision-history"
 _STORE_LOCK = threading.Lock()
 _P17_ACCEPTED_CLOSURE_SHA256 = hashlib.sha256(
     b"pepper-p17-accepted-work-packet-execution-mvp-closure-reused-for-p18-9-0"
@@ -962,6 +970,13 @@ def reconciliation_history_path_for_ticket(ticket_id: str) -> Path:
 
     safe_ticket_id = _safe_ticket_id(ticket_id)
     return get_hermes_home() / _RECONCILIATION_STORE_DIR / f"{safe_ticket_id}.jsonl"
+
+
+def rejected_successor_revision_history_path_for_ticket(ticket_id: str) -> Path:
+    """Return the append-only rejected-successor revision history path."""
+
+    safe_ticket_id = _safe_ticket_id(ticket_id)
+    return get_hermes_home() / _REVISION_STORE_DIR / f"{safe_ticket_id}.jsonl"
 
 
 def quarantined_generation_record_path(*, ticket_id: str, bridge_sha256: str) -> Path:
@@ -1816,6 +1831,112 @@ def apply_ticket_approval_decision(
     return _approval_decision_operational_result(record)
 
 
+def revise_rejected_successor_ticket(
+    *,
+    workflow: dict[str, Any],
+    human_authorization_text: str,
+    authorizer_id: str = "pepper-chat-human",
+    requested_project_id: str | None = None,
+    requested_ticket_id: str | None = None,
+    requested_next_action_id: str | None = None,
+) -> dict[str, Any]:
+    """Revise one explicitly rejected generated successor back to pending approval."""
+
+    safe_ticket_id = _revision_ticket_id_from_workflow(
+        workflow,
+        requested_ticket_id=requested_ticket_id,
+    )
+    target = _revision_generation_target_for_ticket(safe_ticket_id, workflow=workflow)
+    _validate_revision_requested_identity(
+        requested_project_id=requested_project_id,
+        requested_ticket_id=requested_ticket_id,
+        requested_next_action_id=requested_next_action_id,
+        target=target,
+    )
+    _validate_rejected_successor_revision_workflow(workflow, target=target)
+    human_authorization_text = _validate_revision_authorization_text(
+        human_authorization_text,
+        ticket_id=target.ticket_id,
+        revise_next_action_id=target.revise_next_action_id,
+    )
+    authorizer_id = _reviewer_id_from_actor(authorizer_id)
+
+    with _STORE_LOCK:
+        rejected_generation = load_generation_record(
+            ticket_id=target.ticket_id,
+            allow_terminal_rejected_historical=True,
+        )
+        if rejected_generation is None:
+            raise TicketArchitectBridgeConflict(
+                f"{target.ticket_id} has no rejected generated ticket to revise"
+            )
+        rejected_decision = load_approval_decision_record(
+            ticket_id=target.ticket_id,
+            generation_record=rejected_generation,
+        )
+        if rejected_decision is None:
+            raise TicketArchitectBridgeConflict(
+                f"{target.ticket_id} rejected ticket decision is absent"
+            )
+        _validate_terminal_rejected_decision_binding(
+            rejected_generation,
+            decision_record=rejected_decision,
+        )
+
+        revision_workflow = _revision_generation_workflow(workflow, target=target)
+        try:
+            revised_generation = _build_generation_record(revision_workflow, target=target)
+            validate_generation_record(revised_generation, target=target)
+        except TicketArchitectBridgeError:
+            raise
+        except Exception as exc:
+            raise TicketArchitectBridgeGenerationError(
+                f"{target.ticket_id} rejected-successor revision failed"
+            ) from exc
+
+        history_entry = _append_rejected_successor_revision_history(
+            rejected_generation=rejected_generation,
+            rejected_decision=rejected_decision,
+            revised_generation=revised_generation,
+            target=target,
+            human_authorization_text=human_authorization_text,
+            authorizer_id=authorizer_id,
+        )
+        decision_path = approval_decision_record_path_for_ticket(target.ticket_id)
+        try:
+            decision_path.unlink()
+        except FileNotFoundError:
+            pass
+        _write_json_atomic(generation_record_path_for_ticket(target.ticket_id), revised_generation)
+
+    result = _operational_result(revised_generation, idempotent_replay=False)
+    result.update({
+        "revision_applied": True,
+        "revision_status": "awaiting_ticket_approval",
+        "revision_action_id": target.revise_next_action_id,
+        "human_authorization_text": human_authorization_text,
+        "authorizer_id": authorizer_id,
+        "rejected_generation_bridge_SHA256": rejected_generation["bridge_SHA256"],
+        "rejected_approval_publication_SHA256": rejected_decision[
+            "approval_publication_SHA256"
+        ],
+        "historical_rejected_generation_preserved": True,
+        "historical_rejected_decision_preserved": True,
+        "revision_history_path": str(
+            rejected_successor_revision_history_path_for_ticket(target.ticket_id)
+        ),
+        "revision_SHA256": history_entry["revision_SHA256"],
+        "pending_ticket_approval_count": 1,
+        "active_execution_count": 0,
+        "provider_dispatch_count": 0,
+        "model_inference_count": 0,
+        "Git_commands_executed": 0,
+        "Docker_commands_executed": 0,
+        "Graphify_commands_executed": 0,
+    })
+    return result
+
+
 def generate_p18_9_0_ticket(
     *,
     workflow: dict[str, Any],
@@ -1904,6 +2025,213 @@ def _workflow_bound_to_generation_target(
         "required_human_action": "ticket_generation",
     }
     return bounded
+
+
+def _revision_ticket_id_from_workflow(
+    workflow: dict[str, Any],
+    *,
+    requested_ticket_id: str | None,
+) -> str:
+    if not isinstance(workflow, dict):
+        raise TicketArchitectBridgeInputError("workflow state is unavailable")
+    next_action = workflow.get("next_action")
+    candidates = [requested_ticket_id, workflow.get("generated_successor_ticket_id")]
+    if isinstance(next_action, dict):
+        candidates.append(next_action.get("target_ticket_id"))
+    values = {_safe_ticket_id(value) for value in candidates if str(value or "").strip()}
+    if not values:
+        raise TicketArchitectBridgeInputError("rejected successor ticket is unavailable")
+    if len(values) != 1:
+        raise TicketArchitectBridgeInputError("rejected successor ticket authority is ambiguous")
+    return next(iter(values))
+
+
+def _revision_generation_target_for_ticket(
+    ticket_id: str,
+    *,
+    workflow: dict[str, Any],
+) -> GovernedTicketGenerationTarget:
+    canonical = workflow.get("canonical_next_ticket_authority")
+    if not isinstance(canonical, dict):
+        canonical = {}
+    source: dict[str, Any] = {
+        "project_id": workflow.get("project_id") or CANONICAL_PROJECT_ID,
+        "project_name": workflow.get("project_name") or CANONICAL_PROJECT_NAME,
+        "macroproject_id": workflow.get("macroproject_id") or CANONICAL_MACROPROJECT_ID,
+        "macroproject_title": workflow.get("macroproject_title") or CANONICAL_MACROPROJECT_TITLE,
+        "current_ticket_id": None,
+        "next_ticket_id": ticket_id,
+        "next_ticket_title": workflow.get("next_ticket_title") or canonical.get("ticket_title"),
+    }
+    predecessor_ticket_id = str(
+        workflow.get("closed_predecessor_ticket_id")
+        or canonical.get("predecessor_ticket_id")
+        or ""
+    ).strip()
+    if predecessor_ticket_id:
+        source["closed_predecessor_ticket_id"] = predecessor_ticket_id
+    authority = resolve_canonical_next_ticket(source)
+    if authority.ticket_id != ticket_id:
+        raise TicketArchitectBridgeInputError(
+            "rejected successor is not the canonical roadmap next ticket"
+        )
+    return authority.generation_target()
+
+
+def _validate_revision_requested_identity(
+    *,
+    requested_project_id: str | None,
+    requested_ticket_id: str | None,
+    requested_next_action_id: str | None,
+    target: GovernedTicketGenerationTarget,
+) -> None:
+    if requested_project_id not in {None, "", target.project_id}:
+        raise TicketArchitectBridgeInputError(f"requested project is not {target.project_id}")
+    if requested_ticket_id not in {None, "", target.ticket_id}:
+        raise TicketArchitectBridgeInputError(
+            f"requested ticket is not rejected successor {target.ticket_id}"
+        )
+    if requested_next_action_id not in {None, "", target.revise_next_action_id}:
+        raise TicketArchitectBridgeInputError(
+            f"requested next action is not {target.revise_next_action_id}"
+        )
+
+
+def _validate_rejected_successor_revision_workflow(
+    workflow: dict[str, Any],
+    *,
+    target: GovernedTicketGenerationTarget,
+) -> None:
+    if workflow.get("project_id") != target.project_id:
+        raise TicketArchitectBridgeInputError(f"active governed project is not {target.project_id}")
+    if workflow.get("macroproject_id") != target.macroproject_id:
+        raise TicketArchitectBridgeInputError(
+            f"active macroproject is not {target.macroproject_id}"
+        )
+    if workflow.get("current_ticket_id") not in {None, ""}:
+        raise TicketArchitectBridgeInputError(
+            f"{target.ticket_id} successor revision requires no active ticket"
+        )
+    if workflow.get("workflow_status") != "awaiting_correction":
+        raise TicketArchitectBridgeInputError(
+            f"{target.ticket_id} successor revision requires awaiting_correction"
+        )
+    if workflow.get("workflow_state") != f"{target.ticket_id}-AWAITING-CORRECTION":
+        raise TicketArchitectBridgeInputError(
+            f"workflow state is not {target.ticket_id}-AWAITING-CORRECTION"
+        )
+    if workflow.get("generated_successor_ticket_id") != target.ticket_id:
+        raise TicketArchitectBridgeInputError(
+            f"generated successor ticket is not {target.ticket_id}"
+        )
+    if workflow.get("next_ticket_id") != target.ticket_id:
+        raise TicketArchitectBridgeInputError(
+            f"next ticket is not {target.ticket_id}"
+        )
+    next_action = workflow.get("next_action")
+    if not isinstance(next_action, dict):
+        raise TicketArchitectBridgeInputError("next action is unavailable")
+    if next_action.get("id") != target.revise_next_action_id:
+        raise TicketArchitectBridgeInputError(
+            f"next action is not {target.revise_next_action_id}"
+        )
+    if next_action.get("target_ticket_id") != target.ticket_id:
+        raise TicketArchitectBridgeInputError(
+            f"next action does not target {target.ticket_id}"
+        )
+    if next_action.get("required_human_action") != "ticket_correction":
+        raise TicketArchitectBridgeInputError("next action is not a ticket correction action")
+    if int(workflow.get("pending_ticket_approval_count") or 0) != 0:
+        raise TicketArchitectBridgeInputError("pending ticket approvals remain")
+    if int(workflow.get("active_execution_count") or 0) != 0:
+        raise TicketArchitectBridgeInputError("an execution is already active")
+    canonical = workflow.get("canonical_next_ticket_authority")
+    if not isinstance(canonical, dict):
+        raise TicketArchitectBridgeInputError("canonical next ticket authority is unavailable")
+    expected = _canonical_next_ticket_authority_projection(target)
+    for key in (
+        "project_id",
+        "macroproject_id",
+        "ticket_id",
+        "ticket_title",
+        "next_action_id",
+        "roadmap_authority_path",
+        "roadmap_authority_section",
+        "dependency_ticket_ids",
+        "predecessor_ticket_id",
+        "ticket_contract_SHA256",
+    ):
+        if key in expected and canonical.get(key) != expected[key]:
+            raise TicketArchitectBridgeInputError(
+                "canonical next ticket authority does not match current roadmap"
+            )
+
+
+def _revision_generation_workflow(
+    workflow: dict[str, Any],
+    *,
+    target: GovernedTicketGenerationTarget,
+) -> dict[str, Any]:
+    bounded = dict(workflow)
+    bounded["current_ticket_id"] = None
+    bounded["current_ticket_title"] = None
+    bounded["next_ticket_id"] = target.ticket_id
+    bounded["next_ticket_title"] = target.ticket_title
+    bounded["next_action"] = {
+        "id": target.next_action_id,
+        "label": f"Generate governed {target.ticket_id} {target.ticket_title}.",
+        "target_ticket_id": target.ticket_id,
+        "target_ticket_title": target.ticket_title,
+        "required_human_action": "ticket_generation",
+    }
+    return bounded
+
+
+def _validate_revision_authorization_text(
+    value: object,
+    *,
+    ticket_id: str,
+    revise_next_action_id: str,
+) -> str:
+    raw = str(value or "").strip()
+    normalized = unicodedata.normalize("NFKD", raw)
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch)).lower()
+    if not raw:
+        raise TicketArchitectBridgeInputError("human_authorization_text is required")
+    if "?" in raw or "¿" in raw:
+        raise TicketArchitectBridgeInputError("revision authorization text must not be a question")
+    if any(
+        phrase in normalized
+        for phrase in (
+            "creo que",
+            "pienso que",
+            "tal vez",
+            "parece que",
+            "quizas",
+            "quiza",
+            "maybe",
+            "probably",
+            "what if",
+            "que pasa si",
+        )
+    ):
+        raise TicketArchitectBridgeInputError("revision authorization text is ambiguous")
+    ticket_ids = {
+        match.group(0).replace("_", ".").replace("-", ".").upper()
+        for match in re.finditer(r"\bP\d+(?:[._-]\d+)+\b", normalized, flags=re.IGNORECASE)
+    }
+    if ticket_id.upper() not in ticket_ids and revise_next_action_id.lower() not in normalized:
+        raise TicketArchitectBridgeInputError(
+            "revision authorization text must name the rejected successor ticket"
+        )
+    if not re.search(
+        r"\b(revise|revision|correct|correction|regenerate|regen|corrige|corregir|correccion|revisar|revisa|regenera|regenerar)\b",
+        normalized,
+    ):
+        raise TicketArchitectBridgeInputError(
+            "explicit rejected-successor revision authorization text is required"
+        )
+    return raw
 
 
 def generated_record_to_workflow_overlay(record: dict[str, Any]) -> dict[str, Any]:
@@ -3527,6 +3855,67 @@ def _append_reconciliation_history(
     return entry
 
 
+def _append_rejected_successor_revision_history(
+    *,
+    rejected_generation: dict[str, Any],
+    rejected_decision: dict[str, Any],
+    revised_generation: dict[str, Any],
+    target: GovernedTicketGenerationTarget,
+    human_authorization_text: str,
+    authorizer_id: str,
+) -> dict[str, Any]:
+    history_path = rejected_successor_revision_history_path_for_ticket(target.ticket_id)
+    entry = {
+        "schema_version": TICKET_ARCHITECT_BRIDGE_SCHEMA_VERSION,
+        "policy_id": TICKET_ARCHITECT_REJECTED_SUCCESSOR_REVISION_POLICY_ID,
+        "source_system": "pepper-ticket-architect-bridge",
+        "revised_at": _utc_now_iso(),
+        "revision_status": "revised_to_awaiting_ticket_approval",
+        "ticket_id": target.ticket_id,
+        "ticket_title": target.ticket_title,
+        "revision_action_id": target.revise_next_action_id,
+        "new_generation_action_id": target.next_action_id,
+        "authorizer_id": authorizer_id,
+        "human_authorization_text": human_authorization_text,
+        "rejected_generation_bridge_SHA256": rejected_generation["bridge_SHA256"],
+        "rejected_ticket_spec_SHA256": rejected_generation["ticket_spec_SHA256"],
+        "rejected_work_packet_id": rejected_generation["work_packet_id"],
+        "rejected_work_packet_SHA256": rejected_generation["work_packet_SHA256"],
+        "rejected_approval_publication_SHA256": rejected_decision[
+            "approval_publication_SHA256"
+        ],
+        "rejected_approval_decision": rejected_decision["decision"],
+        "revised_generation_bridge_SHA256": revised_generation["bridge_SHA256"],
+        "revised_ticket_spec_SHA256": revised_generation["ticket_spec_SHA256"],
+        "revised_work_packet_id": revised_generation["work_packet_id"],
+        "revised_work_packet_SHA256": revised_generation["work_packet_SHA256"],
+        "historical_rejected_generation_record": rejected_generation,
+        "historical_rejected_approval_decision_record": rejected_decision,
+        "new_generation_record": revised_generation,
+        "ticket_generated": True,
+        "human_ticket_approval_required": True,
+        "human_ticket_approval_present": False,
+        "execution_ready": False,
+        "ticket_execution_authorized": False,
+        "WorkPacket_execution_authorized": False,
+        "runtime_execution_authorized": False,
+        "worker_execution": False,
+        "Kanban_dispatch": False,
+        "Git_mutation": False,
+        "provider_dispatch_count": 0,
+        "model_inference_count": 0,
+        "Git_commands_executed": 0,
+        "Docker_commands_executed": 0,
+        "Graphify_commands_executed": 0,
+        "WorkPacket_compilation_count": 1,
+    }
+    entry["revision_SHA256"] = _revision_history_record_digest(entry)
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    with history_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n")
+    return entry
+
+
 def _load_existing_reconciliation(path: Path, bridge_sha256: str) -> dict[str, Any] | None:
     if not path.exists():
         return None
@@ -3542,6 +3931,16 @@ def _load_existing_reconciliation(path: Path, bridge_sha256: str) -> dict[str, A
         if isinstance(entry, dict) and entry.get("bridge_SHA256") == bridge_sha256:
             return entry
     return None
+
+
+def _write_json_atomic(path: Path, record: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(
+        json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    tmp.replace(path)
 
 
 def _operational_result(record: dict[str, Any], *, idempotent_replay: bool) -> dict[str, Any]:
@@ -3803,6 +4202,20 @@ def _reconciliation_record_digest(record: dict[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _revision_history_record_digest(record: dict[str, Any]) -> str:
+    payload = {key: value for key, value in record.items() if key != "revision_SHA256"}
+    encoded = json.dumps(
+        {
+            "algorithm": TICKET_ARCHITECT_REJECTED_SUCCESSOR_REVISION_DIGEST_ALGORITHM,
+            "record": _normalize(payload),
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def _normalize(value: object) -> object:
     if isinstance(value, BaseModel):
         return _normalize(value.model_dump(mode="json", warnings=False))
@@ -3853,6 +4266,7 @@ __all__ = (
     "generation_record_path",
     "generation_record_path_for_ticket",
     "reconciliation_history_path_for_ticket",
+    "rejected_successor_revision_history_path_for_ticket",
     "quarantined_generation_record_path",
     "approval_decision_record_path",
     "approval_decision_record_path_for_ticket",
@@ -3866,6 +4280,7 @@ __all__ = (
     "validate_p18_9_0_approval_decision_record",
     "inspect_invalid_future_ticket_authority",
     "reconcile_invalid_future_ticket_authority",
+    "revise_rejected_successor_ticket",
     "generate_p18_9_0_ticket",
     "generate_current_ticket",
     "resolve_canonical_next_ticket",

@@ -292,6 +292,23 @@ def _legacy_p18_9_2_decision_record(generation: dict, decision: str) -> dict:
     )
 
 
+def _p18_9_2_rejected_successor_workflow(record: dict) -> dict:
+    overlay = bridge.generated_record_to_workflow_overlay(record)
+    canonical = bridge.resolve_canonical_next_ticket(_p18_9_2_workflow()).asdict()
+    workflow = {**_p18_9_2_workflow(), **overlay}
+    workflow.update({
+        "current_ticket_id": None,
+        "current_ticket_title": None,
+        "generated_successor_ticket_id": "P18.9.2",
+        "generated_successor_ticket_title": "Control Center Overview",
+        "next_ticket_id": "P18.9.2",
+        "next_ticket_title": "Control Center Overview",
+        "canonical_next_ticket_authority": canonical,
+        "active_execution_count": 0,
+    })
+    return workflow
+
+
 def test_generate_p18_9_0_bridge_success_and_persists(bridge_home) -> None:
     result = bridge.generate_p18_9_0_ticket(workflow=_workflow())
     record = bridge.load_p18_9_0_generation_record()
@@ -659,6 +676,185 @@ def test_terminal_rejected_legacy_p18_9_2_record_reconstructs_after_current_auth
     assert snapshot["worker_execution"] is False
     assert snapshot["Kanban_dispatch"] is False
     assert snapshot["Git_mutation"] is False
+
+
+def test_revise_rejected_p18_9_2_successor_regenerates_same_ticket_to_pending_approval(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    record = _legacy_p18_9_2_generation_record(monkeypatch)
+    decision = _legacy_p18_9_2_decision_record(record, "reject")
+    _write_generation_record(record)
+    _write_approval_decision_record(decision)
+    workflow = _p18_9_2_rejected_successor_workflow(record)
+
+    result = bridge.revise_rejected_successor_ticket(
+        workflow=workflow,
+        human_authorization_text="Regenerate P18.9.2 after the rejected successor correction.",
+        authorizer_id="human.p18.9",
+        requested_project_id="PEPPER",
+        requested_ticket_id="P18.9.2",
+        requested_next_action_id="REVISE_P18_9_2",
+    )
+    revised = bridge.load_generation_record(ticket_id="P18.9.2")
+    assert revised is not None
+    history_lines = bridge.rejected_successor_revision_history_path_for_ticket(
+        "P18.9.2"
+    ).read_text(encoding="utf-8").splitlines()
+    history = json.loads(history_lines[0])
+    ticket_text = json.dumps(revised["ticket_spec"], ensure_ascii=False, sort_keys=True)
+
+    assert result["revision_applied"] is True
+    assert result["revision_status"] == "awaiting_ticket_approval"
+    assert result["ticket_id"] == "P18.9.2"
+    assert result["ticket_title"] == "Control Center Overview"
+    assert result["workflow_status"] == "awaiting_ticket_approval"
+    assert result["pending_ticket_approval_count"] == 1
+    assert result["active_execution_count"] == 0
+    assert result["next_action"]["id"] == "APPROVE_P18_9_2"
+    assert result["ticket_execution_authorized"] is False
+    assert result["WorkPacket_execution_authorized"] is False
+    assert result["worker_execution"] is False
+    assert result["Kanban_dispatch"] is False
+    assert result["Git_mutation"] is False
+    assert result["Git_commands_executed"] == 0
+    assert result["Docker_commands_executed"] == 0
+    assert result["Graphify_commands_executed"] == 0
+    assert revised["ticket_id"] == "P18.9.2"
+    assert revised["ticket_spec"]["title"] == "Control Center Overview"
+    assert revised["ticket_spec"]["ticket_type"] == "implementation"
+    assert revised["work_packet_compilation_result"]["work_packet"]["execution_ready"] is False
+    assert "/agent-platform/overview" in ticket_text
+    assert "Current Work summary" in ticket_text
+    assert "Next Governed Action summary" in ticket_text
+    assert "Needs Attention summary" in ticket_text
+    assert "Execution summary" in ticket_text
+    assert "Governed State summary" in ticket_text
+    assert "P18.9.3 Lead Agent Product Experience" in ticket_text
+    assert "Define the governed product architecture" not in ticket_text
+    assert bridge.load_approval_decision_record(
+        ticket_id="P18.9.2",
+        generation_record=revised,
+    ) is None
+    assert not bridge.approval_decision_record_path_for_ticket("P18.9.2").exists()
+    assert len(history_lines) == 1
+    assert history["revision_SHA256"] == bridge._revision_history_record_digest(history)
+    assert history["historical_rejected_generation_record"] == record
+    assert history["historical_rejected_approval_decision_record"] == decision
+    assert history["new_generation_record"] == revised
+    assert history["rejected_generation_bridge_SHA256"] == record["bridge_SHA256"]
+    assert history["rejected_approval_publication_SHA256"] == decision[
+        "approval_publication_SHA256"
+    ]
+    assert history["revised_generation_bridge_SHA256"] == revised["bridge_SHA256"]
+    assert history["human_ticket_approval_present"] is False
+    assert history["execution_ready"] is False
+    assert history["worker_execution"] is False
+    assert history["Kanban_dispatch"] is False
+    assert history["Git_mutation"] is False
+
+
+def test_chat_revise_generated_successor_ticket_uses_revision_backend_without_execution(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    bridge.generate_current_ticket(workflow=_p18_9_2_workflow())
+    record = bridge.load_generation_record(ticket_id="P18.9.2")
+    assert record is not None
+    bridge.apply_ticket_approval_decision(
+        ticket_id="P18.9.2",
+        decision="reject",
+        actor="human.p18.9",
+    )
+    monkeypatch.setattr(
+        pr,
+        "_p18_9_0_generation_overlay",
+        lambda: (_p18_9_2_workflow(), None),
+    )
+
+    result = _chat_tool_result(
+        "revise_generated_successor_ticket",
+        {
+            "human_authorization_text": "Regenerate P18.9.2 after rejection.",
+            "project_id": "PEPPER",
+            "ticket_id": "P18.9.2",
+            "next_action_id": "REVISE_P18_9_2",
+        },
+    )
+    revised = bridge.load_generation_record(ticket_id="P18.9.2")
+    snapshot = pr.build_workflow_control_snapshot()
+
+    assert result["success"] is True
+    assert result["source_tool"] == "revise_generated_successor_ticket"
+    assert result["revision_applied"] is True
+    assert result["workflow_status"] == "awaiting_ticket_approval"
+    assert result["current_ticket_id"] is None
+    assert result["next_ticket_id"] == "P18.9.2"
+    assert result["pending_approval_count"] == 1
+    assert result["pending_ticket_approval_count"] == 1
+    assert result["active_execution_count"] == 0
+    assert result["next_action"]["id"] == "APPROVE_P18_9_2"
+    assert result["worker_execution"] is False
+    assert result["Kanban_dispatch"] is False
+    assert result["Git_mutation"] is False
+    assert result["auto_approval"] is False
+    assert result["auto_execution"] is False
+    assert revised is not None
+    assert bridge.load_approval_decision_record(
+        ticket_id="P18.9.2",
+        generation_record=revised,
+    ) is None
+    assert [item["id"] for item in pr.build_approval_inbox_source()["approvals"]] == [
+        "P18.9.2"
+    ]
+    assert snapshot["workflow_status"] == "awaiting_ticket_approval"
+    assert snapshot["next_action"]["id"] == "APPROVE_P18_9_2"
+    assert snapshot["successor_ticket_generated_not_activated"] is True
+    assert snapshot["worker_execution"] is False
+    assert snapshot["Kanban_dispatch"] is False
+    assert snapshot["Git_mutation"] is False
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Can we regenerate P18.9.2?",
+        "Creo que hay que regenerar P18.9.2",
+        "Show me P18.9.2",
+        "Regenerate P18.9.3 after rejection.",
+    ],
+)
+def test_chat_revise_generated_successor_rejects_non_authorization_language(
+    bridge_home,
+    monkeypatch,
+    text,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    bridge.generate_current_ticket(workflow=_p18_9_2_workflow())
+    record = bridge.load_generation_record(ticket_id="P18.9.2")
+    assert record is not None
+    bridge.apply_ticket_approval_decision(
+        ticket_id="P18.9.2",
+        decision="reject",
+        actor="human.p18.9",
+    )
+    monkeypatch.setattr(
+        pr,
+        "_p18_9_0_generation_overlay",
+        lambda: (_p18_9_2_workflow(), None),
+    )
+
+    result = _chat_tool_result(
+        "revise_generated_successor_ticket",
+        {"human_authorization_text": text},
+    )
+
+    assert result["success"] is False
+    assert bridge.load_approval_decision_record(ticket_id="P18.9.2") is not None
+    assert not bridge.rejected_successor_revision_history_path_for_ticket("P18.9.2").exists()
 
 
 def test_legacy_p18_9_2_pending_record_with_current_authority_drift_fails_closed(

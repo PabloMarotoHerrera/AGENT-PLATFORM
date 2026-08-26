@@ -313,6 +313,7 @@ def test_pepper_toolset_exposes_no_arbitrary_shell_or_file_authority(monkeypatch
         "get_review_status",
         "get_next_action",
         "reconcile_invalid_current_generation_authority",
+        "revise_generated_successor_ticket",
         "generate_current_ticket",
         "prepare_current_ticket_execution",
         "start_current_ticket_execution",
@@ -333,10 +334,16 @@ def test_pepper_toolset_exposes_no_arbitrary_shell_or_file_authority(monkeypatch
         "resolve_repository_authority",
     }.issubset(names)
     by_name = {definition["function"]["name"]: definition["function"] for definition in definitions}
+    revision_params = by_name["revise_generated_successor_ticket"]["parameters"]
     activation_params = by_name["activate_current_ticket_governed_autonomy"]["parameters"]
     continuation_params = by_name["continue_current_ticket_governed_autonomy"]["parameters"]
     review_decision_params = by_name["submit_current_ticket_review_decision"]["parameters"]
     handoff_completion_params = by_name["complete_current_ticket_human_git_handoff"]["parameters"]
+    assert revision_params["required"] == ["human_authorization_text"]
+    assert "ticket_id" in revision_params["properties"]
+    assert "next_action_id" in revision_params["properties"]
+    assert "shell_command" not in revision_params["properties"]
+    assert "workspace_path" not in revision_params["properties"]
     assert activation_params["required"] == ["human_request_text"]
     assert "governed_autonomy_envelope" not in activation_params["properties"]
     assert "capability_gap" not in activation_params["properties"]
@@ -469,6 +476,10 @@ def test_lead_agent_prompt_requires_tool_backed_state() -> None:
     assert "generate_current_ticket" in prompt
     assert "current canonical next governed ticket" in prompt
     assert "P18.9.0 TicketSpec/WorkPacket bridge" not in prompt
+    assert "revise_generated_successor_ticket" in prompt
+    assert "REVISE_<current-ticket>" in prompt
+    assert "rejected generated successor" in prompt
+    assert "preserve rejected history" in prompt
     assert "decide_pending_approval" in prompt
     assert "APPROVE_<current-ticket>" in prompt
     assert "current pending governed ticket approval" in prompt
