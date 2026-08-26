@@ -18,6 +18,7 @@ from hermes_cli.agent_platform.workflow import work_packet_kanban_projection as 
 _EXECUTOR_PROFILE = "pepper-architecture-product"
 _IMPLEMENTATION_PROFILE = "pepper-frontend-implementation"
 _P18_9_1_TITLE = "Pepper Shell, Routing, and Compact Navigation"
+_P18_9_2_TITLE = "Control Center Overview"
 NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
@@ -71,6 +72,33 @@ def _next_ticket_workflow(**overrides):
             "label": f"Generate governed P18.9.1 {_P18_9_1_TITLE}.",
             "target_ticket_id": "P18.9.1",
             "target_ticket_title": _P18_9_1_TITLE,
+            "required_human_action": "ticket_generation",
+        },
+    )
+    data.update(overrides)
+    return data
+
+
+def _p18_9_2_workflow(**overrides):
+    data = _workflow(
+        current_ticket_id=None,
+        current_ticket_title=None,
+        next_ticket_id="P18.9.2",
+        next_ticket_title=_P18_9_2_TITLE,
+        workflow_state="P18.9.1-COMPLETED",
+        workflow_status="completed",
+        queue_state="p18_9_1_closed_next_ticket_ready",
+        closed_predecessor_ticket_id="P18.9.1",
+        validation_state="review_accepted",
+        review_state="accepted",
+        P18_9_ticket_generated=True,
+        next_ticket_ready=True,
+        next_ticket_generated=False,
+        next_action={
+            "id": "GENERATE_P18_9_2_REQUIRES_SEPARATE_HUMAN_ACTION",
+            "label": f"Generate governed P18.9.2 {_P18_9_2_TITLE}.",
+            "target_ticket_id": "P18.9.2",
+            "target_ticket_title": _P18_9_2_TITLE,
             "required_human_action": "ticket_generation",
         },
     )
@@ -2932,6 +2960,94 @@ def test_chat_tool_prepares_current_generic_ticket_execution_projection(
     assert result["worker_execution"] is False
     assert result["Kanban_dispatch"] is False
     assert result["Git_mutation"] is False
+
+
+def test_chat_tool_prepares_approved_successor_execution_projection(
+    projection_home,
+    monkeypatch,
+) -> None:
+    _install_implementation_profile(monkeypatch, projection_home)
+    bridge.generate_current_ticket(workflow=_p18_9_2_workflow())
+    record = bridge.load_generation_record(ticket_id="P18.9.2")
+    assert record is not None
+
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    monkeypatch.setattr(
+        pr,
+        "_p18_9_0_generation_overlay",
+        lambda: (_p18_9_2_workflow(), None),
+    )
+    import tools.pepper_workflow_tools  # noqa: F401
+    from model_tools import handle_function_call
+
+    decision = json.loads(
+        handle_function_call(
+            "decide_pending_approval",
+            {
+                "decision": "approve",
+                "human_decision_text": "Approve P18.9.2",
+                "approval_id": "P18.9.2",
+                "project_id": "PEPPER",
+                "ticket_id": "P18.9.2",
+                "next_action_id": "APPROVE_P18_9_2",
+                "ticket_spec_sha256": record["ticket_spec_SHA256"],
+                "work_packet_id": record["work_packet_id"],
+                "work_packet_sha256": record["work_packet_SHA256"],
+            },
+        )
+    )
+    approved_snapshot = pr.build_workflow_control_snapshot()
+
+    result = json.loads(
+        handle_function_call(
+            "prepare_current_ticket_execution",
+            {
+                "human_request_text": "Prepare P18.9.2 execution.",
+                "project_id": "PEPPER",
+                "ticket_id": "P18.9.2",
+                "next_action_id": "P18_9_2_APPROVED_NO_EXECUTION",
+            },
+        )
+    )
+    queued_snapshot = pr.build_workflow_control_snapshot()
+    projection_record = projection.load_kanban_projection_record(ticket_id="P18.9.2")
+
+    assert decision["success"] is True
+    assert decision["workflow_status"] == "ticket_approved"
+    assert decision["current_ticket_id"] == "P18.9.2"
+    assert approved_snapshot["current_ticket_id"] == "P18.9.2"
+    assert approved_snapshot["workflow_status"] == "ticket_approved"
+    assert approved_snapshot["next_action"]["id"] == "P18_9_2_APPROVED_NO_EXECUTION"
+    assert approved_snapshot["successor_ticket_generated_not_activated"] is False
+
+    assert result["success"] is True
+    assert result["source_tool"] == "prepare_current_ticket_execution"
+    assert result["ticket_id"] == "P18.9.2"
+    assert result["ticket_spec_SHA256"] == record["ticket_spec_SHA256"]
+    assert result["work_packet_id"] == record["work_packet_id"]
+    assert result["work_packet_SHA256"] == record["work_packet_SHA256"]
+    assert result["current_ticket_id"] == "P18.9.2"
+    assert result["workflow_status"] == "queued"
+    assert result["queue_state"] == "kanban_projection_ready_not_dispatched"
+    assert result["next_action"]["id"] == "START_P18_9_2_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION"
+    assert result["assignee_profile"] == _IMPLEMENTATION_PROFILE
+    assert result["execution_profile_role"] == "implementation_product"
+    assert result["dispatch_performed"] is False
+    assert result["execution_started"] is False
+    assert result["worker_execution"] is False
+    assert result["Kanban_dispatch"] is False
+    assert result["Git_mutation"] is False
+
+    assert projection_record is not None
+    assert queued_snapshot["current_ticket_id"] == "P18.9.2"
+    assert queued_snapshot["workflow_status"] == "queued"
+    assert queued_snapshot["queue_state"] == "kanban_projection_ready_not_dispatched"
+    assert queued_snapshot["next_action"]["id"] == "START_P18_9_2_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION"
+    assert queued_snapshot["successor_ticket_generated_not_activated"] is False
+    assert queued_snapshot["worker_execution"] is False
+    assert queued_snapshot["Kanban_dispatch"] is False
+    assert queued_snapshot["Git_mutation"] is False
 
 
 def test_chat_tool_returns_profile_assignment_diagnostics_on_gap(

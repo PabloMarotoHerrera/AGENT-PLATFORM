@@ -1702,7 +1702,7 @@ def _execution_operational_summary() -> dict[str, Any]:
 def _pending_generated_successor_ticket_approval_overlay(
     workflow: dict[str, Any],
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-    """Project a generated successor ticket lifecycle without activating it."""
+    """Project a generated successor ticket lifecycle without starting execution."""
 
     active_ticket_id = str(workflow.get("current_ticket_id") or "").strip()
     if active_ticket_id:
@@ -1747,36 +1747,26 @@ def _pending_generated_successor_ticket_approval_overlay(
         record.get("ticket_title") or generated_overlay.get("current_ticket_title") or ""
     )
     overlay = dict(generated_overlay)
-    pending = generated_overlay.get("workflow_status") == "awaiting_ticket_approval"
+    workflow_status = generated_overlay.get("workflow_status")
+    pending = workflow_status == "awaiting_ticket_approval"
+    approved = workflow_status == "ticket_approved"
+    projection_blocker = None
+    if approved:
+        try:
+            projection = _projection_record_for_generated_ticket(record)
+            if projection is not None:
+                overlay.update(_projection_overlay_for_record(projection))
+        except Exception as exc:  # pragma: no cover - defensive live-state guard
+            projection_blocker = {
+                "id": f"{ticket_id}-SUCCESSOR-KANBAN-PROJECTION-AUTHORITY",
+                "status": "blocked_by_invalid_generated_successor_projection_authority",
+                "evidence": _safe_text(exc, limit=300),
+            }
     overlay.update({
-        "current_ticket_id": None,
-        "current_ticket_title": None,
         "generated_successor_ticket_id": ticket_id,
         "generated_successor_ticket_title": ticket_title,
-        "next_ticket_id": ticket_id,
-        "next_ticket_title": ticket_title,
-        "readiness": (
-            "successor_awaiting_ticket_approval"
-            if pending
-            else generated_overlay.get("readiness")
-        ),
-        "workflow_state": (
-            f"{ticket_id}-SUCCESSOR-AWAITING-TICKET-APPROVAL"
-            if pending
-            else generated_overlay.get("workflow_state")
-        ),
-        "workflow_status": generated_overlay.get("workflow_status"),
-        "approval_state": generated_overlay.get("approval_state"),
-        "pending_ticket_approval_count": int(
-            generated_overlay.get("pending_ticket_approval_count") or 0
-        ),
-        "queue_state": (
-            "awaiting_human_successor_ticket_approval"
-            if pending
-            else generated_overlay.get("queue_state")
-        ),
         "canonical_next_ticket_authority": canonical_next,
-        "successor_ticket_generated_not_activated": True,
+        "successor_ticket_generated_not_activated": not approved,
         "ticket_execution_authorized": False,
         "WorkPacket_execution_authorized": False,
         "runtime_execution_authorized": False,
@@ -1784,7 +1774,34 @@ def _pending_generated_successor_ticket_approval_overlay(
         "Kanban_dispatch": False,
         "Git_mutation": False,
     })
-    return overlay, None
+    if not approved:
+        overlay.update({
+            "current_ticket_id": None,
+            "current_ticket_title": None,
+            "next_ticket_id": ticket_id,
+            "next_ticket_title": ticket_title,
+            "readiness": (
+                "successor_awaiting_ticket_approval"
+                if pending
+                else generated_overlay.get("readiness")
+            ),
+            "workflow_state": (
+                f"{ticket_id}-SUCCESSOR-AWAITING-TICKET-APPROVAL"
+                if pending
+                else generated_overlay.get("workflow_state")
+            ),
+            "workflow_status": workflow_status,
+            "approval_state": generated_overlay.get("approval_state"),
+            "pending_ticket_approval_count": int(
+                generated_overlay.get("pending_ticket_approval_count") or 0
+            ),
+            "queue_state": (
+                "awaiting_human_successor_ticket_approval"
+                if pending
+                else generated_overlay.get("queue_state")
+            ),
+        })
+    return overlay, projection_blocker
 
 
 def _subsystems() -> tuple[str, ...]:

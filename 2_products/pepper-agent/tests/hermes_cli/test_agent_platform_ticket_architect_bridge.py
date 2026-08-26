@@ -2474,7 +2474,7 @@ def test_workflow_control_projects_p18_9_2_successor_after_predecessor_handoff_o
         ),
     ),
 )
-def test_chat_explicit_p18_9_2_successor_decision_preserves_no_active_ticket(
+def test_chat_explicit_p18_9_2_successor_decision_activates_only_approved_ticket(
     bridge_home,
     monkeypatch,
     decision,
@@ -2528,7 +2528,10 @@ def test_chat_explicit_p18_9_2_successor_decision_preserves_no_active_ticket(
     assert result["approval_id"] == "P18.9.2"
     assert result["status"] == status
     assert result["workflow_status"] == workflow_status
-    assert result["current_ticket_id"] is None
+    if decision == "approve":
+        assert result["current_ticket_id"] == "P18.9.2"
+    else:
+        assert result["current_ticket_id"] is None
     assert result["pending_approval_count"] == 0
     assert result["pending_ticket_approval_count"] == 0
     assert result["next_action"]["id"] == next_action_id
@@ -2552,12 +2555,17 @@ def test_chat_explicit_p18_9_2_successor_decision_preserves_no_active_ticket(
     assert decision_record["Kanban_dispatch"] is False
     assert decision_record["Git_mutation"] is False
     assert pr.build_approval_inbox_source()["approvals"] == []
-    assert snapshot["current_ticket_id"] is None
+    if decision == "approve":
+        assert snapshot["current_ticket_id"] == "P18.9.2"
+        assert snapshot["next_ticket_id"] is None
+    else:
+        assert snapshot["current_ticket_id"] is None
+        assert snapshot["next_ticket_id"] == "P18.9.2"
     assert snapshot["generated_successor_ticket_id"] == "P18.9.2"
     assert snapshot["workflow_status"] == workflow_status
     assert snapshot["pending_ticket_approval_count"] == 0
     assert snapshot["next_action"]["id"] == next_action_id
-    assert snapshot["successor_ticket_generated_not_activated"] is True
+    assert snapshot["successor_ticket_generated_not_activated"] is (decision != "approve")
     assert snapshot["worker_execution"] is False
     assert snapshot["Kanban_dispatch"] is False
     assert snapshot["Git_mutation"] is False
