@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -292,6 +293,13 @@ def _make_directory_reparse_point_or_skip(link: Path, target: Path) -> None:
             return
         pytest.skip(f"directory junction creation unavailable: {result.stderr}")
     pytest.skip(f"directory symlink creation unavailable: {symlink_error}")
+
+
+def _make_file_symlink_or_skip(link: Path, target: Path | str) -> None:
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"file symlink creation unavailable: {exc}")
 
 
 def _source_materialization_authority(
@@ -1553,6 +1561,205 @@ def test_dependency_substrate_materializes_snapshot_and_runs_scratch_validation(
     assert "FAKE_VITEST" in stdout
     assert package_dir.as_posix() in stdout.replace("\\", "/")
     assert "SCRATCH_MARKER" in stdout
+
+
+def test_dependency_substrate_materializes_internal_symlinked_files_as_physical_copies(
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    source_root = tmp_path / "source"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    web_package_rel = "2_products/pepper-agent/web"
+    root_modules_rel = "2_products/pepper-agent/node_modules"
+    _write_fixture_file(
+        source_root,
+        f"{web_package_rel}/package.json",
+        json.dumps({"scripts": {"test": "vitest run"}}),
+    )
+    _write_fixture_file(
+        source_root,
+        f"{web_package_rel}/src/agent-platform/shell/scratch-validation.test.ts",
+        "test('safe internal dependency symlink', () => {})\n",
+    )
+    target = _write_fixture_file(
+        source_root,
+        f"{root_modules_rel}/vitest/dist/vitest.mjs",
+        "export const materialized = 'physical dependency copy';\n",
+    )
+    symlinked_entry = source_root / f"{root_modules_rel}/vitest/vitest.mjs"
+    _make_file_symlink_or_skip(symlinked_entry, Path("dist/vitest.mjs"))
+    authority = _source_materialization_authority(
+        workspace,
+        allowed_paths=(
+            f"{web_package_rel}/src/agent-platform/shell/scratch-validation.test.ts",
+        ),
+    )
+    work_packet = SimpleNamespace(
+        validation_steps=(
+            SimpleNamespace(
+                validation_id="V-FRONTEND",
+                description="Focused frontend tests validate scratch state.",
+                expected_result="The focused frontend tests pass.",
+                command=None,
+            ),
+        ),
+        source_ticket=SimpleNamespace(ticket_type="implementation"),
+    )
+
+    pr._materialize_workpacket_scratch_source_tree(authority, source_root=source_root)
+    record = pr._materialize_workpacket_dependency_substrate(
+        authority,
+        work_packet,
+        source_root=source_root,
+    )
+
+    scratch_vitest = workspace / f"{root_modules_rel}/vitest/vitest.mjs"
+    assert symlinked_entry.is_symlink()
+    assert scratch_vitest.is_file()
+    assert not scratch_vitest.is_symlink()
+    assert scratch_vitest.read_text(encoding="utf-8") == target.read_text(encoding="utf-8")
+    substrate = record["dependency_substrates"][0]
+    assert substrate["dependency_sentinel_SHA256"]["vitest/vitest.mjs"] == (
+        substrate["scratch_dependency_sentinel_SHA256"]["vitest/vitest.mjs"]
+    )
+
+
+def test_dependency_substrate_rejects_symlinked_files_that_escape_dependency_root(
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    source_root = tmp_path / "source"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    web_package_rel = "2_products/pepper-agent/web"
+    root_modules_rel = "2_products/pepper-agent/node_modules"
+    package_test = _write_fixture_file(
+        source_root,
+        f"{web_package_rel}/src/agent-platform/shell/scratch-validation.test.ts",
+        "test('escaping dependency symlink', () => {})\n",
+    )
+    _write_fixture_file(
+        source_root,
+        f"{web_package_rel}/package.json",
+        json.dumps({"scripts": {"test": "vitest run"}}),
+    )
+    symlinked_entry = source_root / f"{root_modules_rel}/vitest/vitest.mjs"
+    symlinked_entry.parent.mkdir(parents=True, exist_ok=True)
+    _make_file_symlink_or_skip(symlinked_entry, package_test)
+    authority = _source_materialization_authority(
+        workspace,
+        allowed_paths=(
+            f"{web_package_rel}/src/agent-platform/shell/scratch-validation.test.ts",
+        ),
+    )
+    work_packet = SimpleNamespace(
+        validation_steps=(
+            SimpleNamespace(
+                validation_id="V-FRONTEND",
+                description="Focused frontend tests validate scratch state.",
+                expected_result="The focused frontend tests pass.",
+                command=None,
+            ),
+        ),
+        source_ticket=SimpleNamespace(ticket_type="implementation"),
+    )
+
+    pr._materialize_workpacket_scratch_source_tree(authority, source_root=source_root)
+    with pytest.raises(pr.ProductRuntimeDependencyGap) as exc_info:
+        pr._materialize_workpacket_dependency_substrate(
+            authority,
+            work_packet,
+            source_root=source_root,
+        )
+
+    assert exc_info.value.external_code == pr.IMPLEMENTATION_SCRATCH_VALIDATION_DEPENDENCY_GAP
+    assert exc_info.value.dependency_code == pr.DEPENDENCY_MATERIALIZATION_FAILED
+    assert "unsafe symlinked file" in str(exc_info.value)
+    assert not (workspace / f"{root_modules_rel}/vitest/vitest.mjs").exists()
+
+
+@pytest.mark.parametrize(
+    ("case", "expected_message"),
+    (
+        ("broken", "unsafe symlinked file"),
+        ("cyclic", "unsafe symlinked file"),
+        ("non_regular_fifo", "symlinked file target is not a file"),
+    ),
+)
+def test_dependency_substrate_rejects_invalid_symlinked_files(
+    tmp_path,
+    case: str,
+    expected_message: str,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    source_root = tmp_path / "source"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    web_package_rel = "2_products/pepper-agent/web"
+    root_modules_rel = "2_products/pepper-agent/node_modules"
+    _write_fixture_file(
+        source_root,
+        f"{web_package_rel}/package.json",
+        json.dumps({"scripts": {"test": "vitest run"}}),
+    )
+    _write_fixture_file(
+        source_root,
+        f"{web_package_rel}/src/agent-platform/shell/scratch-validation.test.ts",
+        "test('invalid dependency symlink', () => {})\n",
+    )
+    _write_fixture_file(
+        source_root,
+        f"{root_modules_rel}/vitest/vitest.mjs",
+        "export const vitest = true;\n",
+    )
+    symlinked_entry = source_root / f"{root_modules_rel}/.bin/bad-link"
+    symlinked_entry.parent.mkdir(parents=True, exist_ok=True)
+    if case == "broken":
+        _make_file_symlink_or_skip(symlinked_entry, Path("missing-target.js"))
+    elif case == "cyclic":
+        _make_file_symlink_or_skip(symlinked_entry, Path("bad-link"))
+    else:
+        if not hasattr(os, "mkfifo"):
+            pytest.skip("host does not support FIFO creation")
+        fifo_target = source_root / f"{root_modules_rel}/.cache/fifo-target"
+        fifo_target.parent.mkdir(parents=True, exist_ok=True)
+        os.mkfifo(fifo_target)
+        _make_file_symlink_or_skip(symlinked_entry, Path("../.cache/fifo-target"))
+    authority = _source_materialization_authority(
+        workspace,
+        allowed_paths=(
+            f"{web_package_rel}/src/agent-platform/shell/scratch-validation.test.ts",
+        ),
+    )
+    work_packet = SimpleNamespace(
+        validation_steps=(
+            SimpleNamespace(
+                validation_id="V-FRONTEND",
+                description="Focused frontend tests validate scratch state.",
+                expected_result="The focused frontend tests pass.",
+                command=None,
+            ),
+        ),
+        source_ticket=SimpleNamespace(ticket_type="implementation"),
+    )
+
+    pr._materialize_workpacket_scratch_source_tree(authority, source_root=source_root)
+    with pytest.raises(pr.ProductRuntimeDependencyGap) as exc_info:
+        pr._materialize_workpacket_dependency_substrate(
+            authority,
+            work_packet,
+            source_root=source_root,
+        )
+
+    assert symlinked_entry.is_symlink()
+    assert exc_info.value.external_code == pr.IMPLEMENTATION_SCRATCH_VALIDATION_DEPENDENCY_GAP
+    assert exc_info.value.dependency_code == pr.DEPENDENCY_MATERIALIZATION_FAILED
+    assert expected_message in str(exc_info.value)
+    assert not (workspace / f"{root_modules_rel}/.bin/bad-link").exists()
 
 
 def test_dependency_substrate_missing_vitest_fails_before_worker_spawn(
@@ -3050,6 +3257,175 @@ def test_chat_tool_prepares_approved_successor_execution_projection(
     assert queued_snapshot["Git_mutation"] is False
 
 
+def test_approved_successor_dependency_materialization_failure_survives_fresh_reconstruction(
+    projection_home,
+    monkeypatch,
+) -> None:
+    _install_implementation_profile(monkeypatch, projection_home)
+    bridge.generate_current_ticket(workflow=_p18_9_2_workflow())
+    generation = bridge.load_generation_record(ticket_id="P18.9.2")
+    assert generation is not None
+
+    from hermes_cli import kanban_db
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    monkeypatch.setattr(
+        pr,
+        "_p18_9_0_generation_overlay",
+        lambda: (_p18_9_2_workflow(), None),
+    )
+    approved = pr.apply_approval_decision(
+        "P18.9.2",
+        pr.ApprovalDecisionRequest(decision="approve", actor="human.p18.9"),
+    )
+    assert approved["status"] == "approved"
+    projected = pr.project_current_approved_workpacket_to_kanban(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="P18_9_2_APPROVED_NO_EXECUTION",
+    )
+    queued_before_start = pr.build_workflow_control_snapshot()
+    assert queued_before_start["current_ticket_id"] == "P18.9.2"
+    assert queued_before_start["workflow_status"] == "queued"
+    assert queued_before_start["workflow_state"] == "P18.9.2-QUEUED-NOT-EXECUTING"
+    assert queued_before_start["next_action"]["id"] == (
+        "START_P18_9_2_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION"
+    )
+
+    monkeypatch.setattr(
+        pr,
+        "_executor_provider_readiness",
+        lambda profile_name: _ready_executor_provider_payload(profile_name),
+    )
+    monkeypatch.setattr(
+        pr,
+        "_preflight_pepper_governed_worker_credentials",
+        lambda _projection_record, *, enabled=True: _ready_worker_credential_probe(),
+    )
+    monkeypatch.setattr(
+        pr,
+        "_projection_requires_scratch_source_materialization",
+        lambda _projection_record: True,
+    )
+
+    def dependency_gap(_projection, _workspace, *, env_overlay=None, source_root=None):
+        _ = env_overlay, source_root
+        raise pr.ProductRuntimeDependencyGap(
+            pr.DEPENDENCY_MATERIALIZATION_FAILED,
+            "dependency source contains an unsafe symlinked file",
+        )
+
+    monkeypatch.setattr(pr, "_materialize_pepper_governed_scratch_source", dependency_gap)
+    immediate = pr.start_current_ticket_execution(
+        human_authorization_text="Start P18.9.2 execution now",
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="START_P18_9_2_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION",
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("dependency gap must block before spawn"),
+    )
+    assert immediate["start_status"] == "blocked"
+    assert immediate["blocker_code"] == pr.IMPLEMENTATION_SCRATCH_VALIDATION_DEPENDENCY_GAP
+    assert immediate["dispatch_performed"] is True
+    assert immediate["execution_started"] is False
+    assert immediate["worker_execution"] is False
+    assert immediate["worker_process_started"] is False
+    assert immediate["worker_pid_recorded"] is False
+    assert immediate["Git_mutation"] is False
+
+    fresh = pr.build_workflow_control_snapshot()
+    replay = pr.build_workflow_control_snapshot()
+    assert fresh["current_ticket_id"] == "P18.9.2"
+    assert fresh["workflow_status"] == "execution_failed"
+    assert fresh["workflow_state"] == "P18.9.2-EXECUTION-FAILED-RECOVERY-REQUIRED"
+    assert fresh["queue_state"] == "kanban_execution_terminal"
+    assert fresh["execution_state"] == "no_active_executions"
+    assert fresh["active_execution_count"] == 0
+    assert fresh["worker_execution"] is False
+    assert fresh["Kanban_dispatch"] is True
+    assert fresh["recovery_state"] == "recovery_required"
+    assert fresh["next_action"]["id"] == "RECOVER_P18_9_2_EXECUTION"
+    assert fresh["Git_mutation"] is False
+    assert {
+        key: fresh[key]
+        for key in (
+            "current_ticket_id",
+            "workflow_status",
+            "workflow_state",
+            "queue_state",
+            "execution_state",
+            "active_execution_count",
+            "worker_execution",
+            "Kanban_dispatch",
+            "recovery_state",
+            "next_action",
+        )
+    } == {
+        key: replay[key]
+        for key in (
+            "current_ticket_id",
+            "workflow_status",
+            "workflow_state",
+            "queue_state",
+            "execution_state",
+            "active_execution_count",
+            "worker_execution",
+            "Kanban_dispatch",
+            "recovery_state",
+            "next_action",
+        )
+    }
+
+    record = pr.load_p18_9_0_execution_start_record()
+    assert record is not None
+    assert record["ticket_id"] == "P18.9.2"
+    assert record["execution_started"] is False
+    assert record["worker_execution"] is False
+    assert record["worker_process_started"] is False
+    assert record["Git_mutation"] is False
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        task = kanban_db.get_task(conn, projected["kanban_task_id"])
+        assert task is not None
+        assert task.status == "blocked"
+        assert task.worker_pid is None
+        assert task.current_run_id is None
+        assert task.consecutive_failures == 1
+        assert task.last_failure_error
+        assert pr.DEPENDENCY_MATERIALIZATION_FAILED in task.last_failure_error
+    finally:
+        conn.close()
+
+    recovery = pr.recover_current_ticket_execution(
+        human_authorization_text=pr.governed_ticket_recovery_authorization_text("P18.9.2"),
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="RECOVER_P18_9_2_EXECUTION",
+    )
+    assert recovery["recovery_status"] == "retry_pending"
+    assert recovery["ticket_id"] == "P18.9.2"
+    assert recovery["dispatch_performed"] is False
+    assert recovery["execution_started"] is False
+    assert recovery["worker_execution"] is False
+    assert recovery["Kanban_dispatch"] is False
+    assert recovery["future_retry_requires_separate_start_authorization"] is True
+    assert recovery["auto_retry"] is False
+    assert recovery["auto_rollback"] is False
+    assert recovery["Git_mutation"] is False
+
+    retry_pending = pr.build_workflow_control_snapshot()
+    assert retry_pending["current_ticket_id"] == "P18.9.2"
+    assert retry_pending["workflow_status"] == "retry_pending"
+    assert retry_pending["workflow_state"] == "P18.9.2-RETRY-PENDING-NOT-DISPATCHED"
+    assert retry_pending["active_execution_count"] == 0
+    assert retry_pending["worker_execution"] is False
+    assert retry_pending["Kanban_dispatch"] is False
+    assert retry_pending["recovery_state"] == "retry_pending"
+    assert retry_pending["next_action"]["id"] == (
+        "START_P18_9_2_RETRY_REQUIRES_HUMAN_AUTHORIZATION"
+    )
+    assert retry_pending["Git_mutation"] is False
+
+
 def test_chat_tool_returns_profile_assignment_diagnostics_on_gap(
     projection_home,
     monkeypatch,
@@ -3416,6 +3792,92 @@ def test_current_ticket_start_p18_9_1_consent_reaches_provider_preflight_without
         assert task.status == "ready"
         assert task.current_run_id is None
         assert kanban_db.list_runs(conn, task.id) == []
+    finally:
+        conn.close()
+
+
+def test_current_ticket_dependency_materialization_gap_blocks_before_worker_spawn(
+    projection_home,
+    monkeypatch,
+) -> None:
+    _install_execution_profile(monkeypatch, projection_home)
+    _approve_current_ticket()
+    projected = _project_via_runtime()
+
+    from hermes_cli import kanban_db
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    monkeypatch.setattr(
+        pr,
+        "_executor_provider_readiness",
+        lambda profile_name: _ready_executor_provider_payload(profile_name),
+    )
+    monkeypatch.setattr(
+        pr,
+        "_preflight_pepper_governed_worker_credentials",
+        lambda _projection_record, *, enabled=True: _ready_worker_credential_probe(),
+    )
+    monkeypatch.setattr(
+        pr,
+        "_projection_requires_scratch_source_materialization",
+        lambda _projection_record: True,
+    )
+
+    def dependency_gap(_projection, _workspace, *, env_overlay=None, source_root=None):
+        _ = env_overlay, source_root
+        raise pr.ProductRuntimeDependencyGap(
+            pr.DEPENDENCY_MATERIALIZATION_FAILED,
+            "dependency source contains an unsafe symlinked file",
+        )
+
+    monkeypatch.setattr(pr, "_materialize_pepper_governed_scratch_source", dependency_gap)
+
+    result = pr.start_current_ticket_execution(
+        human_authorization_text="Start P18.9.0 execution now",
+        project_id="PEPPER",
+        ticket_id="P18.9.0",
+        next_action_id="START_P18_9_0_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION",
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("dependency gap must block before spawn"),
+    )
+    workflow = pr.build_workflow_control_snapshot()
+
+    assert result["start_status"] == "blocked"
+    assert result["blocker_code"] == pr.IMPLEMENTATION_SCRATCH_VALIDATION_DEPENDENCY_GAP
+    assert result["blocker_detail"].startswith(
+        f"{pr.DEPENDENCY_MATERIALIZATION_FAILED}:"
+    )
+    assert result["dispatch_performed"] is True
+    assert result["execution_started"] is False
+    assert result["worker_execution"] is False
+    assert result["worker_process_started"] is False
+    assert result["worker_pid_recorded"] is False
+    assert result["Git_mutation"] is False
+    assert result["next_action"]["id"] == "START_P18_9_0_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION"
+    assert workflow["workflow_status"] == "execution_failed"
+    assert workflow["workflow_state"] == "P18.9.0-EXECUTION-FAILED-RECOVERY-REQUIRED"
+    assert workflow["active_execution_count"] == 0
+    assert workflow["worker_execution"] is False
+    assert workflow["Kanban_dispatch"] is True
+    assert workflow["Git_mutation"] is False
+    assert workflow["recovery_state"] == "recovery_required"
+    assert workflow["next_action"]["id"] == "RECOVER_P18_9_0_EXECUTION"
+
+    record = pr.load_p18_9_0_execution_start_record()
+    assert record is not None
+    assert record["execution_started"] is False
+    assert record["worker_execution"] is False
+    assert record["worker_process_started"] is False
+    assert record["Git_mutation"] is False
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        task = kanban_db.get_task(conn, projected["kanban_task_id"])
+        assert task is not None
+        assert task.status == "blocked"
+        assert task.worker_pid is None
+        assert task.current_run_id is None
+        assert task.consecutive_failures == 1
+        assert task.last_failure_error
+        assert pr.DEPENDENCY_MATERIALIZATION_FAILED in task.last_failure_error
     finally:
         conn.close()
 

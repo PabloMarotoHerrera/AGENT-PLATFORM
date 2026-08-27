@@ -1750,6 +1750,7 @@ def _pending_generated_successor_ticket_approval_overlay(
     workflow_status = generated_overlay.get("workflow_status")
     pending = workflow_status == "awaiting_ticket_approval"
     approved = workflow_status == "ticket_approved"
+    projection = None
     projection_blocker = None
     if approved:
         try:
@@ -1774,6 +1775,28 @@ def _pending_generated_successor_ticket_approval_overlay(
         "Kanban_dispatch": False,
         "Git_mutation": False,
     })
+    if approved and projection is not None:
+        start_overlay, start_blocker = _current_ticket_execution_start_overlay(projection)
+        if start_overlay is not None:
+            overlay.update(start_overlay)
+            retry_start_overlay, retry_start_blocker = _p18_9_0_retry_start_overlay(
+                projection,
+            )
+            if retry_start_overlay is not None:
+                overlay.update(retry_start_overlay)
+            if retry_start_blocker is not None:
+                projection_blocker = retry_start_blocker
+            if retry_start_overlay is None:
+                recovery_overlay, recovery_blocker = _p18_9_0_recovery_overlay(
+                    projection,
+                    start_overlay=start_overlay,
+                )
+                if recovery_overlay is not None:
+                    overlay.update(recovery_overlay)
+                if recovery_blocker is not None:
+                    projection_blocker = recovery_blocker
+        if start_blocker is not None:
+            projection_blocker = start_blocker
     if not approved:
         overlay.update({
             "current_ticket_id": None,
@@ -9627,7 +9650,8 @@ def _copy_dependency_substrate_root(
             "dependency source root is a symlink or reparse point",
         )
     try:
-        source_dependency_root.resolve(strict=True).relative_to(source_root)
+        resolved_dependency_root = source_dependency_root.resolve(strict=True)
+        resolved_dependency_root.relative_to(source_root)
     except (OSError, RuntimeError, ValueError) as exc:
         raise ProductRuntimeDependencyGap(
             DEPENDENCY_SOURCE_NOT_FOUND,
@@ -9714,10 +9738,20 @@ def _copy_dependency_substrate_root(
             for filename in filenames:
                 source_file = root_path / filename
                 if is_reparse_or_symlink(source_file):
-                    raise ProductRuntimeDependencyGap(
-                        DEPENDENCY_MATERIALIZATION_FAILED,
-                        "dependency source contains a symlinked file",
-                    )
+                    try:
+                        resolved_file = source_file.resolve(strict=True)
+                        resolved_file.relative_to(resolved_dependency_root)
+                    except (OSError, RuntimeError, ValueError) as exc:
+                        raise ProductRuntimeDependencyGap(
+                            DEPENDENCY_MATERIALIZATION_FAILED,
+                            "dependency source contains an unsafe symlinked file",
+                        ) from exc
+                    if not resolved_file.is_file():
+                        raise ProductRuntimeDependencyGap(
+                            DEPENDENCY_MATERIALIZATION_FAILED,
+                            "dependency source symlinked file target is not a file",
+                        )
+                    source_file = resolved_file
                 dest_file = dest_root / filename
                 _assert_materialized_destination(dest_file, workspace_root=workspace_root)
                 size = source_file.stat().st_size
