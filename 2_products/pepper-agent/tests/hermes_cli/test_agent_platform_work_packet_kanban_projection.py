@@ -531,6 +531,195 @@ def _projection_authority_record(projected: dict) -> dict:
     return authority
 
 
+def _recovered_p18_9_2_dependency_failure_fixture(projection_home, monkeypatch):
+    _install_implementation_profile(monkeypatch, projection_home)
+    bridge.generate_current_ticket(workflow=_p18_9_2_workflow())
+    generation = bridge.load_generation_record(ticket_id="P18.9.2")
+    assert generation is not None
+
+    from hermes_cli import kanban_db
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    monkeypatch.setattr(
+        pr,
+        "_p18_9_0_generation_overlay",
+        lambda: (_p18_9_2_workflow(), None),
+    )
+    approved = pr.apply_approval_decision(
+        "P18.9.2",
+        pr.ApprovalDecisionRequest(decision="approve", actor="human.p18.9"),
+    )
+    assert approved["status"] == "approved"
+    projected = pr.project_current_approved_workpacket_to_kanban(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="P18_9_2_APPROVED_NO_EXECUTION",
+    )
+    projection_record = _projection_authority_record(projected)
+    queued = pr.build_workflow_control_snapshot()
+    assert queued["current_ticket_id"] == "P18.9.2"
+    assert queued["workflow_status"] == "queued"
+    assert queued["workflow_state"] == "P18.9.2-QUEUED-NOT-EXECUTING"
+    assert queued["next_action"]["id"] == (
+        "START_P18_9_2_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION"
+    )
+
+    monkeypatch.setattr(
+        pr,
+        "_executor_provider_readiness",
+        lambda profile_name: _ready_executor_provider_payload(profile_name),
+    )
+    monkeypatch.setattr(
+        pr,
+        "_preflight_pepper_governed_worker_credentials",
+        lambda _projection_record, *, enabled=True: _ready_worker_credential_probe(),
+    )
+    monkeypatch.setattr(
+        pr,
+        "_projection_requires_scratch_source_materialization",
+        lambda _projection_record: True,
+    )
+
+    def dependency_gap(_projection, _workspace, *, env_overlay=None, source_root=None):
+        _ = env_overlay, source_root
+        raise pr.ProductRuntimeDependencyGap(
+            pr.DEPENDENCY_MATERIALIZATION_FAILED,
+            "dependency source contains an unsafe symlinked file",
+        )
+
+    monkeypatch.setattr(pr, "_materialize_pepper_governed_scratch_source", dependency_gap)
+    immediate = pr.start_current_ticket_execution(
+        human_authorization_text="Start P18.9.2 execution now",
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="START_P18_9_2_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION",
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("dependency gap must block before spawn"),
+    )
+    assert immediate["start_status"] == "blocked"
+    assert immediate["blocker_code"] == pr.IMPLEMENTATION_SCRATCH_VALIDATION_DEPENDENCY_GAP
+    assert immediate["dispatch_performed"] is True
+    assert immediate["execution_started"] is False
+    assert immediate["worker_execution"] is False
+    assert immediate["worker_process_started"] is False
+    assert immediate["Git_mutation"] is False
+
+    failed = pr.build_workflow_control_snapshot()
+    assert failed["current_ticket_id"] == "P18.9.2"
+    assert failed["workflow_status"] == "execution_failed"
+    assert failed["workflow_state"] == "P18.9.2-EXECUTION-FAILED-RECOVERY-REQUIRED"
+    assert failed["recovery_state"] == "recovery_required"
+    assert failed["blocker_count"] == 1
+    assert failed["active_execution_count"] == 0
+    assert failed["next_action"]["id"] == "RECOVER_P18_9_2_EXECUTION"
+
+    missing_recovery_retry = pr.start_current_ticket_execution(
+        human_authorization_text="Autorizo retry de P18.9.2.",
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="START_P18_9_2_RETRY_REQUIRES_HUMAN_AUTHORIZATION",
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("retry must require recovery first"),
+    )
+    assert missing_recovery_retry["retry_start_status"] == "blocked"
+    assert missing_recovery_retry["blocker_code"] == "RECOVERY_AUTHORITY_GAP"
+    assert missing_recovery_retry["retry_start_authorization_recorded"] is False
+    assert not pr.retry_start_record_path_for_ticket("P18.9.2").exists()
+
+    recovery = pr.recover_current_ticket_execution(
+        human_authorization_text=pr.governed_ticket_recovery_authorization_text("P18.9.2"),
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="RECOVER_P18_9_2_EXECUTION",
+    )
+    assert recovery["recovery_status"] == "retry_pending"
+    assert recovery["governed_workflow_transition"] == "FAILED->RETRY_PENDING"
+    assert recovery["future_retry_requires_separate_start_authorization"] is True
+    assert recovery["retry_execution_started"] is False
+    assert recovery["retry_execution_count"] == 0
+    assert recovery["dispatch_performed"] is False
+    assert recovery["worker_execution"] is False
+    assert recovery["Kanban_dispatch"] is False
+    assert recovery["auto_retry"] is False
+    assert recovery["Git_mutation"] is False
+
+    retry_pending = pr.build_workflow_control_snapshot()
+    assert retry_pending["current_ticket_id"] == "P18.9.2"
+    assert retry_pending["workflow_status"] == "retry_pending"
+    assert retry_pending["workflow_state"] == "P18.9.2-RETRY-PENDING-NOT-DISPATCHED"
+    assert retry_pending["queue_state"] == "kanban_retry_prepared_not_dispatched"
+    assert retry_pending["recovery_state"] == "retry_pending"
+    assert retry_pending["active_execution_count"] == 0
+    assert retry_pending["worker_execution"] is False
+    assert retry_pending["Kanban_dispatch"] is False
+    assert retry_pending["blocker_count"] == 0
+    assert retry_pending["remaining_blockers"] == []
+    assert retry_pending["worker_lifecycle"]["historical_lifecycle_blocker_consumed"] is True
+    assert retry_pending["next_action"]["id"] == (
+        "START_P18_9_2_RETRY_REQUIRES_HUMAN_AUTHORIZATION"
+    )
+    retry_pending_replay = pr.build_workflow_control_snapshot()
+    assert {
+        key: retry_pending[key]
+        for key in (
+            "current_ticket_id",
+            "workflow_status",
+            "workflow_state",
+            "queue_state",
+            "recovery_state",
+            "active_execution_count",
+            "blocker_count",
+            "remaining_blockers",
+            "next_action",
+            "failure_category",
+            "failure_summary",
+        )
+    } == {
+        key: retry_pending_replay[key]
+        for key in (
+            "current_ticket_id",
+            "workflow_status",
+            "workflow_state",
+            "queue_state",
+            "recovery_state",
+            "active_execution_count",
+            "blocker_count",
+            "remaining_blockers",
+            "next_action",
+            "failure_category",
+            "failure_summary",
+        )
+    }
+
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        task = kanban_db.get_task(conn, projected["kanban_task_id"])
+        runs = kanban_db.list_runs(conn, projected["kanban_task_id"])
+        assert task is not None
+        assert task.status == "blocked"
+        assert task.worker_pid is None
+        assert task.current_run_id is None
+        assert task.last_failure_error
+        assert pr.DEPENDENCY_MATERIALIZATION_FAILED in task.last_failure_error
+        assert len(runs) == 1
+        assert runs[0].status == "gave_up"
+        assert runs[0].outcome == "gave_up"
+        assert pr.DEPENDENCY_MATERIALIZATION_FAILED in (runs[0].error or "")
+        run_id = runs[0].id
+    finally:
+        conn.close()
+
+    return SimpleNamespace(
+        pr=pr,
+        kanban_db=kanban_db,
+        projected=projected,
+        projection_record=projection_record,
+        immediate=immediate,
+        failed=failed,
+        recovery=recovery,
+        retry_pending=retry_pending,
+        failed_run_id=run_id,
+    )
+
+
 def _closed_p18_9_0_with_projected_p18_9_1(projection_home, monkeypatch):
     _install_execution_profile(monkeypatch, projection_home)
     _generation, _projected, _started, _review = _prepare_completed_review_package(monkeypatch)
@@ -3424,6 +3613,168 @@ def test_approved_successor_dependency_materialization_failure_survives_fresh_re
         "START_P18_9_2_RETRY_REQUIRES_HUMAN_AUTHORIZATION"
     )
     assert retry_pending["Git_mutation"] is False
+
+
+def test_approved_successor_recovered_historical_blocker_allows_retry_start(
+    projection_home,
+    monkeypatch,
+) -> None:
+    state = _recovered_p18_9_2_dependency_failure_fixture(projection_home, monkeypatch)
+    pr = state.pr
+    kanban_db = state.kanban_db
+    retry_path = pr.retry_start_record_path_for_ticket("P18.9.2")
+    assert not retry_path.exists()
+
+    replay = pr.build_workflow_control_snapshot()
+    assert replay["workflow_status"] == "retry_pending"
+    assert replay["recovery_state"] == "retry_pending"
+    assert replay["next_action"]["id"] == (
+        "START_P18_9_2_RETRY_REQUIRES_HUMAN_AUTHORIZATION"
+    )
+    assert replay["failure_summary"] == state.recovery["failure_summary"]
+    assert replay["worker_lifecycle"]["historical_lifecycle_blocker_consumed"] is True
+
+    _patch_synthetic_scratch_materialization(monkeypatch, pr)
+    monkeypatch.setattr(kanban_db, "_pid_alive", lambda pid: int(pid) == 6789)
+    retry = pr.start_current_ticket_execution(
+        human_authorization_text="Autorizo retry de P18.9.2.",
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="START_P18_9_2_RETRY_REQUIRES_HUMAN_AUTHORIZATION",
+        spawn_fn=lambda _task, _workspace, board=None: 6789,
+    )
+
+    assert retry["blocker_code"] != "WORKFLOW_BLOCKER_PRESENT"
+    assert retry["source_system"] == pr.PEPPER_RETRY_START_ACTION_SOURCE_SYSTEM
+    assert retry["retry_start_status"] == "started"
+    assert retry["retry_start_authorization_recorded"] is True
+    assert retry["recovery_action_SHA256"] == state.recovery["recovery_action_SHA256"]
+    assert retry["recovery_cycle_id"] == state.recovery["recovery_cycle_id"]
+    assert retry["previous_attempt_count"] == 1
+    assert retry["next_attempt_number"] == 2
+    assert retry["latest_failed_run_id"] == state.failed_run_id
+    assert retry["failure_summary"] == state.recovery["failure_summary"]
+    assert retry["dispatch_performed"] is True
+    assert retry["execution_started"] is True
+    assert retry["worker_execution"] is True
+    assert retry["worker_process_started"] is True
+    assert retry["retry_execution_started"] is True
+    assert retry["retry_execution_count"] == 1
+    assert retry["automatic_retry_count"] == 0
+    assert retry["new_kanban_task_created"] is False
+    assert retry["Git_mutation"] is False
+    assert retry["auto_retry"] is False
+    assert retry["next_action"]["id"] == "MONITOR_P18_9_2_EXECUTION"
+
+    record = pr.load_current_ticket_retry_start_record(
+        projection_record=state.projection_record,
+        recovery_record=pr.load_current_ticket_recovery_action_record(
+            projection_record=state.projection_record,
+        ),
+    )
+    assert record is not None
+    assert record["retry_start_authorization_SHA256"] == retry["retry_start_authorization_SHA256"]
+    assert record["latest_failed_run_id"] == state.failed_run_id
+    assert retry_path.exists()
+
+    conn = kanban_db.connect(board=state.projected["kanban_board_slug"])
+    try:
+        task = kanban_db.get_task(conn, state.projected["kanban_task_id"])
+        runs = kanban_db.list_runs(conn, state.projected["kanban_task_id"])
+        events = kanban_db.list_events(conn, state.projected["kanban_task_id"])
+        assert task is not None
+        assert task.status == "running"
+        assert task.current_run_id == retry["kanban_run_id"]
+        assert task.worker_pid == 6789
+        assert len(runs) == 2
+        assert [run.id for run in runs] == [state.failed_run_id, retry["kanban_run_id"]]
+        assert runs[0].status == "gave_up"
+        assert runs[0].outcome == "gave_up"
+        assert pr.DEPENDENCY_MATERIALIZATION_FAILED in (runs[0].error or "")
+        assert runs[1].status == "running"
+        assert runs[1].ended_at is None
+        assert any(event.kind == "gave_up" for event in events)
+        assert any(event.kind == "retry_prepared" for event in events)
+    finally:
+        conn.close()
+
+    executing = pr.build_workflow_control_snapshot()
+    assert executing["workflow_status"] == "executing"
+    assert executing["queue_state"] == "kanban_dispatched"
+    assert executing["execution_state"] == "active_executions"
+    assert executing["active_execution_count"] == 1
+    assert executing["recovery_state"] == "not_required"
+    assert executing["retry_state"] == "retry_executing"
+    assert executing["retry_start_authority"]["previous_attempt_count"] == 1
+    assert executing["retry_start_authority"]["next_attempt_number"] == 2
+
+
+def test_approved_successor_recovered_retry_rejects_later_failed_run_stale_recovery(
+    projection_home,
+    monkeypatch,
+) -> None:
+    state = _recovered_p18_9_2_dependency_failure_fixture(projection_home, monkeypatch)
+    pr = state.pr
+    kanban_db = state.kanban_db
+
+    conn = kanban_db.connect(board=state.projected["kanban_board_slug"])
+    try:
+        assert kanban_db.unblock_task(conn, state.projected["kanban_task_id"])
+        claimed = kanban_db.claim_task(
+            conn,
+            state.projected["kanban_task_id"],
+            claimer="pepper-worker-retry-start-action",
+        )
+        assert claimed is not None
+        workspace = kanban_db.resolve_workspace(
+            claimed,
+            board=state.projected["kanban_board_slug"],
+        )
+        kanban_db.set_workspace_path(conn, claimed.id, str(workspace))
+        kanban_db._set_worker_pid(conn, claimed.id, 24680)
+        old_expiry = int(time.time()) - 6300
+        conn.execute(
+            "UPDATE tasks SET claim_expires = ?, last_heartbeat_at = NULL, "
+            "skills = ? WHERE id = ?",
+            (old_expiry, json.dumps([]), claimed.id),
+        )
+        conn.execute(
+            "UPDATE task_runs SET claim_expires = ?, last_heartbeat_at = NULL WHERE id = ?",
+            (old_expiry, claimed.current_run_id),
+        )
+        conn.commit()
+        later_run_id = int(claimed.current_run_id)
+    finally:
+        conn.close()
+
+    monkeypatch.setenv("HERMES_KANBAN_CRASH_GRACE_SECONDS", "0")
+    monkeypatch.setattr(kanban_db, "_pid_alive", lambda _pid: False)
+    fresh = pr.build_workflow_control_snapshot()
+    assert fresh["workflow_status"] == "execution_failed"
+    assert fresh["recovery_state"] == "recovery_required"
+    assert fresh["next_action"]["id"] == "RECOVER_P18_9_2_EXECUTION"
+
+    conn = kanban_db.connect(board=state.projected["kanban_board_slug"])
+    try:
+        runs = kanban_db.list_runs(conn, state.projected["kanban_task_id"])
+        assert [run.id for run in runs] == [state.failed_run_id, later_run_id]
+    finally:
+        conn.close()
+
+    retry = pr.start_current_ticket_execution(
+        human_authorization_text="Autorizo retry de P18.9.2.",
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="START_P18_9_2_RETRY_REQUIRES_HUMAN_AUTHORIZATION",
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("stale recovery must block before spawn"),
+    )
+
+    assert retry["retry_start_status"] == "blocked"
+    assert retry["blocker_code"] == "KANBAN_RETRY_SOURCE_GAP"
+    assert retry["retry_start_authorization_recorded"] is False
+    assert "latest failed run no longer matches recovery authority" in retry["blocker_detail"]
+    assert retry["worker_process_started"] is False
+    assert not pr.retry_start_record_path_for_ticket("P18.9.2").exists()
 
 
 def test_chat_tool_returns_profile_assignment_diagnostics_on_gap(

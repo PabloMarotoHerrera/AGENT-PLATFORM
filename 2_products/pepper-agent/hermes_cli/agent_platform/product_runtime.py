@@ -1776,6 +1776,7 @@ def _pending_generated_successor_ticket_approval_overlay(
         "Git_mutation": False,
     })
     if approved and projection is not None:
+        historical_lifecycle_blocker_consumed = False
         start_overlay, start_blocker = _current_ticket_execution_start_overlay(projection)
         if start_overlay is not None:
             overlay.update(start_overlay)
@@ -1784,6 +1785,11 @@ def _pending_generated_successor_ticket_approval_overlay(
             )
             if retry_start_overlay is not None:
                 overlay.update(retry_start_overlay)
+                retry_lifecycle = retry_start_overlay.get("worker_lifecycle")
+                historical_lifecycle_blocker_consumed = bool(
+                    isinstance(retry_lifecycle, dict)
+                    and retry_lifecycle.get("historical_lifecycle_blocker_consumed")
+                )
             if retry_start_blocker is not None:
                 projection_blocker = retry_start_blocker
             if retry_start_overlay is None:
@@ -1793,9 +1799,18 @@ def _pending_generated_successor_ticket_approval_overlay(
                 )
                 if recovery_overlay is not None:
                     overlay.update(recovery_overlay)
+                    recovery_lifecycle = recovery_overlay.get("worker_lifecycle")
+                    historical_lifecycle_blocker_consumed = bool(
+                        isinstance(recovery_lifecycle, dict)
+                        and recovery_lifecycle.get("historical_lifecycle_blocker_consumed")
+                    )
                 if recovery_blocker is not None:
                     projection_blocker = recovery_blocker
-        if start_blocker is not None:
+        if (
+            start_blocker is not None
+            and projection_blocker is None
+            and not historical_lifecycle_blocker_consumed
+        ):
             projection_blocker = start_blocker
     if not approved:
         overlay.update({
