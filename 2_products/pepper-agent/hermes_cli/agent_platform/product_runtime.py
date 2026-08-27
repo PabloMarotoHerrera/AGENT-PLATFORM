@@ -3292,40 +3292,64 @@ def governed_autonomy_runtime_history_path_for_ticket(ticket_id: str) -> Path:
     )
 
 
-def p18_9_0_review_prepare_record_path() -> Path:
-    """Return the profile-scoped P18.9.0 review-preparation authority path."""
+def review_prepare_record_path_for_ticket(ticket_id: str) -> Path:
+    """Return the profile-scoped review-preparation authority path for one ticket."""
 
     return governed_ticket_lifecycle_authority_path(
         "review_prepare",
-        ticket_id=PEPPER_NEXT_TICKET_ID,
+        ticket_id=ticket_id,
     )
+
+
+def review_prepare_history_path_for_ticket(ticket_id: str) -> Path:
+    """Return the append-only review-preparation authority history path for one ticket."""
+
+    return governed_ticket_lifecycle_authority_path(
+        "review_prepare_history",
+        ticket_id=ticket_id,
+    )
+
+
+def p18_9_0_review_prepare_record_path() -> Path:
+    """Return the profile-scoped P18.9.0 review-preparation authority path."""
+
+    return review_prepare_record_path_for_ticket(PEPPER_NEXT_TICKET_ID)
 
 
 def p18_9_0_review_prepare_history_path() -> Path:
     """Return the append-only P18.9.0 review-preparation authority history path."""
 
+    return review_prepare_history_path_for_ticket(PEPPER_NEXT_TICKET_ID)
+
+
+def review_acceptance_record_path_for_ticket(ticket_id: str) -> Path:
+    """Return the profile-scoped review-acceptance authority path for one ticket."""
+
     return governed_ticket_lifecycle_authority_path(
-        "review_prepare_history",
-        ticket_id=PEPPER_NEXT_TICKET_ID,
+        "review_acceptance",
+        ticket_id=ticket_id,
+    )
+
+
+def review_acceptance_history_path_for_ticket(ticket_id: str) -> Path:
+    """Return the append-only review-acceptance authority history path for one ticket."""
+
+    return governed_ticket_lifecycle_authority_path(
+        "review_acceptance_history",
+        ticket_id=ticket_id,
     )
 
 
 def p18_9_0_review_acceptance_record_path() -> Path:
     """Return the profile-scoped P18.9.0 review-acceptance authority path."""
 
-    return governed_ticket_lifecycle_authority_path(
-        "review_acceptance",
-        ticket_id=PEPPER_NEXT_TICKET_ID,
-    )
+    return review_acceptance_record_path_for_ticket(PEPPER_NEXT_TICKET_ID)
 
 
 def p18_9_0_review_acceptance_history_path() -> Path:
     """Return the append-only P18.9.0 review-acceptance authority history path."""
 
-    return governed_ticket_lifecycle_authority_path(
-        "review_acceptance_history",
-        ticket_id=PEPPER_NEXT_TICKET_ID,
-    )
+    return review_acceptance_history_path_for_ticket(PEPPER_NEXT_TICKET_ID)
 
 
 def review_decision_record_path_for_ticket(ticket_id: str) -> Path:
@@ -3652,6 +3676,28 @@ def load_p18_9_0_review_prepare_record(
     return validate_p18_9_0_review_prepare_record(
         record,
         projection_record=projection_record,
+    )
+
+
+def load_current_ticket_review_prepare_record(
+    *,
+    projection_record: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Load and validate the active ticket review-preparation record."""
+
+    projection = projection_record if projection_record is not None else _load_current_projection_record()
+    path = review_prepare_record_path_for_ticket(str(projection["ticket_id"]))
+    if not path.exists():
+        return None
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ProductRuntimeConflict(
+            f"{projection['ticket_id']} review-preparation record is unreadable"
+        ) from exc
+    return validate_p18_9_0_review_prepare_record(
+        record,
+        projection_record=projection,
     )
 
 
@@ -6200,6 +6246,14 @@ def validate_p18_9_0_review_prepare_record(
         projection=projection,
         completion=completion,
     )
+    run_status = str(completion.get("run_status") or "done")
+    run_outcome = str(completion.get("run_outcome") or "completed")
+    git_handoff_required = _review_prepare_human_git_handoff_required(completion)
+    git_handoff_state = (
+        "human_git_authority_preserved"
+        if git_handoff_required
+        else "not_required_for_ticket_result"
+    )
     binding, identity = _current_ticket_identity_fields(projection)
     expected = {
         "schema_version": PEPPER_REVIEW_PREPARE_ACTION_SCHEMA_VERSION,
@@ -6212,8 +6266,8 @@ def validate_p18_9_0_review_prepare_record(
         "kanban_board_slug": projection["kanban_board_slug"],
         "kanban_task_id": projection["kanban_task_id"],
         "successful_run_id": completion["run_id"],
-        "successful_run_status": "done",
-        "successful_run_outcome": "completed",
+        "successful_run_status": run_status,
+        "successful_run_outcome": run_outcome,
         "acceptance_contract_SHA256": contract["acceptance_contract_SHA256"],
         "criteria_revision_SHA256": contract["criteria_revision_SHA256"],
         "kanban_completion_result_SHA256": completion["kanban_completion_result_SHA256"],
@@ -6227,8 +6281,8 @@ def validate_p18_9_0_review_prepare_record(
         "review_state": "prepared_pending_human_acceptance",
         "human_acceptance_required": True,
         "human_acceptance_recorded": False,
-        "git_handoff_required": False,
-        "git_handoff_state": "not_required_for_ticket_result",
+        "git_handoff_required": git_handoff_required,
+        "git_handoff_state": git_handoff_state,
         "dispatch_performed": False,
         "execution_started": False,
         "worker_execution": False,
@@ -6263,8 +6317,8 @@ def validate_p18_9_0_review_prepare_record(
         "ticket": binding.ticket_id,
         "next_action": binding.review_prepare_next_action_id,
         "run_id": completion["run_id"],
-        "run_status": "done",
-        "run_outcome": "completed",
+        "run_status": run_status,
+        "run_outcome": run_outcome,
         "active_execution_count": 0,
         "recovery_state": "not_required",
         "validation_state": "execution_completed_pending_validation",
@@ -6479,12 +6533,12 @@ def prepare_current_ticket_review(
 
     existing = None
     try:
-        existing = load_p18_9_0_review_prepare_record(projection_record=projection)
+        existing = load_current_ticket_review_prepare_record(projection_record=projection)
     except ProductRuntimeConflict:
-        path = p18_9_0_review_prepare_record_path()
+        path = review_prepare_record_path_for_ticket(str(projection["ticket_id"]))
         _archive_existing_authority_record(
             path,
-            p18_9_0_review_prepare_history_path(),
+            review_prepare_history_path_for_ticket(str(projection["ticket_id"])),
             reason="superseded_or_invalid_review_prepare_authority",
         )
         try:
@@ -6523,7 +6577,7 @@ def prepare_current_ticket_review(
             blocker_detail=str(completion.get("blocker_detail") or "completion result detail is unavailable"),
             completion_source=completion,
         )
-    acceptance_contract = _p18_9_0_acceptance_contract()
+    acceptance_contract = _acceptance_contract_for_review_projection(projection)
     record = _build_review_prepare_record(
         request=request,
         projection=projection,
@@ -11342,6 +11396,24 @@ def _governed_autonomy_candidate_changes_available(
     return (_int_or_none(candidate_changes.get("files_changed")) or 0) > 0
 
 
+def _governed_autonomy_terminal_text_has_validation_failure(text: str) -> bool:
+    normalized = text.replace("_", " ").replace("-", " ")
+    if re.search(
+        r"(validation infrastructure|product validation|validation) failure\s*(is|=|:)\s*true",
+        normalized,
+    ):
+        return True
+    return any(
+        marker in normalized
+        for marker in (
+            "validation failed",
+            "product validation failed",
+            "governed v2 validation failed",
+            "tests failed",
+        )
+    )
+
+
 def _governed_autonomy_terminal_validated_candidate_review_required(
     run: dict[str, Any],
     *,
@@ -11354,6 +11426,8 @@ def _governed_autonomy_terminal_validated_candidate_review_required(
         return False
     text = _governed_autonomy_terminal_run_text(run)
     normalized = text.replace("_", " ").replace("-", " ")
+    if _governed_autonomy_terminal_text_has_validation_failure(text):
+        return False
     review_or_git_boundary = any(
         marker in normalized
         for marker in (
@@ -11380,20 +11454,110 @@ def _governed_autonomy_terminal_validated_candidate_review_required(
     ) or ("tests passed" in normalized and "validation" in normalized)
     if not review_or_git_boundary or not validation_passed:
         return False
-    if re.search(
-        r"(validation infrastructure|product validation|validation) failure\s*(is|=|:)\s*true",
-        normalized,
-    ):
-        return False
-    return not any(
-        marker in normalized
-        for marker in (
-            "validation failed",
-            "product validation failed",
-            "governed v2 validation failed",
-            "tests failed",
-        )
+    return True
+
+
+def _terminal_run_review_boundary_evidence(
+    task: Any,
+    run: Any,
+) -> dict[str, Any] | None:
+    if task is None or run is None:
+        return None
+    task_status = str(getattr(task, "status", "") or "").strip().lower()
+    run_status = str(getattr(run, "status", "") or "").strip().lower()
+    run_outcome = str(getattr(run, "outcome", "") or "").strip().lower()
+    if task_status != "blocked" or run_status != "blocked" or run_outcome != "blocked":
+        return None
+    block_kind = str(getattr(task, "block_kind", "") or "").strip().lower()
+    if block_kind != "needs_input":
+        return None
+    if getattr(run, "ended_at", None) is None:
+        return None
+    if getattr(task, "current_run_id", None) is not None:
+        return None
+    if getattr(task, "worker_pid", None):
+        return None
+    if str(getattr(run, "error", None) or "").strip():
+        return None
+    manifest, materialization_reference = _governed_autonomy_materialization_manifest(
+        getattr(task, "workspace_path", None),
     )
+    candidate_changes = _governed_autonomy_candidate_changes_reference(manifest)
+    if not _governed_autonomy_candidate_changes_available(candidate_changes):
+        return None
+    run_view = _run_dict(run)
+    if _governed_autonomy_terminal_text_has_validation_failure(
+        _governed_autonomy_terminal_run_text(run_view),
+    ):
+        return None
+    metadata = getattr(run, "metadata", None)
+    structured_review_required = False
+    if isinstance(metadata, dict):
+        terminal_class = str(
+            metadata.get("terminal_outcome_class")
+            or metadata.get("terminal_outcome")
+            or ""
+        ).strip().lower().replace("-", "_")
+        human_boundary = str(
+            metadata.get("human_boundary")
+            or metadata.get("authority_boundary")
+            or ""
+        ).strip().lower().replace("-", "_")
+        structured_review_required = (
+            (
+                bool(metadata.get("review_required"))
+                or terminal_class in {"review_required", "validated_review_required"}
+            )
+            and bool(
+                metadata.get("implementation_complete")
+                or metadata.get("implementation_completed")
+            )
+            and bool(
+                metadata.get("validation_passed")
+                or metadata.get("execution_validation_passed")
+            )
+            and human_boundary in {"", "human_review", "code_review", "human_code_review"}
+        )
+    validation_infrastructure_failure = _governed_autonomy_validation_infrastructure_failure(
+        run_view,
+    )
+    validated_review_required = _governed_autonomy_terminal_validated_candidate_review_required(
+        run_view,
+        candidate_changes=candidate_changes,
+        validation_infrastructure_failure=validation_infrastructure_failure,
+    )
+    if not structured_review_required:
+        if not validated_review_required:
+            return None
+    if validation_infrastructure_failure:
+        return None
+    detail = (
+        getattr(run, "summary", None)
+        or getattr(task, "last_failure_error", None)
+        or f"Kanban run {getattr(run, 'id', 'unknown')} reached a review boundary"
+    )
+    return {
+        "terminal_outcome_class": "validated_review_required",
+        "review_required": True,
+        "review_boundary_kind": "human_code_review",
+        "terminal_outcome_authority": (
+            "task_run_metadata"
+            if structured_review_required
+            else "kanban_needs_input_block_with_candidate_changes_and_validation_evidence"
+        ),
+        "kanban_block_kind": getattr(task, "block_kind", None),
+        "validation_observation_reference": {
+            "tool_name": "workpacket_validation",
+            "infrastructure_failure": False,
+            "validation_passed": True,
+            "validated_candidate_review_required": True,
+            "error_excerpt": _safe_text(detail, limit=500),
+        },
+        "source_materialization_reference": materialization_reference,
+        "candidate_changes_reference": candidate_changes,
+        "candidate_changes_available": True,
+        "blocker_detail": _safe_text(detail, limit=500),
+    }
 
 
 def _governed_autonomy_validation_infrastructure_failure(
@@ -14469,6 +14633,18 @@ def _p18_9_0_terminal_execution_state(
     outcome = str(getattr(latest_run, "outcome", "") or "").strip().lower()
     if task_status == "running" and getattr(task, "current_run_id", None):
         return None
+    review_boundary = _terminal_run_review_boundary_evidence(task, latest_run)
+    if review_boundary is not None:
+        return {
+            "start_status": "completed",
+            "blocker_code": None,
+            "blocker_detail": None,
+            "next_action_id": action_ids["review_prepare"],
+            "outcome": outcome or run_status or "validated_review_required",
+            "run_status": run_status or None,
+            "run_outcome": outcome or None,
+            **review_boundary,
+        }
     if task_status == "done" or outcome == "completed":
         return {
             "start_status": "completed",
@@ -14771,7 +14947,7 @@ def _review_prepare_acceptance_contract_for_validation(
     projection: dict[str, Any],
     completion: dict[str, Any],
 ) -> dict[str, Any]:
-    current_contract = _p18_9_0_acceptance_contract()
+    current_contract = _acceptance_contract_for_review_projection(projection)
     current_package_sha = _review_prepare_package_digest(
         projection=projection,
         completion=completion,
@@ -16300,21 +16476,45 @@ def _blocked_current_human_git_handoff_completion_result(
     }
 
 
-def _p18_9_0_acceptance_contract() -> dict[str, Any]:
+def _acceptance_contract_for_review_projection(projection: dict[str, Any]) -> dict[str, Any]:
+    if str(projection["ticket_id"]) == PEPPER_BOOTSTRAP_NEXT_TICKET_ID:
+        return _p18_9_0_acceptance_contract()
+    return _p18_9_0_acceptance_contract(projection=projection)
+
+
+def _p18_9_0_acceptance_contract(
+    *,
+    projection: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
+        load_generation_record,
         load_p18_9_0_generation_record,
     )
 
-    generation = load_p18_9_0_generation_record()
+    ticket_id = str(projection["ticket_id"]) if projection is not None else PEPPER_BOOTSTRAP_NEXT_TICKET_ID
+    generation = (
+        load_generation_record(ticket_id=ticket_id)
+        if projection is not None
+        else load_p18_9_0_generation_record()
+    )
     if generation is None:
-        raise ProductRuntimeNotFound("P18.9.0 generated TicketSpec authority not found")
+        raise ProductRuntimeNotFound(f"{ticket_id} generated TicketSpec authority not found")
+    if projection is not None:
+        for key in (
+            "ticket_id",
+            "ticket_spec_SHA256",
+            "work_packet_id",
+            "work_packet_SHA256",
+        ):
+            if generation.get(key) != projection.get(key):
+                raise ProductRuntimeConflict(f"{ticket_id} acceptance contract source {key} mismatch")
     ticket_spec = generation.get("ticket_spec")
     compilation = generation.get("work_packet_compilation_result")
     if not isinstance(ticket_spec, dict) or not isinstance(compilation, dict):
-        raise ProductRuntimeConflict("P18.9.0 acceptance contract source is unavailable")
+        raise ProductRuntimeConflict(f"{ticket_id} acceptance contract source is unavailable")
     work_packet = compilation.get("work_packet")
     if not isinstance(work_packet, dict):
-        raise ProductRuntimeConflict("P18.9.0 WorkPacket contract source is unavailable")
+        raise ProductRuntimeConflict(f"{ticket_id} WorkPacket contract source is unavailable")
     binding = resolve_current_ticket_lifecycle_binding(generation_record=generation)
     contract = {
         "schema_version": PEPPER_REVIEW_PREPARE_ACTION_SCHEMA_VERSION,
@@ -16358,6 +16558,15 @@ def _metadata_bool(metadata: Any, *keys: str) -> bool | None:
         if key in metadata:
             return bool(metadata.get(key))
     return None
+
+
+def _review_prepare_human_git_handoff_required(completion: dict[str, Any]) -> bool:
+    return (
+        completion.get("terminal_outcome_class") == "validated_review_required"
+        and _governed_autonomy_candidate_changes_available(
+            completion.get("candidate_changes_reference"),
+        )
+    )
 
 
 def _kanban_completion_result_source(projection: dict[str, Any]) -> dict[str, Any]:
@@ -16405,7 +16614,9 @@ def _kanban_completion_result_source(projection: dict[str, Any]) -> dict[str, An
         latest_run = runs[-1]
         run_status = str(getattr(latest_run, "status", "") or "").strip().lower()
         run_outcome = str(getattr(latest_run, "outcome", "") or "").strip().lower()
-        if task.status != "done" or run_status != "done" or run_outcome != "completed":
+        review_boundary = _terminal_run_review_boundary_evidence(task, latest_run)
+        completed_result = task.status == "done" and run_status == "done" and run_outcome == "completed"
+        if not completed_result and review_boundary is None:
             return {
                 "blocker_code": "KANBAN_COMPLETION_RESULT_GAP",
                 "blocker_detail": "latest projected Kanban run is not completed",
@@ -16421,7 +16632,12 @@ def _kanban_completion_result_source(projection: dict[str, Any]) -> dict[str, An
         summary = getattr(latest_run, "summary", None)
         metadata = getattr(latest_run, "metadata", None)
         task_result = getattr(task, "result", None)
-        if not (str(summary or "").strip() or str(task_result or "").strip() or metadata):
+        if not (
+            str(summary or "").strip()
+            or str(task_result or "").strip()
+            or metadata
+            or review_boundary is not None
+        ):
             return {
                 "blocker_code": "KANBAN_COMPLETION_RESULT_DETAIL_GAP",
                 "blocker_detail": "completed P18.9.0 run lacks structural result, summary, or metadata detail",
@@ -16448,6 +16664,8 @@ def _kanban_completion_result_source(projection: dict[str, Any]) -> dict[str, An
             detail_sources.append("tasks.result")
         if isinstance(metadata, dict) and metadata:
             detail_sources.append("task_runs.metadata")
+        if review_boundary is not None:
+            detail_sources.append("terminal_review_boundary_evidence")
         source = {
             "blocker_code": None,
             "blocker_detail": None,
@@ -16474,6 +16692,18 @@ def _kanban_completion_result_source(projection: dict[str, Any]) -> dict[str, An
             "Kanban_SQLite_canonical_authority": False,
             "logs_parsed_for_completion_authority": False,
         }
+        if review_boundary is not None:
+            source.update({
+                "terminal_outcome_class": review_boundary["terminal_outcome_class"],
+                "review_required": True,
+                "review_boundary_kind": review_boundary["review_boundary_kind"],
+                "terminal_outcome_authority": review_boundary["terminal_outcome_authority"],
+                "kanban_block_kind": review_boundary["kanban_block_kind"],
+                "validation_observation_reference": review_boundary["validation_observation_reference"],
+                "source_materialization_reference": review_boundary["source_materialization_reference"],
+                "candidate_changes_reference": review_boundary["candidate_changes_reference"],
+                "candidate_changes_available": True,
+            })
         source["kanban_completion_result_SHA256"] = _kanban_completion_result_digest(source)
         return source
     finally:
@@ -16502,13 +16732,27 @@ def _build_review_prepare_record(
         acceptance_contract=acceptance_contract,
     )
     binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
+    run_status = str(completion.get("run_status") or "done")
+    run_outcome = str(completion.get("run_outcome") or "completed")
+    git_handoff_required = _review_prepare_human_git_handoff_required(completion)
+    git_handoff_state = (
+        "human_git_authority_preserved"
+        if git_handoff_required
+        else "not_required_for_ticket_result"
+    )
+    git_handoff_basis = (
+        f"{binding.ticket_id} validated review-required terminal outcome has scratch candidate changes; "
+        "human Git authority is preserved"
+        if git_handoff_required
+        else f"{binding.ticket_id} completion source reports no file or Git mutation metadata"
+    )
     pre_review_invariants = {
         "project": binding.project_id,
         "ticket": binding.ticket_id,
         "next_action": binding.review_prepare_next_action_id,
         "run_id": completion["run_id"],
-        "run_status": "done",
-        "run_outcome": "completed",
+        "run_status": run_status,
+        "run_outcome": run_outcome,
         "active_execution_count": 0,
         "recovery_state": "not_required",
         "validation_state": "execution_completed_pending_validation",
@@ -16536,8 +16780,8 @@ def _build_review_prepare_record(
         "kanban_board_slug": projection["kanban_board_slug"],
         "kanban_task_id": projection["kanban_task_id"],
         "successful_run_id": completion["run_id"],
-        "successful_run_status": "done",
-        "successful_run_outcome": "completed",
+        "successful_run_status": run_status,
+        "successful_run_outcome": run_outcome,
         "kanban_completion_result": completion,
         "kanban_completion_result_SHA256": completion["kanban_completion_result_SHA256"],
         "acceptance_contract": acceptance_contract,
@@ -16558,9 +16802,9 @@ def _build_review_prepare_record(
         "human_acceptance_required": True,
         "human_acceptance_recorded": False,
         "human_acceptance_next_action_id": binding.review_acceptance_next_action_id,
-        "git_handoff_required": False,
-        "git_handoff_state": "not_required_for_ticket_result",
-        "git_handoff_decision_basis": "P18.9.0 completion source reports no file or Git mutation metadata",
+        "git_handoff_required": git_handoff_required,
+        "git_handoff_state": git_handoff_state,
+        "git_handoff_decision_basis": git_handoff_basis,
         "requested_project_id": request.project_id,
         "requested_ticket_id": request.ticket_id,
         "requested_next_action_id": request.next_action_id,
@@ -16729,10 +16973,11 @@ def _build_review_acceptance_record(
 
 def _persist_review_prepare_record(record: dict[str, Any]) -> None:
     validate_p18_9_0_review_prepare_record(record)
-    path = p18_9_0_review_prepare_record_path()
+    ticket_id = str(record["ticket_id"])
+    path = review_prepare_record_path_for_ticket(ticket_id)
     _archive_existing_authority_record(
         path,
-        p18_9_0_review_prepare_history_path(),
+        review_prepare_history_path_for_ticket(ticket_id),
         reason="replaced_by_current_review_prepare_package",
     )
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -16828,8 +17073,9 @@ def _review_prepare_operational_result(
         "review_state": record["review_state"],
         "human_acceptance_required": True,
         "human_acceptance_recorded": False,
-        "git_handoff_required": False,
+        "git_handoff_required": bool(record.get("git_handoff_required")),
         "git_handoff_state": record["git_handoff_state"],
+        "git_handoff_decision_basis": record.get("git_handoff_decision_basis"),
         "current_invocation_side_effects": current_invocation_side_effects,
         "kanban_board_slug": record["kanban_board_slug"],
         "kanban_task_id": record["kanban_task_id"],
@@ -17044,7 +17290,7 @@ def _p18_9_0_review_prepare_overlay(
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
     try:
-        record = load_p18_9_0_review_prepare_record(projection_record=projection)
+        record = load_current_ticket_review_prepare_record(projection_record=projection)
     except Exception as exc:  # pragma: no cover - defensive live-state guard
         return None, {
             "id": "P18-9-0-REVIEW-PREPARE-AUTHORITY",
@@ -17069,14 +17315,16 @@ def _p18_9_0_review_prepare_overlay(
         return None, acceptance_blocker
     return {
         "readiness": "review_prepared_pending_human_acceptance",
-        "workflow_state": "P18.9.0-REVIEW-PREPARED-PENDING-HUMAN-ACCEPTANCE",
+        "workflow_state": f"{binding.ticket_id}-REVIEW-PREPARED-PENDING-HUMAN-ACCEPTANCE",
         "workflow_status": "review_prepared_pending_human_acceptance",
         "queue_state": completed_overlay.get("queue_state", "kanban_execution_terminal"),
         "execution_state": "no_active_executions",
         "validation_state": "review_prepared_pending_human_acceptance",
         "review_state": "prepared_pending_human_acceptance",
         "recovery_state": "not_required",
-        "git_handoff_state": "not_required_for_ticket_result",
+        "git_handoff_required": bool(record.get("git_handoff_required")),
+        "git_handoff_decision_basis": record.get("git_handoff_decision_basis"),
+        "git_handoff_state": record.get("git_handoff_state"),
         "review_prepare_authority": {
             "policy_id": record["policy_id"],
             "P18_5_policy_id": record["P18_5_policy_id"],
@@ -17093,7 +17341,6 @@ def _p18_9_0_review_prepare_overlay(
         "P18_9_0_review_prepare_present": True,
         "human_acceptance_required": True,
         "human_acceptance_recorded": False,
-        "git_handoff_required": False,
         "dispatch_performed": False,
         "execution_started": False,
         "worker_execution": False,
@@ -17110,7 +17357,7 @@ def _p18_9_0_review_prepare_overlay(
             ),
             "target_ticket_id": binding.ticket_id,
             "target_ticket_title": binding.ticket_title,
-            "required_human_action": "p18_9_0_review_acceptance",
+            "required_human_action": "review_acceptance",
         },
     }, None
 
@@ -17286,7 +17533,14 @@ def _current_ticket_execution_start_overlay(
             "Git_mutation": False,
         }, blocker
     if terminal_state is not None and terminal_state["start_status"] == "completed":
-        return {
+        review_required = terminal_state.get("terminal_outcome_class") == "validated_review_required"
+        next_action = {
+            "id": binding.review_prepare_next_action_id,
+            "label": f"{binding.ticket_id} execution completed; prepare review validation.",
+            "target_ticket_id": binding.ticket_id,
+            "target_ticket_title": binding.ticket_title,
+        }
+        overlay = {
             "readiness": "execution_completed",
             "workflow_state": f"{binding.ticket_id}-EXECUTION-COMPLETED",
             "workflow_status": "execution_completed",
@@ -17308,14 +17562,35 @@ def _current_ticket_execution_start_overlay(
                 "kanban_task_id": record["kanban_task_id"],
                 "kanban_run_id": record.get("kanban_run_id"),
             },
-            "next_action": {
-                "id": binding.review_prepare_next_action_id,
-                "label": f"{binding.ticket_id} execution completed; prepare review validation.",
-                "target_ticket_id": binding.ticket_id,
-                "target_ticket_title": binding.ticket_title,
-            },
+            "next_action": next_action,
             "Git_mutation": False,
-        }, None
+        }
+        if review_required:
+            next_action.update({
+                "label": (
+                    f"{binding.ticket_id} governed candidate validated; prepare human review "
+                    "and Git handoff."
+                ),
+                "required_human_action": "review_validation_preparation_and_human_git_handoff",
+            })
+            overlay.update({
+                "readiness": "governed_autonomy_validated_candidate_review_ready",
+                "workflow_state": (
+                    f"{binding.ticket_id}-GOVERNED-AUTONOMY-AWAITING-HUMAN-GIT-HANDOFF"
+                ),
+                "governed_workflow_state": "awaiting_human_git_handoff",
+                "human_git_handoff_transition_required": True,
+                "git_handoff_required": True,
+                "git_handoff_state": "human_git_authority_preserved",
+                "terminal_outcome_class": terminal_state["terminal_outcome_class"],
+                "terminal_outcome_authority": terminal_state["terminal_outcome_authority"],
+                "validated_candidate_review_required": True,
+                "validation_observation_reference": terminal_state["validation_observation_reference"],
+                "source_materialization_reference": terminal_state["source_materialization_reference"],
+                "candidate_changes_reference": terminal_state["candidate_changes_reference"],
+                "candidate_changes_available": True,
+            })
+        return overlay, None
     return {
         "readiness": "execution_started",
         "workflow_state": f"{binding.ticket_id}-EXECUTING",
@@ -17600,7 +17875,14 @@ def _p18_9_0_retry_start_overlay(
             "auto_rollback": False,
         }, blocker
     if terminal_state is not None and terminal_state["start_status"] == "completed":
-        return {
+        review_required = terminal_state.get("terminal_outcome_class") == "validated_review_required"
+        next_action = {
+            "id": binding.review_prepare_next_action_id,
+            "label": f"{binding.ticket_id} retry execution completed; prepare review validation.",
+            "target_ticket_id": binding.ticket_id,
+            "target_ticket_title": binding.ticket_title,
+        }
+        overlay = {
             "readiness": "retry_execution_completed",
             "workflow_state": f"{binding.ticket_id}-RETRY-EXECUTION-COMPLETED",
             "workflow_status": "execution_completed",
@@ -17619,16 +17901,37 @@ def _p18_9_0_retry_start_overlay(
             "retry_execution_started": False,
             "retry_execution_count": record["retry_execution_count"],
             "retry_start_authority": authority,
-            "next_action": {
-                "id": binding.review_prepare_next_action_id,
-                "label": f"{binding.ticket_id} retry execution completed; prepare review validation.",
-                "target_ticket_id": binding.ticket_id,
-                "target_ticket_title": binding.ticket_title,
-            },
+            "next_action": next_action,
             "Git_mutation": False,
             "auto_retry": False,
             "auto_rollback": False,
-        }, None
+        }
+        if review_required:
+            next_action.update({
+                "label": (
+                    f"{binding.ticket_id} governed candidate validated; prepare human review "
+                    "and Git handoff."
+                ),
+                "required_human_action": "review_validation_preparation_and_human_git_handoff",
+            })
+            overlay.update({
+                "readiness": "governed_autonomy_validated_candidate_review_ready",
+                "workflow_state": (
+                    f"{binding.ticket_id}-GOVERNED-AUTONOMY-AWAITING-HUMAN-GIT-HANDOFF"
+                ),
+                "governed_workflow_state": "awaiting_human_git_handoff",
+                "human_git_handoff_transition_required": True,
+                "git_handoff_required": True,
+                "git_handoff_state": "human_git_authority_preserved",
+                "terminal_outcome_class": terminal_state["terminal_outcome_class"],
+                "terminal_outcome_authority": terminal_state["terminal_outcome_authority"],
+                "validated_candidate_review_required": True,
+                "validation_observation_reference": terminal_state["validation_observation_reference"],
+                "source_materialization_reference": terminal_state["source_materialization_reference"],
+                "candidate_changes_reference": terminal_state["candidate_changes_reference"],
+                "candidate_changes_available": True,
+            })
+        return overlay, None
     return {
         "readiness": "retry_execution_started",
         "workflow_state": f"{binding.ticket_id}-EXECUTING",

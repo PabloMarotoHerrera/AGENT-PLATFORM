@@ -921,6 +921,102 @@ def _write_p18_9_1_terminal_candidate_fixture(
     )
 
 
+def _write_p18_9_2_terminal_candidate_fixture(
+    pr,
+    projection_home: Path,
+    workspace: Path,
+) -> None:
+    source_root = projection_home / "p18-9-2-terminal-candidate-source"
+    modified_files = {
+        "2_products/pepper-agent/web/src/agent-platform/runtime-overview/contract.ts": (
+            "export interface RuntimeOverview { status: string }\n",
+            "export interface RuntimeOverview { status: string; queueDepth: number }\n",
+        ),
+        "2_products/pepper-agent/web/src/agent-platform/runtime-overview/runtime-overview-page.tsx": (
+            "export function RuntimeOverviewPage() { return null }\n",
+            "export function RuntimeOverviewPage() { return <section>Control Center</section> }\n",
+        ),
+        "2_products/pepper-agent/web/src/agent-platform/runtime-overview/runtime-overview.test.tsx": (
+            "import { expect, test } from 'vitest'\n",
+            "import { expect, test } from 'vitest'\ntest('renders overview', () => expect(true).toBe(true))\n",
+        ),
+    }
+    for relative_path, (source_text, workspace_text) in modified_files.items():
+        _write_fixture_file(source_root, relative_path, source_text)
+        _write_fixture_file(workspace, relative_path, workspace_text)
+    manifest_path = workspace / pr.PEPPER_SCRATCH_SOURCE_MATERIALIZATION_MANIFEST
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.update({
+        "source_root": str(source_root),
+        "workspace_root": str(workspace),
+        "writable_allowed_paths": [
+            "2_products/pepper-agent/web/src/agent-platform/runtime-overview/**",
+        ],
+    })
+    manifest_path.write_text(
+        json.dumps(manifest, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _finish_projected_run_as_review_required_terminal(
+    kanban_db,
+    projected: dict,
+    run_id: int,
+    *,
+    summary: str,
+    block_kind: str | None = "needs_input",
+    error: str | None = None,
+    metadata: dict | None = None,
+) -> None:
+    now = int(time.time())
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        conn.execute(
+            "UPDATE tasks SET status = 'blocked', current_run_id = NULL, "
+            "worker_pid = NULL, claim_lock = NULL, claim_expires = NULL, "
+            "last_failure_error = NULL, block_kind = ?, block_recurrences = 1 "
+            "WHERE id = ? AND current_run_id = ?",
+            (block_kind, projected["kanban_task_id"], run_id),
+        )
+        conn.execute(
+            "UPDATE task_runs SET status = 'blocked', outcome = 'blocked', summary = ?, "
+            "error = ?, metadata = ?, ended_at = ?, claim_lock = NULL, claim_expires = NULL, "
+            "worker_pid = NULL WHERE id = ?",
+            (
+                summary,
+                error,
+                json.dumps(metadata, ensure_ascii=False) if metadata else None,
+                now,
+                run_id,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _start_recovered_p18_9_2_retry_for_test(
+    state,
+    monkeypatch,
+    *,
+    pid: int = 6792,
+) -> dict:
+    _patch_synthetic_scratch_materialization(monkeypatch, state.pr)
+    monkeypatch.setattr(state.kanban_db, "_pid_alive", lambda live_pid: int(live_pid) == pid)
+    retry = state.pr.start_current_ticket_execution(
+        human_authorization_text="Autorizo retry de P18.9.2.",
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="START_P18_9_2_RETRY_REQUIRES_HUMAN_AUTHORIZATION",
+        spawn_fn=lambda _task, _workspace, board=None: pid,
+    )
+    assert retry["retry_start_status"] == "started"
+    assert retry["kanban_run_id"] == state.failed_run_id + 1
+    return retry
+
+
 def _force_p18_9_1_blocked_run_4(pr, kanban_db, projected: dict, monkeypatch) -> int:
     first = _start_p18_9_1_execution(pr, monkeypatch, pid=6401)
     _block_projected_run(
@@ -3775,6 +3871,201 @@ def test_approved_successor_recovered_retry_rejects_later_failed_run_stale_recov
     assert "latest failed run no longer matches recovery authority" in retry["blocker_detail"]
     assert retry["worker_process_started"] is False
     assert not pr.retry_start_record_path_for_ticket("P18.9.2").exists()
+
+
+def test_review_required_p18_9_2_retry_reconstructs_to_governed_review_boundary(
+    projection_home,
+    monkeypatch,
+) -> None:
+    state = _recovered_p18_9_2_dependency_failure_fixture(projection_home, monkeypatch)
+    pr = state.pr
+    kanban_db = state.kanban_db
+    retry = _start_recovered_p18_9_2_retry_for_test(state, monkeypatch, pid=6792)
+    _write_p18_9_2_terminal_candidate_fixture(
+        pr,
+        projection_home,
+        Path(retry["workspace_path"]),
+    )
+    summary = (
+        "review-required: P18.9.2 Control Center Overview implementation is ready "
+        "for human/code review; focused governed frontend validation passed "
+        "(GVCMD-001, 36 tests)."
+    )
+    _finish_projected_run_as_review_required_terminal(
+        kanban_db,
+        state.projected,
+        retry["kanban_run_id"],
+        summary=summary,
+    )
+
+    workflow = pr.build_workflow_control_snapshot()
+    assert workflow["current_ticket_id"] == "P18.9.2"
+    assert workflow["readiness"] == "governed_autonomy_validated_candidate_review_ready"
+    assert workflow["workflow_status"] == "execution_completed"
+    assert workflow["workflow_state"] == (
+        "P18.9.2-GOVERNED-AUTONOMY-AWAITING-HUMAN-GIT-HANDOFF"
+    )
+    assert workflow["validation_state"] == "execution_completed_pending_validation"
+    assert workflow["review_state"] == "ready_for_review_validation"
+    assert workflow["recovery_state"] == "not_required"
+    assert workflow["blocker_count"] == 0
+    assert workflow["terminal_outcome_class"] == "validated_review_required"
+    assert workflow["validated_candidate_review_required"] is True
+    assert workflow["candidate_changes_available"] is True
+    assert workflow["candidate_changes_reference"]["files_changed"] == 3
+    assert workflow["git_handoff_required"] is True
+    assert workflow["git_handoff_state"] == "human_git_authority_preserved"
+    assert workflow["next_action"]["id"] == "PREPARE_P18_9_2_REVIEW"
+    assert workflow["next_action"]["required_human_action"] == (
+        "review_validation_preparation_and_human_git_handoff"
+    )
+    assert workflow.get("dispatch_performed", False) is False
+    assert workflow["execution_started"] is False
+    assert workflow["worker_execution"] is False
+    assert workflow["Git_mutation"] is False
+    assert workflow["auto_retry"] is False
+
+    review = pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_REVIEW",
+    )
+    assert review["review_prepare_status"] == "prepared_pending_human_acceptance"
+    assert review["review_preparation_recorded"] is True
+    assert review["ticket_id"] == "P18.9.2"
+    assert review["successful_run_id"] == retry["kanban_run_id"]
+    assert review["successful_run_status"] == "blocked"
+    assert review["successful_run_outcome"] == "blocked"
+    assert review["acceptance_contract"]["ticket_id"] == "P18.9.2"
+    assert review["kanban_completion_result"]["terminal_outcome_class"] == (
+        "validated_review_required"
+    )
+    assert "terminal_review_boundary_evidence" in review["kanban_completion_result"][
+        "completion_detail_sources"
+    ]
+    assert review["git_handoff_required"] is True
+    assert review["git_handoff_state"] == "human_git_authority_preserved"
+    assert review["dispatch_performed"] is False
+    assert review["execution_started"] is False
+    assert review["Kanban_dispatch"] is False
+    assert review["Git_mutation"] is False
+    assert pr.review_prepare_record_path_for_ticket("P18.9.2").exists()
+
+    conn = kanban_db.connect(board=state.projected["kanban_board_slug"])
+    try:
+        task = kanban_db.get_task(conn, state.projected["kanban_task_id"])
+        runs = kanban_db.list_runs(conn, state.projected["kanban_task_id"])
+        terminal_run = next(run for run in runs if run.id == retry["kanban_run_id"])
+        assert task is not None
+        assert task.status == "blocked"
+        assert task.block_kind == "needs_input"
+        assert task.current_run_id is None
+        assert task.worker_pid is None
+        assert terminal_run.status == "blocked"
+        assert terminal_run.outcome == "blocked"
+        assert terminal_run.error is None
+    finally:
+        conn.close()
+
+
+def test_p18_9_2_dependency_materialization_failure_remains_recovery_required(
+    projection_home,
+    monkeypatch,
+) -> None:
+    state = _recovered_p18_9_2_dependency_failure_fixture(projection_home, monkeypatch)
+    workflow = state.pr.build_workflow_control_snapshot()
+
+    assert workflow["workflow_status"] == "retry_pending"
+    assert workflow["recovery_state"] == "retry_pending"
+    assert workflow["next_action"]["id"] == "START_P18_9_2_RETRY_REQUIRES_HUMAN_AUTHORIZATION"
+    assert workflow.get("terminal_outcome_class") != "validated_review_required"
+    assert not state.pr.review_prepare_record_path_for_ticket("P18.9.2").exists()
+
+
+@pytest.mark.parametrize(
+    ("summary", "block_kind", "write_candidate", "run_error"),
+    (
+        (
+            "review-required: P18.9.2 is ready for human/code review.",
+            "needs_input",
+            True,
+            None,
+        ),
+        (
+            "review-required: validation passed, but tests failed during final check.",
+            "needs_input",
+            True,
+            None,
+        ),
+        (
+            "review-required: P18.9.2 implementation is ready; validation passed.",
+            "capability",
+            True,
+            None,
+        ),
+        (
+            "review-required: P18.9.2 implementation is ready; validation passed.",
+            "needs_input",
+            False,
+            None,
+        ),
+        (
+            "review-required: P18.9.2 implementation is ready; validation passed.",
+            "needs_input",
+            True,
+            "worker failed after reporting review-required",
+        ),
+    ),
+)
+def test_p18_9_2_review_required_terminal_fails_closed_without_review_authority(
+    projection_home,
+    monkeypatch,
+    summary,
+    block_kind,
+    write_candidate,
+    run_error,
+) -> None:
+    state = _recovered_p18_9_2_dependency_failure_fixture(projection_home, monkeypatch)
+    pr = state.pr
+    retry = _start_recovered_p18_9_2_retry_for_test(state, monkeypatch, pid=6793)
+    if write_candidate:
+        _write_p18_9_2_terminal_candidate_fixture(
+            pr,
+            projection_home,
+            Path(retry["workspace_path"]),
+        )
+    _finish_projected_run_as_review_required_terminal(
+        state.kanban_db,
+        state.projected,
+        retry["kanban_run_id"],
+        summary=summary,
+        block_kind=block_kind,
+        error=run_error,
+    )
+
+    workflow = pr.build_workflow_control_snapshot()
+    assert workflow["current_ticket_id"] == "P18.9.2"
+    assert workflow["workflow_status"] == "execution_failed"
+    assert workflow["workflow_state"] == "P18.9.2-RETRY-EXECUTION-FAILED-RECOVERY-REQUIRED"
+    assert workflow["recovery_state"] == "recovery_required"
+    assert workflow["next_action"]["id"] == "RECOVER_P18_9_2_EXECUTION"
+    assert workflow.get("terminal_outcome_class") != "validated_review_required"
+    assert workflow.get("validated_candidate_review_required") is not True
+    assert workflow.get("dispatch_performed", False) is False
+    assert workflow["execution_started"] is False
+    assert workflow["worker_execution"] is False
+    assert workflow["Git_mutation"] is False
+
+    blocked_review = pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_REVIEW",
+    )
+    assert blocked_review["review_prepare_status"] == "blocked"
+    assert blocked_review["review_preparation_recorded"] is False
+    assert blocked_review["dispatch_performed"] is False
+    assert blocked_review["Git_mutation"] is False
+    assert not pr.review_prepare_record_path_for_ticket("P18.9.2").exists()
 
 
 def test_chat_tool_returns_profile_assignment_diagnostics_on_gap(
