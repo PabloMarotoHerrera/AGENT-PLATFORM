@@ -3724,6 +3724,30 @@ def load_p18_9_0_review_acceptance_record(
     )
 
 
+def load_current_ticket_review_acceptance_record(
+    *,
+    projection_record: dict[str, Any] | None = None,
+    review_prepare_record: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Load and validate the active ticket review-acceptance record."""
+
+    projection = projection_record if projection_record is not None else _load_current_projection_record()
+    path = review_acceptance_record_path_for_ticket(str(projection["ticket_id"]))
+    if not path.exists():
+        return None
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ProductRuntimeConflict(
+            f"{projection['ticket_id']} review-acceptance record is unreadable"
+        ) from exc
+    return validate_p18_9_0_review_acceptance_record(
+        record,
+        projection_record=projection,
+        review_prepare_record=review_prepare_record,
+    )
+
+
 def _review_decision_record_digest(record: dict[str, Any]) -> str:
     payload = {
         key: value
@@ -6546,7 +6570,7 @@ def prepare_current_ticket_review(
         except FileNotFoundError:
             pass
     if existing is not None:
-        acceptance = load_p18_9_0_review_acceptance_record(
+        acceptance = load_current_ticket_review_acceptance_record(
             projection_record=projection,
             review_prepare_record=existing,
         )
@@ -6710,10 +6734,14 @@ def submit_current_ticket_review_decision(
             == _review_feedback_digest(request.feedback)
         ):
             return _review_decision_operational_result(existing, idempotent_replay=True)
-    target = _review_decision_target_from_governed_autonomy(projection)
+    target = _review_decision_target_from_prepared_review_or_governed_autonomy(projection)
     if request.reviewed_run_id not in {None, int(target["reviewed_run_id"])}:
         raise ProductRuntimeConflict(
             f"review decision targets run {target['reviewed_run_id']}, not {request.reviewed_run_id}"
+        )
+    if request.decision == "changes_requested" and target.get("authority_kind") == "review_prepare":
+        raise ProductRuntimeConflict(
+            "review changes_requested requires governed autonomy runtime authority"
         )
     if request.decision == "changes_requested":
         authority_blocker = _review_feedback_authority_blocker(
@@ -15368,6 +15396,50 @@ def _review_feedback_authority_blocker(
     return None
 
 
+def _review_decision_target_from_prepared_review_or_governed_autonomy(
+    projection: dict[str, Any],
+) -> dict[str, Any]:
+    review_prepare = load_current_ticket_review_prepare_record(projection_record=projection)
+    if review_prepare is not None:
+        completion = review_prepare["kanban_completion_result"]
+        candidate_reference = completion.get("candidate_changes_reference")
+        if not _governed_autonomy_candidate_changes_available(candidate_reference):
+            raise ProductRuntimeConflict("review decision requires candidate changes evidence")
+        reviewed_run_id = int(review_prepare["successful_run_id"])
+        return {
+            "authority_kind": "review_prepare",
+            "review_prepare": review_prepare,
+            "activation": {
+                "activation_action_SHA256": review_prepare["review_prepare_action_SHA256"],
+                "governed_autonomy_envelope_SHA256": review_prepare["review_package_SHA256"],
+            },
+            "previous_runtime": {},
+            "effective_authority": None,
+            "terminal_reconciliation": {
+                "terminal_run_id": reviewed_run_id,
+                "terminal_run_status": review_prepare["successful_run_status"],
+                "terminal_run_outcome": review_prepare["successful_run_outcome"],
+                "candidate_changes_reference": candidate_reference,
+                "validated_candidate_review_required": True,
+                "terminal_outcome_class": review_prepare["kanban_completion_result"].get(
+                    "terminal_outcome_class"
+                ),
+            },
+            "reviewed_run_id": reviewed_run_id,
+            "candidate_reference": candidate_reference,
+            "candidate_SHA256": _digest_payload(
+                "pepper-current-ticket-reviewed-candidate-reference-sha256-v1",
+                {
+                    "ticket_id": projection["ticket_id"],
+                    "work_packet_SHA256": projection["work_packet_SHA256"],
+                    "terminal_run_id": reviewed_run_id,
+                    "candidate_changes_reference": candidate_reference,
+                },
+            ),
+        }
+    return _review_decision_target_from_governed_autonomy(projection)
+
+
 def _review_decision_target_from_governed_autonomy(
     projection: dict[str, Any],
 ) -> dict[str, Any]:
@@ -15405,6 +15477,7 @@ def _review_decision_target_from_governed_autonomy(
     if not _governed_autonomy_candidate_changes_available(candidate_reference):
         raise ProductRuntimeConflict("review decision requires candidate changes evidence")
     return {
+        "authority_kind": "governed_autonomy",
         "activation": activation,
         "previous_runtime": previous,
         "effective_authority": effective_authority,
@@ -17230,6 +17303,37 @@ def _blocked_current_review_prepare_result(
     }
 
 
+def _review_prepare_routes_to_review_decision(record: dict[str, Any]) -> bool:
+    return bool(record.get("git_handoff_required"))
+
+
+def _review_prepare_next_action(
+    binding: CurrentTicketLifecycleBinding,
+    record: dict[str, Any],
+) -> dict[str, Any]:
+    if _review_prepare_routes_to_review_decision(record):
+        return {
+            "id": _review_decision_request_action_id(binding.ticket_id),
+            "label": (
+                f"{binding.ticket_id} review package is prepared; submit an explicit "
+                "human review decision before any Git handoff."
+            ),
+            "target_ticket_id": binding.ticket_id,
+            "target_ticket_title": binding.ticket_title,
+            "required_human_action": "human_review_decision",
+        }
+    return {
+        "id": binding.review_acceptance_next_action_id,
+        "label": (
+            f"{binding.ticket_id} review package is prepared; await explicit human "
+            "review acceptance before closure."
+        ),
+        "target_ticket_id": binding.ticket_id,
+        "target_ticket_title": binding.ticket_title,
+        "required_human_action": "review_acceptance",
+    }
+
+
 def _blocked_current_review_acceptance_result(
     projection: dict[str, Any],
     *,
@@ -17293,7 +17397,7 @@ def _p18_9_0_review_prepare_overlay(
         record = load_current_ticket_review_prepare_record(projection_record=projection)
     except Exception as exc:  # pragma: no cover - defensive live-state guard
         return None, {
-            "id": "P18-9-0-REVIEW-PREPARE-AUTHORITY",
+            "id": f"{binding.ticket_hyphen_token}-REVIEW-PREPARE-AUTHORITY",
             "status": "blocked_by_invalid_review_prepare_authority",
             "evidence": _safe_text(exc, limit=300),
         }
@@ -17301,11 +17405,11 @@ def _p18_9_0_review_prepare_overlay(
         return None, None
     if completed_overlay.get("workflow_status") != "execution_completed":
         return None, {
-            "id": "P18-9-0-REVIEW-PREPARE-AUTHORITY",
+            "id": f"{binding.ticket_hyphen_token}-REVIEW-PREPARE-AUTHORITY",
             "status": "blocked_by_review_prepare_state_mismatch",
-            "evidence": "P18.9.0 review preparation exists but execution is not completed",
+            "evidence": f"{binding.ticket_id} review preparation exists but execution is not completed",
         }
-    acceptance_overlay, acceptance_blocker = _p18_9_0_review_acceptance_overlay(
+    acceptance_overlay, acceptance_blocker = _current_ticket_review_acceptance_overlay(
         projection,
         review_prepare_record=record,
     )
@@ -17313,6 +17417,7 @@ def _p18_9_0_review_prepare_overlay(
         return acceptance_overlay, None
     if acceptance_blocker is not None:
         return None, acceptance_blocker
+    next_action = _review_prepare_next_action(binding, record)
     return {
         "readiness": "review_prepared_pending_human_acceptance",
         "workflow_state": f"{binding.ticket_id}-REVIEW-PREPARED-PENDING-HUMAN-ACCEPTANCE",
@@ -17339,6 +17444,8 @@ def _p18_9_0_review_prepare_overlay(
             "human_acceptance_recorded": False,
         },
         "P18_9_0_review_prepare_present": True,
+        "current_ticket_review_prepare_present": True,
+        "review_decision_required": _review_prepare_routes_to_review_decision(record),
         "human_acceptance_required": True,
         "human_acceptance_recorded": False,
         "dispatch_performed": False,
@@ -17349,32 +17456,24 @@ def _p18_9_0_review_prepare_overlay(
         "Git_mutation": False,
         "auto_retry": False,
         "auto_rollback": False,
-        "next_action": {
-            "id": binding.review_acceptance_next_action_id,
-            "label": (
-                f"{binding.ticket_id} review package is prepared; await explicit human "
-                "review acceptance before closure."
-            ),
-            "target_ticket_id": binding.ticket_id,
-            "target_ticket_title": binding.ticket_title,
-            "required_human_action": "review_acceptance",
-        },
+        "next_action": next_action,
     }, None
 
 
-def _p18_9_0_review_acceptance_overlay(
+def _current_ticket_review_acceptance_overlay(
     projection: dict[str, Any],
     *,
     review_prepare_record: dict[str, Any],
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
     try:
-        record = load_p18_9_0_review_acceptance_record(
+        record = load_current_ticket_review_acceptance_record(
             projection_record=projection,
             review_prepare_record=review_prepare_record,
         )
     except Exception as exc:  # pragma: no cover - defensive live-state guard
         return None, {
-            "id": "P18-9-0-REVIEW-ACCEPTANCE-AUTHORITY",
+            "id": f"{binding.ticket_hyphen_token}-REVIEW-ACCEPTANCE-AUTHORITY",
             "status": "blocked_by_invalid_review_acceptance_authority",
             "evidence": _safe_text(exc, limit=300),
         }
@@ -18381,6 +18480,9 @@ def _current_ticket_review_decision_overlay(
     binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
     overlay = {
         "review_decision_recorded": True,
+        "review_decision_required": False,
+        "human_acceptance_required": False,
+        "human_acceptance_recorded": record["review_decision"] == "accept",
         "review_decision": record["review_decision"],
         "review_decision_identity_SHA256": record["review_decision_identity_SHA256"],
         "review_decision_SHA256": record["review_decision_SHA256"],
@@ -18400,6 +18502,19 @@ def _current_ticket_review_decision_overlay(
             "review_state": "accepted",
             "recovery_state": "not_required",
             "governed_workflow_state": "awaiting_human_git_handoff",
+            "git_handoff_required": True,
+            "git_handoff_state": "human_git_authority_preserved",
+            "next_action": record["next_action"],
+        })
+    elif record["review_decision"] == "changes_requested":
+        overlay.update({
+            "readiness": "review_changes_requested_revision_started",
+            "workflow_state": f"{binding.ticket_id}-REVIEW-CHANGES-REQUESTED-REVISION-STARTED",
+            "workflow_status": "review_changes_requested_revision_started",
+            "validation_state": "review_changes_requested",
+            "review_state": "correction_required",
+            "recovery_state": "not_required",
+            "governed_workflow_state": "awaiting_correction",
             "git_handoff_required": True,
             "git_handoff_state": "human_git_authority_preserved",
             "next_action": record["next_action"],
@@ -18665,6 +18780,13 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
         snapshot["canonical_next_ticket_authority"] = canonical_next
     else:
         snapshot["canonical_next_ticket_authority"] = None
+    pending_successor_overlay, pending_successor_blocker = (
+        _pending_generated_successor_ticket_approval_overlay(snapshot)
+    )
+    if pending_successor_overlay is not None:
+        snapshot.update(pending_successor_overlay)
+    if pending_successor_blocker is not None:
+        remaining_blockers.append(pending_successor_blocker)
     current_ticket_id = str(snapshot.get("current_ticket_id") or "").strip()
     if current_ticket_id:
         try:
@@ -18677,6 +18799,17 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
                     snapshot.update(autonomy_overlay)
                 if autonomy_blocker is not None:
                     remaining_blockers.append(autonomy_blocker)
+                if snapshot.get("workflow_status") == "execution_completed":
+                    review_prepare_overlay, review_prepare_blocker = (
+                        _p18_9_0_review_prepare_overlay(
+                            projection,
+                            completed_overlay=snapshot,
+                        )
+                    )
+                    if review_prepare_overlay is not None:
+                        snapshot.update(review_prepare_overlay)
+                    if review_prepare_blocker is not None:
+                        remaining_blockers.append(review_prepare_blocker)
                 review_decision_overlay = _current_ticket_review_decision_overlay(
                     projection,
                 )
@@ -18687,19 +18820,25 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
                 )
                 if handoff_completion_overlay is not None:
                     snapshot.update(handoff_completion_overlay)
+                    if (
+                        pending_successor_overlay is None
+                        and pending_successor_blocker is None
+                        and generation_blocker is None
+                        and str(snapshot.get("current_ticket_id") or "").strip() == ""
+                    ):
+                        successor_overlay, successor_blocker = (
+                            _pending_generated_successor_ticket_approval_overlay(snapshot)
+                        )
+                        if successor_overlay is not None:
+                            snapshot.update(successor_overlay)
+                        if successor_blocker is not None:
+                            remaining_blockers.append(successor_blocker)
         except Exception as exc:  # pragma: no cover - defensive live-state guard
             remaining_blockers.append({
                 "id": f"{current_ticket_id}-GOVERNED-AUTONOMY-AUTHORITY",
                 "status": "blocked_by_unreadable_governed_autonomy_projection",
                 "evidence": _safe_text(exc, limit=300),
             })
-    pending_successor_overlay, pending_successor_blocker = (
-        _pending_generated_successor_ticket_approval_overlay(snapshot)
-    )
-    if pending_successor_overlay is not None:
-        snapshot.update(pending_successor_overlay)
-    if pending_successor_blocker is not None:
-        remaining_blockers.append(pending_successor_blocker)
     snapshot["blocker_count"] = len(remaining_blockers)
     snapshot["next_action_label"] = _next_action_label(snapshot.get("next_action"))
     return snapshot
@@ -18776,6 +18915,12 @@ def build_lead_agent_operational_context() -> dict[str, Any]:
         "active_execution_count": active_execution_count,
         "validation_state": _workflow_value(workflow, "validation_state", "unavailable"),
         "review_state": _workflow_value(workflow, "review_state", "unavailable"),
+        "review_prepare_authority": workflow.get("review_prepare_authority"),
+        "review_decision_recorded": bool(workflow.get("review_decision_recorded")),
+        "review_decision_required": bool(workflow.get("review_decision_required")),
+        "human_acceptance_required": bool(workflow.get("human_acceptance_required")),
+        "human_acceptance_recorded": bool(workflow.get("human_acceptance_recorded")),
+        "git_handoff_required": bool(workflow.get("git_handoff_required")),
         "recovery_state": _workflow_value(workflow, "recovery_state", "unavailable"),
         "failure_category": workflow.get("failure_category"),
         "failure_summary": workflow.get("failure_summary"),

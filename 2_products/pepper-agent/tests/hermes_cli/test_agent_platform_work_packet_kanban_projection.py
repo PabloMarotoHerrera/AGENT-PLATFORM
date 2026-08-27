@@ -4164,6 +4164,286 @@ def test_lead_agent_tool_rejects_mismatched_p18_9_2_review_prepare_authority(
     assert workflow["Git_mutation"] is False
 
 
+def test_lead_agent_read_surfaces_reconstruct_prepared_p18_9_2_review_after_tool_prepare(
+    projection_home,
+    monkeypatch,
+) -> None:
+    import tools.pepper_workflow_tools  # noqa: F401
+    from model_tools import handle_function_call
+
+    state, retry = _p18_9_2_review_ready_for_tool_test(
+        projection_home,
+        monkeypatch,
+        pid=6797,
+    )
+
+    before = json.loads(handle_function_call("get_workflow_control", {}))
+    assert before["workflow_status"] == "execution_completed"
+    assert before["review_state"] == "ready_for_review_validation"
+    assert before["next_action"]["id"] == "PREPARE_P18_9_2_REVIEW"
+    before_candidate_changes = before["workflow_control"]["candidate_changes_reference"]
+    assert before_candidate_changes["files_changed"] == 3
+
+    prepared = json.loads(
+        handle_function_call(
+            "prepare_current_ticket_review",
+            {
+                "human_request_text": "Prepare P18.9.2 review validation now",
+                "project_id": "PEPPER",
+                "ticket_id": "P18.9.2",
+                "next_action_id": "PREPARE_P18_9_2_REVIEW",
+            },
+        )
+    )
+    assert prepared["success"] is True, prepared
+    assert prepared["idempotent_replay"] is False
+    assert prepared["review_prepare_status"] == "prepared_pending_human_acceptance"
+    assert prepared["successful_run_id"] == retry["kanban_run_id"]
+    assert prepared["work_packet_id"] == state.projection_record["work_packet_id"]
+    assert prepared["work_packet_id"] != "WP-DEFAULT-T_B6BAF825"
+    assert prepared["work_packet_SHA256"] == state.projection_record["work_packet_SHA256"]
+    assert state.pr.review_prepare_record_path_for_ticket("P18.9.2").exists()
+    current_projection = state.pr._load_current_projection_record()
+    assert current_projection["ticket_id"] == "P18.9.2", current_projection
+    assert state.pr.load_current_ticket_review_prepare_record(
+        projection_record=current_projection,
+    ) is not None
+    direct_snapshot = state.pr.build_workflow_control_snapshot()
+    assert direct_snapshot["review_state"] == "prepared_pending_human_acceptance", direct_snapshot
+
+    workflow = json.loads(handle_function_call("get_workflow_control", {}))
+    review_status = json.loads(handle_function_call("get_review_status", {}))
+    next_action = json.loads(handle_function_call("get_next_action", {}))
+
+    for result in (workflow, review_status):
+        assert result["success"] is True
+        assert result["validation_state"] == "review_prepared_pending_human_acceptance"
+        assert result["review_state"] == "prepared_pending_human_acceptance"
+        assert result["recovery_state"] == "not_required"
+        assert result["human_acceptance_required"] is True
+        assert result["human_acceptance_recorded"] is False
+        assert result["git_handoff_required"] is True
+        assert result["git_handoff_state"] == "human_git_authority_preserved"
+        assert result["next_action"]["id"] == "SUBMIT_P18_9_2_REVIEW_DECISION"
+        assert result["next_action"]["required_human_action"] == "human_review_decision"
+        assert result["next_action"]["target_ticket_id"] == "P18.9.2"
+        assert result["Git_mutation"] is False
+
+    assert workflow["workflow_status"] == "review_prepared_pending_human_acceptance"
+    assert workflow["workflow_state"] == "P18.9.2-REVIEW-PREPARED-PENDING-HUMAN-ACCEPTANCE"
+    assert workflow["active_execution_count"] == 0
+    assert workflow["workflow_control"]["candidate_changes_reference"] == before_candidate_changes
+    assert workflow["review_prepare_authority"]["review_prepare_action_SHA256"] == prepared[
+        "review_prepare_action_SHA256"
+    ]
+    assert next_action["success"] is True
+    assert next_action["workflow_status"] == "review_prepared_pending_human_acceptance"
+    assert next_action["review_state"] == "prepared_pending_human_acceptance"
+    assert next_action["human_acceptance_required"] is True
+    assert next_action["human_acceptance_recorded"] is False
+    assert next_action["next_action"]["id"] == "SUBMIT_P18_9_2_REVIEW_DECISION"
+    assert next_action["Git_mutation"] is False
+
+    repeated_workflow = json.loads(handle_function_call("get_workflow_control", {}))
+    assert repeated_workflow["workflow_status"] == workflow["workflow_status"]
+    assert repeated_workflow["review_state"] == workflow["review_state"]
+    assert repeated_workflow["next_action"] == workflow["next_action"]
+
+    replay = state.pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_REVIEW",
+    )
+    assert replay["idempotent_replay"] is True
+    assert replay["review_prepare_action_SHA256"] == prepared[
+        "review_prepare_action_SHA256"
+    ]
+    assert replay["dispatch_performed"] is False
+    assert replay["execution_started"] is False
+    assert replay["Git_mutation"] is False
+
+
+@pytest.mark.parametrize(
+    "tamper_kind",
+    [
+        "digest",
+        "ticket",
+        "work_packet_id",
+        "work_packet_sha",
+        "projection_sha",
+        "run_id",
+        "completion_result",
+        "acceptance_contract",
+        "criteria_revision",
+        "candidate_materialization",
+    ],
+)
+def test_p18_9_2_review_prepare_overlay_fails_closed_for_stale_or_malformed_authority(
+    projection_home,
+    monkeypatch,
+    tamper_kind,
+) -> None:
+    import tools.pepper_workflow_tools  # noqa: F401
+    from model_tools import handle_function_call
+
+    state, _retry = _p18_9_2_review_ready_for_tool_test(
+        projection_home,
+        monkeypatch,
+        pid=6798,
+    )
+    prepared = json.loads(
+        handle_function_call(
+            "prepare_current_ticket_review",
+            {
+                "human_request_text": "Prepare P18.9.2 review validation now",
+                "project_id": "PEPPER",
+                "ticket_id": "P18.9.2",
+                "next_action_id": "PREPARE_P18_9_2_REVIEW",
+            },
+        )
+    )
+    assert prepared["success"] is True, prepared
+    _tamper_p18_9_2_review_prepare_record(state.pr, tamper_kind)
+
+    projection = state.pr._load_current_projection_record()
+    with pytest.raises(state.pr.ProductRuntimeConflict):
+        state.pr.load_current_ticket_review_prepare_record(projection_record=projection)
+
+    workflow = state.pr.build_workflow_control_snapshot()
+    assert workflow["current_ticket_id"] == "P18.9.2"
+    assert workflow["workflow_status"] == "execution_completed"
+    assert workflow["validation_state"] == "execution_completed_pending_validation"
+    assert workflow["review_state"] == "ready_for_review_validation"
+    assert workflow["next_action"]["id"] == "PREPARE_P18_9_2_REVIEW"
+    assert workflow["blocker_count"] >= 1
+    assert any(
+        "REVIEW-PREPARE-AUTHORITY" in str(blocker.get("id"))
+        and blocker.get("status") == "blocked_by_invalid_review_prepare_authority"
+        for blocker in workflow["remaining_blockers"]
+    )
+    assert "review_prepare_authority" not in workflow
+    assert workflow["execution_started"] is False
+    assert workflow["worker_execution"] is False
+    assert workflow["Git_mutation"] is False
+
+
+def test_p18_9_0_review_prepare_compatibility_does_not_shadow_current_p18_9_2(
+    projection_home,
+    monkeypatch,
+) -> None:
+    state, _retry = _p18_9_2_review_ready_for_tool_test(
+        projection_home,
+        monkeypatch,
+        pid=6799,
+    )
+    legacy_path = state.pr.review_prepare_record_path_for_ticket("P18.9.0")
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_text(json.dumps({"ticket_id": "P18.9.0"}) + "\n", encoding="utf-8")
+
+    workflow = state.pr.build_workflow_control_snapshot()
+
+    assert workflow["current_ticket_id"] == "P18.9.2"
+    assert workflow["workflow_status"] == "execution_completed"
+    assert workflow["review_state"] == "ready_for_review_validation"
+    assert workflow["next_action"]["id"] == "PREPARE_P18_9_2_REVIEW"
+    assert workflow["blocker_count"] == 0
+    assert "review_prepare_authority" not in workflow
+
+
+def test_p18_9_2_review_decision_supersedes_prepared_review_overlay(
+    projection_home,
+    monkeypatch,
+) -> None:
+    import tools.pepper_workflow_tools  # noqa: F401
+    from model_tools import handle_function_call
+
+    state, retry = _p18_9_2_review_ready_for_tool_test(
+        projection_home,
+        monkeypatch,
+        pid=6800,
+    )
+    prepared = json.loads(
+        handle_function_call(
+            "prepare_current_ticket_review",
+            {
+                "human_request_text": "Prepare P18.9.2 review validation now",
+                "project_id": "PEPPER",
+                "ticket_id": "P18.9.2",
+                "next_action_id": "PREPARE_P18_9_2_REVIEW",
+            },
+        )
+    )
+    assert prepared["success"] is True, prepared
+    prepared_workflow = state.pr.build_workflow_control_snapshot()
+    assert prepared_workflow["review_state"] == "prepared_pending_human_acceptance"
+    assert prepared_workflow["next_action"]["id"] == "SUBMIT_P18_9_2_REVIEW_DECISION"
+
+    decision = state.pr.submit_current_ticket_review_decision(
+        decision="accept",
+        feedback="Human accepts the validated P18.9.2 run candidate for human Git handoff.",
+        reviewed_run_id=retry["kanban_run_id"],
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="SUBMIT_P18_9_2_REVIEW_DECISION",
+    )
+
+    assert decision["review_decision"] == "accept"
+    assert decision["dispatch_performed"] is False
+    assert decision["execution_started"] is False
+    assert decision["Git_mutation"] is False
+    workflow = state.pr.build_workflow_control_snapshot()
+    assert workflow["review_prepare_authority"]["review_prepare_action_SHA256"] == prepared[
+        "review_prepare_action_SHA256"
+    ]
+    assert workflow["review_decision_recorded"] is True
+    assert workflow["review_decision_required"] is False
+    assert workflow["workflow_status"] == "review_accepted_pending_human_git_handoff"
+    assert workflow["review_state"] == "accepted"
+    assert workflow["validation_state"] == "review_accepted"
+    assert workflow["next_action"]["id"] == "PREPARE_P18_9_2_HUMAN_GIT_HANDOFF"
+    assert workflow["next_action"]["required_human_action"] == "human_git_handoff"
+    assert workflow["human_acceptance_required"] is False
+    assert workflow["human_acceptance_recorded"] is True
+    assert workflow["execution_started"] is False
+    assert workflow["worker_execution"] is False
+    assert workflow["Git_mutation"] is False
+
+
+def _tamper_p18_9_2_review_prepare_record(pr, tamper_kind: str) -> None:
+    path = pr.review_prepare_record_path_for_ticket("P18.9.2")
+    record = json.loads(path.read_text(encoding="utf-8"))
+    recompute_digest = True
+    if tamper_kind == "digest":
+        record["review_prepare_action_SHA256"] = "0" * 64
+        recompute_digest = False
+    elif tamper_kind == "ticket":
+        record["ticket_id"] = "P18.9.0"
+    elif tamper_kind == "work_packet_id":
+        record["work_packet_id"] = "WP-DEFAULT-T_B6BAF825"
+    elif tamper_kind == "work_packet_sha":
+        record["work_packet_SHA256"] = "1" * 64
+    elif tamper_kind == "projection_sha":
+        record["projection_SHA256"] = "2" * 64
+    elif tamper_kind == "run_id":
+        record["successful_run_id"] = int(record["successful_run_id"]) + 100
+    elif tamper_kind == "completion_result":
+        record["kanban_completion_result_SHA256"] = "3" * 64
+    elif tamper_kind == "acceptance_contract":
+        record["acceptance_contract_SHA256"] = "4" * 64
+    elif tamper_kind == "criteria_revision":
+        record["criteria_revision_SHA256"] = "5" * 64
+    elif tamper_kind == "candidate_materialization":
+        record["kanban_completion_result"]["candidate_changes_reference"]["files_changed"] = 99
+    else:  # pragma: no cover - guards future parametrization edits
+        raise AssertionError(f"unknown tamper kind: {tamper_kind}")
+    if recompute_digest:
+        record["review_prepare_action_SHA256"] = pr._review_prepare_record_digest(record)
+    path.write_text(
+        json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
 def test_p18_9_2_dependency_materialization_failure_remains_recovery_required(
     projection_home,
     monkeypatch,
