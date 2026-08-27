@@ -13,12 +13,6 @@ from tools.registry import registry, tool_error
 TOOLSET = "pepper_workflow"
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 100
-CURRENT_TICKET_APPROVAL_ID = "P18.9.0"
-CURRENT_TICKET_REVIEW_PREPARE_NEXT_ACTION_ID = "PREPARE_P18_9_0_REVIEW"
-CURRENT_TICKET_REVIEW_ACCEPTANCE_NEXT_ACTION_ID = "AWAIT_HUMAN_P18_9_0_REVIEW_ACCEPTANCE"
-CURRENT_TICKET_REVIEW_ACCEPTANCE_TEXT = (
-    "Acepto explícitamente la review de P18.9.0 y el resultado preparado para aceptación humana."
-)
 CURRENT_PROJECT_ID = "PEPPER"
 
 
@@ -415,10 +409,16 @@ def _validate_explicit_recovery_request(
     return raw
 
 
-def _validate_explicit_review_prepare_request(value: object) -> str:
+def _validate_explicit_review_prepare_request(
+    value: object,
+    *,
+    current_ticket_id: str,
+) -> str:
     raw = str(value or "").strip()
     if not raw:
         raise ValueError("human_request_text is required")
+    if not current_ticket_id:
+        raise ValueError("current ticket is unavailable for review preparation")
     normalized = _normalize_intent_text(raw)
     if "?" in raw or "¿" in raw:
         raise ValueError("review preparation request text must not be a question")
@@ -440,13 +440,13 @@ def _validate_explicit_review_prepare_request(value: object) -> str:
     ):
         raise ValueError("review preparation request text is ambiguous")
     ticket_ids = _mentioned_ticket_ids(normalized)
-    if ticket_ids and CURRENT_TICKET_APPROVAL_ID not in ticket_ids:
+    if ticket_ids and current_ticket_id not in ticket_ids:
         raise ValueError("review preparation request targets a different ticket")
     if not re.search(
         r"\b(prepare|prepara|preparar|review|revision|validacion|validation|validar|acceptance|aceptacion)\b",
         normalized,
     ):
-        raise ValueError("explicit P18.9.0 review preparation request text is required")
+        raise ValueError("explicit current-ticket review preparation request text is required")
     return raw
 
 
@@ -456,8 +456,9 @@ def _validate_explicit_review_acceptance_request(value: object) -> str:
         raise ValueError("human_acceptance_text is required")
     if "?" in raw or "¿" in raw:
         raise ValueError("review acceptance text must not be a question")
-    if raw != CURRENT_TICKET_REVIEW_ACCEPTANCE_TEXT:
-        raise ValueError("exact explicit P18.9.0 review acceptance text is required")
+    expected_text = str(_runtime().PEPPER_CURRENT_REVIEW_ACCEPTANCE_TEXT).strip()
+    if raw != expected_text:
+        raise ValueError("exact explicit current-ticket review acceptance text is required")
     return raw
 
 
@@ -1228,8 +1229,11 @@ def _continue_current_ticket_governed_autonomy(args: dict[str, Any], **_kwargs) 
 def _prepare_current_ticket_review(args: dict[str, Any], **_kwargs) -> str:
     pr = _runtime()
     try:
+        context = pr.build_lead_agent_operational_context()
+        current_ticket_id = str(context.get("current_ticket_id") or "").strip()
         human_request_text = _validate_explicit_review_prepare_request(
-            _review_prepare_request_text_from_args_or_user_task(args, _kwargs)
+            _review_prepare_request_text_from_args_or_user_task(args, _kwargs),
+            current_ticket_id=current_ticket_id,
         )
         result = pr.prepare_current_ticket_review(
             project_id=str(args.get("project_id") or "").strip() or None,
@@ -1729,7 +1733,7 @@ _PREPARE_CURRENT_TICKET_REVIEW_SCHEMA = {
     "properties": {
         "human_request_text": {
             "type": "string",
-            "description": "Exact user phrase explicitly asking to prepare P18.9.0 review validation.",
+            "description": "Exact user phrase explicitly asking to prepare current-ticket review validation.",
         },
         "project_id": {
             "type": "string",
@@ -1737,11 +1741,11 @@ _PREPARE_CURRENT_TICKET_REVIEW_SCHEMA = {
         },
         "ticket_id": {
             "type": "string",
-            "description": "Optional governed ticket guard. Must be P18.9.0 if supplied.",
+            "description": "Optional governed ticket guard. Must equal the current governed ticket if supplied.",
         },
         "next_action_id": {
             "type": "string",
-            "description": "Optional next-action guard. Must be PREPARE_P18_9_0_REVIEW if supplied.",
+            "description": "Optional next-action guard. Must be PREPARE_<current-ticket>_REVIEW if supplied.",
         },
     },
     "required": ["human_request_text"],
@@ -1755,8 +1759,8 @@ _ACCEPT_CURRENT_TICKET_REVIEW_SCHEMA = {
         "human_acceptance_text": {
             "type": "string",
             "description": (
-                "Exact human phrase accepting the prepared P18.9.0 review: "
-                f"{CURRENT_TICKET_REVIEW_ACCEPTANCE_TEXT}"
+                "Exact human phrase accepting the prepared current-ticket review. "
+                "Use only when the backend current review state requires this exact acceptance path."
             ),
         },
         "project_id": {
@@ -1765,11 +1769,11 @@ _ACCEPT_CURRENT_TICKET_REVIEW_SCHEMA = {
         },
         "ticket_id": {
             "type": "string",
-            "description": "Optional governed ticket guard. Must be P18.9.0 if supplied.",
+            "description": "Optional governed ticket guard. Must equal the current governed ticket if supplied.",
         },
         "next_action_id": {
             "type": "string",
-            "description": "Optional next-action guard. Must be AWAIT_HUMAN_P18_9_0_REVIEW_ACCEPTANCE if supplied.",
+            "description": "Optional next-action guard. Must be AWAIT_HUMAN_<current-ticket>_REVIEW_ACCEPTANCE if supplied.",
         },
     },
     "required": ["human_acceptance_text"],
@@ -2167,7 +2171,7 @@ registry.register(
     schema={
         "name": "prepare_current_ticket_review",
         "description": (
-            "Prepare the completed current Pepper P18.9.0 run for governed review "
+            "Prepare the completed current Pepper ticket run for governed review "
             "validation by binding completion evidence to the ticket acceptance contract. "
             "Does not accept, close, rerun, retry, mutate Git, invoke Docker, or invoke Graphify."
         ),
@@ -2184,8 +2188,8 @@ registry.register(
     schema={
         "name": "accept_current_ticket_review",
         "description": (
-            "Record exact explicit human acceptance for the prepared current Pepper P18.9.0 "
-            "review package and close P18.9.0. Does not generate P18.9.1, execute, rerun, "
+            "Record exact explicit human acceptance for the prepared current Pepper ticket "
+            "review package and close that ticket. Does not generate the next ticket, execute, rerun, "
             "retry, mutate Git, invoke Docker, or invoke Graphify."
         ),
         "parameters": _ACCEPT_CURRENT_TICKET_REVIEW_SCHEMA,

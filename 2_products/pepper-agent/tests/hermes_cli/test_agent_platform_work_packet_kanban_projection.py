@@ -3968,6 +3968,202 @@ def test_review_required_p18_9_2_retry_reconstructs_to_governed_review_boundary(
         conn.close()
 
 
+def test_lead_agent_tool_prepares_p18_9_2_review_from_current_ticket_authority(
+    projection_home,
+    monkeypatch,
+) -> None:
+    import tools.pepper_workflow_tools  # noqa: F401
+    from model_tools import handle_function_call
+
+    state, retry = _p18_9_2_review_ready_for_tool_test(
+        projection_home,
+        monkeypatch,
+        pid=6794,
+    )
+    pr = state.pr
+
+    before = pr.build_workflow_control_snapshot()
+    assert before["current_ticket_id"] == "P18.9.2"
+    assert before["workflow_status"] == "execution_completed"
+    assert before["review_state"] == "ready_for_review_validation"
+    assert before["recovery_state"] == "not_required"
+    assert before["blocker_count"] == 0
+    assert before["next_action"]["id"] == "PREPARE_P18_9_2_REVIEW"
+
+    result = json.loads(
+        handle_function_call(
+            "prepare_current_ticket_review",
+            {
+                "human_request_text": "Prepare P18.9.2 review validation now",
+                "project_id": "PEPPER",
+                "ticket_id": "P18.9.2",
+                "next_action_id": "PREPARE_P18_9_2_REVIEW",
+            },
+        )
+    )
+
+    assert result["success"] is True, result
+    assert result["source_tool"] == "prepare_current_ticket_review"
+    assert result["review_prepare_status"] == "prepared_pending_human_acceptance"
+    assert result["ticket_id"] == "P18.9.2"
+    assert result["successful_run_id"] == retry["kanban_run_id"]
+    assert result["successful_run_status"] == "blocked"
+    assert result["successful_run_outcome"] == "blocked"
+    assert result["acceptance_contract"]["ticket_id"] == "P18.9.2"
+    assert result["acceptance_contract"]["work_packet_id"] == state.projection_record[
+        "work_packet_id"
+    ]
+    assert result["kanban_completion_result"]["run_id"] == retry["kanban_run_id"]
+    assert result["kanban_completion_result"]["terminal_outcome_class"] == (
+        "validated_review_required"
+    )
+    assert result["git_handoff_required"] is True
+    assert result["git_handoff_state"] == "human_git_authority_preserved"
+    assert result["dispatch_performed"] is False
+    assert result["execution_started"] is False
+    assert result["worker_execution"] is False
+    assert result["Kanban_dispatch"] is False
+    assert result["Git_mutation"] is False
+    assert result["auto_retry"] is False
+    assert result["auto_rollback"] is False
+
+    direct_replay = pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_REVIEW",
+    )
+    assert direct_replay["idempotent_replay"] is True
+    assert direct_replay["review_prepare_action_SHA256"] == result[
+        "review_prepare_action_SHA256"
+    ]
+
+
+def _p18_9_2_review_ready_for_tool_test(projection_home, monkeypatch, *, pid: int):
+    state = _recovered_p18_9_2_dependency_failure_fixture(projection_home, monkeypatch)
+    retry = _start_recovered_p18_9_2_retry_for_test(state, monkeypatch, pid=pid)
+    _write_p18_9_2_terminal_candidate_fixture(
+        state.pr,
+        projection_home,
+        Path(retry["workspace_path"]),
+    )
+    _finish_projected_run_as_review_required_terminal(
+        state.kanban_db,
+        state.projected,
+        retry["kanban_run_id"],
+        summary=(
+            "review-required: P18.9.2 Control Center Overview implementation is ready "
+            "for human/code review; focused governed frontend validation passed."
+        ),
+    )
+    return state, retry
+
+
+def test_lead_agent_tool_prepares_p18_9_2_review_without_optional_guards(
+    projection_home,
+    monkeypatch,
+) -> None:
+    import tools.pepper_workflow_tools  # noqa: F401
+    from model_tools import handle_function_call
+
+    state, retry = _p18_9_2_review_ready_for_tool_test(
+        projection_home,
+        monkeypatch,
+        pid=6795,
+    )
+
+    result = json.loads(
+        handle_function_call(
+            "prepare_current_ticket_review",
+            {"human_request_text": "Prepare P18.9.2 review validation now"},
+        )
+    )
+
+    assert result["success"] is True, result
+    assert result["ticket_id"] == "P18.9.2"
+    assert result["successful_run_id"] == retry["kanban_run_id"]
+    record = state.pr.load_current_ticket_review_prepare_record(
+        projection_record=state.projection_record,
+    )
+    assert record is not None
+    assert record["requested_project_id"] is None
+    assert record["requested_ticket_id"] is None
+    assert record["requested_next_action_id"] is None
+    assert result["dispatch_performed"] is False
+    assert result["execution_started"] is False
+    assert result["Kanban_dispatch"] is False
+    assert result["Git_mutation"] is False
+
+
+@pytest.mark.parametrize(
+    ("request_args", "expected_error"),
+    [
+        (
+            {
+                "human_request_text": "Prepare P18.9.0 review validation now",
+                "project_id": "PEPPER",
+                "ticket_id": "P18.9.2",
+                "next_action_id": "PREPARE_P18_9_2_REVIEW",
+            },
+            "targets a different ticket",
+        ),
+        (
+            {
+                "human_request_text": "Prepare P18.9.2 review validation now",
+                "project_id": "PEPPER-STALE",
+                "ticket_id": "P18.9.2",
+                "next_action_id": "PREPARE_P18_9_2_REVIEW",
+            },
+            "bounded to project PEPPER",
+        ),
+        (
+            {
+                "human_request_text": "Prepare P18.9.2 review validation now",
+                "project_id": "PEPPER",
+                "ticket_id": "P18.9.0",
+                "next_action_id": "PREPARE_P18_9_2_REVIEW",
+            },
+            "bounded to ticket P18.9.2",
+        ),
+        (
+            {
+                "human_request_text": "Prepare P18.9.2 review validation now",
+                "project_id": "PEPPER",
+                "ticket_id": "P18.9.2",
+                "next_action_id": "PREPARE_P18_9_0_REVIEW",
+            },
+            "review preparation requires PREPARE_P18_9_2_REVIEW",
+        ),
+    ],
+)
+def test_lead_agent_tool_rejects_mismatched_p18_9_2_review_prepare_authority(
+    projection_home,
+    monkeypatch,
+    request_args,
+    expected_error,
+) -> None:
+    import tools.pepper_workflow_tools  # noqa: F401
+    from model_tools import handle_function_call
+
+    state, _retry = _p18_9_2_review_ready_for_tool_test(
+        projection_home,
+        monkeypatch,
+        pid=6796,
+    )
+
+    result = json.loads(handle_function_call("prepare_current_ticket_review", request_args))
+
+    assert result["success"] is False
+    assert expected_error in result["error"]
+    assert not state.pr.review_prepare_record_path_for_ticket("P18.9.2").exists()
+    workflow = state.pr.build_workflow_control_snapshot()
+    assert workflow["current_ticket_id"] == "P18.9.2"
+    assert workflow["next_action"]["id"] == "PREPARE_P18_9_2_REVIEW"
+    assert workflow.get("dispatch_performed", False) is False
+    assert workflow["execution_started"] is False
+    assert workflow["worker_execution"] is False
+    assert workflow["Git_mutation"] is False
+
+
 def test_p18_9_2_dependency_materialization_failure_remains_recovery_required(
     projection_home,
     monkeypatch,
@@ -10804,10 +11000,10 @@ def test_chat_tool_binds_current_user_task_as_review_acceptance_when_arg_omitted
     [
         (None, "human_acceptance_text is required"),
         ("¿Acepto la review de P18.9.0?", "must not be a question"),
-        ("Acepto la review de P18.9.0", "exact explicit P18.9.0 review acceptance"),
+        ("Acepto la review de P18.9.0", "exact explicit current-ticket review acceptance"),
         (
             "Acepto explícitamente la review de P18.9.1 y el resultado preparado para aceptación humana.",
-            "exact explicit P18.9.0 review acceptance",
+            "exact explicit current-ticket review acceptance",
         ),
     ],
 )
@@ -10845,7 +11041,7 @@ def test_chat_tool_rejects_missing_or_unsafe_user_task_review_acceptance(
         ("Should we prepare P18.9.0 review?", "must not be a question"),
         ("Tal vez preparar la revision de P18.9.0", "ambiguous"),
         ("Prepare P18.9.1 review validation now", "targets a different ticket"),
-        ("Summarize P18.9.0", "explicit P18.9.0 review preparation"),
+        ("Summarize P18.9.0", "explicit current-ticket review preparation"),
     ],
 )
 def test_chat_tool_rejects_missing_or_unsafe_user_task_review_prepare_request(
@@ -10861,6 +11057,11 @@ def test_chat_tool_rejects_missing_or_unsafe_user_task_review_prepare_request(
         pr,
         "prepare_current_ticket_review",
         lambda **_kwargs: pytest.fail("review preparation backend must not be called"),
+    )
+    monkeypatch.setattr(
+        pr,
+        "build_lead_agent_operational_context",
+        lambda: {"current_ticket_id": "P18.9.0"},
     )
 
     result = json.loads(

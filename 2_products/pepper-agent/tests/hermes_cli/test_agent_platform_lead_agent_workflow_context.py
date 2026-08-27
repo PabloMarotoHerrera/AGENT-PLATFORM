@@ -337,6 +337,10 @@ def test_pepper_toolset_exposes_no_arbitrary_shell_or_file_authority(monkeypatch
     revision_params = by_name["revise_generated_successor_ticket"]["parameters"]
     activation_params = by_name["activate_current_ticket_governed_autonomy"]["parameters"]
     continuation_params = by_name["continue_current_ticket_governed_autonomy"]["parameters"]
+    review_prepare_tool = by_name["prepare_current_ticket_review"]
+    review_accept_tool = by_name["accept_current_ticket_review"]
+    review_prepare_params = review_prepare_tool["parameters"]
+    review_accept_params = review_accept_tool["parameters"]
     review_decision_params = by_name["submit_current_ticket_review_decision"]["parameters"]
     handoff_completion_params = by_name["complete_current_ticket_human_git_handoff"]["parameters"]
     assert revision_params["required"] == ["human_authorization_text"]
@@ -356,6 +360,16 @@ def test_pepper_toolset_exposes_no_arbitrary_shell_or_file_authority(monkeypatch
     assert "resume_pending_fresh_execution_request_SHA256" in continuation_params[
         "properties"
     ]
+    assert "current Pepper ticket" in review_prepare_tool["description"]
+    assert "PREPARE_<current-ticket>_REVIEW" in json.dumps(review_prepare_params)
+    assert "P18.9.0" not in review_prepare_tool["description"]
+    assert "P18.9.0" not in json.dumps(review_prepare_params)
+    assert "current Pepper ticket" in review_accept_tool["description"]
+    assert "AWAIT_HUMAN_<current-ticket>_REVIEW_ACCEPTANCE" in json.dumps(
+        review_accept_params
+    )
+    assert "P18.9.0" not in review_accept_tool["description"]
+    assert "P18.9.0" not in json.dumps(review_accept_params)
     assert review_decision_params["required"] == ["decision", "feedback"]
     assert review_decision_params["properties"]["decision"]["enum"] == [
         "accept",
@@ -514,9 +528,12 @@ def test_lead_agent_prompt_requires_tool_backed_state() -> None:
     assert "backend-derived child scope/operations" in prompt
     assert "prepare_current_ticket_review" in prompt
     assert "accept_current_ticket_review" in prompt
-    assert "PREPARE_P18_9_0_REVIEW" in prompt
-    assert "AWAIT_HUMAN_P18_9_0_REVIEW_ACCEPTANCE" in prompt
-    assert "Acepto explícitamente la review de P18.9.0" in prompt
+    assert "PREPARE_<current-ticket>_REVIEW" in prompt
+    assert "AWAIT_HUMAN_<current-ticket>_REVIEW_ACCEPTANCE" in prompt
+    assert "exact backend-required acceptance phrase" in prompt
+    assert "PREPARE_P18_9_0_REVIEW" not in prompt
+    assert "AWAIT_HUMAN_P18_9_0_REVIEW_ACCEPTANCE" not in prompt
+    assert "Acepto explícitamente la review de P18.9.0" not in prompt
     assert "KANBAN_COMPLETION_RESULT_DETAIL_GAP" in prompt
     assert "START_<current-ticket>_RETRY_REQUIRES_HUMAN_AUTHORIZATION" in prompt
     assert "explicitly authorizes retrying that same current ticket" in prompt
