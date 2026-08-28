@@ -967,6 +967,7 @@ def _finish_projected_run_as_review_required_terminal(
     *,
     summary: str,
     block_kind: str | None = "needs_input",
+    task_status: str = "blocked",
     error: str | None = None,
     metadata: dict | None = None,
 ) -> None:
@@ -974,11 +975,11 @@ def _finish_projected_run_as_review_required_terminal(
     conn = kanban_db.connect(board=projected["kanban_board_slug"])
     try:
         conn.execute(
-            "UPDATE tasks SET status = 'blocked', current_run_id = NULL, "
+            "UPDATE tasks SET status = ?, current_run_id = NULL, "
             "worker_pid = NULL, claim_lock = NULL, claim_expires = NULL, "
             "last_failure_error = NULL, block_kind = ?, block_recurrences = 1 "
             "WHERE id = ? AND current_run_id = ?",
-            (block_kind, projected["kanban_task_id"], run_id),
+            (task_status, block_kind, projected["kanban_task_id"], run_id),
         )
         conn.execute(
             "UPDATE task_runs SET status = 'blocked', outcome = 'blocked', summary = ?, "
@@ -4165,6 +4166,7 @@ def _p18_9_2_two_round_changes_requested_fixture(
     *,
     first_pid: int = 6810,
     revision_pid: int = 6811,
+    terminal_task_status: str = "blocked",
 ):
     fixture = _p18_9_2_active_revision_fixture(
         projection_home,
@@ -4189,6 +4191,7 @@ def _p18_9_2_two_round_changes_requested_fixture(
             "review-required: P18.9.2 Control Center Overview fresh revision is ready "
             "for human/code review; governed frontend validation passed (GVCMD-001, 41 tests)."
         ),
+        task_status=terminal_task_status,
     )
     return SimpleNamespace(
         state=state,
@@ -4886,6 +4889,75 @@ def test_p18_9_2_prepared_review_changes_requested_blocks_scope_expansion(
     assert not pr.governed_autonomy_runtime_state_path_for_ticket("P18.9.2").exists()
 
 
+def test_p18_9_2_review_ready_terminal_triage_task_does_not_self_block_prepare(
+    projection_home,
+    monkeypatch,
+) -> None:
+    state = _recovered_p18_9_2_dependency_failure_fixture(projection_home, monkeypatch)
+    pr = state.pr
+    retry = _start_recovered_p18_9_2_retry_for_test(state, monkeypatch, pid=6809)
+    _write_p18_9_2_terminal_candidate_fixture(
+        pr,
+        projection_home,
+        Path(retry["workspace_path"]),
+    )
+    _finish_projected_run_as_review_required_terminal(
+        state.kanban_db,
+        state.projected,
+        retry["kanban_run_id"],
+        summary=(
+            "review-required: P18.9.2 Control Center Overview implementation is ready "
+            "for human/code review; focused governed frontend validation passed."
+        ),
+        task_status="triage",
+    )
+
+    workflow = pr.build_workflow_control_snapshot()
+
+    assert workflow["current_ticket_id"] == "P18.9.2"
+    assert workflow["workflow_status"] == "execution_completed"
+    assert workflow["workflow_state"] == (
+        "P18.9.2-GOVERNED-AUTONOMY-AWAITING-HUMAN-GIT-HANDOFF"
+    )
+    assert workflow["validation_state"] == "execution_completed_pending_validation"
+    assert workflow["review_state"] == "ready_for_review_validation"
+    assert workflow["recovery_state"] == "not_required"
+    assert workflow["active_execution_count"] == 0
+    assert workflow["terminal_outcome_class"] == "validated_review_required"
+    assert workflow["validated_candidate_review_required"] is True
+    assert workflow["candidate_changes_available"] is True
+    assert workflow["blocker_count"] == 0, workflow["remaining_blockers"]
+    assert workflow["remaining_blockers"] == []
+    assert workflow["next_action"]["id"] == "PREPARE_P18_9_2_REVIEW"
+    assert workflow["review_decision_required"] is False
+    assert workflow["review_decision_recorded"] is False
+    assert workflow["human_acceptance_required"] is False
+    assert workflow["human_acceptance_recorded"] is False
+
+    prepared = pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_REVIEW",
+    )
+
+    assert prepared["review_prepare_status"] == "prepared_pending_human_acceptance"
+    assert prepared["review_preparation_recorded"] is True
+    assert prepared["successful_run_id"] == retry["kanban_run_id"]
+    assert prepared["kanban_completion_result"]["run_id"] == retry["kanban_run_id"]
+    assert prepared["kanban_completion_result"]["terminal_outcome_class"] == (
+        "validated_review_required"
+    )
+    assert prepared["human_acceptance_required"] is True
+    assert prepared["human_acceptance_recorded"] is False
+    assert prepared["dispatch_performed"] is False
+    assert prepared["execution_started"] is False
+    assert prepared["Git_mutation"] is False
+    after_prepare = pr.build_workflow_control_snapshot()
+    assert after_prepare["review_decision_required"] is True
+    assert after_prepare["review_decision_recorded"] is False
+    assert after_prepare["next_action"]["id"] == "SUBMIT_P18_9_2_REVIEW_DECISION"
+
+
 def test_p18_9_2_pending_revision_blocks_premature_second_review_prepare(
     projection_home,
     monkeypatch,
@@ -5156,6 +5228,83 @@ def test_p18_9_2_tool_prepare_uses_second_round_terminal_authority(
     assert result["dispatch_performed"] is False
     assert result["execution_started"] is False
     assert result["Git_mutation"] is False
+
+
+def test_p18_9_2_round_two_review_ready_triage_task_tool_path_prepares_fresh_review(
+    projection_home,
+    monkeypatch,
+) -> None:
+    import tools.pepper_workflow_tools  # noqa: F401
+    from model_tools import handle_function_call
+
+    fixture = _p18_9_2_two_round_changes_requested_fixture(
+        projection_home,
+        monkeypatch,
+        first_pid=6818,
+        revision_pid=6819,
+        terminal_task_status="triage",
+    )
+
+    workflow_control = json.loads(handle_function_call("get_workflow_control", {}))
+    review_status = json.loads(handle_function_call("get_review_status", {}))
+    next_action = json.loads(handle_function_call("get_next_action", {}))
+
+    for result in (workflow_control, review_status, next_action):
+        assert result["success"] is True
+        assert result["review_state"] == "ready_for_review_validation"
+        assert result["validation_state"] == "execution_completed_pending_validation"
+        assert result["next_action"]["id"] == "PREPARE_P18_9_2_REVIEW"
+        assert result["Git_mutation"] is False
+    for result in (workflow_control, next_action):
+        assert result["current_ticket_id"] == "P18.9.2"
+        assert result["workflow_status"] == "execution_completed"
+    assert workflow_control["active_execution_count"] == 0
+    assert workflow_control["workflow_control"]["blocker_count"] == 0
+    assert workflow_control["workflow_control"]["remaining_blockers"] == []
+    assert review_status["review_decision_required"] is False
+    assert review_status["review_decision_recorded"] is False
+    assert review_status["human_acceptance_required"] is False
+    assert review_status["human_acceptance_recorded"] is False
+
+    prepared = json.loads(
+        handle_function_call(
+            "prepare_current_ticket_review",
+            {
+                "human_request_text": "Prepare P18.9.2 review validation for the fresh revision.",
+                "project_id": "PEPPER",
+                "ticket_id": "P18.9.2",
+                "next_action_id": "PREPARE_P18_9_2_REVIEW",
+            },
+        )
+    )
+
+    assert prepared["success"] is True, prepared
+    assert prepared["idempotent_replay"] is False
+    assert prepared["review_prepare_status"] == "prepared_pending_human_acceptance"
+    assert prepared["successful_run_id"] == fixture.started_14["kanban_run_id"]
+    assert prepared["successful_run_id"] != fixture.run_13["kanban_run_id"]
+    assert prepared["review_prepare_action_SHA256"] != fixture.prepared_13[
+        "review_prepare_action_SHA256"
+    ]
+    assert prepared["review_package_SHA256"] != fixture.prepared_13[
+        "review_package_SHA256"
+    ]
+    assert prepared["dispatch_performed"] is False
+    assert prepared["execution_started"] is False
+    assert prepared["Git_mutation"] is False
+
+    fresh_review = json.loads(handle_function_call("get_review_status", {}))
+    fresh_next_action = json.loads(handle_function_call("get_next_action", {}))
+    for result in (fresh_review, fresh_next_action):
+        assert result["success"] is True
+        assert result["review_state"] == "prepared_pending_human_acceptance"
+        assert result["review_decision_required"] is True
+        assert result["human_acceptance_required"] is True
+        assert result["human_acceptance_recorded"] is False
+        assert result["next_action"]["id"] == "SUBMIT_P18_9_2_REVIEW_DECISION"
+        assert result["Git_mutation"] is False
+    assert fresh_review["review_decision_recorded"] is False
+    assert fresh_next_action["workflow_status"] == "review_prepared_pending_human_acceptance"
 
 
 @pytest.mark.parametrize(

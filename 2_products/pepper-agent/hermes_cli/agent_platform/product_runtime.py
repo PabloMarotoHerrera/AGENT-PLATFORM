@@ -11837,10 +11837,14 @@ def _terminal_run_review_boundary_evidence(
     task_status = str(getattr(task, "status", "") or "").strip().lower()
     run_status = str(getattr(run, "status", "") or "").strip().lower()
     run_outcome = str(getattr(run, "outcome", "") or "").strip().lower()
-    if task_status != "blocked" or run_status != "blocked" or run_outcome != "blocked":
+    if run_status != "blocked" or run_outcome != "blocked":
         return None
     block_kind = str(getattr(task, "block_kind", "") or "").strip().lower()
     if block_kind != "needs_input":
+        return None
+    # The task may be re-queued after a terminal needs_input run; the run row
+    # remains the durable review boundary as long as no worker is active.
+    if task_status not in {"blocked", "triage", "ready"}:
         return None
     if getattr(run, "ended_at", None) is None:
         return None
