@@ -1146,6 +1146,14 @@ _P18_9_1_HANDOFF_EXCLUDED_PATHS = (
     "2_products/pepper-agent/package-lock.json",
     "2_products/pepper-agent/web/src/agent-platform/shell/P18.9.1-implementation-report.txt",
 )
+_P18_9_2_HANDOFF_BRANCH = "p18-9-2-control-center-overview"
+_P18_9_2_HANDOFF_PARENT = "1234567890abcdef1234567890abcdef12345678"
+_P18_9_2_HANDOFF_COMMIT = "abcdef1234567890abcdef1234567890abcdef12"
+_P18_9_2_HANDOFF_CANDIDATE_PATHS = (
+    "2_products/pepper-agent/web/src/agent-platform/runtime-overview/contract.ts",
+    "2_products/pepper-agent/web/src/agent-platform/runtime-overview/runtime-overview-page.tsx",
+    "2_products/pepper-agent/web/src/agent-platform/runtime-overview/runtime-overview.test.tsx",
+)
 
 
 def _p18_9_1_handoff_git_snapshot(
@@ -1162,6 +1170,28 @@ def _p18_9_1_handoff_git_snapshot(
         "status_branch": f"## {branch}...origin/{branch}",
         "status_counts": {"modified": 1},
         "status_entries": [" M 2_products/pepper-agent/package-lock.json"],
+        "skipped_status_entries": {},
+    }
+
+
+def _p18_9_2_handoff_git_snapshot(
+    *,
+    branch: str = _P18_9_2_HANDOFF_BRANCH,
+    head: str = _P18_9_2_HANDOFF_PARENT,
+) -> dict[str, object]:
+    return {
+        "available": True,
+        "read_only": True,
+        "shell": False,
+        "branch": branch,
+        "head": head,
+        "status_branch": f"## {branch}...origin/{branch}",
+        "status_counts": {"modified": 3, "untracked": 2},
+        "status_entries": [
+            *(f" M {path}" for path in _P18_9_2_HANDOFF_CANDIDATE_PATHS),
+            " M 2_products/pepper-agent/package-lock.json",
+            "?? 2_products/pepper-agent/.runtime-logs/session.log",
+        ],
         "skipped_status_entries": {},
     }
 
@@ -4266,6 +4296,338 @@ def _p18_9_2_prepared_review_candidate_fixture(
         candidate_paths=[item["path"] for item in candidate_files],
         candidate_fixture=state.candidate_fixture,
     )
+
+
+def _accepted_p18_9_2_review_for_handoff_prepare(
+    projection_home,
+    monkeypatch,
+    *,
+    pid: int = 6840,
+):
+    fixture = _p18_9_2_prepared_review_candidate_fixture(
+        projection_home,
+        monkeypatch,
+        pid=pid,
+    )
+    accepted = fixture.pr.submit_current_ticket_review_decision(
+        decision="accept",
+        feedback="Human accepts the validated P18.9.2 candidate for human Git handoff.",
+        reviewed_run_id=fixture.retry["kanban_run_id"],
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="SUBMIT_P18_9_2_REVIEW_DECISION",
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("accept must not spawn"),
+    )
+    assert accepted["review_decision"] == "accept"
+    assert accepted["workflow_status"] == "review_accepted_pending_human_git_handoff"
+    assert accepted["reviewed_run_id"] == fixture.retry["kanban_run_id"]
+    assert accepted["review_prepare_action_SHA256"] == fixture.review[
+        "review_prepare_action_SHA256"
+    ]
+    assert accepted["review_package_SHA256"] == fixture.review["review_package_SHA256"]
+    assert tuple(sorted(fixture.candidate_paths)) == _P18_9_2_HANDOFF_CANDIDATE_PATHS
+    accepted_record = fixture.pr.load_current_ticket_review_decision_record(
+        projection_record=fixture.pr._load_current_projection_record(),
+    )
+    assert accepted_record is not None
+    return SimpleNamespace(
+        **fixture.__dict__,
+        accepted=accepted,
+        accepted_record=accepted_record,
+    )
+
+
+def test_p18_9_2_prepare_human_git_handoff_uses_p17_7_without_execution(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _accepted_p18_9_2_review_for_handoff_prepare(
+        projection_home,
+        monkeypatch,
+        pid=6841,
+    )
+    pr = fixture.pr
+    inspection = pr.inspect_current_ticket_review_candidate(
+        operation="list",
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        reviewed_run_id=fixture.retry["kanban_run_id"],
+        review_package_SHA256=fixture.review["review_package_SHA256"],
+        review_prepare_action_SHA256=fixture.review["review_prepare_action_SHA256"],
+    )
+    assert inspection["inspection_status"] == "available"
+    assert inspection["inspection_boundary_state"] == "accepted_pending_human_git_handoff"
+    assert tuple(inspection["candidate_paths"]) == _P18_9_2_HANDOFF_CANDIDATE_PATHS
+
+    prepared = pr.prepare_current_ticket_human_git_handoff(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_HUMAN_GIT_HANDOFF",
+        git_snapshot_fn=_p18_9_2_handoff_git_snapshot,
+    )
+
+    assert prepared["handoff_preparation_recorded"] is True
+    assert prepared["idempotent_replay"] is False
+    assert prepared["reviewed_run_id"] == fixture.retry["kanban_run_id"]
+    assert prepared["reviewed_candidate_SHA256"] == fixture.accepted[
+        "reviewed_candidate_SHA256"
+    ]
+    assert prepared["review_decision_SHA256"] == fixture.accepted["review_decision_SHA256"]
+    assert prepared["review_package_SHA256"] == fixture.review["review_package_SHA256"]
+    assert prepared["P17_7_handoff_policy_id"] == (
+        "pepper-exact-review-bound-non-executing-human-git-handoff-v1"
+    )
+    assert prepared["P17_7_handoff_state"] == "completed"
+    assert prepared["P17_7_handoff_decision"] == "approved"
+    assert tuple(prepared["candidate_paths"]) == _P18_9_2_HANDOFF_CANDIDATE_PATHS
+    assert prepared["candidate_count"] == 3
+    assert prepared["added_count"] == 0
+    assert prepared["modified_count"] == 3
+    assert prepared["deleted_count"] == 0
+    assert prepared["branch"] == _P18_9_2_HANDOFF_BRANCH
+    assert prepared["remote_name"] == "origin"
+    assert prepared["expected_parent_commit"] == _P18_9_2_HANDOFF_PARENT
+    assert prepared["commit_message"] == "P18.9.2 Control Center Overview"
+    assert prepared["human_git_handoff_state"] == "prepared_pending_human_execution"
+    assert prepared["workflow_status"] == "review_accepted_pending_human_git_handoff"
+    assert prepared["governed_workflow_state"] == "awaiting_human_git_handoff"
+    assert prepared["ticket_closed"] is False
+    assert prepared["next_ticket_generated"] is False
+    assert prepared["dispatch_performed"] is False
+    assert prepared["execution_started"] is False
+    assert prepared["worker_execution"] is False
+    assert prepared["Kanban_dispatch"] is False
+    assert prepared["Git_commands_executed"] == 0
+    assert prepared["Docker_commands_executed"] == 0
+    assert prepared["Graphify_commands_executed"] == 0
+    assert prepared["Git_mutation"] is False
+    assert prepared["auto_retry"] is False
+    assert prepared["auto_rollback"] is False
+    assert prepared["next_action"]["id"] == "COMPLETE_P18_9_2_HUMAN_GIT_HANDOFF"
+
+    record = pr.load_current_ticket_human_git_handoff_prepare_record(
+        projection_record=pr._load_current_projection_record(),
+        review_decision_record=fixture.accepted_record,
+    )
+    assert record is not None
+    assert record["handoff_prepare_record_SHA256"] == prepared[
+        "handoff_prepare_record_SHA256"
+    ]
+    assert record["P17_7_handoff_result_SHA256"] == prepared[
+        "P17_7_handoff_result_SHA256"
+    ]
+    p17_result = record["P17_7_human_git_handoff_result"]
+    assert p17_result["Git_commands_executed"] == 0
+    assert p17_result["staging_performed"] is False
+    assert p17_result["commit_performed"] is False
+    assert p17_result["push_performed"] is False
+    assert p17_result["automatic_staging_authorized"] is False
+    assert p17_result["automatic_commit_authorized"] is False
+    assert p17_result["automatic_push_authorized"] is False
+    package = p17_result["package"]
+    assert package["branch_name"] == _P18_9_2_HANDOFF_BRANCH
+    assert package["remote_name"] == "origin"
+    assert package["expected_parent_commit"] == _P18_9_2_HANDOFF_PARENT
+    assert tuple(
+        candidate["relative_path"] for candidate in package["candidates"]
+    ) == _P18_9_2_HANDOFF_CANDIDATE_PATHS
+    assert tuple(package["post_commit_expectation"]["expected_candidate_paths"]) == (
+        _P18_9_2_HANDOFF_CANDIDATE_PATHS
+    )
+    stage_commands = [
+        command for command in package["commands"] if command["kind"] == "stage_path"
+    ]
+    assert [command["argv"] for command in stage_commands] == [
+        ["git", "add", "--", path] for path in _P18_9_2_HANDOFF_CANDIDATE_PATHS
+    ]
+    assert all(
+        command["automatic_execution_authorized"] is False
+        for command in package["commands"]
+    )
+    rendered = record["rendered_handoff_powershell"]
+    assert "package-lock.json" not in rendered
+    assert ".runtime-logs" not in rendered
+    assert "git add ." not in rendered.lower()
+
+    workflow = pr.build_workflow_control_snapshot()
+    assert workflow["workflow_status"] == "review_accepted_pending_human_git_handoff"
+    assert workflow["human_git_handoff_state"] == "prepared_pending_human_execution"
+    assert workflow["git_handoff_state"] == "human_git_authority_preserved"
+    assert workflow["ticket_closed"] is False
+    assert workflow["next_ticket_generated"] is False
+    assert workflow["next_action"]["id"] == "COMPLETE_P18_9_2_HUMAN_GIT_HANDOFF"
+    assert workflow["human_git_handoff_prepare_authority"]["candidate_paths"] == list(
+        _P18_9_2_HANDOFF_CANDIDATE_PATHS
+    )
+    assert workflow["current_ticket_human_git_handoff_prepare"][
+        "P17_7_handoff_result_SHA256"
+    ] == prepared["P17_7_handoff_result_SHA256"]
+    assert "human_git_handoff_completion_authority" not in workflow
+
+    replay = pr.prepare_current_ticket_human_git_handoff(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_HUMAN_GIT_HANDOFF",
+        git_snapshot_fn=lambda: pytest.fail("prepare replay must not inspect Git"),
+    )
+    assert replay["idempotent_replay"] is True
+    assert replay["handoff_prepare_record_SHA256"] == prepared[
+        "handoff_prepare_record_SHA256"
+    ]
+
+
+def test_p18_9_2_prepare_human_git_handoff_requires_accepted_review(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _p18_9_2_prepared_review_candidate_fixture(
+        projection_home,
+        monkeypatch,
+        pid=6842,
+    )
+
+    blocked = fixture.pr.prepare_current_ticket_human_git_handoff(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_HUMAN_GIT_HANDOFF",
+        git_snapshot_fn=lambda: pytest.fail("accepted-review gap must stop before Git inspection"),
+    )
+
+    assert blocked["handoff_preparation_recorded"] is False
+    assert blocked["blocker_code"] == "ACCEPTED_REVIEW_AUTHORITY_GAP"
+    assert blocked["dispatch_performed"] is False
+    assert blocked["execution_started"] is False
+    assert blocked["Git_commands_executed"] == 0
+    assert blocked["Git_mutation"] is False
+    assert not fixture.pr.human_git_handoff_prepare_record_path_for_ticket("P18.9.2").exists()
+
+
+def test_p18_9_2_prepare_human_git_handoff_blocks_review_package_drift(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _accepted_p18_9_2_review_for_handoff_prepare(
+        projection_home,
+        monkeypatch,
+        pid=6843,
+    )
+    _tamper_p18_9_2_review_prepare_record(fixture.pr, "review_package")
+
+    blocked = fixture.pr.prepare_current_ticket_human_git_handoff(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_HUMAN_GIT_HANDOFF",
+        git_snapshot_fn=lambda: pytest.fail("review-package drift must stop before Git inspection"),
+    )
+
+    assert blocked["handoff_preparation_recorded"] is False
+    assert blocked["blocker_code"] == "ACCEPTED_REVIEW_AUTHORITY_GAP"
+    assert blocked["reviewed_run_id"] is None
+    assert blocked["reviewed_candidate_SHA256"] is None
+    assert blocked["dispatch_performed"] is False
+    assert blocked["execution_started"] is False
+    assert blocked["Git_commands_executed"] == 0
+    assert blocked["Git_mutation"] is False
+    assert not fixture.pr.human_git_handoff_prepare_record_path_for_ticket("P18.9.2").exists()
+
+
+def test_p18_9_2_prepare_human_git_handoff_blocks_accepted_binding_drift(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _accepted_p18_9_2_review_for_handoff_prepare(
+        projection_home,
+        monkeypatch,
+        pid=6844,
+    )
+    drifted_review = dict(fixture.accepted_record)
+    drifted_review["review_package_SHA256"] = "6" * 64
+    monkeypatch.setattr(
+        fixture.pr,
+        "load_current_ticket_review_decision_record",
+        lambda *, projection_record=None, allow_historical_mismatch=False: drifted_review,
+    )
+
+    blocked = fixture.pr.prepare_current_ticket_human_git_handoff(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_HUMAN_GIT_HANDOFF",
+        git_snapshot_fn=lambda: pytest.fail("accepted binding drift must stop before Git inspection"),
+    )
+
+    assert blocked["handoff_preparation_recorded"] is False
+    assert blocked["blocker_code"] == "ACCEPTED_REVIEW_CANDIDATE_BINDING_MISMATCH"
+    assert blocked["dispatch_performed"] is False
+    assert blocked["execution_started"] is False
+    assert blocked["Git_commands_executed"] == 0
+    assert blocked["Git_mutation"] is False
+    assert not fixture.pr.human_git_handoff_prepare_record_path_for_ticket("P18.9.2").exists()
+
+
+def test_p18_9_2_prepare_human_git_handoff_blocks_workflow_gap(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _accepted_p18_9_2_review_for_handoff_prepare(
+        projection_home,
+        monkeypatch,
+        pid=6845,
+    )
+    workflow = fixture.pr.build_workflow_control_snapshot()
+    workflow.update({
+        "workflow_status": "executing",
+        "active_execution_count": 1,
+        "execution_state": "active_executions",
+    })
+    monkeypatch.setattr(fixture.pr, "build_workflow_control_snapshot", lambda: workflow)
+
+    blocked = fixture.pr.prepare_current_ticket_human_git_handoff(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_HUMAN_GIT_HANDOFF",
+        git_snapshot_fn=lambda: pytest.fail("workflow gap must stop before Git inspection"),
+    )
+
+    assert blocked["handoff_preparation_recorded"] is False
+    assert blocked["blocker_code"] == "HUMAN_GIT_HANDOFF_PREPARE_ACTION_GAP"
+    assert blocked["dispatch_performed"] is False
+    assert blocked["execution_started"] is False
+    assert blocked["Git_commands_executed"] == 0
+    assert blocked["Git_mutation"] is False
+    assert not fixture.pr.human_git_handoff_prepare_record_path_for_ticket("P18.9.2").exists()
+
+
+def test_p18_9_2_prepare_human_git_handoff_blocks_after_completion(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _accepted_p18_9_2_review_for_handoff_prepare(
+        projection_home,
+        monkeypatch,
+        pid=6846,
+    )
+    monkeypatch.setattr(
+        fixture.pr,
+        "load_current_ticket_human_git_handoff_completion_record",
+        lambda *, projection_record=None, review_decision_record=None: {
+            "completion_record_SHA256": "f" * 64,
+        },
+    )
+
+    blocked = fixture.pr.prepare_current_ticket_human_git_handoff(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_HUMAN_GIT_HANDOFF",
+        git_snapshot_fn=lambda: pytest.fail("completed handoff must stop before Git inspection"),
+    )
+
+    assert blocked["handoff_preparation_recorded"] is False
+    assert blocked["blocker_code"] == "HUMAN_GIT_HANDOFF_ALREADY_COMPLETED"
+    assert blocked["dispatch_performed"] is False
+    assert blocked["execution_started"] is False
+    assert blocked["Git_commands_executed"] == 0
+    assert blocked["Git_mutation"] is False
+    assert not fixture.pr.human_git_handoff_prepare_record_path_for_ticket("P18.9.2").exists()
 
 
 def test_lead_agent_tool_prepares_p18_9_2_review_without_optional_guards(

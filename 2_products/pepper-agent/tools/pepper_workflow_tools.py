@@ -1412,6 +1412,38 @@ def _string_list_arg(args: dict[str, Any], name: str) -> list[str]:
     return [str(item).strip() for item in value if str(item).strip()]
 
 
+def _prepare_current_ticket_human_git_handoff(args: dict[str, Any], **_kwargs) -> str:
+    pr = _runtime()
+    try:
+        result = pr.prepare_current_ticket_human_git_handoff(
+            project_id=str(args.get("project_id") or "").strip() or None,
+            ticket_id=str(args.get("ticket_id") or "").strip() or None,
+            next_action_id=str(args.get("next_action_id") or "").strip() or None,
+        )
+        updated_context = pr.build_lead_agent_operational_context()
+    except Exception as exc:
+        return tool_error(str(exc) or "current ticket human Git handoff preparation failed", success=False)
+    return _result({
+        "source_tool": "prepare_current_ticket_human_git_handoff",
+        **result,
+        "current_ticket_id": updated_context.get("current_ticket_id"),
+        "workflow_state": updated_context.get("workflow_state"),
+        "workflow_status": updated_context.get("workflow_status"),
+        "validation_state": updated_context.get("validation_state"),
+        "review_state": updated_context.get("review_state"),
+        "git_handoff_state": updated_context.get("git_handoff_state"),
+        "next_action": updated_context.get("next_action"),
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "Kanban_dispatch": False,
+        "Git_commands_executed": 0,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+    })
+
+
 def _complete_current_ticket_human_git_handoff(args: dict[str, Any], **_kwargs) -> str:
     pr = _runtime()
     try:
@@ -1927,6 +1959,26 @@ _SUBMIT_CURRENT_TICKET_REVIEW_DECISION_SCHEMA = {
 }
 
 
+_PREPARE_CURRENT_TICKET_HUMAN_GIT_HANDOFF_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "project_id": {
+            "type": "string",
+            "description": "Optional governed project guard. Must be PEPPER if supplied.",
+        },
+        "ticket_id": {
+            "type": "string",
+            "description": "Optional governed ticket guard. Must equal the current ticket if supplied.",
+        },
+        "next_action_id": {
+            "type": "string",
+            "description": "Optional next-action guard. Must be PREPARE_<current-ticket>_HUMAN_GIT_HANDOFF if supplied.",
+        },
+    },
+    "additionalProperties": False,
+}
+
+
 _COMPLETE_CURRENT_TICKET_HUMAN_GIT_HANDOFF_SCHEMA = {
     "type": "object",
     "properties": {
@@ -2338,6 +2390,24 @@ registry.register(
     handler=_submit_current_ticket_review_decision,
     emoji="R",
     max_result_size_chars=36000,
+)
+
+registry.register(
+    name="prepare_current_ticket_human_git_handoff",
+    toolset=TOOLSET,
+    schema={
+        "name": "prepare_current_ticket_human_git_handoff",
+        "description": (
+            "Prepare a non-executing P17.7 human Git handoff package for the accepted "
+            "current Pepper review candidate. It validates accepted review-package binding "
+            "and returns human-run instructions only; it never stages, commits, pushes, "
+            "starts execution, dispatches workers, retries, rolls back, Docker, or Graphify."
+        ),
+        "parameters": _PREPARE_CURRENT_TICKET_HUMAN_GIT_HANDOFF_SCHEMA,
+    },
+    handler=_prepare_current_ticket_human_git_handoff,
+    emoji="G",
+    max_result_size_chars=64000,
 )
 
 registry.register(

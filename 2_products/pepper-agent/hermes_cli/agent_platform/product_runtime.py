@@ -205,6 +205,19 @@ PEPPER_HUMAN_GIT_HANDOFF_COMPLETION_DIGEST_ALGORITHM = (
 PEPPER_HUMAN_GIT_HANDOFF_COMPLETION_IDENTITY_DIGEST_ALGORITHM = (
     "agent-platform-pepper-current-ticket-human-git-handoff-completion-identity-sha256-v1"
 )
+PEPPER_HUMAN_GIT_HANDOFF_PREPARE_SCHEMA_VERSION = 1
+PEPPER_HUMAN_GIT_HANDOFF_PREPARE_POLICY_ID = (
+    "pepper-current-ticket-human-git-handoff-prepare-v1"
+)
+PEPPER_HUMAN_GIT_HANDOFF_PREPARE_SOURCE_SYSTEM = (
+    "pepper-current-ticket-human-git-handoff-prepare"
+)
+PEPPER_HUMAN_GIT_HANDOFF_PREPARE_DIGEST_ALGORITHM = (
+    "agent-platform-pepper-current-ticket-human-git-handoff-prepare-sha256-v1"
+)
+PEPPER_HUMAN_GIT_HANDOFF_PREPARE_IDENTITY_DIGEST_ALGORITHM = (
+    "agent-platform-pepper-current-ticket-human-git-handoff-prepare-identity-sha256-v1"
+)
 PEPPER_GOVERNED_AUTONOMY_PENDING_FRESH_REQUEST_HISTORY_LIMIT = 64
 PEPPER_GOVERNED_AUTONOMY_AUTHORITY_DIGEST_ALGORITHM = (
     "agent-platform-pepper-governed-autonomy-backend-derived-live-authority-sha256-v1"
@@ -221,6 +234,9 @@ _GOVERNED_TICKET_REVIEW_DECISION_STORE_DIR = (
 )
 _GOVERNED_TICKET_HUMAN_GIT_HANDOFF_COMPLETION_STORE_DIR = (
     Path("agent-platform") / "pepper-human-git-handoff-completion-action"
+)
+_GOVERNED_TICKET_HUMAN_GIT_HANDOFF_PREPARE_STORE_DIR = (
+    Path("agent-platform") / "pepper-human-git-handoff-prepare-action"
 )
 _GOVERNED_TICKET_AUTONOMY_STORE_DIR = (
     Path("agent-platform") / "pepper-governed-autonomy-action"
@@ -277,6 +293,14 @@ _GOVERNED_TICKET_AUTHORITY_PATH_SPECS = {
     "human_git_handoff_completion_history": (
         _GOVERNED_TICKET_HUMAN_GIT_HANDOFF_COMPLETION_STORE_DIR,
         "human-git-handoff-completion.history.jsonl",
+    ),
+    "human_git_handoff_prepare": (
+        _GOVERNED_TICKET_HUMAN_GIT_HANDOFF_PREPARE_STORE_DIR,
+        "human-git-handoff-prepare.json",
+    ),
+    "human_git_handoff_prepare_history": (
+        _GOVERNED_TICKET_HUMAN_GIT_HANDOFF_PREPARE_STORE_DIR,
+        "human-git-handoff-prepare.history.jsonl",
     ),
     "governed_autonomy_activation": (
         _GOVERNED_TICKET_AUTONOMY_STORE_DIR,
@@ -942,6 +966,25 @@ class CurrentTicketHumanGitHandoffCompletionRequest(BaseModel):
         if _CONTROL_CHARS.search(value) or not _SAFE_ID.fullmatch(value):
             raise ValueError("invalid completed_by")
         return value
+
+    @field_validator("project_id", "ticket_id", "next_action_id")
+    @classmethod
+    def optional_guards_must_be_safe(cls, value: str | None) -> str | None:
+        if value in {None, ""}:
+            return None
+        if not _SAFE_ID.fullmatch(value):
+            raise ValueError("invalid guarded identifier")
+        return value
+
+
+class CurrentTicketHumanGitHandoffPrepareRequest(BaseModel):
+    """Request body for preparing accepted human Git handoff instructions."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
+
+    project_id: str | None = Field(default=None, max_length=128)
+    ticket_id: str | None = Field(default=None, max_length=128)
+    next_action_id: str | None = Field(default=None, max_length=128)
 
     @field_validator("project_id", "ticket_id", "next_action_id")
     @classmethod
@@ -3443,6 +3486,24 @@ def human_git_handoff_completion_history_path_for_ticket(ticket_id: str) -> Path
     )
 
 
+def human_git_handoff_prepare_record_path_for_ticket(ticket_id: str) -> Path:
+    """Return the profile-scoped current-ticket human Git handoff preparation path."""
+
+    return governed_ticket_lifecycle_authority_path(
+        "human_git_handoff_prepare",
+        ticket_id=ticket_id,
+    )
+
+
+def human_git_handoff_prepare_history_path_for_ticket(ticket_id: str) -> Path:
+    """Return the append-only current-ticket human Git handoff preparation history path."""
+
+    return governed_ticket_lifecycle_authority_path(
+        "human_git_handoff_prepare_history",
+        ticket_id=ticket_id,
+    )
+
+
 def load_p18_9_0_execution_start_record(
     *,
     projection_record: dict[str, Any] | None = None,
@@ -4282,6 +4343,138 @@ def load_current_ticket_human_git_handoff_completion_record(
     except (OSError, json.JSONDecodeError) as exc:
         raise ProductRuntimeConflict("human Git handoff completion record is unreadable") from exc
     return validate_current_ticket_human_git_handoff_completion_record(
+        record,
+        projection_record=projection,
+        review_decision_record=review_decision_record,
+    )
+
+
+def validate_current_ticket_human_git_handoff_prepare_record(
+    record: dict[str, Any],
+    *,
+    projection_record: dict[str, Any] | None = None,
+    review_decision_record: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Validate persisted non-executing human Git handoff preparation."""
+
+    if not isinstance(record, dict):
+        raise ProductRuntimeConflict("human Git handoff preparation record must be an object")
+    if record.get("handoff_prepare_record_SHA256") != _human_git_handoff_prepare_record_digest(record):
+        raise ProductRuntimeConflict("human Git handoff preparation record digest mismatch")
+    projection = projection_record if projection_record is not None else _load_current_projection_record()
+    _validate_execution_start_authority(projection)
+    binding, identity = _current_ticket_identity_fields(projection)
+    accepted_review = _accepted_review_record_for_handoff_completion(
+        projection=projection,
+        review_decision_record=review_decision_record,
+    )
+    review_prepare = load_current_ticket_review_prepare_record(projection_record=projection)
+    if review_prepare is None:
+        raise ProductRuntimeConflict("human Git handoff preparation requires review-prepare authority")
+    blocker = _accepted_review_candidate_inspection_blocker(
+        accepted_review,
+        review_prepare,
+        projection=projection,
+    )
+    if blocker is not None:
+        raise ProductRuntimeConflict(blocker[1])
+    expected = {
+        "schema_version": PEPPER_HUMAN_GIT_HANDOFF_PREPARE_SCHEMA_VERSION,
+        "policy_id": PEPPER_HUMAN_GIT_HANDOFF_PREPARE_POLICY_ID,
+        "source_system": PEPPER_HUMAN_GIT_HANDOFF_PREPARE_SOURCE_SYSTEM,
+        **identity,
+        "approval_publication_SHA256": projection["approval_publication_SHA256"],
+        "dependency_plan_SHA256": projection["dependency_plan_SHA256"],
+        "projection_SHA256": projection["projection_SHA256"],
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+        "reviewed_run_id": accepted_review["reviewed_run_id"],
+        "reviewed_candidate_SHA256": accepted_review["reviewed_candidate_SHA256"],
+        "review_decision_SHA256": accepted_review["review_decision_SHA256"],
+        "review_prepare_action_SHA256": review_prepare["review_prepare_action_SHA256"],
+        "review_package_SHA256": review_prepare["review_package_SHA256"],
+        "acceptance_contract_SHA256": review_prepare["acceptance_contract_SHA256"],
+        "criteria_revision_SHA256": review_prepare["criteria_revision_SHA256"],
+        "review_state": "accepted",
+        "validation_state": "review_accepted",
+        "workflow_status": "review_accepted_pending_human_git_handoff",
+        "governed_workflow_state": "awaiting_human_git_handoff",
+        "human_git_handoff_state": "prepared_pending_human_execution",
+        "git_handoff_state": "human_git_authority_preserved",
+        "git_handoff_required": True,
+        "human_git_authority_preserved": True,
+        "P17_human_git_handoff_authority_reused": True,
+        "P18_governed_transition_reused": True,
+        "authority_expansion_required": False,
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "Kanban_dispatch": False,
+        "Git_commands_executed": 0,
+        "Git_mutation": False,
+        "Docker_commands_executed": 0,
+        "Graphify_commands_executed": 0,
+        "auto_retry": False,
+        "auto_rollback": False,
+    }
+    for key, value in expected.items():
+        if record.get(key) != value:
+            raise ProductRuntimeConflict(f"human Git handoff preparation record {key} mismatch")
+    if record.get("handoff_prepare_identity_SHA256") != _human_git_handoff_prepare_identity_digest(record):
+        raise ProductRuntimeConflict("human Git handoff preparation identity mismatch")
+    next_action = record.get("next_action")
+    if not isinstance(next_action, dict) or next_action.get("id") != _human_git_handoff_completion_action_id(
+        binding.ticket_id
+    ):
+        raise ProductRuntimeConflict("human Git handoff preparation next action mismatch")
+    p17_result_record = record.get("P17_7_human_git_handoff_result")
+    if not isinstance(p17_result_record, dict):
+        raise ProductRuntimeConflict("P17.7 human Git handoff result is missing")
+    try:
+        from hermes_cli.agent_platform.work_packet import (
+            GitHandoffResult,
+            validate_human_git_handoff_result,
+        )
+
+        p17_result = GitHandoffResult.model_validate(p17_result_record)
+        validate_human_git_handoff_result(p17_result)
+    except Exception as exc:
+        raise ProductRuntimeConflict("P17.7 human Git handoff result is invalid") from exc
+    if record.get("P17_7_handoff_result_SHA256") != p17_result.result_SHA256:
+        raise ProductRuntimeConflict("P17.7 handoff result digest mismatch")
+    if record.get("P17_7_handoff_package_SHA256") != p17_result.package.package_SHA256:
+        raise ProductRuntimeConflict("P17.7 handoff package digest mismatch")
+    if record.get("rendered_powershell_SHA256") != p17_result.rendered_powershell_SHA256:
+        raise ProductRuntimeConflict("P17.7 rendered PowerShell digest mismatch")
+    if record.get("rendered_handoff_powershell") in {None, ""}:
+        raise ProductRuntimeConflict("rendered human Git handoff PowerShell is missing")
+    expected_paths = _review_candidate_paths_from_reference(
+        accepted_review.get("reviewed_candidate_reference"),
+    )
+    package_paths = tuple(candidate.relative_path for candidate in p17_result.package.candidates)
+    if package_paths != expected_paths:
+        raise ProductRuntimeConflict("P17.7 handoff package candidate paths mismatch")
+    if tuple(record.get("candidate_paths") or ()) != expected_paths:
+        raise ProductRuntimeConflict("human Git handoff preparation candidate paths mismatch")
+    return record
+
+
+def load_current_ticket_human_git_handoff_prepare_record(
+    *,
+    projection_record: dict[str, Any] | None = None,
+    review_decision_record: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Load and validate current-ticket human Git handoff preparation."""
+
+    projection = projection_record if projection_record is not None else _load_current_projection_record()
+    path = human_git_handoff_prepare_record_path_for_ticket(str(projection["ticket_id"]))
+    if not path.exists():
+        return None
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ProductRuntimeConflict("human Git handoff preparation record is unreadable") from exc
+    return validate_current_ticket_human_git_handoff_prepare_record(
         record,
         projection_record=projection,
         review_decision_record=review_decision_record,
@@ -7071,7 +7264,50 @@ def inspect_current_ticket_review_candidate(
         )
 
     workflow = build_workflow_control_snapshot()
-    if workflow.get("review_state") != "prepared_pending_human_acceptance":
+    accepted_review = None
+    if (
+        workflow.get("workflow_status") == "review_prepared_pending_human_acceptance"
+        and workflow.get("review_state") == "prepared_pending_human_acceptance"
+    ):
+        if workflow.get("review_decision_recorded") is True:
+            return _review_candidate_inspection_blocked_result(
+                projection,
+                operation=operation,
+                review_prepare=review_prepare,
+                blocker_code="CURRENT_REVIEW_ALREADY_DECIDED",
+                blocker_detail="candidate inspection must not shadow an already-recorded review decision",
+            )
+    elif (
+        workflow.get("workflow_status") == "review_accepted_pending_human_git_handoff"
+        and workflow.get("review_state") == "accepted"
+    ):
+        try:
+            accepted_review = _accepted_review_record_for_handoff_completion(
+                projection=projection,
+            )
+        except ProductRuntimeConflict as exc:
+            return _review_candidate_inspection_blocked_result(
+                projection,
+                operation=operation,
+                review_prepare=review_prepare,
+                blocker_code="ACCEPTED_REVIEW_AUTHORITY_GAP",
+                blocker_detail=str(exc) or "accepted review authority is unavailable",
+            )
+        accepted_blocker = _accepted_review_candidate_inspection_blocker(
+            accepted_review,
+            review_prepare,
+            projection=projection,
+        )
+        if accepted_blocker is not None:
+            code, detail = accepted_blocker
+            return _review_candidate_inspection_blocked_result(
+                projection,
+                operation=operation,
+                review_prepare=review_prepare,
+                blocker_code=code,
+                blocker_detail=detail,
+            )
+    else:
         return _review_candidate_inspection_blocked_result(
             projection,
             operation=operation,
@@ -7079,23 +7315,26 @@ def inspect_current_ticket_review_candidate(
             blocker_code="CURRENT_REVIEW_NOT_PREPARED_PENDING_HUMAN_DECISION",
             blocker_detail="candidate inspection requires the current prepared review boundary",
         )
-    if workflow.get("review_decision_recorded") is True:
-        return _review_candidate_inspection_blocked_result(
-            projection,
-            operation=operation,
-            review_prepare=review_prepare,
-            blocker_code="CURRENT_REVIEW_ALREADY_DECIDED",
-            blocker_detail="candidate inspection must not shadow an already-recorded review decision",
-        )
 
     try:
-        return _build_current_review_candidate_inspection_result(
+        result = _build_current_review_candidate_inspection_result(
             projection=projection,
             review_prepare=review_prepare,
             operation=operation,
             candidate_path=candidate_path,
             max_bytes=max_bytes,
         )
+        if accepted_review is not None:
+            result.update({
+                "review_decision_recorded": True,
+                "review_decision": accepted_review.get("review_decision"),
+                "review_decision_SHA256": accepted_review.get("review_decision_SHA256"),
+                "review_decision_identity_SHA256": accepted_review.get(
+                    "review_decision_identity_SHA256"
+                ),
+                "inspection_boundary_state": "accepted_pending_human_git_handoff",
+            })
+        return result
     except ProductRuntimeCandidateInspectionBlocked as exc:
         return _review_candidate_inspection_blocked_result(
             projection,
@@ -7321,6 +7560,184 @@ def submit_current_ticket_review_decision(
     )
     _persist_current_ticket_review_decision_record(record)
     return _review_decision_operational_result(record, idempotent_replay=False)
+
+
+def prepare_current_ticket_human_git_handoff(
+    *,
+    project_id: str | None = None,
+    ticket_id: str | None = None,
+    next_action_id: str | None = None,
+    git_snapshot_fn: Any = None,
+) -> dict[str, Any]:
+    """Prepare non-executing human Git handoff instructions for an accepted review."""
+
+    request = CurrentTicketHumanGitHandoffPrepareRequest(
+        project_id=project_id,
+        ticket_id=ticket_id,
+        next_action_id=next_action_id,
+    )
+    projection = _load_current_projection_record()
+    _validate_execution_start_authority(projection)
+    binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
+    _validate_human_git_handoff_prepare_request_guards(request, binding=binding)
+
+    try:
+        completion = load_current_ticket_human_git_handoff_completion_record(
+            projection_record=projection,
+        )
+    except ProductRuntimeConflict as exc:
+        return _blocked_current_human_git_handoff_prepare_result(
+            projection,
+            request=request,
+            blocker_code="HUMAN_GIT_HANDOFF_COMPLETION_AUTHORITY_INVALID",
+            blocker_detail=str(exc) or "human Git handoff completion authority is invalid",
+        )
+    if completion is not None:
+        return _blocked_current_human_git_handoff_prepare_result(
+            projection,
+            request=request,
+            blocker_code="HUMAN_GIT_HANDOFF_ALREADY_COMPLETED",
+            blocker_detail="human Git handoff preparation is closed by completion evidence",
+        )
+
+    accepted_review = None
+    try:
+        accepted_review = _accepted_review_record_for_handoff_completion(
+            projection=projection,
+        )
+    except ProductRuntimeConflict as exc:
+        return _blocked_current_human_git_handoff_prepare_result(
+            projection,
+            request=request,
+            blocker_code="ACCEPTED_REVIEW_AUTHORITY_GAP",
+            blocker_detail=str(exc) or "accepted review decision is unavailable",
+        )
+    try:
+        review_prepare = load_current_ticket_review_prepare_record(projection_record=projection)
+    except ProductRuntimeConflict as exc:
+        return _blocked_current_human_git_handoff_prepare_result(
+            projection,
+            request=request,
+            blocker_code="REVIEW_PREPARE_AUTHORITY_INVALID",
+            blocker_detail=str(exc) or "human Git handoff preparation review authority is invalid",
+            accepted_review=accepted_review,
+        )
+    if review_prepare is None:
+        return _blocked_current_human_git_handoff_prepare_result(
+            projection,
+            request=request,
+            blocker_code="REVIEW_PREPARE_AUTHORITY_GAP",
+            blocker_detail="human Git handoff preparation requires review-prepare authority",
+            accepted_review=accepted_review,
+        )
+    accepted_blocker = _accepted_review_candidate_inspection_blocker(
+        accepted_review,
+        review_prepare,
+        projection=projection,
+    )
+    if accepted_blocker is not None:
+        code, detail = accepted_blocker
+        return _blocked_current_human_git_handoff_prepare_result(
+            projection,
+            request=request,
+            blocker_code=code,
+            blocker_detail=detail,
+            accepted_review=accepted_review,
+        )
+
+    existing = None
+    try:
+        existing = load_current_ticket_human_git_handoff_prepare_record(
+            projection_record=projection,
+            review_decision_record=accepted_review,
+        )
+    except ProductRuntimeConflict:
+        path = human_git_handoff_prepare_record_path_for_ticket(binding.ticket_id)
+        _archive_existing_authority_record(
+            path,
+            human_git_handoff_prepare_history_path_for_ticket(binding.ticket_id),
+            reason="superseded_or_invalid_human_git_handoff_prepare_authority",
+        )
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+    if existing is not None:
+        return _human_git_handoff_prepare_operational_result(
+            existing,
+            idempotent_replay=True,
+        )
+
+    active_execution_blocker = _human_git_handoff_completion_active_execution_blocker(
+        projection,
+    )
+    if active_execution_blocker is not None:
+        code, detail = active_execution_blocker
+        return _blocked_current_human_git_handoff_prepare_result(
+            projection,
+            request=request,
+            blocker_code=code,
+            blocker_detail=detail,
+            accepted_review=accepted_review,
+        )
+
+    workflow = build_workflow_control_snapshot()
+    workflow_blocker = _human_git_handoff_prepare_workflow_blocker(
+        workflow,
+        binding=binding,
+        accepted_review=accepted_review,
+    )
+    if workflow_blocker is not None:
+        code, detail = workflow_blocker
+        return _blocked_current_human_git_handoff_prepare_result(
+            projection,
+            request=request,
+            blocker_code=code,
+            blocker_detail=detail,
+            accepted_review=accepted_review,
+        )
+
+    git_snapshot = (
+        git_snapshot_fn() if callable(git_snapshot_fn) else _current_readonly_repository_git_snapshot()
+    )
+    try:
+        p17_result, rendered = _build_p17_7_current_human_git_handoff_result(
+            projection=projection,
+            review_prepare=review_prepare,
+            accepted_review=accepted_review,
+            git_snapshot=git_snapshot,
+        )
+    except ProductRuntimeCandidateInspectionBlocked as exc:
+        return _blocked_current_human_git_handoff_prepare_result(
+            projection,
+            request=request,
+            blocker_code=exc.blocker_code,
+            blocker_detail=exc.blocker_detail,
+            accepted_review=accepted_review,
+        )
+    except Exception as exc:
+        return _blocked_current_human_git_handoff_prepare_result(
+            projection,
+            request=request,
+            blocker_code="P17_7_HUMAN_GIT_HANDOFF_PACKAGE_INVALID",
+            blocker_detail=str(exc) or "P17.7 handoff package could not be prepared",
+            accepted_review=accepted_review,
+        )
+
+    record = _build_current_ticket_human_git_handoff_prepare_record(
+        request=request,
+        projection=projection,
+        workflow=workflow,
+        accepted_review=accepted_review,
+        review_prepare=review_prepare,
+        p17_result=p17_result,
+        rendered_powershell=rendered,
+    )
+    _persist_current_ticket_human_git_handoff_prepare_record(record)
+    return _human_git_handoff_prepare_operational_result(
+        record,
+        idempotent_replay=False,
+    )
 
 
 def complete_current_ticket_human_git_handoff(
@@ -17607,6 +18024,344 @@ def _human_git_handoff_prepare_action_id(binding: CurrentTicketLifecycleBinding)
     return f"PREPARE_{binding.ticket_action_token}_HUMAN_GIT_HANDOFF"
 
 
+def _validate_human_git_handoff_prepare_request_guards(
+    request: CurrentTicketHumanGitHandoffPrepareRequest,
+    *,
+    binding: CurrentTicketLifecycleBinding,
+) -> None:
+    if request.project_id not in {None, binding.project_id}:
+        raise ProductRuntimeConflict(
+            f"human Git handoff preparation is bounded to project {binding.project_id}"
+        )
+    if request.ticket_id not in {None, binding.ticket_id}:
+        raise ProductRuntimeConflict(
+            f"human Git handoff preparation is bounded to ticket {binding.ticket_id}"
+        )
+    if request.next_action_id not in {None, _human_git_handoff_prepare_action_id(binding)}:
+        raise ProductRuntimeConflict(
+            "human Git handoff preparation requires the current human Git handoff next action"
+        )
+
+
+def _accepted_review_candidate_inspection_blocker(
+    accepted_review: dict[str, Any],
+    review_prepare: dict[str, Any],
+    *,
+    projection: dict[str, Any],
+) -> tuple[str, str] | None:
+    if accepted_review.get("review_decision") != "accept":
+        return "ACCEPTED_REVIEW_AUTHORITY_GAP", "review decision is not accepted"
+    if accepted_review.get("review_source_authority_kind") != "review_prepare":
+        return (
+            "ACCEPTED_REVIEW_CANDIDATE_BINDING_MISMATCH",
+            "accepted review is not bound to the prepared review package",
+        )
+    expected = {
+        "review_prepare_action_SHA256": review_prepare.get("review_prepare_action_SHA256"),
+        "review_package_SHA256": review_prepare.get("review_package_SHA256"),
+        "acceptance_contract_SHA256": review_prepare.get("acceptance_contract_SHA256"),
+        "criteria_revision_SHA256": review_prepare.get("criteria_revision_SHA256"),
+    }
+    for key, value in expected.items():
+        if accepted_review.get(key) != value:
+            return (
+                "ACCEPTED_REVIEW_CANDIDATE_BINDING_MISMATCH",
+                f"accepted review {key} does not match the current review package",
+            )
+    if _int_or_none(accepted_review.get("reviewed_run_id")) != _int_or_none(
+        review_prepare.get("successful_run_id")
+    ):
+        return (
+            "ACCEPTED_REVIEW_CANDIDATE_BINDING_MISMATCH",
+            "accepted review run does not match the current review package",
+        )
+    completion = review_prepare.get("kanban_completion_result")
+    candidate_reference = (
+        completion.get("candidate_changes_reference") if isinstance(completion, dict) else None
+    )
+    expected_candidate_sha = _review_candidate_reference_digest(
+        projection,
+        review_prepare,
+        candidate_reference,
+    )
+    if expected_candidate_sha != accepted_review.get("reviewed_candidate_SHA256"):
+        return (
+            "ACCEPTED_REVIEW_CANDIDATE_BINDING_MISMATCH",
+            "accepted review candidate digest does not match the current review package",
+        )
+    return None
+
+
+def _review_candidate_paths_from_reference(candidate_reference: Any) -> tuple[str, ...]:
+    files = candidate_reference.get("files") if isinstance(candidate_reference, dict) else None
+    if not isinstance(files, list) or not files:
+        raise ProductRuntimeConflict("reviewed candidate reference lacks file evidence")
+    paths = tuple(
+        sorted(_normalize_runtime_relative_path(item.get("path") or "") for item in files if isinstance(item, dict))
+    )
+    if len(paths) != len(files) or len(paths) != len(frozenset(paths)):
+        raise ProductRuntimeConflict("reviewed candidate reference path evidence is invalid")
+    return paths
+
+
+def _human_git_handoff_prepare_workflow_blocker(
+    workflow: dict[str, Any],
+    *,
+    binding: CurrentTicketLifecycleBinding,
+    accepted_review: dict[str, Any],
+) -> tuple[str, str] | None:
+    if workflow.get("project_id") != binding.project_id:
+        return "HUMAN_GIT_HANDOFF_PREPARE_ACTION_GAP", f"current project is not {binding.project_id}"
+    if workflow.get("current_ticket_id") != binding.ticket_id:
+        return "HUMAN_GIT_HANDOFF_PREPARE_ACTION_GAP", f"current ticket is not {binding.ticket_id}"
+    if workflow.get("workflow_status") != "review_accepted_pending_human_git_handoff":
+        return (
+            "HUMAN_GIT_HANDOFF_PREPARE_ACTION_GAP",
+            "workflow is not awaiting accepted-review human Git handoff",
+        )
+    next_action = workflow.get("next_action")
+    if not isinstance(next_action, dict):
+        return "HUMAN_GIT_HANDOFF_PREPARE_ACTION_GAP", "next action is unavailable"
+    if next_action.get("id") != accepted_review.get("next_action", {}).get("id"):
+        return "HUMAN_GIT_HANDOFF_PREPARE_ACTION_GAP", "next action is not human Git handoff preparation"
+    if int(workflow.get("active_execution_count") or 0) != 0:
+        return "EXECUTION_ALREADY_ACTIVE", "an execution is already active"
+    if workflow.get("execution_state") == "active_executions":
+        return "EXECUTION_ALREADY_ACTIVE", "execution state is active"
+    if workflow.get("validation_state") != "review_accepted":
+        return "HUMAN_GIT_HANDOFF_PREPARE_ACTION_GAP", "validation state is not review_accepted"
+    if workflow.get("review_state") != "accepted":
+        return "HUMAN_GIT_HANDOFF_PREPARE_ACTION_GAP", "review state is not accepted"
+    if workflow.get("recovery_state") != "not_required":
+        return "HUMAN_GIT_HANDOFF_PREPARE_ACTION_GAP", "recovery state is not not_required"
+    if workflow.get("governed_workflow_state") != "awaiting_human_git_handoff":
+        return "HUMAN_GIT_HANDOFF_PREPARE_ACTION_GAP", "governed workflow is not awaiting Git handoff"
+    if workflow.get("git_handoff_required") is not True:
+        return "GIT_HANDOFF_STATE_GAP", "human Git handoff is not required"
+    if workflow.get("git_handoff_state") != "human_git_authority_preserved":
+        return "HUMAN_GIT_AUTHORITY_NOT_PRESERVED", "human Git authority is not preserved"
+    return None
+
+
+def _p17_7_candidate_status(change: str) -> Any:
+    from hermes_cli.agent_platform.work_packet import GitHandoffPathStatus
+
+    normalized = str(change or "").strip().lower()
+    if normalized == "created":
+        return GitHandoffPathStatus.ADDED
+    if normalized == "modified":
+        return GitHandoffPathStatus.MODIFIED
+    if normalized == "deleted":
+        return GitHandoffPathStatus.DELETED
+    raise ProductRuntimeCandidateInspectionBlocked(
+        "CANDIDATE_MANIFEST_MALFORMED",
+        "candidate changes manifest contains an unsupported change type",
+    )
+
+
+def _p17_7_handoff_candidates_from_review_context(
+    context: dict[str, Any],
+) -> tuple[Any, ...]:
+    from hermes_cli.agent_platform.work_packet import GitHandoffCandidate
+    from hermes_cli.agent_platform.work_packet import human_git_handoff as hgh
+
+    candidates: list[Any] = []
+    for entry in context["files"].values():
+        file_context = _review_candidate_file_context(context, entry)
+        status = _p17_7_candidate_status(entry["change"])
+        nondeleted = str(entry["change"]) != "deleted"
+        data = {
+            "candidate_id": f"GHCP-{len(candidates) + 1:03d}",
+            "relative_path": entry["path"],
+            "status": status,
+            "content_SHA256": entry.get("workspace_SHA256") if nondeleted else None,
+            "bytes_after": file_context["candidate_metadata"]["byte_count"] if nondeleted else None,
+            "source_observation_id": f"OBS-{len(candidates) + 1:03d}",
+            "source_artifact_id": f"ART-{len(candidates) + 1:03d}",
+        }
+        candidates.append(
+            GitHandoffCandidate(
+                **data,
+                candidate_SHA256=hgh._candidate_digest_from_record(data),
+            )
+        )
+    return tuple(candidates)
+
+
+def _p17_7_handoff_repository_identity(*, branch: str, parent_commit: str) -> Any:
+    from hermes_cli.agent_platform.work_packet import build_workspace_repository_identity
+
+    return build_workspace_repository_identity(
+        repository_id="pepper-agent-platform",
+        source_commit=parent_commit,
+        workspace_branch=branch,
+    )
+
+
+def _p17_7_handoff_parent_and_branch(
+    git_snapshot: dict[str, Any],
+) -> tuple[str, str]:
+    snapshot = git_snapshot if isinstance(git_snapshot, dict) else {}
+    parent = str(snapshot.get("head") or "").strip().lower()
+    branch = str(snapshot.get("branch") or "").strip()
+    if not re.fullmatch(r"[a-f0-9]{40}", parent):
+        raise ProductRuntimeCandidateInspectionBlocked(
+            "READ_ONLY_GIT_PARENT_UNAVAILABLE",
+            "human Git handoff preparation requires read-only current HEAD evidence",
+        )
+    try:
+        _safe_git_branch_name(branch)
+    except ValueError as exc:
+        raise ProductRuntimeCandidateInspectionBlocked(
+            "READ_ONLY_GIT_BRANCH_UNAVAILABLE",
+            "human Git handoff preparation requires read-only current branch evidence",
+        ) from exc
+    return parent, branch
+
+
+def _p17_7_handoff_commit_message(binding: CurrentTicketLifecycleBinding) -> str:
+    title = _safe_text(binding.ticket_title, limit=80)
+    message = f"{binding.ticket_id} {title}"[:120].strip()
+    return message or binding.ticket_id
+
+
+def _build_p17_7_current_human_git_handoff_result(
+    *,
+    projection: dict[str, Any],
+    review_prepare: dict[str, Any],
+    accepted_review: dict[str, Any],
+    git_snapshot: dict[str, Any],
+) -> tuple[Any, str]:
+    from hermes_cli.agent_platform.work_packet import (
+        GitHandoffAuthority,
+        GitHandoffDecision,
+        GitHandoffPackage,
+        GitHandoffResult,
+        GitHandoffState,
+        OutcomeEnvelopeKind,
+        render_human_git_handoff_powershell,
+        validate_human_git_handoff_result,
+    )
+    from hermes_cli.agent_platform.work_packet import human_git_handoff as hgh
+
+    binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
+    parent_commit, branch = _p17_7_handoff_parent_and_branch(git_snapshot)
+    context = _current_review_candidate_authority_context(
+        projection=projection,
+        review_prepare=review_prepare,
+    )
+    candidates = _p17_7_handoff_candidates_from_review_context(context)
+    if tuple(candidate.relative_path for candidate in candidates) != _review_candidate_paths_from_reference(
+        accepted_review.get("reviewed_candidate_reference")
+    ):
+        raise ProductRuntimeCandidateInspectionBlocked(
+            "ACCEPTED_REVIEW_CANDIDATE_BINDING_MISMATCH",
+            "P17.7 handoff candidates do not match the accepted review candidate set",
+        )
+    repository_identity = _p17_7_handoff_repository_identity(
+        branch=branch,
+        parent_commit=parent_commit,
+    )
+    commit_message = _p17_7_handoff_commit_message(binding)
+    verification_steps = hgh._build_verification_steps()
+    commands = hgh._build_commands(
+        repository_display_path=".",
+        branch_name=branch,
+        remote_name="origin",
+        expected_parent_commit=parent_commit,
+        commit_message=commit_message,
+        candidates=candidates,
+    )
+    expectation = hgh._build_post_commit_expectation(
+        candidates=candidates,
+        expected_parent_commit=parent_commit,
+        expected_branch=branch,
+        expected_remote="origin",
+        expected_commit_message=commit_message,
+    )
+    package_data = {
+        "schema_version": hgh.HUMAN_GIT_HANDOFF_SCHEMA_VERSION,
+        "policy_id": hgh.HUMAN_GIT_HANDOFF_POLICY_ID,
+        "authority": GitHandoffAuthority.HUMAN_ONLY,
+        "repository_identity": repository_identity,
+        "repository_display_path": ".",
+        "branch_name": branch,
+        "remote_name": "origin",
+        "expected_parent_commit": parent_commit,
+        "commit_message": commit_message,
+        "candidates": candidates,
+        "verification_steps": verification_steps,
+        "commands": commands,
+        "post_commit_expectation": expectation,
+    }
+    package_data["package_id"] = hgh._package_id_from_record(package_data)
+    package = GitHandoffPackage(
+        **package_data,
+        package_SHA256=hgh._digest_from_record(hgh.PACKAGE_DIGEST_ALGORITHM, package_data),
+    )
+    rendered = render_human_git_handoff_powershell(package)
+    rendered_sha = hgh._digest_text(hgh.POWERSHELL_DIGEST_ALGORITHM, rendered)
+    counts = hgh._candidate_counts(candidates)
+    result_data = {
+        "schema_version": hgh.HUMAN_GIT_HANDOFF_SCHEMA_VERSION,
+        "policy_id": hgh.HUMAN_GIT_HANDOFF_POLICY_ID,
+        "state": GitHandoffState.COMPLETED,
+        "decision": GitHandoffDecision.APPROVED,
+        "authority": GitHandoffAuthority.HUMAN_ONLY,
+        "work_packet_id": projection["work_packet_id"],
+        "work_packet_SHA256": projection["work_packet_SHA256"],
+        "allocation_id": f"GHALLOC-{binding.ticket_action_token}-{accepted_review['reviewed_run_id']}",
+        "allocation_SHA256": _digest_payload(
+            "pepper-current-ticket-human-git-handoff-p17-allocation-sha256-v1",
+            {
+                "ticket_id": binding.ticket_id,
+                "reviewed_run_id": accepted_review["reviewed_run_id"],
+                "repository_identity_SHA256": repository_identity.identity_SHA256,
+            },
+        ),
+        "profile_id": _safe_text(projection.get("assignee_profile") or "pepper-runtime", limit=128),
+        "profile_SHA256": _digest_payload(
+            "pepper-current-ticket-human-git-handoff-p17-profile-sha256-v1",
+            {
+                "ticket_id": binding.ticket_id,
+                "assignee_profile": projection.get("assignee_profile"),
+                "selected_profile": projection.get("selected_profile"),
+            },
+        ),
+        "outcome_kind": OutcomeEnvelopeKind.RESULT,
+        "outcome_SHA256": review_prepare["review_package_SHA256"],
+        "review_id": f"GHREV-{binding.ticket_action_token}-{accepted_review['reviewed_run_id']}",
+        "review_SHA256": review_prepare["review_package_SHA256"],
+        "approval_SHA256": accepted_review["review_decision_SHA256"],
+        "package": package,
+        "rendered_powershell_SHA256": rendered_sha,
+        "candidate_count": len(candidates),
+        "added_count": counts[0],
+        "modified_count": counts[1],
+        "deleted_count": counts[2],
+        "manual_validation_ids_pending": (),
+        "human_git_handoff_requirement_satisfied": True,
+        "Git_commands_executed": 0,
+        "staging_performed": False,
+        "commit_performed": False,
+        "push_performed": False,
+        "automatic_cleanup_authorized": False,
+        "automatic_rollback_authorized": False,
+        "automatic_staging_authorized": False,
+        "automatic_commit_authorized": False,
+        "automatic_push_authorized": False,
+        "provider_dispatch_count": 0,
+        "model_inference_count": 0,
+    }
+    result_data["handoff_id"] = hgh._handoff_id(result_data)
+    result = GitHandoffResult(
+        **result_data,
+        result_SHA256=hgh._digest_from_record(hgh.RESULT_DIGEST_ALGORITHM, result_data),
+    )
+    validate_human_git_handoff_result(result)
+    return result, rendered
+
+
 def _validate_human_git_handoff_completion_request_guards(
     request: CurrentTicketHumanGitHandoffCompletionRequest,
     *,
@@ -18021,6 +18776,357 @@ def _human_git_handoff_completion_record_digest(record: dict[str, Any]) -> str:
         if key != "completion_record_SHA256"
     }
     return _digest_payload(PEPPER_HUMAN_GIT_HANDOFF_COMPLETION_DIGEST_ALGORITHM, payload)
+
+
+def _human_git_handoff_prepare_record_digest(record: dict[str, Any]) -> str:
+    payload = {
+        key: value
+        for key, value in record.items()
+        if key != "handoff_prepare_record_SHA256"
+    }
+    return _digest_payload(PEPPER_HUMAN_GIT_HANDOFF_PREPARE_DIGEST_ALGORITHM, payload)
+
+
+def _human_git_handoff_prepare_identity_payload_from_fields(
+    *,
+    projection: dict[str, Any],
+    reviewed_run_id: int,
+    reviewed_candidate_SHA256: str,
+    review_decision_SHA256: str,
+    review_prepare_action_SHA256: str,
+    review_package_SHA256: str,
+    P17_7_handoff_result_SHA256: str,
+    P17_7_handoff_package_SHA256: str,
+    rendered_powershell_SHA256: str,
+    branch: str,
+    expected_parent_commit: str,
+    candidate_paths: tuple[str, ...],
+) -> dict[str, Any]:
+    _binding, identity = _current_ticket_identity_fields(projection)
+    return {
+        "schema_version": PEPPER_HUMAN_GIT_HANDOFF_PREPARE_SCHEMA_VERSION,
+        "policy_id": PEPPER_HUMAN_GIT_HANDOFF_PREPARE_POLICY_ID,
+        **identity,
+        "projection_SHA256": projection["projection_SHA256"],
+        "reviewed_run_id": reviewed_run_id,
+        "reviewed_candidate_SHA256": reviewed_candidate_SHA256,
+        "review_decision_SHA256": review_decision_SHA256,
+        "review_prepare_action_SHA256": review_prepare_action_SHA256,
+        "review_package_SHA256": review_package_SHA256,
+        "P17_7_handoff_result_SHA256": P17_7_handoff_result_SHA256,
+        "P17_7_handoff_package_SHA256": P17_7_handoff_package_SHA256,
+        "rendered_powershell_SHA256": rendered_powershell_SHA256,
+        "branch": branch,
+        "expected_parent_commit": expected_parent_commit,
+        "candidate_paths": list(candidate_paths),
+    }
+
+
+def _human_git_handoff_prepare_identity_digest(record: dict[str, Any]) -> str:
+    projection = {
+        "project_id": record["project_id"],
+        "macroproject_id": record["macroproject_id"],
+        "ticket_id": record["ticket_id"],
+        "ticket_title": record["ticket_title"],
+        "ticket_spec_SHA256": record["ticket_spec_SHA256"],
+        "work_packet_id": record["work_packet_id"],
+        "work_packet_SHA256": record["work_packet_SHA256"],
+        "WorkPacket_compilation_count": record["WorkPacket_compilation_count"],
+        "projection_SHA256": record["projection_SHA256"],
+    }
+    payload = _human_git_handoff_prepare_identity_payload_from_fields(
+        projection=projection,
+        reviewed_run_id=int(record["reviewed_run_id"]),
+        reviewed_candidate_SHA256=record["reviewed_candidate_SHA256"],
+        review_decision_SHA256=record["review_decision_SHA256"],
+        review_prepare_action_SHA256=record["review_prepare_action_SHA256"],
+        review_package_SHA256=record["review_package_SHA256"],
+        P17_7_handoff_result_SHA256=record["P17_7_handoff_result_SHA256"],
+        P17_7_handoff_package_SHA256=record["P17_7_handoff_package_SHA256"],
+        rendered_powershell_SHA256=record["rendered_powershell_SHA256"],
+        branch=record["branch"],
+        expected_parent_commit=record["expected_parent_commit"],
+        candidate_paths=tuple(record["candidate_paths"]),
+    )
+    return _digest_payload(PEPPER_HUMAN_GIT_HANDOFF_PREPARE_IDENTITY_DIGEST_ALGORITHM, payload)
+
+
+def _persist_current_ticket_human_git_handoff_prepare_record(record: dict[str, Any]) -> None:
+    validate_current_ticket_human_git_handoff_prepare_record(record)
+    ticket_id = str(record["ticket_id"])
+    path = human_git_handoff_prepare_record_path_for_ticket(ticket_id)
+    _archive_existing_authority_record(
+        path,
+        human_git_handoff_prepare_history_path_for_ticket(ticket_id),
+        reason="replaced_by_current_ticket_human_git_handoff_prepare",
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+
+def _human_git_handoff_prepare_next_action(
+    binding: CurrentTicketLifecycleBinding,
+) -> dict[str, Any]:
+    return {
+        "id": _human_git_handoff_completion_action_id(binding.ticket_id),
+        "label": (
+            f"Record {binding.ticket_id} human Git handoff completion evidence after "
+            "the human runs the prepared P17.7 instructions."
+        ),
+        "target_ticket_id": binding.ticket_id,
+        "target_ticket_title": binding.ticket_title,
+        "required_human_action": "human_git_handoff_completion_evidence",
+    }
+
+
+def _build_current_ticket_human_git_handoff_prepare_record(
+    *,
+    request: CurrentTicketHumanGitHandoffPrepareRequest,
+    projection: dict[str, Any],
+    workflow: dict[str, Any],
+    accepted_review: dict[str, Any],
+    review_prepare: dict[str, Any],
+    p17_result: Any,
+    rendered_powershell: str,
+) -> dict[str, Any]:
+    binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
+    prepared_at = _utc_now_iso()
+    p17_result_record = p17_result.model_dump(mode="json")
+    candidate_paths = tuple(candidate.relative_path for candidate in p17_result.package.candidates)
+    identity_payload = _human_git_handoff_prepare_identity_payload_from_fields(
+        projection=projection,
+        reviewed_run_id=int(accepted_review["reviewed_run_id"]),
+        reviewed_candidate_SHA256=accepted_review["reviewed_candidate_SHA256"],
+        review_decision_SHA256=accepted_review["review_decision_SHA256"],
+        review_prepare_action_SHA256=review_prepare["review_prepare_action_SHA256"],
+        review_package_SHA256=review_prepare["review_package_SHA256"],
+        P17_7_handoff_result_SHA256=p17_result.result_SHA256,
+        P17_7_handoff_package_SHA256=p17_result.package.package_SHA256,
+        rendered_powershell_SHA256=p17_result.rendered_powershell_SHA256,
+        branch=p17_result.package.branch_name,
+        expected_parent_commit=p17_result.package.expected_parent_commit,
+        candidate_paths=candidate_paths,
+    )
+    record = {
+        "schema_version": PEPPER_HUMAN_GIT_HANDOFF_PREPARE_SCHEMA_VERSION,
+        "policy_id": PEPPER_HUMAN_GIT_HANDOFF_PREPARE_POLICY_ID,
+        "source_system": PEPPER_HUMAN_GIT_HANDOFF_PREPARE_SOURCE_SYSTEM,
+        "created_at": prepared_at,
+        "prepared_at": prepared_at,
+        **_current_ticket_projection_identity_fields(projection),
+        "approval_publication_SHA256": projection["approval_publication_SHA256"],
+        "dependency_plan_SHA256": projection["dependency_plan_SHA256"],
+        "projection_SHA256": projection["projection_SHA256"],
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+        "requested_project_id": request.project_id,
+        "requested_ticket_id": request.ticket_id,
+        "requested_next_action_id": request.next_action_id,
+        "reviewed_run_id": int(accepted_review["reviewed_run_id"]),
+        "reviewed_candidate_SHA256": accepted_review["reviewed_candidate_SHA256"],
+        "review_decision_SHA256": accepted_review["review_decision_SHA256"],
+        "review_decision_identity_SHA256": accepted_review.get(
+            "review_decision_identity_SHA256"
+        ),
+        "review_prepare_action_SHA256": review_prepare["review_prepare_action_SHA256"],
+        "review_package_SHA256": review_prepare["review_package_SHA256"],
+        "acceptance_contract_SHA256": review_prepare["acceptance_contract_SHA256"],
+        "criteria_revision_SHA256": review_prepare["criteria_revision_SHA256"],
+        "accepted_review_authority": {
+            "policy_id": accepted_review["policy_id"],
+            "source_system": accepted_review["source_system"],
+            "review_decision": accepted_review["review_decision"],
+            "review_decision_SHA256": accepted_review["review_decision_SHA256"],
+            "review_decision_identity_SHA256": accepted_review.get(
+                "review_decision_identity_SHA256"
+            ),
+            "reviewed_run_id": accepted_review["reviewed_run_id"],
+            "reviewed_candidate_SHA256": accepted_review["reviewed_candidate_SHA256"],
+        },
+        "review_prepare_authority": _review_prepare_authority_projection(review_prepare),
+        "reviewed_candidate_reference": accepted_review.get("reviewed_candidate_reference"),
+        "handoff_prepare_identity_SHA256": _digest_payload(
+            PEPPER_HUMAN_GIT_HANDOFF_PREPARE_IDENTITY_DIGEST_ALGORITHM,
+            identity_payload,
+        ),
+        "P17_7_handoff_result_SHA256": p17_result.result_SHA256,
+        "P17_7_handoff_package_SHA256": p17_result.package.package_SHA256,
+        "P17_7_handoff_package_id": p17_result.package.package_id,
+        "P17_7_handoff_id": p17_result.handoff_id,
+        "P17_7_handoff_policy_id": p17_result.policy_id,
+        "P17_7_handoff_state": p17_result.state.value,
+        "P17_7_handoff_decision": p17_result.decision.value,
+        "P17_7_human_git_handoff_result": p17_result_record,
+        "P17_7_human_git_handoff_package": p17_result.package.model_dump(mode="json"),
+        "rendered_handoff_powershell": rendered_powershell,
+        "rendered_powershell_SHA256": p17_result.rendered_powershell_SHA256,
+        "candidate_count": p17_result.candidate_count,
+        "candidate_paths": list(candidate_paths),
+        "added_count": p17_result.added_count,
+        "modified_count": p17_result.modified_count,
+        "deleted_count": p17_result.deleted_count,
+        "branch": p17_result.package.branch_name,
+        "remote_name": p17_result.package.remote_name,
+        "expected_parent_commit": p17_result.package.expected_parent_commit,
+        "commit_message": p17_result.package.commit_message,
+        "preparation_order_evidence": {
+            "prepared_at": prepared_at,
+            "workflow_next_action": workflow.get("next_action", {}).get("id")
+            if isinstance(workflow.get("next_action"), dict)
+            else None,
+            "review_decision_SHA256": accepted_review["review_decision_SHA256"],
+            "review_package_SHA256": review_prepare["review_package_SHA256"],
+        },
+        "review_state": "accepted",
+        "validation_state": "review_accepted",
+        "workflow_state": f"{binding.ticket_id}-REVIEW-ACCEPTED-HUMAN-GIT-HANDOFF-PREPARED",
+        "workflow_status": "review_accepted_pending_human_git_handoff",
+        "governed_workflow_state": "awaiting_human_git_handoff",
+        "human_git_handoff_state": "prepared_pending_human_execution",
+        "git_handoff_state": "human_git_authority_preserved",
+        "git_handoff_required": True,
+        "human_git_authority_preserved": True,
+        "ticket_closed": False,
+        "next_ticket_generated": False,
+        "P17_human_git_handoff_authority_reused": True,
+        "P18_governed_transition_reused": True,
+        "authority_expansion_required": False,
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "worker_process_started": False,
+        "Kanban_dispatch": False,
+        "retry_execution_started": False,
+        "automatic_retry_count": 0,
+        "automatic_requeue_count": 0,
+        "Kanban_requeue_calls": 0,
+        "Kanban_reclaim_calls": 0,
+        "Kanban_reassign_calls": 0,
+        "new_kanban_task_created": False,
+        "Git_commands_executed": 0,
+        "Docker_commands_executed": 0,
+        "Graphify_commands_executed": 0,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+        "next_action": _human_git_handoff_prepare_next_action(binding),
+    }
+    record["handoff_prepare_record_SHA256"] = _human_git_handoff_prepare_record_digest(record)
+    return record
+
+
+def _human_git_handoff_prepare_operational_result(
+    record: dict[str, Any],
+    *,
+    idempotent_replay: bool,
+) -> dict[str, Any]:
+    return {
+        "source_system": record["source_system"],
+        "schema_version": record["schema_version"],
+        "policy_id": record["policy_id"],
+        "idempotent_replay": idempotent_replay,
+        "handoff_preparation_recorded": True,
+        "project_id": record["project_id"],
+        "macroproject_id": record["macroproject_id"],
+        "ticket_id": record["ticket_id"],
+        "ticket_title": record["ticket_title"],
+        "work_packet_id": record["work_packet_id"],
+        "work_packet_SHA256": record["work_packet_SHA256"],
+        "reviewed_run_id": record["reviewed_run_id"],
+        "reviewed_candidate_SHA256": record["reviewed_candidate_SHA256"],
+        "review_decision_SHA256": record["review_decision_SHA256"],
+        "review_decision_identity_SHA256": record.get("review_decision_identity_SHA256"),
+        "review_prepare_action_SHA256": record["review_prepare_action_SHA256"],
+        "review_package_SHA256": record["review_package_SHA256"],
+        "handoff_prepare_identity_SHA256": record["handoff_prepare_identity_SHA256"],
+        "handoff_prepare_record_SHA256": record["handoff_prepare_record_SHA256"],
+        "P17_7_handoff_result_SHA256": record["P17_7_handoff_result_SHA256"],
+        "P17_7_handoff_package_SHA256": record["P17_7_handoff_package_SHA256"],
+        "P17_7_handoff_package_id": record["P17_7_handoff_package_id"],
+        "P17_7_handoff_id": record["P17_7_handoff_id"],
+        "P17_7_handoff_policy_id": record["P17_7_handoff_policy_id"],
+        "P17_7_handoff_state": record["P17_7_handoff_state"],
+        "P17_7_handoff_decision": record["P17_7_handoff_decision"],
+        "rendered_handoff_powershell": record["rendered_handoff_powershell"],
+        "rendered_powershell_SHA256": record["rendered_powershell_SHA256"],
+        "candidate_count": record["candidate_count"],
+        "candidate_paths": record["candidate_paths"],
+        "added_count": record["added_count"],
+        "modified_count": record["modified_count"],
+        "deleted_count": record["deleted_count"],
+        "branch": record["branch"],
+        "remote_name": record["remote_name"],
+        "expected_parent_commit": record["expected_parent_commit"],
+        "commit_message": record["commit_message"],
+        "human_git_handoff_state": record["human_git_handoff_state"],
+        "review_state": record["review_state"],
+        "validation_state": record["validation_state"],
+        "workflow_state": record["workflow_state"],
+        "workflow_status": record["workflow_status"],
+        "governed_workflow_state": record["governed_workflow_state"],
+        "git_handoff_required": record["git_handoff_required"],
+        "git_handoff_state": record["git_handoff_state"],
+        "ticket_closed": False,
+        "next_ticket_generated": False,
+        "P17_human_git_handoff_authority_reused": True,
+        "P18_governed_transition_reused": True,
+        "authority_expansion_required": False,
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "Kanban_dispatch": False,
+        "Git_commands_executed": 0,
+        "Docker_commands_executed": 0,
+        "Graphify_commands_executed": 0,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+        "next_action": record["next_action"],
+    }
+
+
+def _blocked_current_human_git_handoff_prepare_result(
+    projection: dict[str, Any],
+    *,
+    request: CurrentTicketHumanGitHandoffPrepareRequest,
+    blocker_code: str,
+    blocker_detail: str,
+    accepted_review: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "source_system": PEPPER_HUMAN_GIT_HANDOFF_PREPARE_SOURCE_SYSTEM,
+        "schema_version": PEPPER_HUMAN_GIT_HANDOFF_PREPARE_SCHEMA_VERSION,
+        "policy_id": PEPPER_HUMAN_GIT_HANDOFF_PREPARE_POLICY_ID,
+        "handoff_preparation_recorded": False,
+        "blocker_code": blocker_code,
+        "blocker_detail": _safe_text(blocker_detail, limit=500),
+        **_current_ticket_projection_identity_fields(projection),
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+        "requested_project_id": request.project_id,
+        "requested_ticket_id": request.ticket_id,
+        "requested_next_action_id": request.next_action_id,
+        "reviewed_run_id": accepted_review.get("reviewed_run_id") if accepted_review else None,
+        "reviewed_candidate_SHA256": accepted_review.get("reviewed_candidate_SHA256")
+        if accepted_review
+        else None,
+        "review_decision_SHA256": accepted_review.get("review_decision_SHA256")
+        if accepted_review
+        else None,
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "worker_process_started": False,
+        "Kanban_dispatch": False,
+        "Git_commands_executed": 0,
+        "Docker_commands_executed": 0,
+        "Graphify_commands_executed": 0,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+    }
 
 
 def _human_git_handoff_completion_next_action(
@@ -20398,6 +21504,58 @@ def _current_ticket_human_git_handoff_completion_overlay(
     return _human_git_handoff_completion_overlay_from_record(record)
 
 
+def _current_ticket_human_git_handoff_prepare_overlay(
+    projection: dict[str, Any],
+) -> dict[str, Any] | None:
+    record = load_current_ticket_human_git_handoff_prepare_record(
+        projection_record=projection,
+    )
+    if record is None:
+        return None
+    return {
+        "readiness": "human_git_handoff_prepared_pending_human_execution",
+        "workflow_state": record["workflow_state"],
+        "workflow_status": record["workflow_status"],
+        "validation_state": record["validation_state"],
+        "review_state": record["review_state"],
+        "recovery_state": "not_required",
+        "governed_workflow_state": record["governed_workflow_state"],
+        "human_git_handoff_state": record["human_git_handoff_state"],
+        "git_handoff_state": record["git_handoff_state"],
+        "git_handoff_required": True,
+        "human_git_handoff_prepare_authority": {
+            "policy_id": record["policy_id"],
+            "source_system": record["source_system"],
+            "handoff_prepare_identity_SHA256": record["handoff_prepare_identity_SHA256"],
+            "handoff_prepare_record_SHA256": record["handoff_prepare_record_SHA256"],
+            "reviewed_run_id": record["reviewed_run_id"],
+            "reviewed_candidate_SHA256": record["reviewed_candidate_SHA256"],
+            "review_decision_SHA256": record["review_decision_SHA256"],
+            "P17_7_handoff_result_SHA256": record["P17_7_handoff_result_SHA256"],
+            "P17_7_handoff_package_SHA256": record["P17_7_handoff_package_SHA256"],
+            "rendered_powershell_SHA256": record["rendered_powershell_SHA256"],
+            "candidate_paths": record["candidate_paths"],
+            "ticket_closed": False,
+        },
+        "current_ticket_human_git_handoff_prepare": _human_git_handoff_prepare_operational_result(
+            record,
+            idempotent_replay=True,
+        ),
+        "ticket_closed": False,
+        "next_ticket_generated": False,
+        "P17_human_git_handoff_authority_reused": True,
+        "P18_governed_transition_reused": True,
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "Kanban_dispatch": False,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+        "next_action": record["next_action"],
+    }
+
+
 def build_workflow_control_snapshot() -> dict[str, Any]:
     """Return the controlled cutover dashboard projection."""
 
@@ -20610,6 +21768,11 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
                 )
                 if review_decision_overlay is not None:
                     snapshot.update(review_decision_overlay)
+                handoff_prepare_overlay = _current_ticket_human_git_handoff_prepare_overlay(
+                    projection,
+                )
+                if handoff_prepare_overlay is not None:
+                    snapshot.update(handoff_prepare_overlay)
                 handoff_completion_overlay = _current_ticket_human_git_handoff_completion_overlay(
                     projection,
                 )
