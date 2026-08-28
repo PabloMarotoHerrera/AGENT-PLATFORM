@@ -1288,6 +1288,42 @@ def _prepare_current_ticket_review(args: dict[str, Any], **_kwargs) -> str:
     })
 
 
+def _inspect_current_ticket_review_candidate(args: dict[str, Any], **_kwargs) -> str:
+    pr = _runtime()
+    try:
+        result = pr.inspect_current_ticket_review_candidate(
+            operation=str(args.get("operation") or "list").strip() or "list",
+            candidate_path=str(
+                args.get("candidate_path") or args.get("path") or ""
+            ).strip()
+            or None,
+            project_id=str(args.get("project_id") or "").strip() or None,
+            ticket_id=str(args.get("ticket_id") or "").strip() or None,
+            reviewed_run_id=args.get("reviewed_run_id"),
+            review_package_SHA256=(
+                str(args.get("review_package_SHA256") or "").strip() or None
+            ),
+            review_prepare_action_SHA256=(
+                str(args.get("review_prepare_action_SHA256") or "").strip()
+                or None
+            ),
+            max_bytes=args.get("max_bytes"),
+        )
+    except Exception as exc:
+        return tool_error(str(exc) or "current review candidate inspection failed", success=False)
+    return _result({
+        "source_tool": "inspect_current_ticket_review_candidate",
+        **result,
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "Kanban_dispatch": False,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+    })
+
+
 def _accept_current_ticket_review(args: dict[str, Any], **_kwargs) -> str:
     pr = _runtime()
     try:
@@ -1772,6 +1808,56 @@ _PREPARE_CURRENT_TICKET_REVIEW_SCHEMA = {
 }
 
 
+_INSPECT_CURRENT_TICKET_REVIEW_CANDIDATE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "operation": {
+            "type": "string",
+            "enum": ["list", "metadata", "content", "diff", "aggregate_diff"],
+            "description": (
+                "Read-only inspection operation for the current prepared review candidate. "
+                "Use list first, then diff or content for an exact returned candidate_path."
+            ),
+        },
+        "candidate_path": {
+            "type": "string",
+            "description": (
+                "Repository-relative candidate path from the current prepared review package. "
+                "Required for content and diff; arbitrary paths are rejected."
+            ),
+        },
+        "project_id": {
+            "type": "string",
+            "description": "Optional governed project guard. Must be PEPPER if supplied.",
+        },
+        "ticket_id": {
+            "type": "string",
+            "description": "Optional governed ticket guard. Must equal the current governed ticket if supplied.",
+        },
+        "reviewed_run_id": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Optional guard for the prepared review's reviewed run ID.",
+        },
+        "review_package_SHA256": {
+            "type": "string",
+            "description": "Optional guard for the current prepared review package SHA-256.",
+        },
+        "review_prepare_action_SHA256": {
+            "type": "string",
+            "description": "Optional guard for the current review-prepare action SHA-256.",
+        },
+        "max_bytes": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Optional bounded byte limit for returned content or unified diff text.",
+        },
+    },
+    "required": ["operation"],
+    "additionalProperties": False,
+}
+
+
 _ACCEPT_CURRENT_TICKET_REVIEW_SCHEMA = {
     "type": "object",
     "properties": {
@@ -2199,6 +2285,24 @@ registry.register(
     handler=_prepare_current_ticket_review,
     emoji="P",
     max_result_size_chars=24000,
+)
+
+registry.register(
+    name="inspect_current_ticket_review_candidate",
+    toolset=TOOLSET,
+    schema={
+        "name": "inspect_current_ticket_review_candidate",
+        "description": (
+            "Read the exact current prepared Pepper review candidate through review-package authority. "
+            "Lists authorized candidate files and returns bounded candidate content or source-to-candidate "
+            "unified diffs after source/candidate SHA, WorkPacket scope, and scratch path containment checks. "
+            "Does not submit a review decision, mutate candidate files, dispatch workers, or mutate Git."
+        ),
+        "parameters": _INSPECT_CURRENT_TICKET_REVIEW_CANDIDATE_SCHEMA,
+    },
+    handler=_inspect_current_ticket_review_candidate,
+    emoji="I",
+    max_result_size_chars=64000,
 )
 
 registry.register(

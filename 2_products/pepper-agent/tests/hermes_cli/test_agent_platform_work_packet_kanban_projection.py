@@ -747,7 +747,14 @@ def _patch_synthetic_scratch_materialization(monkeypatch, pr) -> None:
         manifest_path = workspace_path / pr.PEPPER_SCRATCH_SOURCE_MATERIALIZATION_MANIFEST
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
         record = {
+            "policy_id": pr.PEPPER_SCRATCH_SOURCE_MATERIALIZATION_POLICY_ID,
             "source_materialized": True,
+            "ticket_id": _projection["ticket_id"],
+            "work_packet_id": _projection["work_packet_id"],
+            "work_packet_SHA256": _projection["work_packet_SHA256"],
+            "ticket_spec_SHA256": _projection["ticket_spec_SHA256"],
+            "projection_SHA256": _projection["projection_SHA256"],
+            "workspace_root": str(workspace_path),
             "dependency_substrate_materialized": True,
             "dependency_substrate_kind": "synthetic_test_fixture",
             "dependency_install_performed": False,
@@ -925,20 +932,41 @@ def _write_p18_9_2_terminal_candidate_fixture(
     pr,
     projection_home: Path,
     workspace: Path,
-) -> None:
+) -> dict:
     source_root = projection_home / "p18-9-2-terminal-candidate-source"
     modified_files = {
         "2_products/pepper-agent/web/src/agent-platform/runtime-overview/contract.ts": (
             "export interface RuntimeOverview { status: string }\n",
-            "export interface RuntimeOverview { status: string; queueDepth: number }\n",
+            "export interface RuntimeOverview {\n"
+            "  currentWork: string\n"
+            "  nextGovernedAction: string\n"
+            "  needsAttention: string[]\n"
+            "  execution: string\n"
+            "  governedState: string\n"
+            "}\n",
         ),
         "2_products/pepper-agent/web/src/agent-platform/runtime-overview/runtime-overview-page.tsx": (
             "export function RuntimeOverviewPage() { return null }\n",
-            "export function RuntimeOverviewPage() { return <section>Control Center</section> }\n",
+            "export function RuntimeOverviewPage() {\n"
+            "  return (\n"
+            "    <section aria-label=\"Control Center Overview\">\n"
+            "      <h2>Current Work</h2>\n"
+            "      <h2>Next Governed Action</h2>\n"
+            "      <h2>Needs Attention</h2>\n"
+            "      <h2>Execution</h2>\n"
+            "      <h2>Governed State</h2>\n"
+            "    </section>\n"
+            "  )\n"
+            "}\n",
         ),
         "2_products/pepper-agent/web/src/agent-platform/runtime-overview/runtime-overview.test.tsx": (
             "import { expect, test } from 'vitest'\n",
-            "import { expect, test } from 'vitest'\ntest('renders overview', () => expect(true).toBe(true))\n",
+            "import { expect, test } from 'vitest'\n"
+            "test('renders Current Work', () => expect('Current Work').toContain('Current'))\n"
+            "test('renders Next Governed Action', () => expect('Next Governed Action').toContain('Governed'))\n"
+            "test('renders Needs Attention', () => expect('Needs Attention').toContain('Attention'))\n"
+            "test('renders Execution', () => expect('Execution').toContain('Execution'))\n"
+            "test('renders Governed State', () => expect('Governed State').toContain('State'))\n",
         ),
     }
     for relative_path, (source_text, workspace_text) in modified_files.items():
@@ -958,6 +986,12 @@ def _write_p18_9_2_terminal_candidate_fixture(
         json.dumps(manifest, sort_keys=True, indent=2) + "\n",
         encoding="utf-8",
     )
+    return {
+        "source_root": source_root,
+        "workspace_root": workspace,
+        "modified_files": modified_files,
+        "manifest_path": manifest_path,
+    }
 
 
 def _finish_projected_run_as_review_required_terminal(
@@ -4050,7 +4084,7 @@ def test_lead_agent_tool_prepares_p18_9_2_review_from_current_ticket_authority(
 def _p18_9_2_review_ready_for_tool_test(projection_home, monkeypatch, *, pid: int):
     state = _recovered_p18_9_2_dependency_failure_fixture(projection_home, monkeypatch)
     retry = _start_recovered_p18_9_2_retry_for_test(state, monkeypatch, pid=pid)
-    _write_p18_9_2_terminal_candidate_fixture(
+    state.candidate_fixture = _write_p18_9_2_terminal_candidate_fixture(
         state.pr,
         projection_home,
         Path(retry["workspace_path"]),
@@ -4178,7 +4212,7 @@ def _p18_9_2_two_round_changes_requested_fixture(
     pr = fixture.pr
     started_14 = fixture.started_14
 
-    _write_p18_9_2_terminal_candidate_fixture(
+    state.candidate_fixture = _write_p18_9_2_terminal_candidate_fixture(
         pr,
         projection_home,
         Path(started_14["workspace_path"]),
@@ -4201,6 +4235,36 @@ def _p18_9_2_two_round_changes_requested_fixture(
         changed_13=fixture.changed_13,
         revision_request=fixture.revision_request,
         started_14=started_14,
+    )
+
+
+def _p18_9_2_prepared_review_candidate_fixture(
+    projection_home,
+    monkeypatch,
+    *,
+    pid: int = 6820,
+):
+    state, retry = _p18_9_2_review_ready_for_tool_test(
+        projection_home,
+        monkeypatch,
+        pid=pid,
+    )
+    review = state.pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_REVIEW",
+    )
+    candidate_files = review["kanban_completion_result"]["candidate_changes_reference"][
+        "files"
+    ]
+    return SimpleNamespace(
+        state=state,
+        pr=state.pr,
+        retry=retry,
+        review=review,
+        candidate_files=candidate_files,
+        candidate_paths=[item["path"] for item in candidate_files],
+        candidate_fixture=state.candidate_fixture,
     )
 
 
@@ -5305,6 +5369,433 @@ def test_p18_9_2_round_two_review_ready_triage_task_tool_path_prepares_fresh_rev
         assert result["Git_mutation"] is False
     assert fresh_review["review_decision_recorded"] is False
     assert fresh_next_action["workflow_status"] == "review_prepared_pending_human_acceptance"
+
+
+def test_p18_9_2_current_review_candidate_list_content_diff_and_aggregate_flow(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _p18_9_2_prepared_review_candidate_fixture(
+        projection_home,
+        monkeypatch,
+        pid=6821,
+    )
+    pr = fixture.pr
+    page_path = (
+        "2_products/pepper-agent/web/src/agent-platform/runtime-overview/"
+        "runtime-overview-page.tsx"
+    )
+    page_entry = next(item for item in fixture.candidate_files if item["path"] == page_path)
+
+    listed = pr.inspect_current_ticket_review_candidate(
+        operation="list",
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        reviewed_run_id=fixture.review["successful_run_id"],
+        review_package_SHA256=fixture.review["review_package_SHA256"],
+        review_prepare_action_SHA256=fixture.review["review_prepare_action_SHA256"],
+    )
+
+    assert listed["inspection_status"] == "available"
+    assert listed["review_package_SHA256"] == fixture.review["review_package_SHA256"]
+    assert listed["review_prepare_action_SHA256"] == fixture.review[
+        "review_prepare_action_SHA256"
+    ]
+    assert listed["reviewed_run_id"] == fixture.retry["kanban_run_id"]
+    assert listed["candidate_file_count"] == 3
+    assert listed["candidate_paths"] == fixture.candidate_paths
+    assert [item["path"] for item in listed["candidate_files"]] == fixture.candidate_paths
+    assert listed["integrity_validation_result"] == "passed"
+    assert listed["WorkPacket_scope_validation_result"] == "passed"
+    assert listed["Git_mutation"] is False
+    assert listed["dispatch_performed"] is False
+    assert listed["worker_execution"] is False
+    assert listed["review_state_mutation"] is False
+    assert listed["candidate_mutation"] is False
+
+    content_1 = pr.inspect_current_ticket_review_candidate(
+        operation="content",
+        candidate_path=page_path,
+    )
+    content_2 = pr.inspect_current_ticket_review_candidate(
+        operation="content",
+        candidate_path=page_path,
+    )
+    assert content_1["inspection_status"] == "content_available"
+    assert content_1["content"] == content_2["content"]
+    assert content_1["source_SHA256"] == page_entry["source_SHA256"]
+    assert content_1["candidate_SHA256"] == page_entry["workspace_SHA256"]
+    assert content_1["candidate_byte_count"] == len(
+        (fixture.candidate_fixture["workspace_root"] / page_path).read_bytes()
+    )
+    assert content_1["content_truncated"] is False
+    assert content_1["content_complete"] is True
+    for marker in (
+        "Current Work",
+        "Next Governed Action",
+        "Needs Attention",
+        "Execution",
+        "Governed State",
+    ):
+        assert marker in content_1["content"]
+
+    diff_1 = pr.inspect_current_ticket_review_candidate(
+        operation="diff",
+        candidate_path=page_path,
+    )
+    diff_2 = pr.inspect_current_ticket_review_candidate(
+        operation="diff",
+        candidate_path=page_path,
+    )
+    assert diff_1["inspection_status"] == "diff_available"
+    assert diff_1["unified_diff"] == diff_2["unified_diff"]
+    assert diff_1["diff_truncated"] is False
+    assert diff_1["diff_complete"] is True
+    assert f"--- a/{page_path}" in diff_1["unified_diff"]
+    assert f"+++ b/{page_path}" in diff_1["unified_diff"]
+    assert "-export function RuntimeOverviewPage() { return null }" in diff_1[
+        "unified_diff"
+    ]
+    assert "+      <h2>Current Work</h2>" in diff_1["unified_diff"]
+
+    aggregate = pr.inspect_current_ticket_review_candidate(operation="aggregate_diff")
+    assert aggregate["inspection_status"] == "aggregate_diff_available"
+    assert aggregate["diff_truncated"] is False
+    for candidate_path in fixture.candidate_paths:
+        assert f"+++ b/{candidate_path}" in aggregate["unified_diff"]
+    assert "test('renders Current Work'" in aggregate["unified_diff"]
+
+    truncated = pr.inspect_current_ticket_review_candidate(
+        operation="diff",
+        candidate_path=page_path,
+        max_bytes=120,
+    )
+    assert truncated["diff_truncated"] is True
+    assert truncated["diff_complete"] is False
+    assert truncated["retained_diff_byte_count"] <= 120
+
+    after = pr.build_workflow_control_snapshot()
+    assert after["review_state"] == "prepared_pending_human_acceptance"
+    assert after["review_decision_recorded"] is False
+    assert after["next_action"]["id"] == "SUBMIT_P18_9_2_REVIEW_DECISION"
+    assert after["Git_mutation"] is False
+
+
+def test_p18_9_2_current_review_candidate_tool_path_full_inspection_flow(
+    projection_home,
+    monkeypatch,
+) -> None:
+    import tools.pepper_workflow_tools  # noqa: F401
+    from model_tools import handle_function_call
+
+    fixture = _p18_9_2_prepared_review_candidate_fixture(
+        projection_home,
+        monkeypatch,
+        pid=6822,
+    )
+
+    status = json.loads(handle_function_call("get_review_status", {}))
+    assert status["success"] is True
+    assert status["review_state"] == "prepared_pending_human_acceptance"
+    assert status["review_decision_recorded"] is False
+
+    listed = json.loads(
+        handle_function_call(
+            "inspect_current_ticket_review_candidate",
+            {
+                "operation": "list",
+                "project_id": "PEPPER",
+                "ticket_id": "P18.9.2",
+                "reviewed_run_id": fixture.review["successful_run_id"],
+                "review_package_SHA256": fixture.review["review_package_SHA256"],
+            },
+        )
+    )
+    assert listed["success"] is True, listed
+    assert listed["inspection_status"] == "available"
+    assert [item["path"] for item in listed["candidate_files"]] == fixture.candidate_paths
+
+    diffs = []
+    for candidate_path in fixture.candidate_paths:
+        inspected = json.loads(
+            handle_function_call(
+                "inspect_current_ticket_review_candidate",
+                {"operation": "diff", "candidate_path": candidate_path},
+            )
+        )
+        assert inspected["success"] is True, inspected
+        assert inspected["inspection_status"] == "diff_available"
+        assert inspected["candidate_path"] == candidate_path
+        assert inspected["Git_mutation"] is False
+        assert inspected["dispatch_performed"] is False
+        assert inspected["worker_execution"] is False
+        diffs.append(inspected["unified_diff"])
+
+    combined = "\n".join(diffs)
+    for marker in (
+        "Current Work",
+        "Next Governed Action",
+        "Needs Attention",
+        "Execution",
+        "Governed State",
+        "test('renders Current Work'",
+    ):
+        assert marker in combined
+
+    fresh_status = json.loads(handle_function_call("get_review_status", {}))
+    assert fresh_status["success"] is True
+    assert fresh_status["review_state"] == "prepared_pending_human_acceptance"
+    assert fresh_status["review_decision_recorded"] is False
+    assert fresh_status["Git_mutation"] is False
+
+
+def test_p18_9_2_review_candidate_inspection_rejects_unbound_and_guard_mismatches(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _p18_9_2_prepared_review_candidate_fixture(
+        projection_home,
+        monkeypatch,
+        pid=6823,
+    )
+    pr = fixture.pr
+
+    wrong_path = pr.inspect_current_ticket_review_candidate(
+        operation="diff",
+        candidate_path="2_products/pepper-agent/web/src/agent-platform/runtime-overview/not-bound.tsx",
+    )
+    assert wrong_path["inspection_status"] == "blocked"
+    assert wrong_path["blocker_code"] == "CANDIDATE_PATH_NOT_AUTHORIZED"
+
+    traversal = pr.inspect_current_ticket_review_candidate(
+        operation="content",
+        candidate_path="../outside.txt",
+    )
+    assert traversal["inspection_status"] == "blocked"
+    assert traversal["blocker_code"] == "PATH_CONTAINMENT_BLOCKER"
+
+    wrong_run = pr.inspect_current_ticket_review_candidate(
+        operation="list",
+        reviewed_run_id=fixture.review["successful_run_id"] + 1,
+    )
+    assert wrong_run["inspection_status"] == "blocked"
+    assert wrong_run["blocker_code"] == "REVIEW_RUN_GUARD_MISMATCH"
+
+    wrong_package = pr.inspect_current_ticket_review_candidate(
+        operation="list",
+        review_package_SHA256="0" * 64,
+    )
+    assert wrong_package["inspection_status"] == "blocked"
+    assert wrong_package["blocker_code"] == "REVIEW_PACKAGE_GUARD_MISMATCH"
+
+    wrong_ticket = pr.inspect_current_ticket_review_candidate(
+        operation="list",
+        ticket_id="P18.9.1",
+    )
+    assert wrong_ticket["inspection_status"] == "blocked"
+    assert wrong_ticket["blocker_code"] == "TICKET_GUARD_MISMATCH"
+
+
+@pytest.mark.parametrize(
+    ("side", "blocker_detail"),
+    [
+        ("source", "source SHA256 drifted"),
+        ("candidate", "workspace SHA256 drifted"),
+    ],
+)
+def test_p18_9_2_review_candidate_inspection_fails_closed_on_hash_drift(
+    projection_home,
+    monkeypatch,
+    side: str,
+    blocker_detail: str,
+) -> None:
+    fixture = _p18_9_2_prepared_review_candidate_fixture(
+        projection_home,
+        monkeypatch,
+        pid=6824,
+    )
+    pr = fixture.pr
+    rel = fixture.candidate_paths[0]
+    root = (
+        fixture.candidate_fixture["source_root"]
+        if side == "source"
+        else fixture.candidate_fixture["workspace_root"]
+    )
+    (root / rel).write_text(blocker_detail + "\n", encoding="utf-8")
+
+    result = pr.inspect_current_ticket_review_candidate(
+        operation="content",
+        candidate_path=rel,
+    )
+
+    assert result["inspection_status"] == "blocked"
+    assert result["blocker_code"] == "CANDIDATE_INTEGRITY_BLOCKER"
+    assert result["Git_mutation"] is False
+
+
+def test_p18_9_2_review_candidate_inspection_historical_package_cannot_shadow_current(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _p18_9_2_two_round_changes_requested_fixture(
+        projection_home,
+        monkeypatch,
+        first_pid=6825,
+        revision_pid=6826,
+        terminal_task_status="triage",
+    )
+    current = fixture.pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_REVIEW",
+    )
+
+    listed = fixture.pr.inspect_current_ticket_review_candidate(operation="list")
+    assert listed["inspection_status"] == "available"
+    assert listed["reviewed_run_id"] == fixture.started_14["kanban_run_id"]
+    assert listed["review_package_SHA256"] == current["review_package_SHA256"]
+    assert listed["review_package_SHA256"] != fixture.prepared_13[
+        "review_package_SHA256"
+    ]
+
+    historical_guard = fixture.pr.inspect_current_ticket_review_candidate(
+        operation="list",
+        review_package_SHA256=fixture.prepared_13["review_package_SHA256"],
+    )
+    assert historical_guard["inspection_status"] == "blocked"
+    assert historical_guard["blocker_code"] == "REVIEW_PACKAGE_GUARD_MISMATCH"
+
+
+def test_p18_9_2_review_candidate_inspection_rejects_symlink_escape(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _p18_9_2_prepared_review_candidate_fixture(
+        projection_home,
+        monkeypatch,
+        pid=6827,
+    )
+    rel = fixture.candidate_paths[1]
+    expected_text = fixture.candidate_fixture["modified_files"][rel][1]
+    outside = projection_home / "outside-candidate.tsx"
+    outside.write_text(expected_text, encoding="utf-8")
+    candidate_path = fixture.candidate_fixture["workspace_root"] / rel
+    candidate_path.unlink()
+    _make_file_symlink_or_skip(candidate_path, outside)
+
+    result = fixture.pr.inspect_current_ticket_review_candidate(
+        operation="content",
+        candidate_path=rel,
+    )
+
+    assert result["inspection_status"] == "blocked"
+    assert result["blocker_code"] == "PATH_CONTAINMENT_BLOCKER"
+    assert result["Git_mutation"] is False
+
+
+def test_p18_9_2_review_candidate_inspection_missing_candidate_fails_closed(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _p18_9_2_prepared_review_candidate_fixture(
+        projection_home,
+        monkeypatch,
+        pid=6828,
+    )
+    rel = fixture.candidate_paths[1]
+    (fixture.candidate_fixture["workspace_root"] / rel).unlink()
+
+    result = fixture.pr.inspect_current_ticket_review_candidate(
+        operation="content",
+        candidate_path=rel,
+    )
+
+    assert result["inspection_status"] == "blocked"
+    assert result["blocker_code"] == "CANDIDATE_INTEGRITY_BLOCKER"
+
+
+def test_p18_9_2_review_candidate_inspection_workspace_escape_fails_closed(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _p18_9_2_prepared_review_candidate_fixture(
+        projection_home,
+        monkeypatch,
+        pid=6830,
+    )
+    manifest_path = fixture.candidate_fixture["manifest_path"]
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["workspace_root"] = str(projection_home / "outside-candidate-workspace")
+    manifest_path.write_text(
+        json.dumps(manifest, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    result = fixture.pr.inspect_current_ticket_review_candidate(
+        operation="content",
+        candidate_path=fixture.candidate_paths[0],
+    )
+
+    assert result["inspection_status"] == "blocked"
+    assert result["blocker_code"] == "CANDIDATE_INTEGRITY_BLOCKER"
+    assert result["Git_mutation"] is False
+
+
+def test_p18_9_2_review_candidate_inspection_binary_candidate_is_metadata_only(
+    projection_home,
+    monkeypatch,
+) -> None:
+    state = _recovered_p18_9_2_dependency_failure_fixture(projection_home, monkeypatch)
+    retry = _start_recovered_p18_9_2_retry_for_test(state, monkeypatch, pid=6829)
+    candidate_fixture = _write_p18_9_2_terminal_candidate_fixture(
+        state.pr,
+        projection_home,
+        Path(retry["workspace_path"]),
+    )
+    binary_rel = (
+        "2_products/pepper-agent/web/src/agent-platform/runtime-overview/"
+        "overview-artifact.bin"
+    )
+    source_binary = candidate_fixture["source_root"] / binary_rel
+    candidate_binary = candidate_fixture["workspace_root"] / binary_rel
+    source_binary.parent.mkdir(parents=True, exist_ok=True)
+    candidate_binary.parent.mkdir(parents=True, exist_ok=True)
+    source_binary.write_bytes(b"\x00source\x01")
+    candidate_binary.write_bytes(b"\x00candidate\x02")
+    _finish_projected_run_as_review_required_terminal(
+        state.kanban_db,
+        state.projected,
+        retry["kanban_run_id"],
+        summary=(
+            "review-required: P18.9.2 Control Center Overview implementation is ready "
+            "for human/code review; governed frontend validation passed."
+        ),
+    )
+    review = state.pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_REVIEW",
+    )
+    assert review["kanban_completion_result"]["candidate_changes_reference"][
+        "files_changed"
+    ] == 4
+
+    content = state.pr.inspect_current_ticket_review_candidate(
+        operation="content",
+        candidate_path=binary_rel,
+    )
+    diff = state.pr.inspect_current_ticket_review_candidate(
+        operation="diff",
+        candidate_path=binary_rel,
+    )
+
+    for result in (content, diff):
+        assert result["inspection_status"] == "metadata_only"
+        assert result["candidate_path"] == binary_rel
+        assert result["candidate_text_supported"] is False
+        assert result["Git_mutation"] is False
+    assert content["content"] is None
+    assert diff["unified_diff"] is None
 
 
 @pytest.mark.parametrize(

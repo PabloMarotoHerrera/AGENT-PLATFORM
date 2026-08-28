@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 import difflib
+import fnmatch
 import hashlib
 import json
 import os
@@ -101,6 +102,16 @@ PEPPER_REVIEW_PREPARE_ACTION_DIGEST_ALGORITHM = (
 PEPPER_REVIEW_PREPARE_PACKAGE_DIGEST_ALGORITHM = (
     "agent-platform-pepper-p18-9-0-review-package-sha256-v1"
 )
+PEPPER_REVIEW_CANDIDATE_INSPECTION_SOURCE_SYSTEM = (
+    "pepper-review-candidate-inspection"
+)
+PEPPER_REVIEW_CANDIDATE_INSPECTION_SCHEMA_VERSION = 1
+PEPPER_REVIEW_CANDIDATE_INSPECTION_POLICY_ID = (
+    "pepper-current-review-candidate-inspection-v1"
+)
+PEPPER_REVIEW_CANDIDATE_CONTENT_MAX_BYTES = 24_000
+PEPPER_REVIEW_CANDIDATE_DIFF_MAX_BYTES = 32_000
+PEPPER_REVIEW_CANDIDATE_AGGREGATE_DIFF_MAX_BYTES = 48_000
 PEPPER_ACCEPTANCE_CONTRACT_DIGEST_ALGORITHM = (
     "agent-platform-pepper-p18-9-0-acceptance-contract-sha256-v1"
 )
@@ -411,6 +422,15 @@ class ProductRuntimeNotFound(ProductRuntimeError):
 
 class ProductRuntimeConflict(ProductRuntimeError):
     """Raised when a source-local identifier is ambiguous."""
+
+
+class ProductRuntimeCandidateInspectionBlocked(ProductRuntimeConflict):
+    """Raised when prepared candidate inspection must fail closed."""
+
+    def __init__(self, blocker_code: str, blocker_detail: str) -> None:
+        self.blocker_code = blocker_code
+        self.blocker_detail = blocker_detail
+        super().__init__(blocker_detail)
 
 
 class ProductRuntimeAuthorityMismatch(ProductRuntimeConflict):
@@ -3745,6 +3765,25 @@ def load_current_ticket_review_prepare_record(
         raise
 
 
+def _load_current_ticket_review_prepare_record_raw(
+    *,
+    projection_record: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    projection = projection_record if projection_record is not None else _load_current_projection_record()
+    path = review_prepare_record_path_for_ticket(str(projection["ticket_id"]))
+    if not path.exists():
+        return None
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ProductRuntimeConflict(
+            f"{projection['ticket_id']} review-preparation record is unreadable"
+        ) from exc
+    if not isinstance(record, dict):
+        raise ProductRuntimeConflict("review-preparation record must be an object")
+    return record
+
+
 def _review_record_projection_identity_matches(
     record: dict[str, Any],
     projection: dict[str, Any],
@@ -6949,6 +6988,122 @@ def prepare_current_ticket_review(
     )
     _persist_review_prepare_record(record)
     return _review_prepare_operational_result(record, idempotent_replay=False)
+
+
+def inspect_current_ticket_review_candidate(
+    *,
+    operation: str = "list",
+    candidate_path: str | None = None,
+    project_id: str | None = None,
+    ticket_id: str | None = None,
+    reviewed_run_id: int | None = None,
+    review_package_SHA256: str | None = None,
+    review_prepare_action_SHA256: str | None = None,
+    max_bytes: int | None = None,
+) -> dict[str, Any]:
+    """Inspect the current prepared review candidate without mutating state."""
+
+    projection = _load_current_projection_record()
+    raw_record_for_blocker: dict[str, Any] | None = None
+    try:
+        binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
+        _validate_current_review_candidate_inspection_request(
+            operation=operation,
+            candidate_path=candidate_path,
+            project_id=project_id,
+            ticket_id=ticket_id,
+            reviewed_run_id=reviewed_run_id,
+            review_package_SHA256=review_package_SHA256,
+            review_prepare_action_SHA256=review_prepare_action_SHA256,
+            binding=binding,
+        )
+        raw_record = _load_current_ticket_review_prepare_record_raw(
+            projection_record=projection,
+        )
+        raw_record_for_blocker = raw_record
+        if raw_record is None:
+            return _review_candidate_inspection_blocked_result(
+                projection,
+                operation=operation,
+                blocker_code="CURRENT_REVIEW_PACKAGE_MISSING",
+                blocker_detail="current ticket review inspection requires a prepared review package",
+            )
+        guard_blocker = _current_review_candidate_guard_blocker(
+            raw_record,
+            reviewed_run_id=reviewed_run_id,
+            review_package_SHA256=review_package_SHA256,
+            review_prepare_action_SHA256=review_prepare_action_SHA256,
+        )
+        if guard_blocker is not None:
+            code, detail = guard_blocker
+            return _review_candidate_inspection_blocked_result(
+                projection,
+                operation=operation,
+                review_prepare=raw_record,
+                blocker_code=code,
+                blocker_detail=detail,
+            )
+        review_prepare = validate_p18_9_0_review_prepare_record(
+            raw_record,
+            projection_record=projection,
+        )
+    except ProductRuntimeCandidateInspectionBlocked as exc:
+        return _review_candidate_inspection_blocked_result(
+            projection,
+            operation=operation,
+            blocker_code=exc.blocker_code,
+            blocker_detail=exc.blocker_detail,
+        )
+    except ProductRuntimeConflict as exc:
+        blocker_code = (
+            "CANDIDATE_INTEGRITY_BLOCKER"
+            if _review_candidate_validation_conflict_is_integrity_drift(
+                raw_record_for_blocker,
+                exc,
+            )
+            else "CURRENT_REVIEW_PACKAGE_INVALID"
+        )
+        return _review_candidate_inspection_blocked_result(
+            projection,
+            operation=operation,
+            blocker_code=blocker_code,
+            blocker_detail=str(exc) or "current review package is invalid",
+        )
+
+    workflow = build_workflow_control_snapshot()
+    if workflow.get("review_state") != "prepared_pending_human_acceptance":
+        return _review_candidate_inspection_blocked_result(
+            projection,
+            operation=operation,
+            review_prepare=review_prepare,
+            blocker_code="CURRENT_REVIEW_NOT_PREPARED_PENDING_HUMAN_DECISION",
+            blocker_detail="candidate inspection requires the current prepared review boundary",
+        )
+    if workflow.get("review_decision_recorded") is True:
+        return _review_candidate_inspection_blocked_result(
+            projection,
+            operation=operation,
+            review_prepare=review_prepare,
+            blocker_code="CURRENT_REVIEW_ALREADY_DECIDED",
+            blocker_detail="candidate inspection must not shadow an already-recorded review decision",
+        )
+
+    try:
+        return _build_current_review_candidate_inspection_result(
+            projection=projection,
+            review_prepare=review_prepare,
+            operation=operation,
+            candidate_path=candidate_path,
+            max_bytes=max_bytes,
+        )
+    except ProductRuntimeCandidateInspectionBlocked as exc:
+        return _review_candidate_inspection_blocked_result(
+            projection,
+            operation=operation,
+            review_prepare=review_prepare,
+            blocker_code=exc.blocker_code,
+            blocker_detail=exc.blocker_detail,
+        )
 
 
 def accept_current_ticket_review(
@@ -11740,6 +11895,999 @@ def _governed_autonomy_candidate_changes_reference(
             totals["modified"] + totals["created"] + totals["deleted"] > max_files
         ),
         "files": changes,
+    }
+
+
+_REVIEW_CANDIDATE_INSPECTION_OPERATIONS = frozenset({
+    "list",
+    "metadata",
+    "content",
+    "diff",
+    "aggregate_diff",
+})
+_REVIEW_CANDIDATE_CHANGE_TYPES = frozenset({"modified", "created", "deleted"})
+
+
+def _validate_current_review_candidate_inspection_request(
+    *,
+    operation: str,
+    candidate_path: str | None,
+    project_id: str | None,
+    ticket_id: str | None,
+    reviewed_run_id: int | None,
+    review_package_SHA256: str | None,
+    review_prepare_action_SHA256: str | None,
+    binding: GovernedTicketLifecycleBinding,
+) -> None:
+    operation_id = str(operation or "list").strip().lower()
+    if operation_id not in _REVIEW_CANDIDATE_INSPECTION_OPERATIONS:
+        raise ProductRuntimeCandidateInspectionBlocked(
+            "REVIEW_CANDIDATE_OPERATION_INVALID",
+            "review candidate inspection operation is not supported",
+        )
+    if operation_id in {"content", "diff"} and not str(candidate_path or "").strip():
+        raise ProductRuntimeCandidateInspectionBlocked(
+            "REVIEW_CANDIDATE_PATH_REQUIRED",
+            "candidate_path is required for content or diff inspection",
+        )
+    if candidate_path is not None:
+        try:
+            _normalize_runtime_relative_path(candidate_path)
+        except ProductRuntimeConflict as exc:
+            raise ProductRuntimeCandidateInspectionBlocked(
+                "PATH_CONTAINMENT_BLOCKER",
+                str(exc) or "candidate path is not repository-relative",
+            ) from exc
+    if project_id not in {None, "", binding.project_id}:
+        raise ProductRuntimeCandidateInspectionBlocked(
+            "PROJECT_GUARD_MISMATCH",
+            "candidate inspection project guard does not match current project",
+        )
+    if ticket_id not in {None, "", binding.ticket_id}:
+        raise ProductRuntimeCandidateInspectionBlocked(
+            "TICKET_GUARD_MISMATCH",
+            "candidate inspection ticket guard does not match current ticket",
+        )
+    if reviewed_run_id is not None and (
+        isinstance(reviewed_run_id, bool) or _int_or_none(reviewed_run_id) is None
+    ):
+        raise ProductRuntimeCandidateInspectionBlocked(
+            "REVIEW_RUN_GUARD_INVALID",
+            "candidate inspection reviewed_run_id guard is invalid",
+        )
+    for label, value in (
+        ("review_package_SHA256", review_package_SHA256),
+        ("review_prepare_action_SHA256", review_prepare_action_SHA256),
+    ):
+        if value not in {None, ""} and not _SAFE_SHA256.fullmatch(str(value)):
+            raise ProductRuntimeCandidateInspectionBlocked(
+                "REVIEW_PACKAGE_GUARD_INVALID",
+                f"candidate inspection {label} guard is invalid",
+            )
+
+
+def _current_review_candidate_guard_blocker(
+    review_prepare: dict[str, Any],
+    *,
+    reviewed_run_id: int | None,
+    review_package_SHA256: str | None,
+    review_prepare_action_SHA256: str | None,
+) -> tuple[str, str] | None:
+    if reviewed_run_id is not None and _int_or_none(reviewed_run_id) != _int_or_none(
+        review_prepare.get("successful_run_id")
+    ):
+        return (
+            "REVIEW_RUN_GUARD_MISMATCH",
+            "candidate inspection reviewed_run_id guard does not match the current prepared review",
+        )
+    if review_package_SHA256 and review_package_SHA256 != review_prepare.get(
+        "review_package_SHA256"
+    ):
+        return (
+            "REVIEW_PACKAGE_GUARD_MISMATCH",
+            "candidate inspection review_package_SHA256 guard does not match the current prepared review",
+        )
+    if review_prepare_action_SHA256 and review_prepare_action_SHA256 != review_prepare.get(
+        "review_prepare_action_SHA256"
+    ):
+        return (
+            "REVIEW_PREPARE_GUARD_MISMATCH",
+            "candidate inspection review_prepare_action_SHA256 guard does not match the current prepared review",
+        )
+    return None
+
+
+def _review_candidate_inspection_base_result(
+    projection: dict[str, Any],
+    *,
+    operation: str,
+    review_prepare: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    operation_id = str(operation or "list").strip().lower() or "list"
+    result = {
+        "source_system": PEPPER_REVIEW_CANDIDATE_INSPECTION_SOURCE_SYSTEM,
+        "schema_version": PEPPER_REVIEW_CANDIDATE_INSPECTION_SCHEMA_VERSION,
+        "policy_id": PEPPER_REVIEW_CANDIDATE_INSPECTION_POLICY_ID,
+        "operation": operation_id,
+        "project_id": projection.get("project_id"),
+        "ticket_id": projection.get("ticket_id"),
+        "ticket_spec_SHA256": projection.get("ticket_spec_SHA256"),
+        "work_packet_id": projection.get("work_packet_id"),
+        "work_packet_SHA256": projection.get("work_packet_SHA256"),
+        "projection_SHA256": projection.get("projection_SHA256"),
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "worker_process_started": False,
+        "Kanban_dispatch": False,
+        "review_decision_recorded": False,
+        "review_state_mutation": False,
+        "candidate_mutation": False,
+        "Git_commands_executed": 0,
+        "Docker_commands_executed": 0,
+        "Graphify_commands_executed": 0,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+    }
+    if isinstance(review_prepare, dict):
+        completion = review_prepare.get("kanban_completion_result")
+        candidate_reference = (
+            completion.get("candidate_changes_reference")
+            if isinstance(completion, dict)
+            else None
+        )
+        result.update({
+            "review_prepare_action_SHA256": review_prepare.get(
+                "review_prepare_action_SHA256"
+            ),
+            "review_package_SHA256": review_prepare.get("review_package_SHA256"),
+            "acceptance_contract_SHA256": review_prepare.get(
+                "acceptance_contract_SHA256"
+            ),
+            "criteria_revision_SHA256": review_prepare.get("criteria_revision_SHA256"),
+            "kanban_completion_result_SHA256": review_prepare.get(
+                "kanban_completion_result_SHA256"
+            ),
+            "reviewed_run_id": review_prepare.get("successful_run_id"),
+            "reviewed_run_status": review_prepare.get("successful_run_status"),
+            "reviewed_run_outcome": review_prepare.get("successful_run_outcome"),
+            "reviewed_candidate_SHA256": _review_candidate_reference_digest(
+                projection,
+                review_prepare,
+                candidate_reference,
+            ),
+        })
+    return result
+
+
+def _review_candidate_inspection_blocked_result(
+    projection: dict[str, Any],
+    *,
+    operation: str,
+    blocker_code: str,
+    blocker_detail: str,
+    review_prepare: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    result = _review_candidate_inspection_base_result(
+        projection,
+        operation=operation,
+        review_prepare=review_prepare,
+    )
+    result.update({
+        "inspection_status": "blocked",
+        "blocker_code": blocker_code,
+        "blocker_detail": _safe_text(blocker_detail, limit=500),
+        "integrity_validation_result": "blocked",
+        "WorkPacket_scope_validation_result": "blocked",
+    })
+    return result
+
+
+def _review_candidate_reference_digest(
+    projection: dict[str, Any],
+    review_prepare: dict[str, Any],
+    candidate_reference: Any,
+) -> str | None:
+    if not _governed_autonomy_candidate_changes_available(candidate_reference):
+        return None
+    run_id = _int_or_none(review_prepare.get("successful_run_id"))
+    if run_id is None:
+        return None
+    return _digest_payload(
+        "pepper-current-ticket-reviewed-candidate-reference-sha256-v1",
+        {
+            "ticket_id": projection["ticket_id"],
+            "work_packet_SHA256": projection["work_packet_SHA256"],
+            "terminal_run_id": run_id,
+            "candidate_changes_reference": candidate_reference,
+        },
+    )
+
+
+def _review_candidate_validation_conflict_is_integrity_drift(
+    review_prepare: dict[str, Any] | None,
+    _exc: ProductRuntimeConflict,
+) -> bool:
+    if not isinstance(review_prepare, dict):
+        return False
+    try:
+        digest_matches = review_prepare.get(
+            "review_prepare_action_SHA256"
+        ) == _review_prepare_record_digest(review_prepare)
+    except Exception:
+        return False
+    if not digest_matches:
+        return False
+    completion = review_prepare.get("kanban_completion_result")
+    if not isinstance(completion, dict):
+        return False
+    if not _governed_autonomy_candidate_changes_available(
+        completion.get("candidate_changes_reference")
+    ):
+        return False
+    return True
+
+
+def _build_current_review_candidate_inspection_result(
+    *,
+    projection: dict[str, Any],
+    review_prepare: dict[str, Any],
+    operation: str,
+    candidate_path: str | None,
+    max_bytes: int | None,
+) -> dict[str, Any]:
+    operation_id = str(operation or "list").strip().lower() or "list"
+    context = _current_review_candidate_authority_context(
+        projection=projection,
+        review_prepare=review_prepare,
+    )
+    base = _review_candidate_inspection_base_result(
+        projection,
+        operation=operation_id,
+        review_prepare=review_prepare,
+    )
+    base.update({
+        "inspection_status": "available",
+        "blocker_code": None,
+        "blocker_detail": None,
+        "source_materialization_reference": {
+            "available": True,
+            "policy_id": context["manifest"].get("policy_id"),
+            "source_materialized": context["manifest"].get("source_materialized"),
+            "manifest_identity_validated": True,
+        },
+        "candidate_changes_reference": _review_candidate_changes_summary(
+            context["candidate_changes_reference"]
+        ),
+        "candidate_file_count": len(context["files"]),
+        "candidate_paths": list(context["files"].keys()),
+        "candidate_files": [
+            _review_candidate_public_file_entry(entry)
+            for entry in context["files"].values()
+        ],
+        "integrity_validation_result": "passed",
+        "WorkPacket_scope_validation_result": "passed",
+        "read_only": True,
+    })
+    if operation_id in {"list", "metadata"}:
+        return base
+    if operation_id == "aggregate_diff":
+        return _review_candidate_aggregate_diff_result(
+            base,
+            context=context,
+            max_bytes=_coerce_review_candidate_max_bytes(
+                max_bytes,
+                default=PEPPER_REVIEW_CANDIDATE_AGGREGATE_DIFF_MAX_BYTES,
+                ceiling=PEPPER_REVIEW_CANDIDATE_AGGREGATE_DIFF_MAX_BYTES,
+            ),
+        )
+    rel = _normalize_runtime_relative_path(candidate_path or "")
+    entry = context["files"].get(rel)
+    if entry is None:
+        raise ProductRuntimeCandidateInspectionBlocked(
+            "CANDIDATE_PATH_NOT_AUTHORIZED",
+            "candidate path is not present in the current prepared review package",
+        )
+    file_context = _review_candidate_file_context(context, entry)
+    if operation_id == "content":
+        return _review_candidate_content_result(
+            base,
+            file_context=file_context,
+            max_bytes=_coerce_review_candidate_max_bytes(
+                max_bytes,
+                default=PEPPER_REVIEW_CANDIDATE_CONTENT_MAX_BYTES,
+                ceiling=PEPPER_REVIEW_CANDIDATE_CONTENT_MAX_BYTES,
+            ),
+        )
+    return _review_candidate_diff_result(
+        base,
+        file_context=file_context,
+        max_bytes=_coerce_review_candidate_max_bytes(
+            max_bytes,
+            default=PEPPER_REVIEW_CANDIDATE_DIFF_MAX_BYTES,
+            ceiling=PEPPER_REVIEW_CANDIDATE_DIFF_MAX_BYTES,
+        ),
+    )
+
+
+def _current_review_candidate_authority_context(
+    *,
+    projection: dict[str, Any],
+    review_prepare: dict[str, Any],
+) -> dict[str, Any]:
+    completion = review_prepare.get("kanban_completion_result")
+    if not isinstance(completion, dict):
+        raise ProductRuntimeCandidateInspectionBlocked(
+            "CURRENT_REVIEW_PACKAGE_INVALID",
+            "prepared review package lacks Kanban completion evidence",
+        )
+    candidate_reference = completion.get("candidate_changes_reference")
+    if not _governed_autonomy_candidate_changes_available(candidate_reference):
+        raise ProductRuntimeCandidateInspectionBlocked(
+            "CANDIDATE_MANIFEST_MALFORMED",
+            "prepared review package lacks candidate changes evidence",
+        )
+    materialization_reference = completion.get("source_materialization_reference")
+    if not isinstance(materialization_reference, dict):
+        raise ProductRuntimeCandidateInspectionBlocked(
+            "SOURCE_MATERIALIZATION_REFERENCE_MISSING",
+            "prepared review package lacks source materialization reference",
+        )
+    manifest_path = _review_candidate_manifest_path(materialization_reference)
+    workspace_root = _review_candidate_workspace_root_from_manifest_path(manifest_path)
+    manifest = _read_review_candidate_manifest(
+        manifest_path,
+        workspace_root=workspace_root,
+    )
+    source_root = _review_candidate_source_root(manifest)
+    _validate_review_candidate_manifest_identity(
+        manifest,
+        projection=projection,
+        workspace_root=workspace_root,
+        manifest_path=manifest_path,
+    )
+    files = _review_candidate_file_map(
+        candidate_reference,
+        allowed_paths=tuple(manifest.get("writable_allowed_paths") or ()),
+    )
+    return {
+        "manifest": manifest,
+        "manifest_path": manifest_path,
+        "source_root": source_root,
+        "workspace_root": workspace_root,
+        "candidate_changes_reference": candidate_reference,
+        "files": files,
+    }
+
+
+def _review_candidate_manifest_path(materialization_reference: dict[str, Any]) -> Path:
+    text = str(materialization_reference.get("manifest_path") or "").strip()
+    if not text:
+        raise ProductRuntimeCandidateInspectionBlocked(
+            "SOURCE_MATERIALIZATION_REFERENCE_MISSING",
+            "source materialization manifest path is missing",
+        )
+    path = Path(text).expanduser()
+    if not path.is_absolute():
+        raise ProductRuntimeCandidateInspectionBlocked(
+            "PATH_CONTAINMENT_BLOCKER",
+            "source materialization manifest path must be absolute authority",
+        )
+    expected = Path(PEPPER_SCRATCH_SOURCE_MATERIALIZATION_MANIFEST)
+    if path.name != expected.name or path.parent.name != expected.parent.name:
+        raise ProductRuntimeCandidateInspectionBlocked(
+            "SOURCE_MATERIALIZATION_REFERENCE_MISMATCH",
+            "source materialization manifest path does not match governed scratch layout",
+        )
+    return path
+
+
+def _review_candidate_workspace_root_from_manifest_path(manifest_path: Path) -> Path:
+    from hermes_cli.agent_platform.runtime_adapter.path_containment import (
+        RuntimePathContainmentError,
+        assert_existing_path_contained,
+        validate_trusted_base_root,
+    )
+
+    try:
+        workspace_root = validate_trusted_base_root(manifest_path.parent.parent)
+        assert_existing_path_contained(manifest_path, containment_root=workspace_root)
+    except RuntimePathContainmentError as exc:
+        raise ProductRuntimeCandidateInspectionBlocked(
+            "PATH_CONTAINMENT_BLOCKER",
+            "source materialization manifest path is outside the scratch workspace or unsafe",
+        ) from exc
+    return workspace_root
+
+
+def _read_review_candidate_manifest(
+    manifest_path: Path,
+    *,
+    workspace_root: Path,
+) -> dict[str, Any]:
+    from hermes_cli.agent_platform.runtime_adapter.path_containment import (
+        RuntimePathContainmentError,
+        assert_existing_path_contained,
+    )
+
+    try:
+        contained = assert_existing_path_contained(
+            manifest_path,
+            containment_root=workspace_root,
+        )
+    except RuntimePathContainmentError as exc:
+        raise ProductRuntimeCandidateInspectionBlocked(
+            "PATH_CONTAINMENT_BLOCKER",
+            "source materialization manifest is outside the scratch workspace or unsafe",
+        ) from exc
+    try:
+        manifest = json.loads(contained.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ProductRuntimeCandidateInspectionBlocked(
+            "CANDIDATE_MANIFEST_MALFORMED",
+            "source materialization manifest is unreadable",
+        ) from exc
+    if not isinstance(manifest, dict):
+        raise ProductRuntimeCandidateInspectionBlocked(
+            "CANDIDATE_MANIFEST_MALFORMED",
+            "source materialization manifest must be an object",
+        )
+    return manifest
+
+
+def _review_candidate_source_root(manifest: dict[str, Any]) -> Path:
+    from hermes_cli.agent_platform.runtime_adapter.path_containment import (
+        RuntimePathContainmentError,
+        validate_trusted_base_root,
+    )
+
+    source_text = str(manifest.get("source_root") or "").strip()
+    if not source_text:
+        raise ProductRuntimeCandidateInspectionBlocked(
+            "SOURCE_MATERIALIZATION_REFERENCE_MISSING",
+            "source materialization manifest lacks source root authority",
+        )
+    try:
+        return validate_trusted_base_root(Path(source_text).expanduser())
+    except RuntimePathContainmentError as exc:
+        raise ProductRuntimeCandidateInspectionBlocked(
+            "PATH_CONTAINMENT_BLOCKER",
+            "source materialization source root is unsafe or unavailable",
+        ) from exc
+
+
+def _validate_review_candidate_manifest_identity(
+    manifest: dict[str, Any],
+    *,
+    projection: dict[str, Any],
+    workspace_root: Path,
+    manifest_path: Path,
+) -> None:
+    expected = {
+        "policy_id": PEPPER_SCRATCH_SOURCE_MATERIALIZATION_POLICY_ID,
+        "ticket_id": projection["ticket_id"],
+        "work_packet_id": projection["work_packet_id"],
+        "work_packet_SHA256": projection["work_packet_SHA256"],
+        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
+        "projection_SHA256": projection["projection_SHA256"],
+        "source_materialized": True,
+    }
+    for key, value in expected.items():
+        if manifest.get(key) != value:
+            raise ProductRuntimeCandidateInspectionBlocked(
+                "SOURCE_MATERIALIZATION_IDENTITY_MISMATCH",
+                f"source materialization manifest {key} does not match current review authority",
+            )
+    try:
+        manifest_workspace = Path(str(manifest.get("workspace_root") or "")).expanduser().resolve(strict=True)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise ProductRuntimeCandidateInspectionBlocked(
+            "SOURCE_MATERIALIZATION_IDENTITY_MISMATCH",
+            "source materialization manifest workspace root cannot be resolved",
+        ) from exc
+    if manifest_workspace != workspace_root:
+        raise ProductRuntimeCandidateInspectionBlocked(
+            "SOURCE_MATERIALIZATION_IDENTITY_MISMATCH",
+            "source materialization manifest workspace root does not match trusted workspace",
+        )
+    manifest_identity_path = Path(str(manifest.get("manifest_path") or "")).expanduser()
+    if manifest_identity_path != manifest_path:
+        raise ProductRuntimeCandidateInspectionBlocked(
+            "SOURCE_MATERIALIZATION_IDENTITY_MISMATCH",
+            "source materialization manifest path does not match trusted manifest",
+        )
+
+
+def _review_candidate_file_map(
+    candidate_reference: dict[str, Any],
+    *,
+    allowed_paths: tuple[Any, ...],
+) -> dict[str, dict[str, Any]]:
+    if not allowed_paths:
+        raise ProductRuntimeCandidateInspectionBlocked(
+            "WORKPACKET_SCOPE_MISMATCH",
+            "source materialization manifest lacks WorkPacket writable scope",
+        )
+    files = candidate_reference.get("files")
+    if not isinstance(files, list) or not files:
+        raise ProductRuntimeCandidateInspectionBlocked(
+            "CANDIDATE_MANIFEST_MALFORMED",
+            "candidate changes manifest has no files",
+        )
+    mapped: dict[str, dict[str, Any]] = {}
+    for item in files:
+        if not isinstance(item, dict):
+            raise ProductRuntimeCandidateInspectionBlocked(
+                "CANDIDATE_MANIFEST_MALFORMED",
+                "candidate changes manifest contains a malformed file entry",
+            )
+        rel = _normalize_runtime_relative_path(item.get("path") or "")
+        if rel in mapped:
+            raise ProductRuntimeCandidateInspectionBlocked(
+                "CANDIDATE_MANIFEST_MALFORMED",
+                "candidate changes manifest contains duplicate paths",
+            )
+        change = str(item.get("change") or "").strip().lower()
+        if change not in _REVIEW_CANDIDATE_CHANGE_TYPES:
+            raise ProductRuntimeCandidateInspectionBlocked(
+                "CANDIDATE_MANIFEST_MALFORMED",
+                "candidate changes manifest contains an unsupported change type",
+            )
+        if not _review_candidate_path_in_workpacket_scope(rel, allowed_paths):
+            raise ProductRuntimeCandidateInspectionBlocked(
+                "WORKPACKET_SCOPE_MISMATCH",
+                "candidate path is outside the WorkPacket writable scope",
+            )
+        source_sha = item.get("source_SHA256")
+        candidate_sha = item.get("workspace_SHA256")
+        if source_sha is not None and not _SAFE_SHA256.fullmatch(str(source_sha)):
+            raise ProductRuntimeCandidateInspectionBlocked(
+                "CANDIDATE_MANIFEST_MALFORMED",
+                "candidate changes manifest source SHA256 is invalid",
+            )
+        if candidate_sha is not None and not _SAFE_SHA256.fullmatch(str(candidate_sha)):
+            raise ProductRuntimeCandidateInspectionBlocked(
+                "CANDIDATE_MANIFEST_MALFORMED",
+                "candidate changes manifest workspace SHA256 is invalid",
+            )
+        mapped[rel] = {
+            **item,
+            "path": rel,
+            "change": change,
+            "source_SHA256": source_sha,
+            "workspace_SHA256": candidate_sha,
+        }
+    return {key: mapped[key] for key in sorted(mapped)}
+
+
+def _review_candidate_path_in_workpacket_scope(
+    relative_path: str,
+    allowed_paths: tuple[Any, ...],
+) -> bool:
+    for pattern in allowed_paths:
+        try:
+            normalized = _normalize_materialization_relative_path(str(pattern or ""))
+        except ProductRuntimeConflict:
+            continue
+        if normalized.endswith("/**"):
+            prefix = normalized[:-3].rstrip("/")
+            if relative_path == prefix or relative_path.startswith(f"{prefix}/"):
+                return True
+            continue
+        if _contains_glob_pattern(normalized):
+            if fnmatch.fnmatchcase(relative_path, normalized):
+                return True
+            continue
+        if relative_path == normalized or relative_path.startswith(f"{normalized}/"):
+            return True
+    return False
+
+
+def _review_candidate_changes_summary(candidate_reference: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "available": True,
+        "files_changed": candidate_reference.get("files_changed"),
+        "modified_file_count": candidate_reference.get("modified_file_count"),
+        "created_file_count": candidate_reference.get("created_file_count"),
+        "deleted_file_count": candidate_reference.get("deleted_file_count"),
+        "line_insertions": candidate_reference.get("line_insertions"),
+        "line_deletions": candidate_reference.get("line_deletions"),
+        "truncated": bool(candidate_reference.get("truncated")),
+    }
+
+
+def _review_candidate_public_file_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "path": entry["path"],
+        "change_type": entry["change"],
+        "source_SHA256": entry.get("source_SHA256"),
+        "candidate_SHA256": entry.get("workspace_SHA256"),
+        "line_delta_available": bool(entry.get("line_delta_available")),
+        "insertions": int(entry.get("insertions") or 0),
+        "deletions": int(entry.get("deletions") or 0),
+        "integrity_validation_result": "passed",
+        "WorkPacket_scope_validation_result": "passed",
+    }
+
+
+def _review_candidate_file_context(
+    context: dict[str, Any],
+    entry: dict[str, Any],
+) -> dict[str, Any]:
+    rel = entry["path"]
+    source_path = _review_candidate_expected_file_path(
+        context["source_root"],
+        rel,
+        expected_sha=entry.get("source_SHA256"),
+        path_role="source",
+    )
+    candidate_path = _review_candidate_expected_file_path(
+        context["workspace_root"],
+        rel,
+        expected_sha=entry.get("workspace_SHA256"),
+        path_role="candidate",
+    )
+    actual_change = _review_candidate_actual_change(source_path, candidate_path)
+    if actual_change != entry["change"]:
+        raise ProductRuntimeCandidateInspectionBlocked(
+            "CANDIDATE_INTEGRITY_BLOCKER",
+            "candidate change type no longer matches the prepared review package",
+        )
+    return {
+        "entry": entry,
+        "relative_path": rel,
+        "source_path": source_path,
+        "candidate_path": candidate_path,
+        "source_metadata": _review_candidate_file_metadata(source_path),
+        "candidate_metadata": _review_candidate_file_metadata(candidate_path),
+    }
+
+
+def _review_candidate_expected_file_path(
+    root: Path,
+    relative_path: str,
+    *,
+    expected_sha: str | None,
+    path_role: str,
+) -> Path | None:
+    from hermes_cli.agent_platform.runtime_adapter.path_containment import (
+        RuntimePathContainmentError,
+        assert_existing_path_contained,
+    )
+
+    candidate = root / relative_path
+    if expected_sha is None:
+        if candidate.exists() or candidate.is_symlink():
+            raise ProductRuntimeCandidateInspectionBlocked(
+                "CANDIDATE_INTEGRITY_BLOCKER",
+                f"unexpected {path_role} file exists for prepared candidate path",
+            )
+        return None
+    try:
+        contained = assert_existing_path_contained(candidate, containment_root=root)
+    except RuntimePathContainmentError as exc:
+        code = "CANDIDATE_INTEGRITY_BLOCKER"
+        if "missing" not in str(exc):
+            code = "PATH_CONTAINMENT_BLOCKER"
+        raise ProductRuntimeCandidateInspectionBlocked(
+            code,
+            f"prepared candidate {path_role} file is missing or unsafe",
+        ) from exc
+    if not contained.is_file():
+        raise ProductRuntimeCandidateInspectionBlocked(
+            "CANDIDATE_FILESYSTEM_OBJECT_UNSUPPORTED",
+            f"prepared candidate {path_role} path is not a regular file",
+        )
+    actual_sha = _sha256_file_or_none(contained)
+    if actual_sha != expected_sha:
+        raise ProductRuntimeCandidateInspectionBlocked(
+            "CANDIDATE_INTEGRITY_BLOCKER",
+            f"prepared candidate {path_role} SHA256 drifted before inspection",
+        )
+    return contained
+
+
+def _review_candidate_actual_change(
+    source_path: Path | None,
+    candidate_path: Path | None,
+) -> str:
+    if source_path is not None and candidate_path is not None:
+        return "modified"
+    if candidate_path is not None:
+        return "created"
+    if source_path is not None:
+        return "deleted"
+    raise ProductRuntimeCandidateInspectionBlocked(
+        "CANDIDATE_INTEGRITY_BLOCKER",
+        "prepared candidate path no longer exists on either side",
+    )
+
+
+def _review_candidate_file_metadata(path: Path | None) -> dict[str, Any]:
+    if path is None:
+        return {
+            "present": False,
+            "byte_count": 0,
+            "line_count": 0,
+            "encoding": None,
+            "text_supported": False,
+            "binary": False,
+        }
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as handle:
+            probe = handle.read(4096)
+    except OSError as exc:
+        raise ProductRuntimeCandidateInspectionBlocked(
+            "CANDIDATE_FILESYSTEM_OBJECT_UNSUPPORTED",
+            "prepared candidate file metadata cannot be inspected",
+        ) from exc
+    binary = b"\x00" in probe
+    text_supported = False
+    encoding = None
+    line_count = None
+    if not binary:
+        try:
+            probe.decode("utf-8")
+            text_supported = True
+            encoding = "utf-8"
+            line_count = _review_candidate_line_count(path)
+        except UnicodeDecodeError:
+            text_supported = False
+    return {
+        "present": True,
+        "byte_count": size,
+        "line_count": line_count,
+        "encoding": encoding,
+        "text_supported": text_supported,
+        "binary": binary,
+    }
+
+
+def _review_candidate_line_count(path: Path) -> int:
+    line_count = 0
+    last_byte = b""
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            if chunk:
+                line_count += chunk.count(b"\n")
+                last_byte = chunk[-1:]
+    size = path.stat().st_size
+    if size and last_byte != b"\n":
+        line_count += 1
+    return line_count
+
+
+def _review_candidate_content_result(
+    base: dict[str, Any],
+    *,
+    file_context: dict[str, Any],
+    max_bytes: int,
+) -> dict[str, Any]:
+    metadata = file_context["candidate_metadata"]
+    result = _review_candidate_single_file_base(base, file_context)
+    result["inspection_status"] = "content_available"
+    result["content_max_bytes"] = max_bytes
+    result["candidate_byte_count"] = metadata["byte_count"]
+    result["candidate_line_count"] = metadata["line_count"]
+    result["encoding"] = metadata["encoding"]
+    result["text_supported"] = metadata["text_supported"]
+    if not metadata["present"] or not metadata["text_supported"]:
+        result.update({
+            "inspection_status": "metadata_only",
+            "content": None,
+            "content_available": False,
+            "content_truncated": False,
+            "content_complete": False,
+            "retained_byte_count": 0,
+        })
+        return result
+    text_result = _review_candidate_read_text_bounded(
+        file_context["candidate_path"],
+        max_bytes=max_bytes,
+    )
+    result.update({
+        "content": text_result["text"],
+        "content_available": True,
+        "content_truncated": text_result["truncated"],
+        "content_complete": not text_result["truncated"],
+        "retained_byte_count": text_result["retained_byte_count"],
+    })
+    return result
+
+
+def _review_candidate_diff_result(
+    base: dict[str, Any],
+    *,
+    file_context: dict[str, Any],
+    max_bytes: int,
+) -> dict[str, Any]:
+    result = _review_candidate_single_file_base(base, file_context)
+    result["inspection_status"] = "diff_available"
+    result["diff_max_bytes"] = max_bytes
+    source_text = _review_candidate_full_text_or_none(file_context["source_path"])
+    candidate_text = _review_candidate_full_text_or_none(file_context["candidate_path"])
+    if source_text is None or candidate_text is None:
+        result.update({
+            "inspection_status": "metadata_only",
+            "unified_diff": None,
+            "diff_available": False,
+            "diff_truncated": False,
+            "diff_complete": False,
+            "retained_diff_byte_count": 0,
+            "diff_byte_count": None,
+        })
+        return result
+    diff = _review_candidate_unified_diff(
+        file_context["relative_path"],
+        source_text=source_text,
+        candidate_text=candidate_text,
+        max_bytes=max_bytes,
+    )
+    result.update({
+        "unified_diff": diff["text"],
+        "diff_available": True,
+        "diff_truncated": diff["truncated"],
+        "diff_complete": not diff["truncated"],
+        "diff_byte_count": diff["raw_byte_count"],
+        "retained_diff_byte_count": diff["retained_byte_count"],
+        "diff_deterministic": True,
+    })
+    return result
+
+
+def _review_candidate_aggregate_diff_result(
+    base: dict[str, Any],
+    *,
+    context: dict[str, Any],
+    max_bytes: int,
+) -> dict[str, Any]:
+    retained_parts: list[str] = []
+    raw_parts: list[str] = []
+    omitted_paths: list[str] = []
+    for entry in context["files"].values():
+        file_context = _review_candidate_file_context(context, entry)
+        source_text = _review_candidate_full_text_or_none(file_context["source_path"])
+        candidate_text = _review_candidate_full_text_or_none(file_context["candidate_path"])
+        if source_text is None or candidate_text is None:
+            omitted_paths.append(entry["path"])
+            continue
+        raw_parts.append(
+            _review_candidate_unified_diff(
+                file_context["relative_path"],
+                source_text=source_text,
+                candidate_text=candidate_text,
+                max_bytes=10**12,
+            )["text"]
+        )
+    raw_text = "\n".join(part.rstrip("\n") for part in raw_parts if part).strip()
+    raw_bytes = raw_text.encode("utf-8")
+    truncated = len(raw_bytes) > max_bytes
+    retained_text = raw_bytes[:max_bytes].decode("utf-8", errors="ignore")
+    if raw_text and not truncated:
+        retained_parts.append(raw_text)
+    elif raw_text:
+        retained_parts.append(retained_text)
+    result = dict(base)
+    result.update({
+        "inspection_status": "aggregate_diff_available",
+        "unified_diff": "\n".join(retained_parts),
+        "diff_available": bool(raw_text),
+        "diff_truncated": truncated,
+        "diff_complete": bool(raw_text) and not truncated and not omitted_paths,
+        "diff_byte_count": len(raw_bytes),
+        "retained_diff_byte_count": len("\n".join(retained_parts).encode("utf-8")),
+        "diff_max_bytes": max_bytes,
+        "diff_deterministic": True,
+        "metadata_only_paths": omitted_paths,
+    })
+    if omitted_paths and not raw_text:
+        result["inspection_status"] = "metadata_only"
+    return result
+
+
+def _review_candidate_single_file_base(
+    base: dict[str, Any],
+    file_context: dict[str, Any],
+) -> dict[str, Any]:
+    entry = file_context["entry"]
+    source_metadata = file_context["source_metadata"]
+    candidate_metadata = file_context["candidate_metadata"]
+    result = dict(base)
+    result.update({
+        "candidate_path": file_context["relative_path"],
+        "change_type": entry["change"],
+        "source_SHA256": entry.get("source_SHA256"),
+        "candidate_SHA256": entry.get("workspace_SHA256"),
+        "source_byte_count": source_metadata["byte_count"],
+        "source_line_count": source_metadata["line_count"],
+        "candidate_byte_count": candidate_metadata["byte_count"],
+        "candidate_line_count": candidate_metadata["line_count"],
+        "source_text_supported": source_metadata["text_supported"],
+        "candidate_text_supported": candidate_metadata["text_supported"],
+        "integrity_validation_result": "passed",
+        "WorkPacket_scope_validation_result": "passed",
+    })
+    return result
+
+
+def _coerce_review_candidate_max_bytes(
+    value: int | None,
+    *,
+    default: int,
+    ceiling: int,
+) -> int:
+    if value is None:
+        return default
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    if parsed <= 0:
+        return default
+    return min(parsed, ceiling)
+
+
+def _review_candidate_read_text_bounded(path: Path, *, max_bytes: int) -> dict[str, Any]:
+    try:
+        raw_size = path.stat().st_size
+        with path.open("rb") as handle:
+            retained = handle.read(max_bytes)
+    except OSError as exc:
+        raise ProductRuntimeCandidateInspectionBlocked(
+            "CANDIDATE_FILESYSTEM_OBJECT_UNSUPPORTED",
+            "prepared candidate content cannot be inspected",
+        ) from exc
+    return {
+        "text": retained.decode("utf-8", errors="ignore"),
+        "truncated": raw_size > len(retained),
+        "raw_byte_count": raw_size,
+        "retained_byte_count": len(retained),
+    }
+
+
+def _review_candidate_full_text_or_none(path: Path | None) -> str | None:
+    if path is None:
+        return ""
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise ProductRuntimeCandidateInspectionBlocked(
+            "CANDIDATE_FILESYSTEM_OBJECT_UNSUPPORTED",
+            "prepared candidate file cannot be inspected",
+        ) from exc
+    if b"\x00" in raw:
+        return None
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+def _review_candidate_unified_diff(
+    relative_path: str,
+    *,
+    source_text: str,
+    candidate_text: str,
+    max_bytes: int,
+) -> dict[str, Any]:
+    lines = difflib.unified_diff(
+        source_text.splitlines(keepends=True),
+        candidate_text.splitlines(keepends=True),
+        fromfile=f"a/{relative_path}",
+        tofile=f"b/{relative_path}",
+        lineterm="\n",
+    )
+    raw_text = "".join(lines)
+    raw_bytes = raw_text.encode("utf-8")
+    truncated = len(raw_bytes) > max_bytes
+    retained = raw_bytes[:max_bytes].decode("utf-8", errors="ignore")
+    return {
+        "text": retained,
+        "truncated": truncated,
+        "raw_byte_count": len(raw_bytes),
+        "retained_byte_count": len(retained.encode("utf-8")),
     }
 
 
