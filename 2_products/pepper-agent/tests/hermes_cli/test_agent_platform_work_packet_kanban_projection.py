@@ -3908,7 +3908,15 @@ def test_review_required_p18_9_2_retry_reconstructs_to_governed_review_boundary(
     assert workflow["validation_state"] == "execution_completed_pending_validation"
     assert workflow["review_state"] == "ready_for_review_validation"
     assert workflow["recovery_state"] == "not_required"
-    assert workflow["blocker_count"] == 0
+    assert workflow["blocker_count"] == 0, {
+        "blocker_count": workflow["blocker_count"],
+        "remaining_blocker_count": len(workflow["remaining_blockers"]),
+        "remaining_blockers": workflow["remaining_blockers"],
+        "governed_autonomy_blocker_code": workflow.get("governed_autonomy", {}).get(
+            "blocker_code"
+        ),
+        "top_blocker_code": workflow.get("blocker_code"),
+    }
     assert workflow["terminal_outcome_class"] == "validated_review_required"
     assert workflow["validated_candidate_review_required"] is True
     assert workflow["candidate_changes_available"] is True
@@ -4056,6 +4064,141 @@ def _p18_9_2_review_ready_for_tool_test(projection_home, monkeypatch, *, pid: in
         ),
     )
     return state, retry
+
+
+def _p18_9_2_changes_requested_revision_pending_fixture(
+    projection_home,
+    monkeypatch,
+    *,
+    first_pid: int = 6810,
+):
+    state, run_13 = _p18_9_2_review_ready_for_tool_test(
+        projection_home,
+        monkeypatch,
+        pid=first_pid,
+    )
+    pr = state.pr
+    monkeypatch.setattr(pr, "_executor_provider_readiness", _ready_executor_provider_payload)
+    prepared_13 = pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_REVIEW",
+    )
+    changed_13 = pr.submit_current_ticket_review_decision(
+        decision="changes_requested",
+        feedback="Human requests P18.9.2 changes limited to runtime-overview-page.tsx.",
+        reviewed_run_id=run_13["kanban_run_id"],
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="SUBMIT_P18_9_2_REVIEW_DECISION",
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("prepared review bridge must not spawn"),
+    )
+    revision_request = changed_13["review_revision_request_reference"]
+    pending_workflow = pr.build_workflow_control_snapshot()
+    assert pending_workflow["workflow_status"] == (
+        "review_changes_requested_revision_pending_continuation"
+    )
+    assert pending_workflow["next_action"]["id"] == "CONTINUE_P18_9_2_GOVERNED_AUTONOMY"
+
+    return SimpleNamespace(
+        state=state,
+        pr=pr,
+        run_13=run_13,
+        prepared_13=prepared_13,
+        changed_13=changed_13,
+        revision_request=revision_request,
+    )
+
+
+def _p18_9_2_active_revision_fixture(
+    projection_home,
+    monkeypatch,
+    *,
+    first_pid: int = 6810,
+    revision_pid: int = 6811,
+):
+    fixture = _p18_9_2_changes_requested_revision_pending_fixture(
+        projection_home,
+        monkeypatch,
+        first_pid=first_pid,
+    )
+    state = fixture.state
+    pr = fixture.pr
+    revision_request = fixture.revision_request
+
+    _patch_synthetic_scratch_materialization(monkeypatch, pr)
+    monkeypatch.setattr(
+        state.kanban_db,
+        "_pid_alive",
+        lambda pid: int(pid) == revision_pid,
+    )
+    started_14 = pr.continue_current_ticket_governed_autonomy(
+        runtime_goal="Start the bounded P18.9.2 review-revision run.",
+        strategy="DIRECT",
+        resume_pending_fresh_execution_request_SHA256=revision_request[
+            "fresh_execution_request_SHA256"
+        ],
+        spawn_fn=lambda _task, _workspace, board=None, env_overlay=None: revision_pid,
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+    )
+    assert started_14["kanban_run_id"] == fixture.run_13["kanban_run_id"] + 1
+    active_workflow = pr.build_workflow_control_snapshot()
+    assert active_workflow["workflow_status"] == "executing"
+    assert active_workflow["active_execution_count"] == 1
+    assert active_workflow["next_action"]["id"] == "MONITOR_P18_9_2_EXECUTION"
+
+    return SimpleNamespace(
+        state=state,
+        pr=pr,
+        run_13=fixture.run_13,
+        prepared_13=fixture.prepared_13,
+        changed_13=fixture.changed_13,
+        revision_request=revision_request,
+        started_14=started_14,
+    )
+
+
+def _p18_9_2_two_round_changes_requested_fixture(
+    projection_home,
+    monkeypatch,
+    *,
+    first_pid: int = 6810,
+    revision_pid: int = 6811,
+):
+    fixture = _p18_9_2_active_revision_fixture(
+        projection_home,
+        monkeypatch,
+        first_pid=first_pid,
+        revision_pid=revision_pid,
+    )
+    state = fixture.state
+    pr = fixture.pr
+    started_14 = fixture.started_14
+
+    _write_p18_9_2_terminal_candidate_fixture(
+        pr,
+        projection_home,
+        Path(started_14["workspace_path"]),
+    )
+    _finish_projected_run_as_review_required_terminal(
+        state.kanban_db,
+        state.projected,
+        started_14["kanban_run_id"],
+        summary=(
+            "review-required: P18.9.2 Control Center Overview fresh revision is ready "
+            "for human/code review; governed frontend validation passed (GVCMD-001, 41 tests)."
+        ),
+    )
+    return SimpleNamespace(
+        state=state,
+        pr=pr,
+        run_13=fixture.run_13,
+        prepared_13=fixture.prepared_13,
+        changed_13=fixture.changed_13,
+        revision_request=fixture.revision_request,
+        started_14=started_14,
+    )
 
 
 def test_lead_agent_tool_prepares_p18_9_2_review_without_optional_guards(
@@ -4741,6 +4884,346 @@ def test_p18_9_2_prepared_review_changes_requested_blocks_scope_expansion(
     assert blocked["Git_mutation"] is False
     assert not pr.review_decision_record_path_for_ticket("P18.9.2").exists()
     assert not pr.governed_autonomy_runtime_state_path_for_ticket("P18.9.2").exists()
+
+
+def test_p18_9_2_pending_revision_blocks_premature_second_review_prepare(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _p18_9_2_changes_requested_revision_pending_fixture(
+        projection_home,
+        monkeypatch,
+        first_pid=6806,
+    )
+    pr = fixture.pr
+
+    blocked = pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_REVIEW",
+    )
+
+    assert blocked["review_prepare_status"] == "blocked"
+    assert blocked["review_preparation_recorded"] is False
+    assert blocked["blocker_code"] == "PEPPER_REVIEW_PREPARE_ACTION_GAP"
+    assert "execution_completed" in blocked["blocker_detail"]
+    assert blocked["dispatch_performed"] is False
+    assert blocked["execution_started"] is False
+    assert blocked["Git_mutation"] is False
+    current_prepare = json.loads(
+        pr.review_prepare_record_path_for_ticket("P18.9.2").read_text(encoding="utf-8")
+    )
+    assert current_prepare["review_prepare_action_SHA256"] == fixture.prepared_13[
+        "review_prepare_action_SHA256"
+    ]
+    current_decision = json.loads(
+        pr.review_decision_record_path_for_ticket("P18.9.2").read_text(encoding="utf-8")
+    )
+    assert current_decision["review_decision_SHA256"] == fixture.changed_13[
+        "review_decision_SHA256"
+    ]
+    workflow = pr.build_workflow_control_snapshot()
+    assert workflow["workflow_status"] == "review_changes_requested_revision_pending_continuation"
+    assert workflow["next_action"]["id"] == "CONTINUE_P18_9_2_GOVERNED_AUTONOMY"
+
+
+def test_p18_9_2_active_corrective_run_blocks_review_prepare_without_rotation(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _p18_9_2_active_revision_fixture(
+        projection_home,
+        monkeypatch,
+        first_pid=6807,
+        revision_pid=6808,
+    )
+    pr = fixture.pr
+
+    blocked = pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_REVIEW",
+    )
+
+    assert blocked["review_prepare_status"] == "blocked"
+    assert blocked["review_preparation_recorded"] is False
+    assert blocked["blocker_code"] == "PEPPER_REVIEW_PREPARE_ACTION_GAP"
+    assert "execution_completed" in blocked["blocker_detail"]
+    assert blocked["dispatch_performed"] is False
+    assert blocked["execution_started"] is False
+    assert blocked["Git_mutation"] is False
+    current_prepare = json.loads(
+        pr.review_prepare_record_path_for_ticket("P18.9.2").read_text(encoding="utf-8")
+    )
+    assert current_prepare["review_prepare_action_SHA256"] == fixture.prepared_13[
+        "review_prepare_action_SHA256"
+    ]
+    assert not pr.review_decision_record_path_for_ticket("P18.9.2").exists()
+    decision_history = [
+        json.loads(line)["record"]
+        for line in pr.review_decision_history_path_for_ticket("P18.9.2").read_text(
+            encoding="utf-8"
+        ).splitlines()
+        if line.strip()
+    ]
+    assert any(
+        item["review_decision_SHA256"] == fixture.changed_13["review_decision_SHA256"]
+        for item in decision_history
+    )
+    workflow = pr.build_workflow_control_snapshot()
+    assert workflow["workflow_status"] == "executing"
+    assert workflow["active_execution_count"] == 1
+    assert workflow["next_action"]["id"] == "MONITOR_P18_9_2_EXECUTION"
+
+
+def test_p18_9_2_corrective_candidate_allows_second_review_round(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _p18_9_2_two_round_changes_requested_fixture(
+        projection_home,
+        monkeypatch,
+        first_pid=6812,
+        revision_pid=6813,
+    )
+    pr = fixture.pr
+
+    workflow = pr.build_workflow_control_snapshot()
+    assert workflow["current_ticket_id"] == "P18.9.2"
+    assert workflow["workflow_status"] == "execution_completed"
+    assert workflow["workflow_state"] == (
+        "P18.9.2-GOVERNED-AUTONOMY-AWAITING-HUMAN-GIT-HANDOFF"
+    )
+    assert workflow["review_state"] == "ready_for_review_validation"
+    assert workflow["validation_state"] == "execution_completed_pending_validation"
+    assert workflow["active_execution_count"] == 0
+    assert workflow["blocker_count"] == 0, {
+        "blocker_count": workflow["blocker_count"],
+        "remaining_blocker_count": len(workflow["remaining_blockers"]),
+        "remaining_blockers": workflow["remaining_blockers"],
+        "governed_autonomy_blocker_code": workflow.get("governed_autonomy", {}).get(
+            "blocker_code"
+        ),
+        "top_blocker_code": workflow.get("blocker_code"),
+    }
+    assert workflow["remaining_blockers"] == []
+    assert workflow["human_acceptance_required"] is False
+    assert workflow.get("human_acceptance_recorded") is not True
+    assert workflow.get("review_decision_required") is not True
+    assert workflow.get("review_decision_recorded") is not True
+    assert workflow["terminal_outcome_class"] == "validated_review_required"
+    assert workflow["governed_autonomy"]["terminal_run_id"] == fixture.started_14[
+        "kanban_run_id"
+    ]
+    assert workflow["next_action"]["id"] == "PREPARE_P18_9_2_REVIEW"
+
+    prepared_14 = pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_REVIEW",
+    )
+
+    assert prepared_14["review_prepare_status"] == "prepared_pending_human_acceptance"
+    assert prepared_14["review_preparation_recorded"] is True
+    assert prepared_14["successful_run_id"] == fixture.started_14["kanban_run_id"]
+    assert prepared_14["successful_run_id"] != fixture.run_13["kanban_run_id"]
+    assert prepared_14["review_prepare_action_SHA256"] != fixture.prepared_13[
+        "review_prepare_action_SHA256"
+    ]
+    assert prepared_14["review_package_SHA256"] != fixture.prepared_13[
+        "review_package_SHA256"
+    ]
+    assert prepared_14["kanban_completion_result"]["run_id"] == fixture.started_14[
+        "kanban_run_id"
+    ]
+    assert prepared_14["kanban_completion_result"]["terminal_outcome_class"] == (
+        "validated_review_required"
+    )
+    assert prepared_14["human_acceptance_required"] is True
+    assert prepared_14["human_acceptance_recorded"] is False
+    assert prepared_14["Git_mutation"] is False
+    assert prepared_14["dispatch_performed"] is False
+    assert prepared_14["execution_started"] is False
+    assert prepared_14["Kanban_dispatch"] is False
+
+    after_prepare = pr.build_workflow_control_snapshot()
+    assert after_prepare["workflow_status"] == "review_prepared_pending_human_acceptance"
+    assert after_prepare["review_decision_required"] is True
+    assert after_prepare["review_decision_recorded"] is False
+    assert after_prepare["human_acceptance_required"] is True
+    assert after_prepare["human_acceptance_recorded"] is False
+    assert after_prepare["review_prepare_authority"]["successful_run_id"] == (
+        fixture.started_14["kanban_run_id"]
+    )
+    assert after_prepare["next_action"]["id"] == "SUBMIT_P18_9_2_REVIEW_DECISION"
+
+    replay = pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_REVIEW",
+    )
+    assert replay["idempotent_replay"] is True
+    assert replay["review_prepare_action_SHA256"] == prepared_14[
+        "review_prepare_action_SHA256"
+    ]
+
+    history_path = pr.review_prepare_history_path_for_ticket("P18.9.2")
+    history = [
+        json.loads(line)["record"]
+        for line in history_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert any(
+        item["review_prepare_action_SHA256"]
+        == fixture.prepared_13["review_prepare_action_SHA256"]
+        for item in history
+    )
+    decision_history_path = pr.review_decision_history_path_for_ticket("P18.9.2")
+    decision_history = [
+        json.loads(line)["record"]
+        for line in decision_history_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert any(
+        item["review_decision_SHA256"] == fixture.changed_13["review_decision_SHA256"]
+        for item in decision_history
+    )
+    runtime_history_path = pr.governed_autonomy_runtime_history_path_for_ticket("P18.9.2")
+    runtime_history = [
+        json.loads(line)["record"]
+        for line in runtime_history_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert any(
+        item["fresh_execution_request_SHA256"]
+        == fixture.revision_request["fresh_execution_request_SHA256"]
+        and item["governed_autonomy_runtime_status"]
+        == "review_revision_request_recorded_pending_continuation"
+        for item in runtime_history
+    )
+    assert not pr.review_decision_record_path_for_ticket("P18.9.2").exists()
+    current_runtime = json.loads(
+        pr.governed_autonomy_runtime_state_path_for_ticket("P18.9.2").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert current_runtime["kanban_run_id"] == fixture.started_14["kanban_run_id"]
+    assert current_runtime["fresh_execution_request_SHA256"] == fixture.revision_request[
+        "fresh_execution_request_SHA256"
+    ]
+    assert current_runtime["governed_autonomy_runtime_status"] != (
+        "review_revision_request_recorded_pending_continuation"
+    )
+
+
+def test_p18_9_2_tool_prepare_uses_second_round_terminal_authority(
+    projection_home,
+    monkeypatch,
+) -> None:
+    import tools.pepper_workflow_tools  # noqa: F401
+    from model_tools import handle_function_call
+
+    fixture = _p18_9_2_two_round_changes_requested_fixture(
+        projection_home,
+        monkeypatch,
+        first_pid=6814,
+        revision_pid=6815,
+    )
+
+    result = json.loads(
+        handle_function_call(
+            "prepare_current_ticket_review",
+            {
+                "human_request_text": "Prepare P18.9.2 review validation for the fresh revision.",
+                "project_id": "PEPPER",
+                "ticket_id": "P18.9.2",
+                "next_action_id": "PREPARE_P18_9_2_REVIEW",
+            },
+        )
+    )
+
+    assert result["success"] is True, result
+    assert result["idempotent_replay"] is False
+    assert result["review_prepare_status"] == "prepared_pending_human_acceptance"
+    assert result["successful_run_id"] == fixture.started_14["kanban_run_id"]
+    assert result["successful_run_id"] != fixture.run_13["kanban_run_id"]
+    assert result["review_prepare_action_SHA256"] != fixture.prepared_13[
+        "review_prepare_action_SHA256"
+    ]
+    assert result["review_package_SHA256"] != fixture.prepared_13[
+        "review_package_SHA256"
+    ]
+    assert result["dispatch_performed"] is False
+    assert result["execution_started"] is False
+    assert result["Git_mutation"] is False
+
+
+@pytest.mark.parametrize(
+    ("decision", "expected_status", "expected_review_state"),
+    [
+        ("accept", "review_accepted_pending_human_git_handoff", "accepted"),
+        ("reject", "review_rejected_no_execution", "rejected"),
+        (
+            "changes_requested",
+            "review_changes_requested_revision_pending_continuation",
+            "correction_required",
+        ),
+    ],
+)
+def test_p18_9_2_second_round_review_decisions_target_fresh_run(
+    projection_home,
+    monkeypatch,
+    decision,
+    expected_status,
+    expected_review_state,
+) -> None:
+    fixture = _p18_9_2_two_round_changes_requested_fixture(
+        projection_home,
+        monkeypatch,
+        first_pid=6816,
+        revision_pid=6817,
+    )
+    pr = fixture.pr
+    prepared_14 = pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_REVIEW",
+    )
+
+    reviewed = pr.submit_current_ticket_review_decision(
+        decision=decision,
+        feedback=f"Human {decision.replace('_', ' ')} for the P18.9.2 fresh revision.",
+        reviewed_run_id=fixture.started_14["kanban_run_id"],
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="SUBMIT_P18_9_2_REVIEW_DECISION",
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("second-round decision must not spawn"),
+    )
+
+    assert reviewed["review_decision"] == decision
+    assert reviewed["reviewed_run_id"] == fixture.started_14["kanban_run_id"]
+    assert reviewed["reviewed_run_id"] != fixture.run_13["kanban_run_id"]
+    assert reviewed["review_source_authority_kind"] == "review_prepare"
+    assert reviewed["review_prepare_action_SHA256"] == prepared_14[
+        "review_prepare_action_SHA256"
+    ]
+    assert reviewed["review_package_SHA256"] == prepared_14["review_package_SHA256"]
+    assert reviewed["workflow_status"] == expected_status
+    assert reviewed["review_state"] == expected_review_state
+    assert reviewed["dispatch_performed"] is False
+    assert reviewed["execution_started"] is False
+    assert reviewed["Git_mutation"] is False
+    if decision == "changes_requested":
+        revision_request = reviewed["review_revision_request_reference"]
+        assert revision_request["prior_terminal_run_id"] == fixture.started_14[
+            "kanban_run_id"
+        ]
+        assert revision_request["fresh_execution_request_SHA256"] != fixture.revision_request[
+            "fresh_execution_request_SHA256"
+        ]
+        assert reviewed["next_action"]["id"] == "CONTINUE_P18_9_2_GOVERNED_AUTONOMY"
+    else:
+        assert reviewed["review_revision_request_reference"] is None
 
 
 def _tamper_p18_9_2_review_prepare_record(pr, tamper_kind: str) -> None:
@@ -8580,7 +9063,7 @@ def test_current_p18_9_1_human_git_handoff_completion_accepts_historical_advance
     monkeypatch.setattr(
         pr,
         "load_current_ticket_review_decision_record",
-        lambda *, projection_record=None: live_review,
+        lambda *, projection_record=None, allow_historical_mismatch=False: live_review,
     )
     advanced_head_snapshot = _p18_9_1_handoff_git_snapshot(
         branch=_P18_9_1_HANDOFF_BRANCH,

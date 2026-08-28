@@ -1466,7 +1466,10 @@ def load_terminal_completed_predecessor_evidence(ticket_id: str) -> dict[str, An
         raise ProductRuntimeConflict(
             "terminal completed predecessor governed-autonomy runtime is absent"
         )
-    review = load_current_ticket_review_decision_record(projection_record=projection)
+    review = _load_terminal_completed_predecessor_review_decision_record(
+        projection=projection,
+        runtime=runtime,
+    )
     if review is None:
         raise ProductRuntimeConflict(
             "terminal completed predecessor accepted review decision is absent"
@@ -1506,6 +1509,38 @@ def load_terminal_completed_predecessor_evidence(ticket_id: str) -> dict[str, An
         "review_decision_record": review,
         "human_git_handoff_completion_record": handoff,
     }
+
+
+def _load_terminal_completed_predecessor_review_decision_record(
+    *,
+    projection: dict[str, Any],
+    runtime: dict[str, Any],
+) -> dict[str, Any] | None:
+    try:
+        return load_current_ticket_review_decision_record(projection_record=projection)
+    except ProductRuntimeConflict as exc:
+        path = review_decision_record_path_for_ticket(str(projection["ticket_id"]))
+        try:
+            raw_review = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as raw_exc:
+            raise exc from raw_exc
+        if not isinstance(raw_review, dict):
+            raise
+        if raw_review.get("review_decision_SHA256") != _review_decision_record_digest(raw_review):
+            raise
+        try:
+            runtime_target = _terminal_completed_predecessor_runtime_review_target(
+                projection=projection,
+                runtime=runtime,
+                review=raw_review,
+            )
+        except ProductRuntimeConflict as target_exc:
+            raise target_exc from exc
+        if raw_review.get("reviewed_candidate_SHA256") != runtime_target["candidate_SHA256"]:
+            raise ProductRuntimeConflict(
+                "terminal completed predecessor review candidate does not match runtime evidence"
+            ) from exc
+        raise
 
 
 def _terminal_completed_predecessor_runtime_review_target(
@@ -3682,6 +3717,7 @@ def load_p18_9_0_review_prepare_record(
 def load_current_ticket_review_prepare_record(
     *,
     projection_record: dict[str, Any] | None = None,
+    allow_historical_mismatch: bool = False,
 ) -> dict[str, Any] | None:
     """Load and validate the active ticket review-preparation record."""
 
@@ -3695,10 +3731,186 @@ def load_current_ticket_review_prepare_record(
         raise ProductRuntimeConflict(
             f"{projection['ticket_id']} review-preparation record is unreadable"
         ) from exc
-    return validate_p18_9_0_review_prepare_record(
-        record,
-        projection_record=projection,
-    )
+    try:
+        return validate_p18_9_0_review_prepare_record(
+            record,
+            projection_record=projection,
+        )
+    except ProductRuntimeConflict:
+        if allow_historical_mismatch and _review_prepare_superseded_by_current_round(
+            record,
+            projection=projection,
+        ):
+            return None
+        raise
+
+
+def _review_record_projection_identity_matches(
+    record: dict[str, Any],
+    projection: dict[str, Any],
+) -> bool:
+    binding, identity = _current_ticket_identity_fields(projection)
+    expected = {
+        **identity,
+        "approval_publication_SHA256": projection["approval_publication_SHA256"],
+        "dependency_plan_SHA256": projection["dependency_plan_SHA256"],
+        "projection_SHA256": projection["projection_SHA256"],
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+        "target_ticket_id": binding.ticket_id,
+    }
+    return all(record.get(key) == value for key, value in expected.items())
+
+
+def _review_prepare_superseded_by_current_round(
+    record: dict[str, Any],
+    *,
+    projection: dict[str, Any],
+) -> bool:
+    if not isinstance(record, dict):
+        return False
+    if record.get("review_prepare_action_SHA256") != _review_prepare_record_digest(record):
+        return False
+    binding, identity = _current_ticket_identity_fields(projection)
+    expected = {
+        **identity,
+        "approval_publication_SHA256": projection["approval_publication_SHA256"],
+        "dependency_plan_SHA256": projection["dependency_plan_SHA256"],
+        "projection_SHA256": projection["projection_SHA256"],
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+    }
+    if any(record.get(key) != value for key, value in expected.items()):
+        return False
+    completion = _kanban_completion_result_source(projection)
+    if completion.get("blocker_code"):
+        return False
+    recorded_run = _int_or_none(record.get("successful_run_id"))
+    current_run = _int_or_none(completion.get("run_id"))
+    if recorded_run is None or current_run is None or recorded_run >= current_run:
+        return False
+    if not _review_prepare_human_git_handoff_required(completion):
+        return False
+    return binding.ticket_id == record.get("ticket_id")
+
+
+def _review_decision_has_basic_current_ticket_identity(
+    record: dict[str, Any],
+    *,
+    projection: dict[str, Any],
+) -> bool:
+    if not isinstance(record, dict):
+        return False
+    if record.get("review_decision_SHA256") != _review_decision_record_digest(record):
+        return False
+    if record.get("review_decision") not in {"accept", "changes_requested", "reject"}:
+        return False
+    if not _review_record_projection_identity_matches(record, projection):
+        return False
+    if _int_or_none(record.get("reviewed_run_id")) is None:
+        return False
+    candidate_sha = record.get("reviewed_candidate_SHA256")
+    return isinstance(candidate_sha, str) and bool(candidate_sha.strip())
+
+
+def _review_decision_revision_request_consumed_by_runtime(
+    record: dict[str, Any],
+    *,
+    projection: dict[str, Any],
+) -> bool:
+    if record.get("review_decision") != "changes_requested":
+        return False
+    revision_request = record.get("review_revision_request_reference")
+    if not isinstance(revision_request, dict):
+        return False
+    revision_sha = revision_request.get("fresh_execution_request_SHA256")
+    if not isinstance(revision_sha, str) or not _SAFE_SHA256.fullmatch(revision_sha):
+        return False
+    try:
+        activation = load_current_ticket_governed_autonomy_activation_record(
+            projection_record=projection,
+        )
+        if activation is None:
+            return False
+        runtime = load_current_ticket_governed_autonomy_runtime_state(
+            projection_record=projection,
+            activation_record=activation,
+        )
+    except ProductRuntimeConflict:
+        return False
+    for item in _governed_autonomy_runtime_lineage_records_newest_first(
+        runtime,
+        ticket_id=str(projection["ticket_id"]),
+    ):
+        runtime_record = item.get("record")
+        if not isinstance(runtime_record, dict):
+            continue
+        if runtime_record.get("fresh_execution_request_SHA256") != revision_sha:
+            continue
+        if _governed_autonomy_fresh_execution_request_created_attempt(runtime_record):
+            return True
+    return False
+
+
+def _review_decision_superseded_by_current_round(
+    record: dict[str, Any],
+    *,
+    projection: dict[str, Any],
+) -> bool:
+    if not _review_decision_has_basic_current_ticket_identity(record, projection=projection):
+        return False
+    if _review_decision_revision_request_consumed_by_runtime(record, projection=projection):
+        return True
+    completion = _kanban_completion_result_source(projection)
+    if completion.get("blocker_code"):
+        return False
+    current_run = _int_or_none(completion.get("run_id"))
+    reviewed_run = _int_or_none(record.get("reviewed_run_id"))
+    if current_run is None or reviewed_run is None or reviewed_run >= current_run:
+        return False
+    if not _review_prepare_human_git_handoff_required(completion):
+        return False
+    if record.get("review_decision") == "changes_requested":
+        return False
+    return True
+
+
+def _archive_superseded_current_review_round_records(
+    projection: dict[str, Any],
+) -> None:
+    ticket_id = str(projection["ticket_id"])
+    prepare_path = review_prepare_record_path_for_ticket(ticket_id)
+    if prepare_path.exists():
+        try:
+            prepare_record = json.loads(prepare_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            prepare_record = None
+        if _review_prepare_superseded_by_current_round(prepare_record, projection=projection):
+            _archive_existing_authority_record(
+                prepare_path,
+                review_prepare_history_path_for_ticket(ticket_id),
+                reason="superseded_by_new_terminal_review_round",
+            )
+            try:
+                prepare_path.unlink()
+            except FileNotFoundError:
+                pass
+    decision_path = review_decision_record_path_for_ticket(ticket_id)
+    if decision_path.exists():
+        try:
+            decision_record = json.loads(decision_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            decision_record = None
+        if _review_decision_superseded_by_current_round(decision_record, projection=projection):
+            _archive_existing_authority_record(
+                decision_path,
+                review_decision_history_path_for_ticket(ticket_id),
+                reason="superseded_by_new_terminal_review_round",
+            )
+            try:
+                decision_path.unlink()
+            except FileNotFoundError:
+                pass
 
 
 def load_p18_9_0_review_acceptance_record(
@@ -3908,6 +4120,7 @@ def validate_current_ticket_review_decision_record(
 def load_current_ticket_review_decision_record(
     *,
     projection_record: dict[str, Any] | None = None,
+    allow_historical_mismatch: bool = False,
 ) -> dict[str, Any] | None:
     """Load and validate current-ticket human review-decision provenance."""
 
@@ -3919,6 +4132,11 @@ def load_current_ticket_review_decision_record(
         record = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise ProductRuntimeConflict("review-decision record is unreadable") from exc
+    if allow_historical_mismatch and _review_decision_superseded_by_current_round(
+        record,
+        projection=projection,
+    ):
+        return None
     return validate_current_ticket_review_decision_record(
         record,
         projection_record=projection,
@@ -6643,22 +6861,33 @@ def prepare_current_ticket_review(
     _validate_review_prepare_request_guards(request)
     projection = _load_current_projection_record()
     _validate_execution_start_authority(projection)
+    _archive_superseded_current_review_round_records(projection)
 
     existing = None
+    existing_conflict = None
     try:
         existing = load_current_ticket_review_prepare_record(projection_record=projection)
-    except ProductRuntimeConflict:
-        path = review_prepare_record_path_for_ticket(str(projection["ticket_id"]))
-        _archive_existing_authority_record(
-            path,
-            review_prepare_history_path_for_ticket(str(projection["ticket_id"])),
-            reason="superseded_or_invalid_review_prepare_authority",
-        )
-        try:
-            path.unlink()
-        except FileNotFoundError:
-            pass
+    except ProductRuntimeConflict as exc:
+        existing_conflict = exc
+    workflow = build_workflow_control_snapshot()
     if existing is not None:
+        try:
+            active_decision = load_current_ticket_review_decision_record(
+                projection_record=projection,
+                allow_historical_mismatch=True,
+            )
+        except ProductRuntimeConflict:
+            active_decision = {}
+        if active_decision is not None:
+            workflow_blocker = _review_prepare_workflow_blocker(workflow)
+            if workflow_blocker is not None:
+                code, detail = workflow_blocker
+                return _blocked_current_review_prepare_result(
+                    projection,
+                    request=request,
+                    blocker_code=code,
+                    blocker_detail=detail,
+                )
         acceptance = load_current_ticket_review_acceptance_record(
             projection_record=projection,
             review_prepare_record=existing,
@@ -6669,8 +6898,28 @@ def prepare_current_ticket_review(
                 idempotent_replay=True,
             )
         return _review_prepare_operational_result(existing, idempotent_replay=True)
+    if existing_conflict is not None:
+        workflow_blocker = _review_prepare_workflow_blocker(workflow)
+        if workflow_blocker is not None and workflow.get("workflow_status") != "execution_completed":
+            code, detail = workflow_blocker
+            return _blocked_current_review_prepare_result(
+                projection,
+                request=request,
+                blocker_code=code,
+                blocker_detail=detail,
+            )
+        path = review_prepare_record_path_for_ticket(str(projection["ticket_id"]))
+        _archive_existing_authority_record(
+            path,
+            review_prepare_history_path_for_ticket(str(projection["ticket_id"])),
+            reason="superseded_or_invalid_review_prepare_authority",
+        )
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        workflow = build_workflow_control_snapshot()
 
-    workflow = build_workflow_control_snapshot()
     workflow_blocker = _review_prepare_workflow_blocker(workflow)
     if workflow_blocker is not None:
         code, detail = workflow_blocker
@@ -17754,7 +18003,10 @@ def _p18_9_0_review_prepare_overlay(
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
     try:
-        record = load_current_ticket_review_prepare_record(projection_record=projection)
+        record = load_current_ticket_review_prepare_record(
+            projection_record=projection,
+            allow_historical_mismatch=True,
+        )
     except Exception as exc:  # pragma: no cover - defensive live-state guard
         return None, {
             "id": f"{binding.ticket_hyphen_token}-REVIEW-PREPARE-AUTHORITY",
@@ -18044,6 +18296,10 @@ def _current_ticket_execution_start_overlay(
                 "terminal_outcome_class": terminal_state["terminal_outcome_class"],
                 "terminal_outcome_authority": terminal_state["terminal_outcome_authority"],
                 "validated_candidate_review_required": True,
+                "review_decision_required": False,
+                "review_decision_recorded": False,
+                "human_acceptance_required": False,
+                "human_acceptance_recorded": False,
                 "validation_observation_reference": terminal_state["validation_observation_reference"],
                 "source_materialization_reference": terminal_state["source_materialization_reference"],
                 "candidate_changes_reference": terminal_state["candidate_changes_reference"],
@@ -18385,6 +18641,10 @@ def _p18_9_0_retry_start_overlay(
                 "terminal_outcome_class": terminal_state["terminal_outcome_class"],
                 "terminal_outcome_authority": terminal_state["terminal_outcome_authority"],
                 "validated_candidate_review_required": True,
+                "review_decision_required": False,
+                "review_decision_recorded": False,
+                "human_acceptance_required": False,
+                "human_acceptance_recorded": False,
                 "validation_observation_reference": terminal_state["validation_observation_reference"],
                 "source_materialization_reference": terminal_state["source_materialization_reference"],
                 "candidate_changes_reference": terminal_state["candidate_changes_reference"],
@@ -18790,6 +19050,10 @@ def _current_ticket_governed_autonomy_overlay(
                     "human_git_handoff_transition_required": True,
                     "git_handoff_required": True,
                     "git_handoff_state": "human_git_authority_preserved",
+                    "review_decision_required": False,
+                    "review_decision_recorded": False,
+                    "human_acceptance_required": False,
+                    "human_acceptance_recorded": False,
                 })
             overlay.update(review_ready_overlay)
     elif terminal_reconciliation is not None:
@@ -18834,7 +19098,10 @@ def _current_ticket_governed_autonomy_overlay(
 def _current_ticket_review_decision_overlay(
     projection: dict[str, Any],
 ) -> dict[str, Any] | None:
-    record = load_current_ticket_review_decision_record(projection_record=projection)
+    record = load_current_ticket_review_decision_record(
+        projection_record=projection,
+        allow_historical_mismatch=True,
+    )
     if record is None:
         return None
     binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
