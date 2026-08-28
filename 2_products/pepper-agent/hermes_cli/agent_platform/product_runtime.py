@@ -3813,6 +3813,95 @@ def validate_current_ticket_review_decision_record(
         raise ProductRuntimeConflict("review-decision feedback digest is invalid")
     if record.get("target_ticket_id") != binding.ticket_id:
         raise ProductRuntimeConflict("review-decision target ticket mismatch")
+    authority_identity = record.get("current_authority_identity")
+    if not isinstance(authority_identity, dict):
+        raise ProductRuntimeConflict("review-decision authority identity is invalid")
+    source_kind = record.get("review_source_authority_kind")
+    if source_kind is not None:
+        if source_kind not in {"governed_autonomy", "review_prepare"}:
+            raise ProductRuntimeConflict("review-decision source authority kind is invalid")
+        revision_request = record.get("review_revision_request_reference")
+        revision_request_sha = None
+        if decision == "changes_requested":
+            if not isinstance(revision_request, dict):
+                raise ProductRuntimeConflict("review-decision revision request is missing")
+            revision_request_sha = revision_request.get("fresh_execution_request_SHA256")
+            if not isinstance(revision_request_sha, str) or not _SAFE_SHA256.fullmatch(
+                revision_request_sha
+            ):
+                raise ProductRuntimeConflict("review-decision revision request digest is invalid")
+            if revision_request.get("bounded_review_feedback_SHA256") != feedback_sha:
+                raise ProductRuntimeConflict("review-decision revision feedback mismatch")
+            if revision_request.get("reviewed_candidate_SHA256") != record.get(
+                "reviewed_candidate_SHA256"
+            ):
+                raise ProductRuntimeConflict("review-decision revision candidate mismatch")
+            if _int_or_none(revision_request.get("prior_terminal_run_id")) != _int_or_none(
+                record.get("reviewed_run_id")
+            ):
+                raise ProductRuntimeConflict("review-decision revision run mismatch")
+            if revision_request.get("review_decision_SHA256") != record.get(
+                "review_decision_identity_SHA256"
+            ):
+                raise ProductRuntimeConflict("review-decision revision identity mismatch")
+            if revision_request.get("review_decision_identity_SHA256") not in {
+                None,
+                record.get("review_decision_identity_SHA256"),
+            }:
+                raise ProductRuntimeConflict("review-decision revision identity mismatch")
+        expected_identity = {
+            "project_id": binding.project_id,
+            "ticket_id": binding.ticket_id,
+            "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
+            "work_packet_id": projection["work_packet_id"],
+            "work_packet_SHA256": projection["work_packet_SHA256"],
+            "projection_SHA256": projection["projection_SHA256"],
+            "authority_kind": source_kind,
+            "activation_action_SHA256": authority_identity.get("activation_action_SHA256"),
+            "governed_autonomy_envelope_SHA256": authority_identity.get(
+                "governed_autonomy_envelope_SHA256"
+            ),
+            "review_prepare_action_SHA256": authority_identity.get(
+                "review_prepare_action_SHA256"
+            ),
+            "review_package_SHA256": authority_identity.get("review_package_SHA256"),
+            "reviewed_run_id": record.get("reviewed_run_id"),
+            "reviewed_candidate_SHA256": record.get("reviewed_candidate_SHA256"),
+            "review_decision": decision,
+            "bounded_review_feedback_SHA256": feedback_sha,
+            "revision_request_SHA256": revision_request_sha,
+        }
+        if record.get("review_decision_identity_SHA256") != _digest_payload(
+            "pepper-current-ticket-review-decision-identity-sha256-v1",
+            expected_identity,
+        ):
+            raise ProductRuntimeConflict("review-decision identity digest mismatch")
+    if source_kind == "review_prepare":
+        review_prepare = load_current_ticket_review_prepare_record(projection_record=projection)
+        if review_prepare is None:
+            raise ProductRuntimeConflict("review-decision prepared review authority is missing")
+        expected_prepare = {
+            "review_prepare_action_SHA256": review_prepare["review_prepare_action_SHA256"],
+            "review_package_SHA256": review_prepare["review_package_SHA256"],
+            "acceptance_contract_SHA256": review_prepare["acceptance_contract_SHA256"],
+            "criteria_revision_SHA256": review_prepare["criteria_revision_SHA256"],
+        }
+        for key, value in expected_prepare.items():
+            if record.get(key) != value:
+                raise ProductRuntimeConflict(f"review-decision prepared {key} mismatch")
+            if authority_identity.get(key) not in {None, value}:
+                raise ProductRuntimeConflict(f"review-decision authority {key} mismatch")
+        if _int_or_none(record.get("reviewed_run_id")) != _int_or_none(
+            review_prepare.get("successful_run_id")
+        ):
+            raise ProductRuntimeConflict("review-decision prepared run mismatch")
+        if decision == "changes_requested":
+            revision_request = record["review_revision_request_reference"]
+            for key, value in expected_prepare.items():
+                if revision_request.get(key) != value:
+                    raise ProductRuntimeConflict(
+                        f"review-decision revision prepared {key} mismatch"
+                    )
     return record
 
 
@@ -6739,10 +6828,6 @@ def submit_current_ticket_review_decision(
         raise ProductRuntimeConflict(
             f"review decision targets run {target['reviewed_run_id']}, not {request.reviewed_run_id}"
         )
-    if request.decision == "changes_requested" and target.get("authority_kind") == "review_prepare":
-        raise ProductRuntimeConflict(
-            "review changes_requested requires governed autonomy runtime authority"
-        )
     if request.decision == "changes_requested":
         authority_blocker = _review_feedback_authority_blocker(
             request.feedback,
@@ -6799,20 +6884,29 @@ def submit_current_ticket_review_decision(
                 "runtime_state_SHA256"
             ),
         }
-        revision_result = continue_current_ticket_governed_autonomy(
-            runtime_goal=(
-                f"Start a same-authority governed revision for {binding.ticket_id} from "
-                "human review changes-requested feedback. Use current canonical source; "
-                "preserve accepted run direction and do not mutate Git."
-            ),
-            observed_failure=request.feedback,
-            strategy="DIRECT",
-            fresh_execution_request_override=revision_request,
-            human_review_revision_segment_reference=segment_reference,
-            spawn_fn=spawn_fn,
-            project_id=binding.project_id,
-            ticket_id=binding.ticket_id,
-        )
+        if target.get("authority_kind") == "review_prepare":
+            revision_result = _record_prepared_review_revision_authority(
+                request=request,
+                projection=projection,
+                target=target,
+                revision_request=revision_request,
+                segment_reference=segment_reference,
+            )
+        else:
+            revision_result = continue_current_ticket_governed_autonomy(
+                runtime_goal=(
+                    f"Start a same-authority governed revision for {binding.ticket_id} from "
+                    "human review changes-requested feedback. Use current canonical source; "
+                    "preserve accepted run direction and do not mutate Git."
+                ),
+                observed_failure=request.feedback,
+                strategy="DIRECT",
+                fresh_execution_request_override=revision_request,
+                human_review_revision_segment_reference=segment_reference,
+                spawn_fn=spawn_fn,
+                project_id=binding.project_id,
+                ticket_id=binding.ticket_id,
+            )
     record = _build_current_ticket_review_decision_record(
         request=request,
         projection=projection,
@@ -15496,7 +15590,11 @@ def _review_decision_target_from_governed_autonomy(
     }
 
 
-def _review_decision_states(decision: str) -> dict[str, str]:
+def _review_decision_states(
+    decision: str,
+    *,
+    revision_result: dict[str, Any] | None = None,
+) -> dict[str, str]:
     if decision == "accept":
         return {
             "review_validation_decision": "accept",
@@ -15507,12 +15605,18 @@ def _review_decision_states(decision: str) -> dict[str, str]:
             "governed_workflow_state": "awaiting_human_git_handoff",
         }
     if decision == "changes_requested":
+        revision_started = bool(revision_result and revision_result.get("execution_started"))
+        workflow_status = (
+            "review_changes_requested_revision_started"
+            if revision_started
+            else "review_changes_requested_revision_pending_continuation"
+        )
         return {
             "review_validation_decision": "needs_correction",
             "review_validation_state": "correction_required",
             "validation_state": "review_changes_requested",
             "review_state": "correction_required",
-            "workflow_status": "review_changes_requested_revision_started",
+            "workflow_status": workflow_status,
             "governed_workflow_state": "awaiting_correction",
         }
     return {
@@ -15532,6 +15636,7 @@ def _review_revision_request_reference(
     feedback_sha256: str,
     feedback_excerpt: str,
 ) -> dict[str, Any]:
+    review_prepare = target.get("review_prepare") if isinstance(target.get("review_prepare"), dict) else None
     payload = {
         "project_id": projection["project_id"],
         "ticket_id": projection["ticket_id"],
@@ -15539,7 +15644,23 @@ def _review_revision_request_reference(
         "work_packet_id": projection["work_packet_id"],
         "work_packet_SHA256": projection["work_packet_SHA256"],
         "projection_SHA256": projection["projection_SHA256"],
+        "authority_kind": target.get("authority_kind"),
         "activation_action_SHA256": target["activation"]["activation_action_SHA256"],
+        "governed_autonomy_envelope_SHA256": target["activation"].get(
+            "governed_autonomy_envelope_SHA256"
+        ),
+        "review_prepare_action_SHA256": (
+            review_prepare.get("review_prepare_action_SHA256") if review_prepare else None
+        ),
+        "review_package_SHA256": (
+            review_prepare.get("review_package_SHA256") if review_prepare else None
+        ),
+        "acceptance_contract_SHA256": (
+            review_prepare.get("acceptance_contract_SHA256") if review_prepare else None
+        ),
+        "criteria_revision_SHA256": (
+            review_prepare.get("criteria_revision_SHA256") if review_prepare else None
+        ),
         "reviewed_run_id": target["reviewed_run_id"],
         "reviewed_candidate_SHA256": target["candidate_SHA256"],
         "bounded_review_feedback_SHA256": feedback_sha256,
@@ -15555,6 +15676,23 @@ def _review_revision_request_reference(
         "transition_classification": "HUMAN_REVIEW_CHANGES_REQUESTED_REVISION",
         "execution_attempt_reason": PEPPER_GOVERNED_AUTONOMY_FRESH_EXECUTION_REASON,
         "fresh_execution_request_SHA256": request_sha,
+        "authority_kind": target.get("authority_kind"),
+        "activation_action_SHA256": target["activation"]["activation_action_SHA256"],
+        "governed_autonomy_envelope_SHA256": target["activation"].get(
+            "governed_autonomy_envelope_SHA256"
+        ),
+        "review_prepare_action_SHA256": (
+            review_prepare.get("review_prepare_action_SHA256") if review_prepare else None
+        ),
+        "review_package_SHA256": (
+            review_prepare.get("review_package_SHA256") if review_prepare else None
+        ),
+        "acceptance_contract_SHA256": (
+            review_prepare.get("acceptance_contract_SHA256") if review_prepare else None
+        ),
+        "criteria_revision_SHA256": (
+            review_prepare.get("criteria_revision_SHA256") if review_prepare else None
+        ),
         "human_request_text_SHA256": feedback_sha256,
         "human_request_text_excerpt": feedback_excerpt,
         "same_ticket": True,
@@ -15570,6 +15708,153 @@ def _review_revision_request_reference(
         "reviewed_candidate_copied_to_revision_base": False,
         "canonical_mutation_performed": False,
     }
+
+
+def _review_revision_activation_request_text(binding: CurrentTicketLifecycleBinding) -> str:
+    return (
+        f"Human changes_requested review decision for {binding.ticket_id} explicitly "
+        "authorizes governed autonomy activation status for a bounded same-WorkPacket "
+        "corrective revision."
+    )
+
+
+def _ensure_review_revision_governed_autonomy_activation(
+    *,
+    request: CurrentTicketReviewDecisionRequest,
+    projection: dict[str, Any],
+    target: dict[str, Any],
+    revision_request: dict[str, Any],
+    review_decision_identity_sha256: str,
+) -> tuple[dict[str, Any], bool]:
+    existing = load_current_ticket_governed_autonomy_activation_record(
+        projection_record=projection,
+    )
+    if existing is not None:
+        return existing, False
+    binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
+    activation_request = CurrentTicketGovernedAutonomyActivationRequest(
+        human_request_text=_review_revision_activation_request_text(binding),
+        authorizer_id=request.reviewer_id,
+        project_id=binding.project_id,
+        ticket_id=binding.ticket_id,
+        next_action_id=_review_decision_request_action_id(binding.ticket_id),
+    )
+    workflow = build_workflow_control_snapshot()
+    _validate_governed_autonomy_activation_request_guards(
+        activation_request,
+        projection_record=projection,
+        workflow=workflow,
+    )
+    _validate_governed_autonomy_activation_request_text(
+        activation_request.human_request_text,
+        ticket_id=binding.ticket_id,
+    )
+    record = _build_governed_autonomy_activation_record(
+        request=activation_request,
+        projection=projection,
+        workflow=workflow,
+    )
+    review_prepare = target.get("review_prepare") if isinstance(target.get("review_prepare"), dict) else {}
+    record.update({
+        "review_revision_activation_derived_from_review_decision": True,
+        "review_decision_identity_SHA256": review_decision_identity_sha256,
+        "review_revision_request_SHA256": revision_request[
+            "fresh_execution_request_SHA256"
+        ],
+        "review_prepare_action_SHA256": review_prepare.get("review_prepare_action_SHA256"),
+        "review_package_SHA256": review_prepare.get("review_package_SHA256"),
+    })
+    record.pop("activation_action_SHA256", None)
+    record["activation_action_SHA256"] = _governed_autonomy_activation_record_digest(record)
+    _persist_governed_autonomy_activation_record(record)
+    return record, True
+
+
+def _record_prepared_review_revision_authority(
+    *,
+    request: CurrentTicketReviewDecisionRequest,
+    projection: dict[str, Any],
+    target: dict[str, Any],
+    revision_request: dict[str, Any],
+    segment_reference: dict[str, Any],
+) -> dict[str, Any]:
+    activation, activation_created = _ensure_review_revision_governed_autonomy_activation(
+        request=request,
+        projection=projection,
+        target=target,
+        revision_request=revision_request,
+        review_decision_identity_sha256=segment_reference["review_decision_identity_SHA256"],
+    )
+    previous = load_current_ticket_governed_autonomy_runtime_state(
+        projection_record=projection,
+        activation_record=activation,
+    )
+    effective_authority = _resolve_effective_current_governed_autonomy_authority(
+        projection=projection,
+        activation=activation,
+        previous=previous,
+    )
+    _require_current_governed_autonomy_authority_match(
+        projection=projection,
+        activation=activation,
+        previous=previous,
+        effective_authority=effective_authority,
+    )
+    binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
+    continuation_request = CurrentTicketGovernedAutonomyContinuationRequest(
+        runtime_goal=(
+            f"Record a pending same-authority governed revision for {binding.ticket_id} "
+            "from human review changes-requested feedback. Do not dispatch; expose the "
+            "separate governed corrective continuation boundary."
+        ),
+        observed_failure=request.feedback,
+        strategy="DIRECT",
+        project_id=binding.project_id,
+        ticket_id=binding.ticket_id,
+    )
+    provider_readiness = _executor_provider_readiness(str(projection["assignee_profile"]))
+    record = _governed_autonomy_runtime_base_record(
+        request=continuation_request,
+        projection=projection,
+        activation=activation,
+        previous=previous,
+        runtime_decision="DIRECT",
+        runtime_status="review_revision_request_recorded_pending_continuation",
+        latest_decision_evidence={
+            "decision": "DIRECT",
+            "review_revision_request_recorded": True,
+            "review_decision_identity_SHA256": segment_reference[
+                "review_decision_identity_SHA256"
+            ],
+            "fresh_execution_request_reference": revision_request,
+            "activation_created_from_review_decision": activation_created,
+        },
+        provider_readiness=provider_readiness,
+        process_continuation_increment=0,
+        validation_failure_increment=0,
+        next_human_action=(
+            "continue the recorded governed review revision request under the same authority"
+        ),
+        fresh_execution_request=revision_request,
+        budget_segment_reference=segment_reference,
+    )
+    _persist_governed_autonomy_runtime_state(record)
+    result = _governed_autonomy_runtime_operational_result(
+        record,
+        activation_record=activation,
+        idempotent_replay=False,
+        effective_authority=effective_authority,
+    )
+    result.update({
+        "review_revision_request_recorded": True,
+        "activation_created_from_review_decision": activation_created,
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "Kanban_dispatch": False,
+        "Git_mutation": False,
+    })
+    return result
 
 
 def _build_current_ticket_review_decision_record(
@@ -15590,7 +15875,16 @@ def _build_current_ticket_review_decision_record(
             feedback_sha256=feedback_sha,
             feedback_excerpt=feedback_excerpt,
         )
-    states = _review_decision_states(request.decision)
+    states = _review_decision_states(
+        request.decision,
+        revision_result=revision_result,
+    )
+    review_prepare = target.get("review_prepare") if isinstance(target.get("review_prepare"), dict) else None
+    revision_request_sha = (
+        revision_request.get("fresh_execution_request_SHA256")
+        if revision_request is not None
+        else None
+    )
     identity = {
         "project_id": binding.project_id,
         "ticket_id": binding.ticket_id,
@@ -15598,14 +15892,22 @@ def _build_current_ticket_review_decision_record(
         "work_packet_id": projection["work_packet_id"],
         "work_packet_SHA256": projection["work_packet_SHA256"],
         "projection_SHA256": projection["projection_SHA256"],
+        "authority_kind": target.get("authority_kind"),
         "activation_action_SHA256": target["activation"]["activation_action_SHA256"],
+        "governed_autonomy_envelope_SHA256": target["activation"].get(
+            "governed_autonomy_envelope_SHA256"
+        ),
+        "review_prepare_action_SHA256": (
+            review_prepare.get("review_prepare_action_SHA256") if review_prepare else None
+        ),
+        "review_package_SHA256": (
+            review_prepare.get("review_package_SHA256") if review_prepare else None
+        ),
         "reviewed_run_id": target["reviewed_run_id"],
         "reviewed_candidate_SHA256": target["candidate_SHA256"],
         "review_decision": request.decision,
         "bounded_review_feedback_SHA256": feedback_sha,
-        "revision_request_SHA256": revision_request.get("fresh_execution_request_SHA256")
-        if revision_request is not None
-        else None,
+        "revision_request_SHA256": revision_request_sha,
     }
     decision_identity_sha = _digest_payload(
         "pepper-current-ticket-review-decision-identity-sha256-v1",
@@ -15614,6 +15916,7 @@ def _build_current_ticket_review_decision_record(
     if revision_request is not None:
         revision_request = dict(revision_request)
         revision_request["review_decision_SHA256"] = decision_identity_sha
+        revision_request["review_decision_identity_SHA256"] = decision_identity_sha
     record = {
         "schema_version": PEPPER_REVIEW_DECISION_ACTION_SCHEMA_VERSION,
         "policy_id": PEPPER_REVIEW_DECISION_ACTION_POLICY_ID,
@@ -15632,16 +15935,36 @@ def _build_current_ticket_review_decision_record(
         "reviewed_candidate_SHA256": target["candidate_SHA256"],
         "reviewed_candidate_reference": target["candidate_reference"],
         "review_decision": request.decision,
+        "review_source_authority_kind": target.get("authority_kind"),
+        "review_prepare_action_SHA256": (
+            review_prepare.get("review_prepare_action_SHA256") if review_prepare else None
+        ),
+        "review_package_SHA256": (
+            review_prepare.get("review_package_SHA256") if review_prepare else None
+        ),
+        "acceptance_contract_SHA256": (
+            review_prepare.get("acceptance_contract_SHA256") if review_prepare else None
+        ),
+        "criteria_revision_SHA256": (
+            review_prepare.get("criteria_revision_SHA256") if review_prepare else None
+        ),
         "review_decision_identity_SHA256": decision_identity_sha,
         "reviewer_id": request.reviewer_id,
         "bounded_review_feedback": request.feedback,
         "bounded_review_feedback_excerpt": feedback_excerpt,
         "bounded_review_feedback_SHA256": feedback_sha,
         "current_authority_identity": {
+            "authority_kind": target.get("authority_kind"),
             "activation_action_SHA256": target["activation"]["activation_action_SHA256"],
             "governed_autonomy_envelope_SHA256": target["activation"][
                 "governed_autonomy_envelope_SHA256"
             ],
+            "review_prepare_action_SHA256": (
+                review_prepare.get("review_prepare_action_SHA256") if review_prepare else None
+            ),
+            "review_package_SHA256": (
+                review_prepare.get("review_package_SHA256") if review_prepare else None
+            ),
             "work_packet_SHA256": projection["work_packet_SHA256"],
             "projection_SHA256": projection["projection_SHA256"],
         },
@@ -15679,7 +16002,12 @@ def _build_current_ticket_review_decision_record(
         "Graphify_commands_executed": 0,
         "auto_retry": False,
         "auto_rollback": False,
-        "next_action": _review_decision_next_action(binding, request.decision),
+        "next_action": _review_decision_next_action(
+            binding,
+            request.decision,
+            revision_result=revision_result,
+            revision_request=revision_request,
+        ),
     }
     record["review_decision_SHA256"] = _review_decision_record_digest(record)
     return record
@@ -15688,6 +16016,9 @@ def _build_current_ticket_review_decision_record(
 def _review_decision_next_action(
     binding: CurrentTicketLifecycleBinding,
     decision: str,
+    *,
+    revision_result: dict[str, Any] | None = None,
+    revision_request: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     if decision == "accept":
         return {
@@ -15698,14 +16029,31 @@ def _review_decision_next_action(
             "required_human_action": "human_git_handoff",
         }
     if decision == "changes_requested":
-        return {
+        revision_started = bool(revision_result and revision_result.get("execution_started"))
+        action = {
             "id": governed_autonomy_continuation_action_id(binding.ticket_id),
-            "label": f"Monitor {binding.ticket_id} governed review-revision attempt.",
+            "label": (
+                f"Monitor {binding.ticket_id} governed review-revision attempt."
+                if revision_started
+                else f"Continue {binding.ticket_id} from the recorded governed review-revision request."
+            ),
             "target_ticket_id": binding.ticket_id,
             "target_ticket_title": binding.ticket_title,
             "authority": "backend_derived_governed_autonomy_continuation",
-            "required_human_action": "review_revision_monitoring",
+            "required_human_action": (
+                "review_revision_monitoring"
+                if revision_started
+                else "governed_review_revision_continuation"
+            ),
         }
+        if revision_request is not None:
+            action["fresh_execution_request_SHA256"] = revision_request.get(
+                "fresh_execution_request_SHA256"
+            )
+            action["review_revision_request_SHA256"] = revision_request.get(
+                "fresh_execution_request_SHA256"
+            )
+        return action
     return {
         "id": f"{binding.ticket_action_token}_REVIEW_REJECTED_NO_EXECUTION",
         "label": f"{binding.ticket_id} review rejected; separate human authority is required.",
@@ -15732,6 +16080,11 @@ def _review_decision_operational_result(
         "reviewed_run_id": record["reviewed_run_id"],
         "reviewed_candidate_SHA256": record["reviewed_candidate_SHA256"],
         "review_decision": record["review_decision"],
+        "review_source_authority_kind": record.get("review_source_authority_kind"),
+        "review_prepare_action_SHA256": record.get("review_prepare_action_SHA256"),
+        "review_package_SHA256": record.get("review_package_SHA256"),
+        "acceptance_contract_SHA256": record.get("acceptance_contract_SHA256"),
+        "criteria_revision_SHA256": record.get("criteria_revision_SHA256"),
         "review_decision_identity_SHA256": record["review_decision_identity_SHA256"],
         "review_decision_SHA256": record["review_decision_SHA256"],
         "bounded_review_feedback_SHA256": record["bounded_review_feedback_SHA256"],
@@ -15771,10 +16124,17 @@ def _review_revision_result_reference(result: dict[str, Any]) -> dict[str, Any]:
     return {
         "governed_autonomy_runtime_status": result.get("governed_autonomy_runtime_status"),
         "runtime_state_SHA256": result.get("runtime_state_SHA256"),
+        "previous_runtime_state_SHA256": result.get("previous_runtime_state_SHA256"),
         "runtime_decision": result.get("runtime_decision"),
         "fresh_execution_requested": bool(result.get("fresh_execution_requested")),
         "fresh_execution_request_SHA256": result.get("fresh_execution_request_SHA256"),
         "fresh_execution_request_reference": result.get("fresh_execution_request_reference"),
+        "review_revision_request_recorded": bool(
+            result.get("review_revision_request_recorded")
+        ),
+        "activation_created_from_review_decision": bool(
+            result.get("activation_created_from_review_decision")
+        ),
         "budget_segment_reference": result.get("budget_segment_reference"),
         "budget_segment_previous_runtime_state_SHA256": result.get(
             "budget_segment_previous_runtime_state_SHA256"
@@ -18507,16 +18867,32 @@ def _current_ticket_review_decision_overlay(
             "next_action": record["next_action"],
         })
     elif record["review_decision"] == "changes_requested":
+        revision_started = bool(record.get("revision_attempt_started"))
+        readiness = (
+            "review_changes_requested_revision_started"
+            if revision_started
+            else "review_changes_requested_revision_pending_continuation"
+        )
+        workflow_state = (
+            f"{binding.ticket_id}-REVIEW-CHANGES-REQUESTED-REVISION-STARTED"
+            if revision_started
+            else f"{binding.ticket_id}-REVIEW-CHANGES-REQUESTED-REVISION-PENDING-CONTINUATION"
+        )
         overlay.update({
-            "readiness": "review_changes_requested_revision_started",
-            "workflow_state": f"{binding.ticket_id}-REVIEW-CHANGES-REQUESTED-REVISION-STARTED",
-            "workflow_status": "review_changes_requested_revision_started",
-            "validation_state": "review_changes_requested",
-            "review_state": "correction_required",
+            "readiness": readiness,
+            "workflow_state": workflow_state,
+            "workflow_status": record["workflow_status"],
+            "validation_state": record["validation_state"],
+            "review_state": record["review_state"],
             "recovery_state": "not_required",
             "governed_workflow_state": "awaiting_correction",
             "git_handoff_required": True,
             "git_handoff_state": "human_git_authority_preserved",
+            "review_revision_request_reference": record.get(
+                "review_revision_request_reference"
+            ),
+            "revision_runtime_state_SHA256": record.get("revision_runtime_state_SHA256"),
+            "revision_attempt_started": revision_started,
             "next_action": record["next_action"],
         })
     elif record["review_decision"] == "reject":

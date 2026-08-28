@@ -4273,6 +4273,7 @@ def test_lead_agent_read_surfaces_reconstruct_prepared_p18_9_2_review_after_tool
         "projection_sha",
         "run_id",
         "completion_result",
+        "review_package",
         "acceptance_contract",
         "criteria_revision",
         "candidate_materialization",
@@ -4409,6 +4410,339 @@ def test_p18_9_2_review_decision_supersedes_prepared_review_overlay(
     assert workflow["Git_mutation"] is False
 
 
+def test_p18_9_2_prepared_review_reject_records_no_revision_or_execution(
+    projection_home,
+    monkeypatch,
+) -> None:
+    state, retry = _p18_9_2_review_ready_for_tool_test(
+        projection_home,
+        monkeypatch,
+        pid=6801,
+    )
+    pr = state.pr
+    prepared = pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_REVIEW",
+    )
+    assert prepared["review_prepare_status"] == "prepared_pending_human_acceptance"
+
+    rejected = pr.submit_current_ticket_review_decision(
+        decision="reject",
+        feedback="Human rejects the validated P18.9.2 candidate and requests no further execution.",
+        reviewed_run_id=retry["kanban_run_id"],
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="SUBMIT_P18_9_2_REVIEW_DECISION",
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("reject must not spawn"),
+    )
+
+    assert rejected["review_decision"] == "reject"
+    assert rejected["review_source_authority_kind"] == "review_prepare"
+    assert rejected["review_prepare_action_SHA256"] == prepared["review_prepare_action_SHA256"]
+    assert rejected["review_validation_decision"] == "cancelled"
+    assert rejected["review_state"] == "rejected"
+    assert rejected["review_revision_request_reference"] is None
+    assert rejected["revision_attempt_started"] is False
+    assert rejected["dispatch_performed"] is False
+    assert rejected["execution_started"] is False
+    assert rejected["Git_mutation"] is False
+    workflow = pr.build_workflow_control_snapshot()
+    assert workflow["workflow_status"] == "review_rejected_no_execution"
+    assert workflow["review_state"] == "rejected"
+    assert workflow["next_action"]["id"] == "P18_9_2_REVIEW_REJECTED_NO_EXECUTION"
+    assert not pr.governed_autonomy_runtime_state_path_for_ticket("P18.9.2").exists()
+
+
+def test_p18_9_2_prepared_review_changes_requested_derives_pending_revision_authority(
+    projection_home,
+    monkeypatch,
+) -> None:
+    state, retry = _p18_9_2_review_ready_for_tool_test(
+        projection_home,
+        monkeypatch,
+        pid=6801,
+    )
+    pr = state.pr
+    monkeypatch.setattr(pr, "_executor_provider_readiness", _ready_executor_provider_payload)
+    prepared = pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_REVIEW",
+    )
+    assert prepared["review_prepare_status"] == "prepared_pending_human_acceptance"
+    before = pr.build_workflow_control_snapshot()
+    assert before["review_decision_required"] is True
+    assert before.get("review_decision_recorded") is not True
+    assert not pr.governed_autonomy_activation_record_path_for_ticket("P18.9.2").exists()
+
+    changed = pr.submit_current_ticket_review_decision(
+        decision="changes_requested",
+        feedback="Human requests P18.9.2 changes limited to runtime-overview-page.tsx.",
+        reviewed_run_id=retry["kanban_run_id"],
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="SUBMIT_P18_9_2_REVIEW_DECISION",
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("prepared review bridge must not spawn"),
+    )
+
+    assert changed["review_decision"] == "changes_requested"
+    assert changed["review_source_authority_kind"] == "review_prepare"
+    assert changed["review_prepare_action_SHA256"] == prepared["review_prepare_action_SHA256"]
+    assert changed["review_package_SHA256"] == prepared["review_package_SHA256"]
+    assert changed["review_validation_decision"] == "needs_correction"
+    assert changed["review_state"] == "correction_required"
+    assert changed["workflow_status"] == "review_changes_requested_revision_pending_continuation"
+    assert changed["revision_attempt_started"] is False
+    assert changed["revision_kanban_run_id"] is None
+    assert changed["dispatch_performed"] is False
+    assert changed["execution_started"] is False
+    assert changed["worker_execution"] is False
+    assert changed["Kanban_dispatch"] is False
+    assert changed["Git_mutation"] is False
+    revision_request = changed["review_revision_request_reference"]
+    assert revision_request["fresh_execution_provenance"] == "human_review_changes_requested"
+    assert revision_request["prior_terminal_run_id"] == retry["kanban_run_id"]
+    assert revision_request["review_prepare_action_SHA256"] == prepared["review_prepare_action_SHA256"]
+    assert revision_request["review_package_SHA256"] == prepared["review_package_SHA256"]
+    assert revision_request["reviewed_candidate_SHA256"] == changed["reviewed_candidate_SHA256"]
+    assert revision_request["review_decision_identity_SHA256"] == changed[
+        "review_decision_identity_SHA256"
+    ]
+    assert revision_request["revision_source_base"] == "current_canonical_source"
+    assert revision_request["reviewed_candidate_copied_to_revision_base"] is False
+    assert changed["next_action"]["id"] == "CONTINUE_P18_9_2_GOVERNED_AUTONOMY"
+    assert changed["next_action"]["required_human_action"] == (
+        "governed_review_revision_continuation"
+    )
+    assert changed["next_action"]["fresh_execution_request_SHA256"] == revision_request[
+        "fresh_execution_request_SHA256"
+    ]
+
+    activation = pr.load_current_ticket_governed_autonomy_activation_record(
+        projection_record=state.pr._load_current_projection_record(),
+    )
+    assert activation is not None
+    assert activation["review_revision_activation_derived_from_review_decision"] is True
+    runtime = pr.load_current_ticket_governed_autonomy_runtime_state(
+        projection_record=state.pr._load_current_projection_record(),
+        activation_record=activation,
+    )
+    assert runtime is not None
+    assert runtime["governed_autonomy_runtime_status"] == (
+        "review_revision_request_recorded_pending_continuation"
+    )
+    assert runtime["runtime_decision"] == "DIRECT"
+    assert runtime["fresh_execution_requested"] is True
+    assert runtime["fresh_execution_request_SHA256"] == revision_request[
+        "fresh_execution_request_SHA256"
+    ]
+    assert runtime["fresh_execution_request_reference"] == revision_request
+    assert runtime["dispatch_performed"] is False
+    assert runtime["execution_started"] is False
+    assert runtime["Git_mutation"] is False
+
+    workflow = pr.build_workflow_control_snapshot()
+    assert workflow["current_ticket_id"] == "P18.9.2"
+    assert workflow["review_decision_recorded"] is True
+    assert workflow["review_decision_required"] is False
+    assert workflow["workflow_status"] == "review_changes_requested_revision_pending_continuation"
+    assert workflow["review_state"] == "correction_required"
+    assert workflow["revision_attempt_started"] is False
+    assert workflow["next_action"]["id"] == "CONTINUE_P18_9_2_GOVERNED_AUTONOMY"
+    assert workflow["current_ticket_id"] == "P18.9.2"
+    assert workflow.get("next_ticket_id") != "P18.9.3"
+    assert workflow["Git_mutation"] is False
+
+    replay = pr.submit_current_ticket_review_decision(
+        decision="changes_requested",
+        feedback="Human requests P18.9.2 changes limited to runtime-overview-page.tsx.",
+        reviewed_run_id=retry["kanban_run_id"],
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="SUBMIT_P18_9_2_REVIEW_DECISION",
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("review decision replay must not spawn"),
+    )
+    assert replay["idempotent_replay"] is True
+    assert replay["review_decision_SHA256"] == changed["review_decision_SHA256"]
+
+    with pytest.raises(pr.ProductRuntimeConflict, match="different review decision"):
+        pr.submit_current_ticket_review_decision(
+            decision="reject",
+            feedback="Human rejects the same P18.9.2 reviewed run.",
+            reviewed_run_id=retry["kanban_run_id"],
+            project_id="PEPPER",
+            ticket_id="P18.9.2",
+            next_action_id="SUBMIT_P18_9_2_REVIEW_DECISION",
+            spawn_fn=lambda *_args, **_kwargs: pytest.fail("conflict must not spawn"),
+        )
+
+
+def test_p18_9_2_prepared_review_changes_requested_reuses_stop_for_human_history(
+    projection_home,
+    monkeypatch,
+) -> None:
+    state, retry = _p18_9_2_review_ready_for_tool_test(
+        projection_home,
+        monkeypatch,
+        pid=6802,
+    )
+    pr = state.pr
+    monkeypatch.setattr(pr, "_executor_provider_readiness", _ready_executor_provider_payload)
+    prepared = pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_REVIEW",
+    )
+    assert prepared["review_prepare_status"] == "prepared_pending_human_acceptance"
+
+    activation = pr.activate_current_ticket_governed_autonomy(
+        human_request_text="I explicitly authorize governed autonomy activation status for P18.9.2.",
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="SUBMIT_P18_9_2_REVIEW_DECISION",
+    )
+    assert activation["governed_autonomy_activation_recorded"] is True
+    stop = pr.continue_current_ticket_governed_autonomy(
+        runtime_goal="Stop for human after P18.9.2 activation without execution.",
+        strategy="STOP_FOR_HUMAN",
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+    )
+    assert stop["runtime_decision"] == "STOP_FOR_HUMAN"
+    assert stop["governed_autonomy_runtime_status"] == "blocked_stop_for_human"
+    assert stop["dispatch_performed"] is False
+    assert stop["execution_started"] is False
+    assert stop["Git_mutation"] is False
+
+    changed = pr.submit_current_ticket_review_decision(
+        decision="changes_requested",
+        feedback="Human requests P18.9.2 changes limited to runtime-overview-page.tsx.",
+        reviewed_run_id=retry["kanban_run_id"],
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="SUBMIT_P18_9_2_REVIEW_DECISION",
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("prepared review bridge must not spawn"),
+    )
+    assert changed["review_decision"] == "changes_requested"
+    assert changed["revision_attempt_started"] is False
+    assert changed["revision_attempt_result"]["previous_runtime_state_SHA256"] == stop[
+        "runtime_state_SHA256"
+    ]
+    assert changed["revision_attempt_result"]["budget_segment_previous_runtime_state_SHA256"] == stop[
+        "runtime_state_SHA256"
+    ]
+    assert changed["revision_attempt_result"]["activation_created_from_review_decision"] is False
+    assert changed["dispatch_performed"] is False
+    assert changed["execution_started"] is False
+    assert changed["Git_mutation"] is False
+
+
+def test_p18_9_2_prepared_review_changes_requested_rejects_wrong_run(
+    projection_home,
+    monkeypatch,
+) -> None:
+    state, retry = _p18_9_2_review_ready_for_tool_test(
+        projection_home,
+        monkeypatch,
+        pid=6803,
+    )
+    pr = state.pr
+    monkeypatch.setattr(pr, "_executor_provider_readiness", _ready_executor_provider_payload)
+    pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_REVIEW",
+    )
+
+    with pytest.raises(pr.ProductRuntimeConflict, match="review decision targets run"):
+        pr.submit_current_ticket_review_decision(
+            decision="changes_requested",
+            feedback="Human requests P18.9.2 changes limited to runtime-overview-page.tsx.",
+            reviewed_run_id=retry["kanban_run_id"] + 100,
+            project_id="PEPPER",
+            ticket_id="P18.9.2",
+            next_action_id="SUBMIT_P18_9_2_REVIEW_DECISION",
+            spawn_fn=lambda *_args, **_kwargs: pytest.fail("wrong run must not spawn"),
+        )
+    assert not pr.review_decision_record_path_for_ticket("P18.9.2").exists()
+    assert not pr.governed_autonomy_runtime_state_path_for_ticket("P18.9.2").exists()
+
+
+def test_p18_9_2_review_decision_fails_closed_after_prepared_authority_drift(
+    projection_home,
+    monkeypatch,
+) -> None:
+    state, retry = _p18_9_2_review_ready_for_tool_test(
+        projection_home,
+        monkeypatch,
+        pid=6804,
+    )
+    pr = state.pr
+    monkeypatch.setattr(pr, "_executor_provider_readiness", _ready_executor_provider_payload)
+    pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_REVIEW",
+    )
+    changed = pr.submit_current_ticket_review_decision(
+        decision="changes_requested",
+        feedback="Human requests P18.9.2 changes limited to runtime-overview-page.tsx.",
+        reviewed_run_id=retry["kanban_run_id"],
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="SUBMIT_P18_9_2_REVIEW_DECISION",
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("prepared review bridge must not spawn"),
+    )
+    assert changed["review_decision"] == "changes_requested"
+
+    _tamper_p18_9_2_review_prepare_record(pr, "review_package")
+
+    with pytest.raises(pr.ProductRuntimeConflict):
+        pr.load_current_ticket_review_decision_record(
+            projection_record=pr._load_current_projection_record(),
+        )
+
+
+def test_p18_9_2_prepared_review_changes_requested_blocks_scope_expansion(
+    projection_home,
+    monkeypatch,
+) -> None:
+    state, retry = _p18_9_2_review_ready_for_tool_test(
+        projection_home,
+        monkeypatch,
+        pid=6805,
+    )
+    pr = state.pr
+    monkeypatch.setattr(pr, "_executor_provider_readiness", _ready_executor_provider_payload)
+    pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_REVIEW",
+    )
+
+    blocked = pr.submit_current_ticket_review_decision(
+        decision="changes_requested",
+        feedback=(
+            "Human requests P18.9.2 changes limited to runtime-overview-page.tsx and "
+            "also asks to modify 2_products/pepper-agent/package-lock.json."
+        ),
+        reviewed_run_id=retry["kanban_run_id"],
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="SUBMIT_P18_9_2_REVIEW_DECISION",
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("authority expansion must not spawn"),
+    )
+
+    assert blocked["blocker_code"] == "REVIEW_FEEDBACK_REQUIRES_AUTHORITY_EXPANSION"
+    assert blocked["authority_expansion_required"] is True
+    assert blocked["dispatch_performed"] is False
+    assert blocked["execution_started"] is False
+    assert blocked["Git_mutation"] is False
+    assert not pr.review_decision_record_path_for_ticket("P18.9.2").exists()
+    assert not pr.governed_autonomy_runtime_state_path_for_ticket("P18.9.2").exists()
+
+
 def _tamper_p18_9_2_review_prepare_record(pr, tamper_kind: str) -> None:
     path = pr.review_prepare_record_path_for_ticket("P18.9.2")
     record = json.loads(path.read_text(encoding="utf-8"))
@@ -4428,6 +4762,8 @@ def _tamper_p18_9_2_review_prepare_record(pr, tamper_kind: str) -> None:
         record["successful_run_id"] = int(record["successful_run_id"]) + 100
     elif tamper_kind == "completion_result":
         record["kanban_completion_result_SHA256"] = "3" * 64
+    elif tamper_kind == "review_package":
+        record["review_package_SHA256"] = "6" * 64
     elif tamper_kind == "acceptance_contract":
         record["acceptance_contract_SHA256"] = "4" * 64
     elif tamper_kind == "criteria_revision":
