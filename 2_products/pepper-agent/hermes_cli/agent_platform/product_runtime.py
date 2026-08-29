@@ -205,7 +205,7 @@ PEPPER_HUMAN_GIT_HANDOFF_COMPLETION_DIGEST_ALGORITHM = (
 PEPPER_HUMAN_GIT_HANDOFF_COMPLETION_IDENTITY_DIGEST_ALGORITHM = (
     "agent-platform-pepper-current-ticket-human-git-handoff-completion-identity-sha256-v1"
 )
-PEPPER_HUMAN_GIT_HANDOFF_PREPARE_SCHEMA_VERSION = 1
+PEPPER_HUMAN_GIT_HANDOFF_PREPARE_SCHEMA_VERSION = 2
 PEPPER_HUMAN_GIT_HANDOFF_PREPARE_POLICY_ID = (
     "pepper-current-ticket-human-git-handoff-prepare-v1"
 )
@@ -218,6 +218,19 @@ PEPPER_HUMAN_GIT_HANDOFF_PREPARE_DIGEST_ALGORITHM = (
 PEPPER_HUMAN_GIT_HANDOFF_PREPARE_IDENTITY_DIGEST_ALGORITHM = (
     "agent-platform-pepper-current-ticket-human-git-handoff-prepare-identity-sha256-v1"
 )
+PEPPER_HUMAN_CANDIDATE_MATERIALIZATION_POLICY_ID = (
+    "pepper-current-ticket-human-candidate-materialization-v1"
+)
+PEPPER_HUMAN_CANDIDATE_MATERIALIZATION_DIGEST_ALGORITHM = (
+    "agent-platform-pepper-human-candidate-materialization-plan-sha256-v1"
+)
+PEPPER_HUMAN_GIT_HANDOFF_C12_RENDERED_DIGEST_ALGORITHM = (
+    "agent-platform-pepper-human-git-handoff-materialization-aware-rendered-sha256-v1"
+)
+PEPPER_HUMAN_GIT_HANDOFF_TOLERATED_UNTRACKED_EXCLUSIONS = (
+    "2_products/pepper-agent/.runtime-logs/**",
+)
+PEPPER_HUMAN_GIT_HANDOFF_EXPLICIT_PREPARE_REQUIRED_FROM_TICKET_ID = "P18.9.2"
 PEPPER_GOVERNED_AUTONOMY_PENDING_FRESH_REQUEST_HISTORY_LIMIT = 64
 PEPPER_GOVERNED_AUTONOMY_AUTHORITY_DIGEST_ALGORITHM = (
     "agent-platform-pepper-governed-autonomy-backend-derived-live-authority-sha256-v1"
@@ -4444,7 +4457,7 @@ def validate_current_ticket_human_git_handoff_prepare_record(
         raise ProductRuntimeConflict("P17.7 handoff result digest mismatch")
     if record.get("P17_7_handoff_package_SHA256") != p17_result.package.package_SHA256:
         raise ProductRuntimeConflict("P17.7 handoff package digest mismatch")
-    if record.get("rendered_powershell_SHA256") != p17_result.rendered_powershell_SHA256:
+    if record.get("P17_7_rendered_powershell_SHA256") != p17_result.rendered_powershell_SHA256:
         raise ProductRuntimeConflict("P17.7 rendered PowerShell digest mismatch")
     if record.get("rendered_handoff_powershell") in {None, ""}:
         raise ProductRuntimeConflict("rendered human Git handoff PowerShell is missing")
@@ -4456,6 +4469,30 @@ def validate_current_ticket_human_git_handoff_prepare_record(
         raise ProductRuntimeConflict("P17.7 handoff package candidate paths mismatch")
     if tuple(record.get("candidate_paths") or ()) != expected_paths:
         raise ProductRuntimeConflict("human Git handoff preparation candidate paths mismatch")
+    materialization_plan = record.get("human_candidate_materialization_plan")
+    if not isinstance(materialization_plan, dict):
+        raise ProductRuntimeConflict("human candidate materialization plan is missing")
+    if materialization_plan.get("materialization_plan_SHA256") != _human_candidate_materialization_plan_digest(
+        materialization_plan
+    ):
+        raise ProductRuntimeConflict("human candidate materialization plan digest mismatch")
+    if record.get("materialization_plan_SHA256") != materialization_plan["materialization_plan_SHA256"]:
+        raise ProductRuntimeConflict("human candidate materialization plan reference mismatch")
+    if tuple(materialization_plan.get("candidate_paths") or ()) != expected_paths:
+        raise ProductRuntimeConflict("human candidate materialization paths mismatch")
+    if _handoff_exclusion_conflicts(
+        expected_paths,
+        tuple(materialization_plan.get("tolerated_untracked_exclusions") or ()),
+    ):
+        raise ProductRuntimeConflict("human Git handoff exclusion overlaps candidate path")
+    if record.get("rendered_powershell_SHA256") != _c12_rendered_handoff_digest(
+        str(record["rendered_handoff_powershell"])
+    ):
+        raise ProductRuntimeConflict("materialization-aware rendered PowerShell digest mismatch")
+    if record.get("materialization_required") != materialization_plan.get("materialization_required"):
+        raise ProductRuntimeConflict("human candidate materialization requirement mismatch")
+    if record.get("canonical_source_mutation_by_Pepper") is not False:
+        raise ProductRuntimeConflict("human Git handoff preparation grants source mutation authority")
     return record
 
 
@@ -7701,11 +7738,22 @@ def prepare_current_ticket_human_git_handoff(
         git_snapshot_fn() if callable(git_snapshot_fn) else _current_readonly_repository_git_snapshot()
     )
     try:
-        p17_result, rendered = _build_p17_7_current_human_git_handoff_result(
+        p17_result, p17_rendered = _build_p17_7_current_human_git_handoff_result(
             projection=projection,
             review_prepare=review_prepare,
             accepted_review=accepted_review,
             git_snapshot=git_snapshot,
+        )
+        materialization_plan = _build_human_candidate_materialization_plan(
+            projection=projection,
+            review_prepare=review_prepare,
+            accepted_review=accepted_review,
+            p17_result=p17_result,
+            git_snapshot=git_snapshot,
+        )
+        rendered = _render_c12_human_git_handoff_powershell(
+            materialization_plan=materialization_plan,
+            p17_result=p17_result,
         )
     except ProductRuntimeCandidateInspectionBlocked as exc:
         return _blocked_current_human_git_handoff_prepare_result(
@@ -7731,6 +7779,8 @@ def prepare_current_ticket_human_git_handoff(
         accepted_review=accepted_review,
         review_prepare=review_prepare,
         p17_result=p17_result,
+        p17_rendered_powershell=p17_rendered,
+        materialization_plan=materialization_plan,
         rendered_powershell=rendered,
     )
     _persist_current_ticket_human_git_handoff_prepare_record(record)
@@ -18225,6 +18275,502 @@ def _p17_7_handoff_commit_message(binding: CurrentTicketLifecycleBinding) -> str
     return message or binding.ticket_id
 
 
+def _human_candidate_materialization_plan_digest(plan: dict[str, Any]) -> str:
+    payload = {key: value for key, value in plan.items() if key != "materialization_plan_SHA256"}
+    return _digest_payload(PEPPER_HUMAN_CANDIDATE_MATERIALIZATION_DIGEST_ALGORITHM, payload)
+
+
+def _c12_rendered_handoff_digest(rendered: str) -> str:
+    return _digest_payload(
+        PEPPER_HUMAN_GIT_HANDOFF_C12_RENDERED_DIGEST_ALGORITHM,
+        {"rendered_handoff_powershell": rendered},
+    )
+
+
+def _ps_single_quote(value: object) -> str:
+    return "'" + str(value or "").replace("'", "''") + "'"
+
+
+def _ps_nullable_string(value: object) -> str:
+    if value in {None, ""}:
+        return "$null"
+    return _ps_single_quote(value)
+
+
+def _git_snapshot_path_sha256(
+    git_snapshot: dict[str, Any],
+    relative_path: str,
+) -> str | None:
+    snapshot = git_snapshot if isinstance(git_snapshot, dict) else {}
+    maps = (
+        snapshot.get("path_SHA256"),
+        snapshot.get("path_sha256"),
+        snapshot.get("current_path_SHA256"),
+        snapshot.get("current_path_sha256"),
+        snapshot.get("file_SHA256_by_path"),
+        snapshot.get("file_sha256_by_path"),
+    )
+    for mapping in maps:
+        if not isinstance(mapping, dict):
+            continue
+        value = mapping.get(relative_path) or mapping.get(relative_path.replace("/", "\\"))
+        if isinstance(value, str) and _SAFE_SHA256.fullmatch(value.strip().lower()):
+            return value.strip().lower()
+    return None
+
+
+def _git_snapshot_remote_parent(git_snapshot: dict[str, Any]) -> str | None:
+    snapshot = git_snapshot if isinstance(git_snapshot, dict) else {}
+    for key in ("remote_head", "remote_parent", "upstream_head", "origin_head"):
+        value = snapshot.get(key)
+        if isinstance(value, str) and re.fullmatch(r"[a-f0-9]{40}", value.strip().lower()):
+            return value.strip().lower()
+    return None
+
+
+def _materialization_target_state(
+    *,
+    change_type: str,
+    source_sha: str | None,
+    candidate_sha: str | None,
+    current_target_sha: str | None,
+) -> str:
+    if current_target_sha is None:
+        return "target_hash_unavailable"
+    if candidate_sha is not None and current_target_sha == candidate_sha:
+        return "target_already_accepted_candidate"
+    if source_sha is not None and current_target_sha == source_sha:
+        return "target_at_expected_source"
+    if change_type == "created" and current_target_sha in {None, ""}:
+        return "target_absent_as_expected"
+    if change_type == "deleted" and current_target_sha in {None, ""}:
+        return "target_already_removed"
+    return "unexpected_target_sha"
+
+
+def _materialization_required_from_entries(entries: list[dict[str, Any]]) -> bool:
+    for entry in entries:
+        if entry["target_materialization_state"] != "target_already_accepted_candidate":
+            return True
+    return False
+
+
+def _status_entry_parts(entry: Any) -> tuple[str, str] | None:
+    if isinstance(entry, dict):
+        status = str(entry.get("status") or entry.get("code") or "").ljust(2)[:2]
+        path = str(entry.get("path") or entry.get("relative_path") or "").strip()
+    else:
+        text = str(entry or "").rstrip()
+        if not text:
+            return None
+        status = text[:2].ljust(2)[:2]
+        path = text[3:].strip() if len(text) > 3 else ""
+    if " -> " in path:
+        path = path.split(" -> ")[-1]
+    path = path.strip().strip('"').replace("\\", "/")
+    if not path:
+        return None
+    return status, path
+
+
+def _path_matches_handoff_exclusion(path: str, exclusion: str) -> bool:
+    normalized_path = path.strip().strip("/").replace("\\", "/")
+    normalized_exclusion = exclusion.strip().strip("/").replace("\\", "/")
+    if not normalized_path or not normalized_exclusion:
+        return False
+    if normalized_exclusion.endswith("/**"):
+        prefix = normalized_exclusion[:-3].rstrip("/")
+        return normalized_path == prefix or normalized_path.startswith(f"{prefix}/")
+    if _contains_glob_pattern(normalized_exclusion):
+        return fnmatch.fnmatchcase(normalized_path, normalized_exclusion)
+    return normalized_path == normalized_exclusion or normalized_path.startswith(
+        f"{normalized_exclusion}/"
+    )
+
+
+def _handoff_exclusion_conflicts(
+    candidate_paths: tuple[str, ...],
+    tolerated_untracked_exclusions: tuple[str, ...],
+) -> tuple[str, ...]:
+    conflicts: list[str] = []
+    for path in candidate_paths:
+        if any(_path_matches_handoff_exclusion(path, exclusion) for exclusion in tolerated_untracked_exclusions):
+            conflicts.append(path)
+    return tuple(sorted(conflicts))
+
+
+def _human_git_handoff_dirty_status(
+    git_snapshot: dict[str, Any],
+    *,
+    candidate_paths: tuple[str, ...],
+    tolerated_untracked_exclusions: tuple[str, ...],
+) -> dict[str, Any]:
+    snapshot = git_snapshot if isinstance(git_snapshot, dict) else {}
+    entries = snapshot.get("status_entries")
+    if not isinstance(entries, list):
+        entries = []
+    candidate_set = frozenset(candidate_paths)
+    tolerated_untracked: list[str] = []
+    candidate_status_entries: list[dict[str, str]] = []
+    unexpected_tracked: list[dict[str, str]] = []
+    unexpected_untracked: list[dict[str, str]] = []
+    for raw_entry in entries:
+        parsed = _status_entry_parts(raw_entry)
+        if parsed is None:
+            continue
+        status, path = parsed
+        if path in candidate_set:
+            candidate_status_entries.append({"status": status, "path": path})
+            continue
+        if status == "??" and any(
+            _path_matches_handoff_exclusion(path, exclusion)
+            for exclusion in tolerated_untracked_exclusions
+        ):
+            tolerated_untracked.append(path)
+            continue
+        if status == "??":
+            unexpected_untracked.append({"status": status, "path": path})
+        else:
+            unexpected_tracked.append({"status": status, "path": path})
+    unexpected_count = len(unexpected_tracked) + len(unexpected_untracked)
+    return {
+        "available": bool(snapshot.get("available")) or bool(entries),
+        "status": "blocked_unexpected_remainder" if unexpected_count else "ok",
+        "candidate_status_entries": candidate_status_entries,
+        "tolerated_untracked_exclusions": list(tolerated_untracked_exclusions),
+        "tolerated_untracked_paths": sorted(tolerated_untracked),
+        "unexpected_tracked_paths": unexpected_tracked,
+        "unexpected_untracked_paths": unexpected_untracked,
+        "unexpected_dirty_path_count": unexpected_count,
+        "policy": {
+            "accepted_candidate_paths_may_be_dirty_only_after_materialization": True,
+            "unexpected_tracked_paths_block_handoff": True,
+            "package_lock_modification_blocks_handoff": True,
+            "arbitrary_untracked_paths_block_handoff": True,
+            "tolerated_untracked_runtime_exclusions_may_remain_unstaged": True,
+        },
+    }
+
+
+def _build_human_candidate_materialization_plan(
+    *,
+    projection: dict[str, Any],
+    review_prepare: dict[str, Any],
+    accepted_review: dict[str, Any],
+    p17_result: Any,
+    git_snapshot: dict[str, Any],
+) -> dict[str, Any]:
+    binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
+    context = _current_review_candidate_authority_context(
+        projection=projection,
+        review_prepare=review_prepare,
+    )
+    entries: list[dict[str, Any]] = []
+    for entry in context["files"].values():
+        file_context = _review_candidate_file_context(context, entry)
+        relative_path = entry["path"]
+        change_type = entry["change"]
+        source_sha = entry.get("source_SHA256")
+        candidate_sha = entry.get("workspace_SHA256")
+        current_target_sha = _git_snapshot_path_sha256(git_snapshot, relative_path)
+        target_state = _materialization_target_state(
+            change_type=change_type,
+            source_sha=source_sha,
+            candidate_sha=candidate_sha,
+            current_target_sha=current_target_sha,
+        )
+        entries.append({
+            "candidate_id": f"MAT-{len(entries) + 1:03d}",
+            "relative_path": relative_path,
+            "change_type": change_type,
+            "source_SHA256": source_sha,
+            "accepted_candidate_SHA256": candidate_sha,
+            "current_target_SHA256": current_target_sha,
+            "target_materialization_state": target_state,
+            "scratch_candidate_path": str(file_context["candidate_path"])
+            if file_context["candidate_path"] is not None
+            else None,
+            "scratch_source_path": str(file_context["source_path"])
+            if file_context["source_path"] is not None
+            else None,
+            "target_relative_path": relative_path,
+            "materialization_action": "remove_target_path"
+            if change_type == "deleted"
+            else "copy_exact_candidate_bytes",
+        })
+    candidate_paths = tuple(item["relative_path"] for item in entries)
+    tolerated_exclusions = tuple(PEPPER_HUMAN_GIT_HANDOFF_TOLERATED_UNTRACKED_EXCLUSIONS)
+    exclusion_conflicts = _handoff_exclusion_conflicts(candidate_paths, tolerated_exclusions)
+    if exclusion_conflicts:
+        raise ProductRuntimeCandidateInspectionBlocked(
+            "HANDOFF_EXCLUSION_CONFLICTS_WITH_CANDIDATE_PATH",
+            "tolerated handoff exclusion overlaps an accepted candidate path",
+        )
+    remote_parent = _git_snapshot_remote_parent(git_snapshot)
+    remote_parent_status = (
+        "verified"
+        if remote_parent == p17_result.package.expected_parent_commit
+        else "unavailable"
+        if remote_parent is None
+        else "blocked_remote_parent_mismatch"
+    )
+    blocked_entries = [
+        item
+        for item in entries
+        if item["target_materialization_state"] == "unexpected_target_sha"
+    ]
+    if blocked_entries:
+        raise ProductRuntimeCandidateInspectionBlocked(
+            "MATERIALIZATION_SOURCE_SHA_MISMATCH",
+            "canonical target SHA does not match expected source or accepted candidate",
+        )
+    if remote_parent_status == "blocked_remote_parent_mismatch":
+        raise ProductRuntimeCandidateInspectionBlocked(
+            "READ_ONLY_GIT_REMOTE_PARENT_MISMATCH",
+            "read-only remote parent evidence does not match current handoff parent",
+        )
+    materialization_required = _materialization_required_from_entries(entries)
+    plan = {
+        "schema_version": 1,
+        "policy_id": PEPPER_HUMAN_CANDIDATE_MATERIALIZATION_POLICY_ID,
+        "source_system": PEPPER_HUMAN_GIT_HANDOFF_PREPARE_SOURCE_SYSTEM,
+        "materialization_required": materialization_required,
+        "materialization_strategy": "explicit_cross_checkout_human_powershell_copy_from_trusted_scratch",
+        "cross_checkout_strategy": {
+            "id": "explicit_wsl_to_windows_or_same_checkout_human_copy",
+            "description": (
+                "PowerShell resolves trusted scratch paths directly when already visible; POSIX/WSL "
+                "scratch paths are converted with wsl.exe wslpath before the human copy step."
+            ),
+            "scratch_workspace_may_differ_from_git_checkout": True,
+        },
+        **_current_ticket_projection_identity_fields(projection),
+        "projection_SHA256": projection["projection_SHA256"],
+        "reviewed_run_id": accepted_review["reviewed_run_id"],
+        "reviewed_candidate_SHA256": accepted_review["reviewed_candidate_SHA256"],
+        "review_decision_SHA256": accepted_review["review_decision_SHA256"],
+        "review_prepare_action_SHA256": review_prepare["review_prepare_action_SHA256"],
+        "review_package_SHA256": review_prepare["review_package_SHA256"],
+        "P17_7_handoff_package_SHA256": p17_result.package.package_SHA256,
+        "target_repository_parent_SHA256": p17_result.package.expected_parent_commit,
+        "target_branch": p17_result.package.branch_name,
+        "remote_name": p17_result.package.remote_name,
+        "materialization_source_workspace": {
+            "manifest_path": str(context["manifest_path"]),
+            "scratch_workspace_root": str(context["workspace_root"]),
+            "scratch_source_root": str(context["source_root"]),
+            "source_materialized": bool(context["manifest"].get("source_materialized")),
+            "manifest_identity_validated": True,
+        },
+        "git_checkout_display_path": p17_result.package.repository_display_path,
+        "candidate_paths": list(candidate_paths),
+        "candidate_count": len(entries),
+        "candidates": entries,
+        "tolerated_untracked_exclusions": list(tolerated_exclusions),
+        "unexpected_dirty_path_policy": {
+            "candidate_paths": "must_materialize_then_stage_exactly",
+            "tracked_non_candidate_paths": "block_until_human_resolves",
+            "package_lock_json": "tracked_modification_blocks_until_human_resolves",
+            "tolerated_untracked_runtime_exclusions": "may_remain_unstaged_and_uncommitted",
+            "other_untracked_paths": "block_until_human_resolves",
+        },
+        "preflight_dirty_status": _human_git_handoff_dirty_status(
+            git_snapshot,
+            candidate_paths=candidate_paths,
+            tolerated_untracked_exclusions=tolerated_exclusions,
+        ),
+        "remote_parent_status": remote_parent_status,
+        "read_only_remote_parent_SHA256": remote_parent,
+        "canonical_source_mutation_by_Pepper": False,
+        "Git_commands_executed": 0,
+        "Git_mutation": False,
+    }
+    plan["materialization_plan_SHA256"] = _human_candidate_materialization_plan_digest(plan)
+    return plan
+
+
+def _render_c12_human_git_handoff_powershell(
+    *,
+    materialization_plan: dict[str, Any],
+    p17_result: Any,
+) -> str:
+    from hermes_cli.agent_platform.work_packet import human_git_handoff as hgh
+
+    candidates = materialization_plan["candidates"]
+    candidate_lines = []
+    for candidate in candidates:
+        candidate_lines.append(
+            "    @{ Id = "
+            + _ps_single_quote(candidate["candidate_id"])
+            + "; RelativePath = "
+            + _ps_single_quote(candidate["relative_path"])
+            + "; ChangeType = "
+            + _ps_single_quote(candidate["change_type"])
+            + "; SourceSHA256 = "
+            + _ps_nullable_string(candidate.get("source_SHA256"))
+            + "; CandidateSHA256 = "
+            + _ps_nullable_string(candidate.get("accepted_candidate_SHA256"))
+            + "; ScratchCandidatePath = "
+            + _ps_nullable_string(candidate.get("scratch_candidate_path"))
+            + " }"
+        )
+    path_array = ", ".join(_ps_single_quote(path) for path in materialization_plan["candidate_paths"])
+    exclusion_array = ", ".join(
+        _ps_single_quote(path) for path in materialization_plan["tolerated_untracked_exclusions"]
+    )
+    package = p17_result.package
+    lines = [
+        "$ErrorActionPreference = 'Stop'",
+        "$Repo = " + _ps_single_quote(package.repository_display_path),
+        "$BranchName = " + _ps_single_quote(package.branch_name),
+        "$ExpectedParent = '" + package.expected_parent_commit + "'",
+        "$RemoteName = '" + package.remote_name + "'",
+        "$CommitMessage = " + _ps_single_quote(package.commit_message),
+        "$ScratchWorkspaceRoot = "
+        + _ps_single_quote(
+            materialization_plan["materialization_source_workspace"]["scratch_workspace_root"]
+        ),
+        "$ExpectedPaths = @(" + path_array + ") | Sort-Object",
+        "$ToleratedUntrackedExclusions = @(" + exclusion_array + ")",
+        "$Candidates = @(",
+        *candidate_lines,
+        ")",
+        "function Resolve-C12MaterializationPath {",
+        "    param([string]$Path)",
+        "    if ([string]::IsNullOrWhiteSpace($Path)) { return $null }",
+        "    if ($Path -match '^/') {",
+        "        $Converted = (& wsl.exe wslpath -w -- $Path).Trim()",
+        "        if ([string]::IsNullOrWhiteSpace($Converted)) { throw 'WSL path conversion failed' }",
+        "        return $Converted",
+        "    }",
+        "    return $Path",
+        "}",
+        "function Get-C12FileSha256 {",
+        "    param([string]$LiteralPath)",
+        "    if ([string]::IsNullOrWhiteSpace($LiteralPath)) { return $null }",
+        "    if (-not (Test-Path -LiteralPath $LiteralPath -PathType Leaf)) { return $null }",
+        "    return (Get-FileHash -Algorithm SHA256 -LiteralPath $LiteralPath).Hash.ToLowerInvariant()",
+        "}",
+        "function Test-C12ContainedPath {",
+        "    param([string]$Path, [string]$Root)",
+        "    $FullPath = [System.IO.Path]::GetFullPath($Path)",
+        "    $FullRoot = [System.IO.Path]::GetFullPath($Root).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)",
+        "    return ($FullPath -eq $FullRoot -or $FullPath.StartsWith($FullRoot + [System.IO.Path]::DirectorySeparatorChar) -or $FullPath.StartsWith($FullRoot + [System.IO.Path]::AltDirectorySeparatorChar))",
+        "}",
+        "function Test-C12ToleratedUntrackedPath {",
+        "    param([string]$Path)",
+        "    $Normalized = $Path.Replace('\\', '/')",
+        "    foreach ($Exclusion in $ToleratedUntrackedExclusions) {",
+        "        $Pattern = $Exclusion.Replace('\\', '/')",
+        "        if ($Pattern.EndsWith('/**')) {",
+        "            $Prefix = $Pattern.Substring(0, $Pattern.Length - 3).TrimEnd('/')",
+        "            if ($Normalized -eq $Prefix -or $Normalized.StartsWith($Prefix + '/')) { return $true }",
+        "        } elseif ($Normalized -eq $Pattern -or $Normalized.StartsWith($Pattern.TrimEnd('/') + '/')) { return $true }",
+        "    }",
+        "    return $false",
+        "}",
+        "function Assert-C12StatusPolicy {",
+        "    param([string[]]$AllowedTrackedPaths, [string[]]$AllowedStagedPaths, [string]$Phase)",
+        "    $AllowedTracked = @{}; foreach ($Path in $AllowedTrackedPaths) { $AllowedTracked[$Path.Replace('\\', '/')] = $true }",
+        "    $AllowedStaged = @{}; foreach ($Path in $AllowedStagedPaths) { $AllowedStaged[$Path.Replace('\\', '/')] = $true }",
+        "    $Unexpected = @()",
+        "    foreach ($Line in @(git status --short --untracked-files=all)) {",
+        "        if ([string]::IsNullOrWhiteSpace($Line)) { continue }",
+        "        $Status = $Line.Substring(0, 2)",
+        "        $Path = if ($Line.Length -gt 3) { $Line.Substring(3).Trim() } else { '' }",
+        "        if ($Path.Contains(' -> ')) { $Path = $Path.Split(' -> ')[-1] }",
+        "        $Path = $Path.Trim('\"').Replace('\\', '/')",
+        "        $IndexStatus = $Status.Substring(0, 1)",
+        "        $WorktreeStatus = $Status.Substring(1, 1)",
+        "        if ($AllowedTracked.ContainsKey($Path)) { continue }",
+        "        if ($AllowedStaged.ContainsKey($Path) -and $IndexStatus -ne ' ' -and $WorktreeStatus -eq ' ') { continue }",
+        "        if ($Status -eq '??' -and (Test-C12ToleratedUntrackedPath $Path)) { continue }",
+        "        $Unexpected += ($Status + ' ' + $Path)",
+        "    }",
+        "    if (@($Unexpected).Count -ne 0) { throw ('unexpected ' + $Phase + ' remainder: ' + ($Unexpected -join ', ')) }",
+        "}",
+        "Set-Location -LiteralPath $Repo",
+        "$ResolvedScratchRoot = Resolve-C12MaterializationPath $ScratchWorkspaceRoot",
+        "if (-not (Test-Path -LiteralPath $ResolvedScratchRoot -PathType Container)) { throw 'scratch workspace root missing' }",
+        "$CurrentBranch = (git rev-parse --abbrev-ref HEAD).Trim()",
+        "if ($CurrentBranch -ne $BranchName) { throw 'branch mismatch' }",
+        "$CurrentParent = (git rev-parse HEAD).Trim()",
+        "if ($CurrentParent -ne $ExpectedParent) { throw 'parent mismatch' }",
+        "$RemoteParent = (git rev-parse origin/$BranchName).Trim()",
+        "if ($RemoteParent -ne $ExpectedParent) { throw 'remote parent mismatch' }",
+        "if ((git diff --cached --name-only).Count -ne 0) { throw 'index not empty' }",
+        "Assert-C12StatusPolicy -AllowedTrackedPaths $ExpectedPaths -AllowedStagedPaths @() -Phase 'pre-materialization'",
+        "foreach ($Candidate in $Candidates) {",
+        "    $RelativePath = $Candidate.RelativePath",
+        "    if (-not ($ExpectedPaths -contains $RelativePath)) { throw 'unauthorized candidate path' }",
+        "    $TargetPath = Join-Path $Repo $RelativePath",
+        "    $TargetParent = Split-Path -Parent $TargetPath",
+        "    if (-not (Test-Path -LiteralPath $TargetParent -PathType Container)) { New-Item -ItemType Directory -Path $TargetParent | Out-Null }",
+        "    $CurrentTargetSHA = Get-C12FileSha256 $TargetPath",
+        "    if ($Candidate.CandidateSHA256 -and $CurrentTargetSHA -eq $Candidate.CandidateSHA256) { continue }",
+        "    if ($Candidate.SourceSHA256) {",
+        "        if ($CurrentTargetSHA -ne $Candidate.SourceSHA256) { throw ('source SHA mismatch before materialization: ' + $RelativePath) }",
+        "    } elseif ($CurrentTargetSHA) { throw ('unexpected pre-existing target before materialization: ' + $RelativePath) }",
+        "    if ($Candidate.ChangeType -eq 'deleted') {",
+        "        if (Test-Path -LiteralPath $TargetPath) { Remove-Item -LiteralPath $TargetPath }",
+        "        if (Get-C12FileSha256 $TargetPath) { throw ('post-materialization delete mismatch: ' + $RelativePath) }",
+        "        continue",
+        "    }",
+        "    $ScratchCandidatePath = Resolve-C12MaterializationPath $Candidate.ScratchCandidatePath",
+        "    if (-not (Test-C12ContainedPath $ScratchCandidatePath $ResolvedScratchRoot)) { throw ('scratch candidate escape: ' + $RelativePath) }",
+        "    $ScratchCandidateSHA = Get-C12FileSha256 $ScratchCandidatePath",
+        "    if ($ScratchCandidateSHA -ne $Candidate.CandidateSHA256) { throw ('scratch candidate SHA mismatch: ' + $RelativePath) }",
+        "    Copy-Item -LiteralPath $ScratchCandidatePath -Destination $TargetPath -Force",
+        "    $PostTargetSHA = Get-C12FileSha256 $TargetPath",
+        "    if ($PostTargetSHA -ne $Candidate.CandidateSHA256) { throw ('post-materialization SHA mismatch: ' + $RelativePath) }",
+        "}",
+        "Assert-C12StatusPolicy -AllowedTrackedPaths $ExpectedPaths -AllowedStagedPaths @() -Phase 'post-materialization'",
+        "$ObservedPaths = @(git diff --name-only -- $ExpectedPaths) | Sort-Object",
+        "if (@($ObservedPaths).Count -ne @($ExpectedPaths).Count) { throw 'materialized candidate count mismatch' }",
+        "for ($i = 0; $i -lt $ExpectedPaths.Count; $i++) { if ($ObservedPaths[$i] -ne $ExpectedPaths[$i]) { throw 'materialized candidate path mismatch' } }",
+        "foreach ($Candidate in $Candidates) {",
+        "    if ($Candidate.ChangeType -ne 'deleted') {",
+        "        $TargetPath = Join-Path $Repo $Candidate.RelativePath",
+        "        if ((Get-C12FileSha256 $TargetPath) -ne $Candidate.CandidateSHA256) { throw ('staging gate SHA mismatch: ' + $Candidate.RelativePath) }",
+        "    }",
+        "    git add -- $Candidate.RelativePath",
+        "}",
+        "git diff --staged --check",
+        "$StagedPaths = @(git diff --staged --name-only) | Sort-Object",
+        "if (@($StagedPaths).Count -ne @($ExpectedPaths).Count) { throw 'staged count mismatch' }",
+        "for ($i = 0; $i -lt $ExpectedPaths.Count; $i++) { if ($StagedPaths[$i] -ne $ExpectedPaths[$i]) { throw 'staged path mismatch' } }",
+        "foreach ($Candidate in $Candidates) {",
+        "    $TargetPath = Join-Path $Repo $Candidate.RelativePath",
+        "    $StagedLine = (git ls-files --stage -- $Candidate.RelativePath)",
+        "    if ([string]::IsNullOrWhiteSpace($StagedLine)) { throw ('staged candidate missing: ' + $Candidate.RelativePath) }",
+        "    if ($Candidate.ChangeType -ne 'deleted') {",
+        "        $WorktreeBlob = (git hash-object --path=$($Candidate.RelativePath) -- $TargetPath).Trim()",
+        "        if ($StagedLine -notmatch [regex]::Escape($WorktreeBlob)) { throw ('staged content mismatch: ' + $Candidate.RelativePath) }",
+        "    }",
+        "}",
+        "Assert-C12StatusPolicy -AllowedTrackedPaths @() -AllowedStagedPaths $ExpectedPaths -Phase 'post-staging'",
+        "git diff --staged --stat",
+        "git diff --staged --name-status -- $ExpectedPaths",
+        "git commit -m $CommitMessage",
+        "git push origin $BranchName",
+        "$NewHead = (git rev-parse HEAD).Trim()",
+        "$NewParent = (git rev-parse HEAD^).Trim()",
+        "if ($NewParent -ne $ExpectedParent) { throw 'post-commit parent mismatch' }",
+        "if ((git log -1 --format=%s).Trim() -ne $CommitMessage) { throw 'commit message mismatch' }",
+        "$CommittedPaths = @(git diff-tree --no-commit-id --name-only --no-renames -r $NewHead) | Sort-Object",
+        "if (@($CommittedPaths).Count -ne @($ExpectedPaths).Count) { throw 'commit path count mismatch' }",
+        "for ($i = 0; $i -lt $ExpectedPaths.Count; $i++) { if ($CommittedPaths[$i] -ne $ExpectedPaths[$i]) { throw 'commit path mismatch' } }",
+        "$RemoteHead = (git rev-parse origin/$BranchName).Trim()",
+        "if ($RemoteHead -ne $NewHead) { throw 'remote mismatch' }",
+        "if ((git diff --cached --name-only).Count -ne 0) { throw 'post-commit index not empty' }",
+        "Assert-C12StatusPolicy -AllowedTrackedPaths @() -AllowedStagedPaths @() -Phase 'post-commit'",
+        "python 10_scripts/governance/pepper_baseline_integrity.py --repo-root . --product-root 2_products/pepper-agent --mode all --format json",
+    ]
+    rendered = "\n".join(lines) + "\n"
+    hgh._reject_forbidden_rendered_powershell(rendered)
+    return rendered
+
+
 def _build_p17_7_current_human_git_handoff_result(
     *,
     projection: dict[str, Any],
@@ -18477,7 +19023,19 @@ def _human_git_handoff_completion_workflow_blocker(
     next_action = workflow.get("next_action")
     if not isinstance(next_action, dict):
         return "HUMAN_GIT_HANDOFF_COMPLETION_ACTION_GAP", "next action is unavailable"
-    if next_action.get("id") != accepted_review.get("next_action", {}).get("id"):
+    completion_action_id = _human_git_handoff_completion_action_id(binding.ticket_id)
+    explicit_prepare_required = _governed_ticket_sequence_key(
+        binding.ticket_id
+    ) >= _governed_ticket_sequence_key(
+        PEPPER_HUMAN_GIT_HANDOFF_EXPLICIT_PREPARE_REQUIRED_FROM_TICKET_ID
+    )
+    if isinstance(workflow.get("human_git_handoff_prepare_authority"), dict) or explicit_prepare_required:
+        if next_action.get("id") != completion_action_id:
+            return (
+                "HUMAN_GIT_HANDOFF_COMPLETION_ACTION_GAP",
+                "explicit human Git handoff prepare is required before completion",
+            )
+    elif next_action.get("id") != accepted_review.get("next_action", {}).get("id"):
         return "HUMAN_GIT_HANDOFF_COMPLETION_ACTION_GAP", "next action is not human Git handoff"
     if int(workflow.get("active_execution_count") or 0) != 0:
         return "EXECUTION_ALREADY_ACTIVE", "an execution is already active"
@@ -18797,6 +19355,7 @@ def _human_git_handoff_prepare_identity_payload_from_fields(
     review_package_SHA256: str,
     P17_7_handoff_result_SHA256: str,
     P17_7_handoff_package_SHA256: str,
+    materialization_plan_SHA256: str,
     rendered_powershell_SHA256: str,
     branch: str,
     expected_parent_commit: str,
@@ -18815,6 +19374,7 @@ def _human_git_handoff_prepare_identity_payload_from_fields(
         "review_package_SHA256": review_package_SHA256,
         "P17_7_handoff_result_SHA256": P17_7_handoff_result_SHA256,
         "P17_7_handoff_package_SHA256": P17_7_handoff_package_SHA256,
+        "materialization_plan_SHA256": materialization_plan_SHA256,
         "rendered_powershell_SHA256": rendered_powershell_SHA256,
         "branch": branch,
         "expected_parent_commit": expected_parent_commit,
@@ -18843,6 +19403,7 @@ def _human_git_handoff_prepare_identity_digest(record: dict[str, Any]) -> str:
         review_package_SHA256=record["review_package_SHA256"],
         P17_7_handoff_result_SHA256=record["P17_7_handoff_result_SHA256"],
         P17_7_handoff_package_SHA256=record["P17_7_handoff_package_SHA256"],
+        materialization_plan_SHA256=record["materialization_plan_SHA256"],
         rendered_powershell_SHA256=record["rendered_powershell_SHA256"],
         branch=record["branch"],
         expected_parent_commit=record["expected_parent_commit"],
@@ -18889,12 +19450,15 @@ def _build_current_ticket_human_git_handoff_prepare_record(
     accepted_review: dict[str, Any],
     review_prepare: dict[str, Any],
     p17_result: Any,
+    p17_rendered_powershell: str,
+    materialization_plan: dict[str, Any],
     rendered_powershell: str,
 ) -> dict[str, Any]:
     binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
     prepared_at = _utc_now_iso()
     p17_result_record = p17_result.model_dump(mode="json")
     candidate_paths = tuple(candidate.relative_path for candidate in p17_result.package.candidates)
+    rendered_sha = _c12_rendered_handoff_digest(rendered_powershell)
     identity_payload = _human_git_handoff_prepare_identity_payload_from_fields(
         projection=projection,
         reviewed_run_id=int(accepted_review["reviewed_run_id"]),
@@ -18904,7 +19468,8 @@ def _build_current_ticket_human_git_handoff_prepare_record(
         review_package_SHA256=review_prepare["review_package_SHA256"],
         P17_7_handoff_result_SHA256=p17_result.result_SHA256,
         P17_7_handoff_package_SHA256=p17_result.package.package_SHA256,
-        rendered_powershell_SHA256=p17_result.rendered_powershell_SHA256,
+        materialization_plan_SHA256=materialization_plan["materialization_plan_SHA256"],
+        rendered_powershell_SHA256=rendered_sha,
         branch=p17_result.package.branch_name,
         expected_parent_commit=p17_result.package.expected_parent_commit,
         candidate_paths=candidate_paths,
@@ -18960,8 +19525,25 @@ def _build_current_ticket_human_git_handoff_prepare_record(
         "P17_7_handoff_decision": p17_result.decision.value,
         "P17_7_human_git_handoff_result": p17_result_record,
         "P17_7_human_git_handoff_package": p17_result.package.model_dump(mode="json"),
+        "P17_7_rendered_handoff_powershell": p17_rendered_powershell,
+        "P17_7_rendered_powershell_SHA256": p17_result.rendered_powershell_SHA256,
+        "human_candidate_materialization_plan": materialization_plan,
+        "materialization_plan_SHA256": materialization_plan["materialization_plan_SHA256"],
+        "materialization_required": materialization_plan["materialization_required"],
+        "materialization_strategy": materialization_plan["materialization_strategy"],
+        "materialization_source_workspace": materialization_plan[
+            "materialization_source_workspace"
+        ],
+        "materialization_candidate_entries": materialization_plan["candidates"],
+        "tolerated_untracked_exclusions": materialization_plan[
+            "tolerated_untracked_exclusions"
+        ],
+        "unexpected_dirty_path_policy": materialization_plan[
+            "unexpected_dirty_path_policy"
+        ],
+        "preflight_dirty_status": materialization_plan["preflight_dirty_status"],
         "rendered_handoff_powershell": rendered_powershell,
-        "rendered_powershell_SHA256": p17_result.rendered_powershell_SHA256,
+        "rendered_powershell_SHA256": rendered_sha,
         "candidate_count": p17_result.candidate_count,
         "candidate_paths": list(candidate_paths),
         "added_count": p17_result.added_count,
@@ -18993,6 +19575,7 @@ def _build_current_ticket_human_git_handoff_prepare_record(
         "P17_human_git_handoff_authority_reused": True,
         "P18_governed_transition_reused": True,
         "authority_expansion_required": False,
+        "canonical_source_mutation_by_Pepper": False,
         "dispatch_performed": False,
         "execution_started": False,
         "worker_execution": False,
@@ -19049,6 +19632,21 @@ def _human_git_handoff_prepare_operational_result(
         "P17_7_handoff_policy_id": record["P17_7_handoff_policy_id"],
         "P17_7_handoff_state": record["P17_7_handoff_state"],
         "P17_7_handoff_decision": record["P17_7_handoff_decision"],
+        "materialization_required": record["materialization_required"],
+        "materialization_strategy": record["materialization_strategy"],
+        "materialization_plan_SHA256": record["materialization_plan_SHA256"],
+        "human_candidate_materialization_plan": record[
+            "human_candidate_materialization_plan"
+        ],
+        "materialization_source_workspace": record[
+            "materialization_source_workspace"
+        ],
+        "materialization_candidate_entries": record[
+            "materialization_candidate_entries"
+        ],
+        "tolerated_untracked_exclusions": record["tolerated_untracked_exclusions"],
+        "unexpected_dirty_path_policy": record["unexpected_dirty_path_policy"],
+        "preflight_dirty_status": record["preflight_dirty_status"],
         "rendered_handoff_powershell": record["rendered_handoff_powershell"],
         "rendered_powershell_SHA256": record["rendered_powershell_SHA256"],
         "candidate_count": record["candidate_count"],
@@ -19081,6 +19679,7 @@ def _human_git_handoff_prepare_operational_result(
         "Docker_commands_executed": 0,
         "Graphify_commands_executed": 0,
         "Git_mutation": False,
+        "canonical_source_mutation_by_Pepper": False,
         "auto_retry": False,
         "auto_rollback": False,
         "next_action": record["next_action"],
@@ -19102,6 +19701,7 @@ def _blocked_current_human_git_handoff_prepare_result(
         "handoff_preparation_recorded": False,
         "blocker_code": blocker_code,
         "blocker_detail": _safe_text(blocker_detail, limit=500),
+        "canonical_source_mutation_by_Pepper": False,
         **_current_ticket_projection_identity_fields(projection),
         "kanban_board_slug": projection["kanban_board_slug"],
         "kanban_task_id": projection["kanban_task_id"],
@@ -21534,9 +22134,18 @@ def _current_ticket_human_git_handoff_prepare_overlay(
             "P17_7_handoff_result_SHA256": record["P17_7_handoff_result_SHA256"],
             "P17_7_handoff_package_SHA256": record["P17_7_handoff_package_SHA256"],
             "rendered_powershell_SHA256": record["rendered_powershell_SHA256"],
+            "materialization_required": record["materialization_required"],
+            "materialization_strategy": record["materialization_strategy"],
+            "materialization_plan_SHA256": record["materialization_plan_SHA256"],
             "candidate_paths": record["candidate_paths"],
             "ticket_closed": False,
         },
+        "materialization_required": record["materialization_required"],
+        "materialization_strategy": record["materialization_strategy"],
+        "materialization_source_workspace": record["materialization_source_workspace"],
+        "tolerated_untracked_exclusions": record["tolerated_untracked_exclusions"],
+        "unexpected_dirty_path_policy": record["unexpected_dirty_path_policy"],
+        "preflight_dirty_status": record["preflight_dirty_status"],
         "current_ticket_human_git_handoff_prepare": _human_git_handoff_prepare_operational_result(
             record,
             idempotent_replay=True,
@@ -21550,6 +22159,7 @@ def _current_ticket_human_git_handoff_prepare_overlay(
         "worker_execution": False,
         "Kanban_dispatch": False,
         "Git_mutation": False,
+        "canonical_source_mutation_by_Pepper": False,
         "auto_retry": False,
         "auto_rollback": False,
         "next_action": record["next_action"],
