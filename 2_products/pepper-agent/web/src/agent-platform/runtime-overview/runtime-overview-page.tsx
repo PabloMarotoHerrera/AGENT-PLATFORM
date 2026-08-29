@@ -1,5 +1,11 @@
+import type { ReactNode } from "react";
 import {
   Activity,
+  AlertTriangle,
+  CheckCircle2,
+  GitBranch,
+  ListChecks,
+  PlayCircle,
   Radio,
   RefreshCw,
   Server,
@@ -11,7 +17,7 @@ import { Button } from "@nous-research/ui/ui/components/button";
 import { Card, CardContent } from "@nous-research/ui/ui/components/card";
 import { Spinner } from "@nous-research/ui/ui/components/spinner";
 
-import type { RuntimeGatewayState } from "./contract";
+import type { RuntimeGatewayState, RuntimeWorkflowControl } from "./contract";
 import {
   useRuntimeOverview,
   type RuntimeOverviewState,
@@ -39,6 +45,21 @@ function phaseBadge(phase: RuntimeOverviewState["phase"]) {
   return <Badge tone="secondary">Loading</Badge>;
 }
 
+function yesNo(value: boolean) {
+  return value ? "Yes" : "No";
+}
+
+function requiredLabel(value: boolean) {
+  return value ? "Required" : "Not required";
+}
+
+function unavailableWorkflowMessage(phase: RuntimeOverviewState["phase"]) {
+  if (phase === "loading") return "Loading bounded workflow-control read model…";
+  if (phase === "error" || phase === "stale") return "Workflow-control read model is using no validated current response.";
+  if (phase === "unavailable") return "Workflow-control provider did not expose the bounded Control Center fields.";
+  return "Workflow-control provider is not configured for this runtime response.";
+}
+
 function Metric({
   icon: Icon,
   label,
@@ -61,6 +82,38 @@ function Metric({
           {value}
         </strong>
         <p className="text-sm leading-relaxed text-[var(--agent-platform-text-muted)]">{detail}</p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function Cell({ label, value, detail }: {
+  readonly label: string;
+  readonly value: string | number;
+  readonly detail?: string;
+}) {
+  return (
+    <div className="border-l-2 border-[var(--agent-platform-border-default)] pl-3">
+      <dt className="text-xs text-[var(--agent-platform-text-muted)]">{label}</dt>
+      <dd className="mt-1 break-words font-mono text-sm text-[var(--agent-platform-text-primary)]">{value}</dd>
+      {detail && <dd className="mt-1 text-xs leading-relaxed text-[var(--agent-platform-text-muted)]">{detail}</dd>}
+    </div>
+  );
+}
+
+function OverviewQuestion({ title, answer, children }: {
+  readonly title: string;
+  readonly answer: string;
+  readonly children?: ReactNode;
+}) {
+  return (
+    <Card className="border-[var(--agent-platform-border-default)] bg-[var(--agent-platform-surface-panel)]">
+      <CardContent className="space-y-4 p-5">
+        <div>
+          <h2 className="text-lg font-semibold text-[var(--agent-platform-text-primary)]">{title}</h2>
+          <p className="mt-2 text-sm leading-relaxed text-[var(--agent-platform-text-secondary)]">{answer}</p>
+        </div>
+        {children}
       </CardContent>
     </Card>
   );
@@ -92,6 +145,88 @@ function EmptyState({ phase, refresh }: Pick<RuntimeOverviewViewProps, "refresh"
   );
 }
 
+function ControlCenter({ workflowControl }: { readonly workflowControl: RuntimeWorkflowControl }) {
+  const currentWorkAnswer = workflowControl.currentTicketId
+    ? `${workflowControl.currentTicketId}: ${workflowControl.currentTicketTitle ?? "Untitled governed ticket"}`
+    : "No current governed ticket is active.";
+  const attentionReasons = [
+    workflowControl.pendingTicketApprovalCount > 0 ? "ticket approval pending" : null,
+    workflowControl.reviewDecisionRequired ? "review decision required" : null,
+    workflowControl.humanAcceptanceRequired && !workflowControl.humanAcceptanceRecorded ? "human acceptance required" : null,
+    workflowControl.gitHandoffRequired ? "Git handoff required" : null,
+    workflowControl.readyRequiresHumanSmoke ? "human smoke check required" : null,
+    workflowControl.remainingBlockerCount > 0 ? "blockers remain" : null,
+    workflowControl.failureCategory ? "recovery evidence present" : null,
+  ].filter(Boolean).join("; ");
+  const executionAnswer = workflowControl.activeExecutionCount > 0
+    ? `${workflowControl.activeExecutionCount} active execution(s); ${workflowControl.executionCount} total recorded.`
+    : "No active executions are running.";
+
+  return (
+    <section className="grid gap-4 lg:grid-cols-2" aria-label="Pepper Control Center overview questions">
+      <OverviewQuestion title="Current Work" answer={currentWorkAnswer}>
+        <dl className="grid gap-3 text-sm sm:grid-cols-2">
+          <Cell label="Project" value={`${workflowControl.projectId} / ${workflowControl.macroprojectId}`} />
+          <Cell label="Workflow status" value={workflowControl.workflowStatus} />
+        </dl>
+      </OverviewQuestion>
+
+      <OverviewQuestion title="Next Governed Action" answer={workflowControl.nextActionLabel}>
+        <dl className="grid gap-3 text-sm sm:grid-cols-2">
+          <Cell label="Canonical action ID" value={workflowControl.nextActionId} />
+          <Cell label="Required human action" value={workflowControl.nextActionRequiredHumanAction} />
+          <Cell label="Target ticket" value={workflowControl.nextActionTargetTicketId ?? "No target ticket"} detail={workflowControl.nextActionTargetTicketTitle ?? undefined} />
+        </dl>
+      </OverviewQuestion>
+
+      <OverviewQuestion title="Needs Attention" answer={attentionReasons || "No human-attention condition is currently raised."}>
+        <dl className="grid gap-3 text-sm sm:grid-cols-2">
+          <Cell label="Pending ticket approvals" value={workflowControl.pendingTicketApprovalCount} />
+          <Cell label="Remaining blockers" value={workflowControl.remainingBlockerCount} />
+          <Cell label="Warnings" value={workflowControl.warningCount} />
+          <Cell label="Manual chat control" value={requiredLabel(workflowControl.manualChatControlRequired)} />
+        </dl>
+      </OverviewQuestion>
+
+      <OverviewQuestion title="Execution" answer={executionAnswer}>
+        <dl className="grid gap-3 text-sm sm:grid-cols-2">
+          <Cell label="Execution state" value={workflowControl.executionState} />
+          <Cell label="Gateway work" value={workflowControl.activeExecutionCount > 0 ? "Active" : "Idle"} />
+        </dl>
+      </OverviewQuestion>
+
+      <Card className="border-[var(--agent-platform-border-strong)] bg-[var(--agent-platform-surface-elevated)] lg:col-span-2">
+        <CardContent className="space-y-4 p-5 sm:p-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="font-mono text-xs uppercase tracking-[0.16em] text-[var(--agent-platform-text-muted)]">Governed State</p>
+              <h2 className="mt-2 text-xl font-semibold">Pepper Control Center</h2>
+              <p className="mt-2 text-sm leading-relaxed text-[var(--agent-platform-text-secondary)]">
+                Read-only governed state composed from the bounded runtime status and workflow-control read models.
+              </p>
+            </div>
+            <Badge tone={workflowControl.readyRequiresHumanSmoke || workflowControl.blockerCount > 0 ? "warning" : "success"}>{workflowControl.readiness}</Badge>
+          </div>
+          <dl className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+            <Cell label="Approval" value={workflowControl.approvalState} detail={`${workflowControl.pendingApprovalCount} total pending`} />
+            <Cell label="Queue" value={workflowControl.queueState} />
+            <Cell label="Execution" value={workflowControl.executionState} detail={`${workflowControl.activeExecutionCount} active`} />
+            <Cell label="Validation" value={workflowControl.validationState} />
+            <Cell label="Review" value={workflowControl.reviewState} detail={`Decision recorded: ${yesNo(workflowControl.reviewDecisionRecorded)}`} />
+            <Cell label="Recovery" value={workflowControl.recoveryState} detail={workflowControl.failureSummary ?? workflowControl.failureCategory ?? undefined} />
+            <Cell label="Git handoff" value={workflowControl.gitHandoffState} detail={workflowControl.humanGitAuthority} />
+            <Cell label="Default mode" value={workflowControl.defaultModeEnabled ? "Enabled" : "Disabled"} />
+            <Cell label="Manual OpenCode ticket copy" value={requiredLabel(workflowControl.manualOpenCodeTicketCopyRequired)} />
+            <Cell label="Manual OpenCode result copy" value={requiredLabel(workflowControl.manualOpenCodeResultCopyRequired)} />
+            <Cell label="Closed P18.8 gaps" value={workflowControl.closedGapCount} />
+            <Cell label="Blockers" value={workflowControl.blockerCount} />
+          </dl>
+        </CardContent>
+      </Card>
+    </section>
+  );
+}
+
 export function RuntimeOverviewView({ state, refresh }: RuntimeOverviewViewProps) {
   const { snapshot } = state;
   const workflowControl = snapshot?.workflowControl ?? null;
@@ -105,17 +240,17 @@ export function RuntimeOverviewView({ state, refresh }: RuntimeOverviewViewProps
         <header className="flex flex-col gap-5 border-b border-[var(--agent-platform-border-default)] pb-6 sm:flex-row sm:items-end sm:justify-between">
           <div className="space-y-2">
             <p className="font-mono text-xs uppercase tracking-[0.2em] text-[var(--agent-platform-text-muted)]">
-              AGENT PLATFORM / Runtime
+              AGENT PLATFORM / Control Center
             </p>
             <h1
               id="runtime-overview-title"
               className="text-3xl font-semibold tracking-tight sm:text-4xl"
               style={{ fontFamily: "var(--agent-platform-font-display)" }}
             >
-              Runtime Overview
+              Control Center Overview
             </h1>
             <p className="max-w-2xl text-sm leading-relaxed text-[var(--agent-platform-text-secondary)] sm:text-base">
-              A read-only, privacy-bounded view of Hermes service readiness and recent activity.
+              A read-only Pepper Control Center summary answering current work, next governed action, needs attention, execution, and governed-state questions.
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -219,38 +354,32 @@ export function RuntimeOverviewView({ state, refresh }: RuntimeOverviewViewProps
               />
             </section>
 
-            {workflowControl && (
-              <Card className="border-[var(--agent-platform-border-strong)] bg-[var(--agent-platform-surface-elevated)]">
-                <CardContent className="space-y-5 p-5 sm:p-6">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <p className="font-mono text-xs uppercase tracking-[0.16em] text-[var(--agent-platform-text-muted)]">Controlled default mode</p>
-                      <h2 className="mt-2 text-xl font-semibold">Pepper Workflow Control</h2>
-                      <p className="mt-2 text-sm leading-relaxed text-[var(--agent-platform-text-secondary)]">{workflowControl.nextActionLabel}</p>
-                    </div>
-                    <Badge tone={workflowControl.readyRequiresHumanSmoke ? "warning" : "success"}>{workflowControl.readiness}</Badge>
+            {workflowControl ? (
+              <ControlCenter workflowControl={workflowControl} />
+            ) : (
+              <Card className="border-[var(--agent-platform-border-default)] bg-[var(--agent-platform-surface-panel)]">
+                <CardContent className="flex items-start gap-3 p-5 text-sm text-[var(--agent-platform-text-secondary)]">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 text-[var(--agent-platform-status-warning)]" aria-hidden="true" />
+                  <div>
+                    <h2 className="font-semibold text-[var(--agent-platform-text-primary)]">Workflow-control unavailable</h2>
+                    <p className="mt-1 leading-relaxed">{unavailableWorkflowMessage(state.phase)}</p>
                   </div>
-                  <dl className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
-                    <div className="border-l-2 border-[var(--agent-platform-border-default)] pl-3"><dt className="text-xs text-[var(--agent-platform-text-muted)]">Governed project</dt><dd className="font-mono">{workflowControl.projectId}</dd></div>
-                    <div className="border-l-2 border-[var(--agent-platform-border-default)] pl-3"><dt className="text-xs text-[var(--agent-platform-text-muted)]">Current ticket</dt><dd className="font-mono">{workflowControl.currentTicketId ?? "None generated"}</dd></div>
-                    <div className="border-l-2 border-[var(--agent-platform-border-default)] pl-3"><dt className="text-xs text-[var(--agent-platform-text-muted)]">Pending approvals</dt><dd className="font-mono">{workflowControl.pendingApprovalCount}</dd></div>
-                    <div className="border-l-2 border-[var(--agent-platform-border-default)] pl-3"><dt className="text-xs text-[var(--agent-platform-text-muted)]">Active executions</dt><dd className="font-mono">{workflowControl.activeExecutionCount}</dd></div>
-                    <div className="border-l-2 border-[var(--agent-platform-border-default)] pl-3"><dt className="text-xs text-[var(--agent-platform-text-muted)]">Default mode</dt><dd className="font-mono">{workflowControl.defaultModeEnabled ? "Enabled" : "Disabled"}</dd></div>
-                    <div className="border-l-2 border-[var(--agent-platform-border-default)] pl-3"><dt className="text-xs text-[var(--agent-platform-text-muted)]">Manual OpenCode copy</dt><dd className="font-mono">{workflowControl.manualOpenCodeTicketCopyRequired || workflowControl.manualOpenCodeResultCopyRequired ? "Required" : "Not required"}</dd></div>
-                    <div className="border-l-2 border-[var(--agent-platform-border-default)] pl-3"><dt className="text-xs text-[var(--agent-platform-text-muted)]">Closed P18.8 gaps</dt><dd className="font-mono">{workflowControl.closedGapCount}</dd></div>
-                    <div className="border-l-2 border-[var(--agent-platform-border-default)] pl-3"><dt className="text-xs text-[var(--agent-platform-text-muted)]">Remaining blockers</dt><dd className="font-mono">{workflowControl.remainingBlockerCount}</dd></div>
-                  </dl>
-                  <p className="text-xs leading-relaxed text-[var(--agent-platform-text-muted)]">Ticket title: {workflowControl.currentTicketTitle ?? "No active governed ticket"}. Workflow status: {workflowControl.workflowStatus}. Git authority: {workflowControl.humanGitAuthority}. Chat control required: {workflowControl.manualChatControlRequired ? "yes" : "no"}.</p>
                 </CardContent>
               </Card>
             )}
 
             <section className="flex flex-col gap-4 border-t border-[var(--agent-platform-border-default)] pt-6 sm:flex-row sm:items-center sm:justify-between" aria-label="Platform version">
-              <div>
-                <h2 className="font-semibold">Platform contract</h2>
-                <p className="mt-1 text-sm text-[var(--agent-platform-text-secondary)]">
-                  Config schema {snapshot.platform.configVersion} / latest {snapshot.platform.latestConfigVersion} · release {snapshot.platform.releaseDate}
-                </p>
+              <div className="flex flex-wrap items-center gap-3">
+                <CheckCircle2 className="h-4 w-4 text-[var(--agent-platform-status-success)]" aria-hidden="true" />
+                <ListChecks className="h-4 w-4 text-[var(--agent-platform-text-muted)]" aria-hidden="true" />
+                <PlayCircle className="h-4 w-4 text-[var(--agent-platform-text-muted)]" aria-hidden="true" />
+                <GitBranch className="h-4 w-4 text-[var(--agent-platform-text-muted)]" aria-hidden="true" />
+                <div>
+                  <h2 className="font-semibold">Platform contract</h2>
+                  <p className="mt-1 text-sm text-[var(--agent-platform-text-secondary)]">
+                    Config schema {snapshot.platform.configVersion} / latest {snapshot.platform.latestConfigVersion} · release {snapshot.platform.releaseDate}
+                  </p>
+                </div>
               </div>
               <Badge tone={snapshot.platform.updateAvailable ? "warning" : "success"}>
                 {snapshot.platform.updateAvailable ? "Update available" : "Configuration current"}

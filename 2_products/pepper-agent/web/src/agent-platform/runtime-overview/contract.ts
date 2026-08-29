@@ -43,13 +43,22 @@ export interface RuntimeWorkflowControl {
   readonly workflowStatus: string;
   readonly approvalState: string;
   readonly pendingApprovalCount: number;
+  readonly pendingTicketApprovalCount: number;
   readonly queueState: string;
   readonly executionState: string;
+  readonly executionCount: number;
   readonly activeExecutionCount: number;
   readonly validationState: string;
   readonly reviewState: string;
+  readonly reviewDecisionRecorded: boolean;
+  readonly reviewDecisionRequired: boolean;
+  readonly humanAcceptanceRequired: boolean;
+  readonly humanAcceptanceRecorded: boolean;
   readonly recoveryState: string;
+  readonly failureCategory: string | null;
+  readonly failureSummary: string | null;
   readonly gitHandoffState: string;
+  readonly gitHandoffRequired: boolean;
   readonly defaultModeEnabled: boolean;
   readonly manualChatControlRequired: boolean;
   readonly manualOpenCodeTicketCopyRequired: boolean;
@@ -58,7 +67,13 @@ export interface RuntimeWorkflowControl {
   readonly readyRequiresHumanSmoke: boolean;
   readonly closedGapCount: number;
   readonly remainingBlockerCount: number;
+  readonly blockerCount: number;
+  readonly warningCount: number;
+  readonly nextActionId: string;
   readonly nextActionLabel: string;
+  readonly nextActionTargetTicketId: string | null;
+  readonly nextActionTargetTicketTitle: string | null;
+  readonly nextActionRequiredHumanAction: string;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -78,14 +93,29 @@ function asOptionalBoundedString(value: unknown, maxLength: number): string | nu
   return asBoundedString(value, maxLength) ?? undefined;
 }
 
+function asOptionalNullableString(value: unknown, maxLength: number): string | null {
+  if (value === null || value === undefined) return null;
+  return asBoundedString(value, maxLength) ?? null;
+}
+
 function asNonNegativeInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
     ? value
     : null;
 }
 
+function asOptionalNonNegativeInteger(value: unknown, fallback: number): number | null {
+  if (value === null || value === undefined) return fallback;
+  return asNonNegativeInteger(value);
+}
+
 function asBoolean(value: unknown): boolean | null {
   return typeof value === "boolean" ? value : null;
+}
+
+function asOptionalBoolean(value: unknown, fallback: boolean): boolean | null {
+  if (value === null || value === undefined) return fallback;
+  return asBoolean(value);
 }
 
 function parseWorkflowControl(value: unknown): RuntimeWorkflowControl | null {
@@ -104,13 +134,22 @@ function parseWorkflowControl(value: unknown): RuntimeWorkflowControl | null {
   const workflowStatus = asBoundedString(source.workflow_status, 160);
   const approvalState = asBoundedString(source.approval_state, 160);
   const pendingApprovalCount = asNonNegativeInteger(source.pending_approval_count);
+  const pendingTicketApprovalCount = asOptionalNonNegativeInteger(source.pending_ticket_approval_count, pendingApprovalCount ?? 0);
   const queueState = asBoundedString(source.queue_state, 160);
   const executionState = asBoundedString(source.execution_state, 160);
+  const executionCount = asOptionalNonNegativeInteger(source.execution_count, 0);
   const activeExecutionCount = asNonNegativeInteger(source.active_execution_count);
   const validationState = asBoundedString(source.validation_state, 160);
   const reviewState = asBoundedString(source.review_state, 160);
+  const reviewDecisionRecorded = asOptionalBoolean(source.review_decision_recorded, false);
+  const reviewDecisionRequired = asOptionalBoolean(source.review_decision_required, false);
+  const humanAcceptanceRequired = asOptionalBoolean(source.human_acceptance_required, false);
+  const humanAcceptanceRecorded = asOptionalBoolean(source.human_acceptance_recorded, false);
   const recoveryState = asBoundedString(source.recovery_state, 160);
+  const failureCategory = asOptionalNullableString(source.failure_category, 160);
+  const failureSummary = asOptionalNullableString(source.failure_summary, 240);
   const gitHandoffState = asBoundedString(source.git_handoff_state, 160);
+  const gitHandoffRequired = asOptionalBoolean(source.git_handoff_required, false);
   const defaultModeEnabled = asBoolean(source.default_mode_enabled);
   const manualChatControlRequired = asBoolean(source.manual_chat_control_required);
   const manualOpenCodeTicketCopyRequired = asBoolean(source.manual_opencode_ticket_copy_required);
@@ -119,20 +158,31 @@ function parseWorkflowControl(value: unknown): RuntimeWorkflowControl | null {
   const readyRequiresHumanSmoke = asBoolean(source.ready_requires_human_smoke);
   const closedGaps = Array.isArray(source.closed_gaps) ? source.closed_gaps.length : null;
   const remainingBlockers = Array.isArray(source.remaining_blockers) ? source.remaining_blockers.length : null;
+  const blockerCount = asOptionalNonNegativeInteger(source.blocker_count, remainingBlockers ?? 0);
+  const warningCount = asOptionalNonNegativeInteger(source.warning_count, 0);
+  const nextActionId = asBoundedString(nextAction.id, 160);
   const nextActionLabel = asBoundedString(nextAction.label, 240);
+  const nextActionTargetTicketId = asOptionalBoundedString(nextAction.target_ticket_id, 128);
+  const nextActionTargetTicketTitle = asOptionalBoundedString(nextAction.target_ticket_title, 240);
+  const nextActionRequiredHumanAction = asBoundedString(nextAction.required_human_action, 160);
   if (
     productId === null || projectId === null || projectName === null ||
     macroprojectId === null ||
     currentTicketId === undefined || currentTicketTitle === undefined ||
     mode === null || readiness === null || defaultModeEnabled === null ||
     workflowState === null || workflowStatus === null || approvalState === null ||
-    pendingApprovalCount === null || queueState === null || executionState === null ||
+    pendingApprovalCount === null || pendingTicketApprovalCount === null ||
+    queueState === null || executionState === null || executionCount === null ||
     activeExecutionCount === null || validationState === null || reviewState === null ||
-    recoveryState === null || gitHandoffState === null ||
+    reviewDecisionRecorded === null || reviewDecisionRequired === null ||
+    humanAcceptanceRequired === null || humanAcceptanceRecorded === null ||
+    recoveryState === null || gitHandoffState === null || gitHandoffRequired === null ||
     manualChatControlRequired === null || manualOpenCodeTicketCopyRequired === null ||
     manualOpenCodeResultCopyRequired === null || humanGitAuthority === null ||
     readyRequiresHumanSmoke === null || closedGaps === null || remainingBlockers === null ||
-    nextActionLabel === null
+    blockerCount === null || warningCount === null || nextActionId === null ||
+    nextActionLabel === null || nextActionTargetTicketId === undefined ||
+    nextActionTargetTicketTitle === undefined || nextActionRequiredHumanAction === null
   ) return null;
   return Object.freeze({
     productId,
@@ -147,13 +197,22 @@ function parseWorkflowControl(value: unknown): RuntimeWorkflowControl | null {
     workflowStatus,
     approvalState,
     pendingApprovalCount,
+    pendingTicketApprovalCount,
     queueState,
     executionState,
+    executionCount,
     activeExecutionCount,
     validationState,
     reviewState,
+    reviewDecisionRecorded,
+    reviewDecisionRequired,
+    humanAcceptanceRequired,
+    humanAcceptanceRecorded,
     recoveryState,
+    failureCategory,
+    failureSummary,
     gitHandoffState,
+    gitHandoffRequired,
     defaultModeEnabled,
     manualChatControlRequired,
     manualOpenCodeTicketCopyRequired,
@@ -162,7 +221,13 @@ function parseWorkflowControl(value: unknown): RuntimeWorkflowControl | null {
     readyRequiresHumanSmoke,
     closedGapCount: closedGaps,
     remainingBlockerCount: remainingBlockers,
+    blockerCount,
+    warningCount,
+    nextActionId,
     nextActionLabel,
+    nextActionTargetTicketId,
+    nextActionTargetTicketTitle,
+    nextActionRequiredHumanAction,
   });
 }
 
