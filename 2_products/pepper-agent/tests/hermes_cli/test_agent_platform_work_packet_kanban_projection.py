@@ -5280,6 +5280,150 @@ def test_p18_9_2_complete_human_git_handoff_rejects_stale_prepare_and_accepts_fr
     assert completed["Git_mutation"] is False
 
 
+def test_p18_9_2_post_handoff_commit_reconstruction_preserves_completion_pending(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _accepted_p18_9_2_review_for_handoff_prepare(
+        projection_home,
+        monkeypatch,
+        pid=6856,
+    )
+    source_hashes, candidate_hashes = _p18_9_2_candidate_hash_maps(
+        fixture.candidate_files
+    )
+    snapshot_a = _p18_9_2_handoff_git_snapshot(path_SHA256=source_hashes)
+    fixture.pr.prepare_current_ticket_human_git_handoff(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_HUMAN_GIT_HANDOFF",
+        git_snapshot_fn=lambda: snapshot_a,
+    )
+
+    post_commit = "bcdef1234567890abcdef1234567890abcdef123"
+    post_commit_snapshot = _p18_9_2_handoff_git_snapshot(
+        head=post_commit,
+        remote_head=post_commit,
+        head_parent=_P18_9_2_HANDOFF_PARENT,
+        path_SHA256=candidate_hashes,
+    )
+    _patch_p18_9_2_handoff_snapshot(monkeypatch, fixture.pr, post_commit_snapshot)
+
+    workflow = fixture.pr.build_workflow_control_snapshot()
+
+    assert workflow["current_ticket_id"] == "P18.9.2"
+    assert workflow["reviewed_run_id"] == fixture.retry["kanban_run_id"]
+    assert workflow["active_execution_count"] == 0
+    assert workflow["review_state"] == "accepted"
+    assert workflow["validation_state"] == "review_accepted"
+    assert workflow["workflow_status"] == "review_accepted_pending_human_git_handoff"
+    assert workflow["handoff_execution_context_status"] == (
+        "candidate_materialized_pending_completion"
+    )
+    assert workflow["git_handoff_required"] is True
+    assert workflow["next_action"]["id"] == "COMPLETE_P18_9_2_HUMAN_GIT_HANDOFF"
+    assert workflow["next_action"].get("required_human_action") != (
+        "terminal_governed_run_review_or_fresh_execution_request"
+    )
+    assert workflow["next_action"]["id"] != "CONTINUE_P18_9_2_GOVERNED_AUTONOMY"
+    assert workflow["blocker_count"] == 0, workflow["remaining_blockers"]
+    assert "human_git_handoff_completion_authority" not in workflow
+
+
+def test_p18_9_2_post_handoff_reconstruction_survives_missing_scratch_manifest(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _accepted_p18_9_2_review_for_handoff_prepare(
+        projection_home,
+        monkeypatch,
+        pid=6858,
+    )
+    source_hashes, candidate_hashes = _p18_9_2_candidate_hash_maps(
+        fixture.candidate_files
+    )
+    snapshot_a = _p18_9_2_handoff_git_snapshot(path_SHA256=source_hashes)
+    fixture.pr.prepare_current_ticket_human_git_handoff(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_HUMAN_GIT_HANDOFF",
+        git_snapshot_fn=lambda: snapshot_a,
+    )
+    Path(fixture.candidate_fixture["manifest_path"]).unlink()
+
+    post_commit = "bcdef1234567890abcdef1234567890abcdef123"
+    post_commit_snapshot = _p18_9_2_handoff_git_snapshot(
+        head=post_commit,
+        remote_head=post_commit,
+        head_parent=_P18_9_2_HANDOFF_PARENT,
+        path_SHA256=candidate_hashes,
+    )
+    _patch_p18_9_2_handoff_snapshot(monkeypatch, fixture.pr, post_commit_snapshot)
+
+    workflow = fixture.pr.build_workflow_control_snapshot()
+
+    assert workflow["current_ticket_id"] == "P18.9.2"
+    assert workflow["reviewed_run_id"] == fixture.retry["kanban_run_id"]
+    assert workflow["review_state"] == "accepted"
+    assert workflow["validation_state"] == "review_accepted"
+    assert workflow["workflow_status"] == "review_accepted_pending_human_git_handoff"
+    assert workflow["handoff_execution_context_status"] == (
+        "candidate_materialized_pending_completion"
+    )
+    assert workflow["git_handoff_required"] is True
+    assert workflow["next_action"]["id"] == "COMPLETE_P18_9_2_HUMAN_GIT_HANDOFF"
+    assert workflow["next_action"].get("required_human_action") != (
+        "terminal_governed_run_review_or_fresh_execution_request"
+    )
+    assert workflow["next_action"]["id"] != "CONTINUE_P18_9_2_GOVERNED_AUTONOMY"
+    assert workflow["blocker_count"] == 0, workflow["remaining_blockers"]
+    assert "human_git_handoff_completion_authority" not in workflow
+
+
+def test_p18_9_2_post_handoff_commit_reconstruction_rejects_mismatching_parent(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _accepted_p18_9_2_review_for_handoff_prepare(
+        projection_home,
+        monkeypatch,
+        pid=6857,
+    )
+    source_hashes, candidate_hashes = _p18_9_2_candidate_hash_maps(
+        fixture.candidate_files
+    )
+    snapshot_a = _p18_9_2_handoff_git_snapshot(path_SHA256=source_hashes)
+    fixture.pr.prepare_current_ticket_human_git_handoff(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_HUMAN_GIT_HANDOFF",
+        git_snapshot_fn=lambda: snapshot_a,
+    )
+
+    unrelated_parent = "3334567890abcdef1234567890abcdef12345678"
+    unrelated_commit = "bcdef1234567890abcdef1234567890abcdef123"
+    post_commit_snapshot = _p18_9_2_handoff_git_snapshot(
+        head=unrelated_commit,
+        remote_head=unrelated_commit,
+        head_parent=unrelated_parent,
+        path_SHA256=candidate_hashes,
+    )
+    _patch_p18_9_2_handoff_snapshot(monkeypatch, fixture.pr, post_commit_snapshot)
+
+    workflow = fixture.pr.build_workflow_control_snapshot()
+
+    assert workflow["current_ticket_id"] == "P18.9.2"
+    assert workflow["review_state"] == "accepted"
+    assert workflow["workflow_status"] == "review_accepted_pending_human_git_handoff"
+    assert workflow["handoff_execution_context_status"] == "blocked"
+    assert workflow["handoff_execution_context_blocker_code"] == (
+        "HUMAN_GIT_HANDOFF_REALIZATION_PARENT_MISMATCH"
+    )
+    assert workflow["next_action"]["id"] == "BLOCKED_P18_9_2_HUMAN_GIT_HANDOFF"
+    assert workflow["next_action"]["id"] != "CONTINUE_P18_9_2_GOVERNED_AUTONOMY"
+    assert "human_git_handoff_completion_authority" not in workflow
+
+
 @pytest.mark.parametrize(
     ("status_entries", "expected_status", "expected_tracked", "expected_untracked"),
     [

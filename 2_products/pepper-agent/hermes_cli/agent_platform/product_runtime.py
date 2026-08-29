@@ -238,6 +238,10 @@ PEPPER_HUMAN_GIT_HANDOFF_TOLERATED_UNTRACKED_EXCLUSIONS = (
     "2_products/pepper-agent/.runtime-logs/**",
 )
 PEPPER_HUMAN_GIT_HANDOFF_EXPLICIT_PREPARE_REQUIRED_FROM_TICKET_ID = "P18.9.2"
+PEPPER_REVIEW_PREPARE_DURABLE_COMPLETION_FALLBACK_BLOCKERS = frozenset({
+    "KANBAN_COMPLETION_RESULT_GAP",
+    "KANBAN_COMPLETION_RESULT_DETAIL_GAP",
+})
 PEPPER_GOVERNED_AUTONOMY_PENDING_FRESH_REQUEST_HISTORY_LIMIT = 64
 PEPPER_GOVERNED_AUTONOMY_AUTHORITY_DIGEST_ALGORITHM = (
     "agent-platform-pepper-governed-autonomy-backend-derived-live-authority-sha256-v1"
@@ -3914,6 +3918,56 @@ def _review_prepare_superseded_by_current_round(
     return binding.ticket_id == record.get("ticket_id")
 
 
+def _review_prepare_completion_for_validation(
+    record: dict[str, Any],
+    *,
+    projection: dict[str, Any],
+) -> dict[str, Any]:
+    completion = _kanban_completion_result_source(projection)
+    blocker = str(completion.get("blocker_code") or "")
+    if not blocker:
+        return completion
+    if blocker not in PEPPER_REVIEW_PREPARE_DURABLE_COMPLETION_FALLBACK_BLOCKERS:
+        raise ProductRuntimeConflict(blocker)
+    durable_completion = record.get("kanban_completion_result")
+    if not isinstance(durable_completion, dict):
+        raise ProductRuntimeConflict(blocker)
+    live_run_id = _int_or_none(completion.get("run_id"))
+    if live_run_id != _int_or_none(record.get("successful_run_id")):
+        raise ProductRuntimeConflict(blocker)
+    durable_completion_sha = durable_completion.get("kanban_completion_result_SHA256")
+    if durable_completion_sha != _kanban_completion_result_digest(durable_completion):
+        raise ProductRuntimeConflict(
+            "review-preparation durable completion result digest mismatch"
+        )
+    expected = {
+        "kanban_board_slug": _normalize_board(str(projection["kanban_board_slug"])),
+        "kanban_task_id": projection["kanban_task_id"],
+        "run_id": _int_or_none(record.get("successful_run_id")),
+    }
+    for key, value in expected.items():
+        observed = (
+            _int_or_none(durable_completion.get(key))
+            if key == "run_id"
+            else durable_completion.get(key)
+        )
+        if observed != value:
+            raise ProductRuntimeConflict(
+                f"review-preparation durable completion result {key} mismatch"
+            )
+    if record.get("kanban_completion_result_SHA256") != durable_completion.get(
+        "kanban_completion_result_SHA256"
+    ):
+        raise ProductRuntimeConflict(
+            "review-preparation durable completion result authority mismatch"
+        )
+    if not _review_prepare_human_git_handoff_required(durable_completion):
+        raise ProductRuntimeConflict(
+            "review-preparation durable completion result is not review-required candidate evidence"
+        )
+    return durable_completion
+
+
 def _review_decision_has_basic_current_ticket_identity(
     record: dict[str, Any],
     *,
@@ -6846,6 +6900,7 @@ def validate_p18_9_0_review_prepare_record(
     record: dict[str, Any],
     *,
     projection_record: dict[str, Any] | None = None,
+    allow_durable_completion_fallback: bool = True,
 ) -> dict[str, Any]:
     """Validate persisted P18.9.0 review-preparation authority."""
 
@@ -6855,9 +6910,12 @@ def validate_p18_9_0_review_prepare_record(
         raise ProductRuntimeConflict("review-preparation record digest mismatch")
     projection = projection_record if projection_record is not None else _load_current_projection_record()
     _validate_execution_start_authority(projection)
-    completion = _kanban_completion_result_source(projection)
-    if completion.get("blocker_code"):
-        raise ProductRuntimeConflict(str(completion["blocker_code"]))
+    if allow_durable_completion_fallback:
+        completion = _review_prepare_completion_for_validation(record, projection=projection)
+    else:
+        completion = _kanban_completion_result_source(projection)
+        if completion.get("blocker_code"):
+            raise ProductRuntimeConflict(str(completion["blocker_code"]))
     contract = _review_prepare_acceptance_contract_for_validation(
         record,
         projection=projection,
@@ -7293,6 +7351,7 @@ def inspect_current_ticket_review_candidate(
         review_prepare = validate_p18_9_0_review_prepare_record(
             raw_record,
             projection_record=projection,
+            allow_durable_completion_fallback=False,
         )
     except ProductRuntimeCandidateInspectionBlocked as exc:
         return _review_candidate_inspection_blocked_result(
@@ -7980,22 +8039,6 @@ def complete_current_ticket_human_git_handoff(
             accepted_review=accepted_review,
         )
 
-    workflow = build_workflow_control_snapshot()
-    workflow_blocker = _human_git_handoff_completion_workflow_blocker(
-        workflow,
-        binding=binding,
-        accepted_review=accepted_review,
-    )
-    if workflow_blocker is not None:
-        code, detail = workflow_blocker
-        return _blocked_current_human_git_handoff_completion_result(
-            projection,
-            request=request,
-            blocker_code=code,
-            blocker_detail=detail,
-            accepted_review=accepted_review,
-        )
-
     path_blocker = _human_git_handoff_completion_path_blocker(
         request,
         projection=projection,
@@ -8031,6 +8074,21 @@ def complete_current_ticket_human_git_handoff(
                 accepted_review=accepted_review,
                 referenced_paths=referenced_paths,
             )
+    workflow = build_workflow_control_snapshot()
+    workflow_blocker = _human_git_handoff_completion_workflow_blocker(
+        workflow,
+        binding=binding,
+        accepted_review=accepted_review,
+    )
+    if workflow_blocker is not None:
+        code, detail = workflow_blocker
+        return _blocked_current_human_git_handoff_completion_result(
+            projection,
+            request=request,
+            blocker_code=code,
+            blocker_detail=detail,
+            accepted_review=accepted_review,
+        )
     verification_evidence, verification_blocker = _human_git_handoff_completion_verification_evidence(
         request,
         git_snapshot=git_snapshot,
@@ -18893,6 +18951,21 @@ def _human_git_handoff_prepare_execution_context_status(
         })
         return result
     if source_status == "accepted_candidate_materialized" and local_parent != expected_parent:
+        head_parent = str(context.get("head_parent_SHA256") or "").strip().lower()
+        if not re.fullmatch(r"[a-f0-9]{40}", head_parent):
+            result.update({
+                "status": "blocked",
+                "blocker_code": "HUMAN_GIT_HANDOFF_REALIZATION_PARENT_UNAVAILABLE",
+                "blocker_detail": "post-materialization handoff realization requires final HEAD parent evidence",
+            })
+            return result
+        if head_parent != expected_parent:
+            result.update({
+                "status": "blocked",
+                "blocker_code": "HUMAN_GIT_HANDOFF_REALIZATION_PARENT_MISMATCH",
+                "blocker_detail": "post-materialization HEAD is not a direct child of the prepared handoff parent",
+            })
+            return result
         result.update({
             "status": "candidate_materialized_pending_completion",
             "blocker_code": "HUMAN_GIT_HANDOFF_ALREADY_MATERIALIZED_PENDING_COMPLETION",
@@ -20750,6 +20823,7 @@ def _kanban_completion_result_source(projection: dict[str, Any]) -> dict[str, An
                 "blocker_code": "KANBAN_COMPLETION_RESULT_GAP",
                 "blocker_detail": "latest projected Kanban run is not completed",
                 "kanban_task_status": task.status,
+                "run_id": int(latest_run.id),
                 "latest_run_status": run_status,
                 "latest_run_outcome": run_outcome,
             }
@@ -23033,6 +23107,19 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
                             snapshot.update(successor_overlay)
                         if successor_blocker is not None:
                             remaining_blockers.append(successor_blocker)
+                if snapshot.get("review_state") in {"prepared_pending_human_acceptance", "accepted"}:
+                    binding = resolve_current_ticket_lifecycle_binding(
+                        projection_record=projection,
+                    )
+                    superseded_worker_blockers = {
+                        f"{binding.ticket_hyphen_token}-WORKER-LIFECYCLE",
+                        f"{binding.ticket_hyphen_token}-RETRY-WORKER-LIFECYCLE",
+                    }
+                    remaining_blockers[:] = [
+                        blocker
+                        for blocker in remaining_blockers
+                        if blocker.get("id") not in superseded_worker_blockers
+                    ]
         except Exception as exc:  # pragma: no cover - defensive live-state guard
             remaining_blockers.append({
                 "id": f"{current_ticket_id}-GOVERNED-AUTONOMY-AUTHORITY",
