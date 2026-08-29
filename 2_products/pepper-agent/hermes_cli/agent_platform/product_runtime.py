@@ -23094,9 +23094,25 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
                 )
                 if handoff_completion_overlay is not None:
                     snapshot.update(handoff_completion_overlay)
+                    binding = resolve_current_ticket_lifecycle_binding(
+                        projection_record=projection,
+                    )
+                    superseded_worker_blockers = {
+                        f"{binding.ticket_hyphen_token}-WORKER-LIFECYCLE",
+                        f"{binding.ticket_hyphen_token}-RETRY-WORKER-LIFECYCLE",
+                    }
                     if (
-                        pending_successor_overlay is None
-                        and pending_successor_blocker is None
+                        pending_successor_blocker is not None
+                        and pending_successor_blocker.get("id") in superseded_worker_blockers
+                    ):
+                        remaining_blockers[:] = [
+                            blocker
+                            for blocker in remaining_blockers
+                            if blocker.get("id") not in superseded_worker_blockers
+                        ]
+                        pending_successor_blocker = None
+                    if (
+                        pending_successor_blocker is None
                         and generation_blocker is None
                         and str(snapshot.get("current_ticket_id") or "").strip() == ""
                     ):
