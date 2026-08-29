@@ -324,6 +324,7 @@ def test_pepper_toolset_exposes_no_arbitrary_shell_or_file_authority(monkeypatch
         "prepare_current_ticket_review",
         "accept_current_ticket_review",
         "submit_current_ticket_review_decision",
+        "prepare_current_ticket_human_git_handoff",
         "complete_current_ticket_human_git_handoff",
     }.issubset(names)
     assert {
@@ -342,6 +343,7 @@ def test_pepper_toolset_exposes_no_arbitrary_shell_or_file_authority(monkeypatch
     review_prepare_params = review_prepare_tool["parameters"]
     review_accept_params = review_accept_tool["parameters"]
     review_decision_params = by_name["submit_current_ticket_review_decision"]["parameters"]
+    handoff_prepare_params = by_name["prepare_current_ticket_human_git_handoff"]["parameters"]
     handoff_completion_params = by_name["complete_current_ticket_human_git_handoff"]["parameters"]
     assert revision_params["required"] == ["human_authorization_text"]
     assert "ticket_id" in revision_params["properties"]
@@ -376,6 +378,15 @@ def test_pepper_toolset_exposes_no_arbitrary_shell_or_file_authority(monkeypatch
         "changes_requested",
         "reject",
     ]
+    assert "required" not in handoff_prepare_params
+    handoff_prepare_properties = handoff_prepare_params["properties"]
+    assert "next_action_id" in handoff_prepare_properties
+    assert "PREPARE_<current-ticket>_HUMAN_GIT_HANDOFF" in json.dumps(
+        handoff_prepare_params
+    )
+    assert "git_command" not in handoff_prepare_properties
+    assert "shell_command" not in handoff_prepare_properties
+    assert "workspace_path" not in handoff_prepare_properties
     assert handoff_completion_params["required"] == [
         "reviewed_run_id",
         "reviewed_candidate_SHA256",
@@ -481,6 +492,51 @@ def test_complete_human_git_handoff_tool_forwards_evidence_only_lists(
     assert "shell_command" not in captured
 
 
+def test_prepare_human_git_handoff_tool_forwards_guards_only(
+    monkeypatch,
+) -> None:
+    import tools.pepper_workflow_tools as pepper_tools
+
+    captured: dict[str, object] = {}
+
+    class RuntimeStub:
+        def prepare_current_ticket_human_git_handoff(self, **kwargs):
+            captured.update(kwargs)
+            return {
+                "handoff_preparation_recorded": True,
+                "dispatch_performed": False,
+                "execution_started": False,
+                "Git_commands_executed": 0,
+                "Git_mutation": False,
+            }
+
+        def build_lead_agent_operational_context(self):
+            return {
+                "workflow_status": "review_accepted_pending_human_git_handoff",
+                "git_handoff_state": "human_git_authority_preserved",
+            }
+
+    monkeypatch.setattr(pepper_tools, "_runtime", lambda: RuntimeStub())
+
+    result = json.loads(pepper_tools._prepare_current_ticket_human_git_handoff({
+        "project_id": "PEPPER",
+        "ticket_id": "P18.9.2",
+        "next_action_id": "PREPARE_P18_9_2_HUMAN_GIT_HANDOFF",
+    }))
+
+    assert result["success"] is True
+    assert result["source_tool"] == "prepare_current_ticket_human_git_handoff"
+    assert captured == {
+        "project_id": "PEPPER",
+        "ticket_id": "P18.9.2",
+        "next_action_id": "PREPARE_P18_9_2_HUMAN_GIT_HANDOFF",
+    }
+    assert result["Git_commands_executed"] == 0
+    assert result["Git_mutation"] is False
+    assert "commits" not in captured
+    assert "shell_command" not in captured
+
+
 def test_lead_agent_prompt_requires_tool_backed_state() -> None:
     from hermes_cli.agent_platform.lead_agent import pepper_lead_agent_system_prompt
 
@@ -521,9 +577,14 @@ def test_lead_agent_prompt_requires_tool_backed_state() -> None:
     assert "submit_current_ticket_review_decision" in prompt
     assert "accept, changes_requested, and reject" in prompt
     assert "Do not route human review accept, changes_requested, or reject decisions" in prompt
+    assert "prepare_current_ticket_human_git_handoff" in prompt
+    assert "non-executing P17.7 human Git handoff package plus C12 materialization instructions" in prompt
+    assert "copying accepted candidate bytes into the canonical checkout" in prompt
+    assert "must not stage, commit, push, close the ticket" in prompt
     assert "complete_current_ticket_human_git_handoff" in prompt
     assert "PREPARE_<current-ticket>_HUMAN_GIT_HANDOFF" in prompt
     assert "never execute Git yourself" in prompt
+    assert "never assume accepted candidates already exist in the canonical working tree" in prompt
     assert "evidence-only human Git handoff completion" in prompt
     assert "backend-derived child scope/operations" in prompt
     assert "prepare_current_ticket_review" in prompt
