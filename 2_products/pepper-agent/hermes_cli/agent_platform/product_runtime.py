@@ -17,6 +17,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import time
 import unicodedata
 from pathlib import Path
@@ -226,6 +227,12 @@ PEPPER_HUMAN_CANDIDATE_MATERIALIZATION_DIGEST_ALGORITHM = (
 )
 PEPPER_HUMAN_GIT_HANDOFF_C12_RENDERED_DIGEST_ALGORITHM = (
     "agent-platform-pepper-human-git-handoff-materialization-aware-rendered-sha256-v1"
+)
+PEPPER_HUMAN_GIT_HANDOFF_EXECUTION_CONTEXT_POLICY_ID = (
+    "pepper-human-git-handoff-execution-context-v1"
+)
+PEPPER_HUMAN_GIT_HANDOFF_EXECUTION_CONTEXT_DIGEST_ALGORITHM = (
+    "agent-platform-pepper-human-git-handoff-execution-context-sha256-v1"
 )
 PEPPER_HUMAN_GIT_HANDOFF_TOLERATED_UNTRACKED_EXCLUSIONS = (
     "2_products/pepper-agent/.runtime-logs/**",
@@ -2432,7 +2439,7 @@ def _ticket_approval_artifact_blocker(
     path: Path | None,
     identity_mismatches: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    return {
+    result = {
         "inspection_status": "blocked",
         "read_only": True,
         "validated": False,
@@ -4493,6 +4500,16 @@ def validate_current_ticket_human_git_handoff_prepare_record(
         raise ProductRuntimeConflict("human candidate materialization requirement mismatch")
     if record.get("canonical_source_mutation_by_Pepper") is not False:
         raise ProductRuntimeConflict("human Git handoff preparation grants source mutation authority")
+    execution_context = record.get("handoff_execution_context")
+    if execution_context is not None:
+        if not isinstance(execution_context, dict):
+            raise ProductRuntimeConflict("human Git handoff execution context is invalid")
+        if execution_context.get("execution_context_SHA256") != _human_git_handoff_execution_context_digest(
+            execution_context
+        ):
+            raise ProductRuntimeConflict("human Git handoff execution context digest mismatch")
+        if record.get("handoff_execution_context_SHA256") != execution_context["execution_context_SHA256"]:
+            raise ProductRuntimeConflict("human Git handoff execution context reference mismatch")
     return record
 
 
@@ -7682,6 +7699,7 @@ def prepare_current_ticket_human_git_handoff(
             accepted_review=accepted_review,
         )
 
+    git_snapshot: dict[str, Any] | None = None
     existing = None
     try:
         existing = load_current_ticket_human_git_handoff_prepare_record(
@@ -7700,10 +7718,41 @@ def prepare_current_ticket_human_git_handoff(
         except FileNotFoundError:
             pass
     if existing is not None:
-        return _human_git_handoff_prepare_operational_result(
-            existing,
-            idempotent_replay=True,
+        git_snapshot = _current_handoff_execution_git_snapshot(
+            candidate_paths=tuple(existing.get("candidate_paths") or ()),
+            git_snapshot_fn=git_snapshot_fn,
         )
+        context_status = _human_git_handoff_prepare_execution_context_status(
+            existing,
+            git_snapshot=git_snapshot,
+        )
+        if context_status["status"] == "fresh":
+            result = _human_git_handoff_prepare_operational_result(
+                existing,
+                idempotent_replay=True,
+            )
+            result["handoff_execution_context"] = context_status["execution_context"]
+            result["handoff_execution_context_status"] = "fresh"
+            return result
+        if context_status["status"] == "stale_repository_parent":
+            path = human_git_handoff_prepare_record_path_for_ticket(binding.ticket_id)
+            _archive_existing_authority_record(
+                path,
+                human_git_handoff_prepare_history_path_for_ticket(binding.ticket_id),
+                reason="stale_repository_parent",
+            )
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+        else:
+            return _blocked_current_human_git_handoff_prepare_result(
+                projection,
+                request=request,
+                blocker_code=str(context_status.get("blocker_code") or "HANDOFF_EXECUTION_CONTEXT_STALE"),
+                blocker_detail=str(context_status.get("blocker_detail") or "handoff execution context is stale"),
+                accepted_review=accepted_review,
+            )
 
     active_execution_blocker = _human_git_handoff_completion_active_execution_blocker(
         projection,
@@ -7734,9 +7783,13 @@ def prepare_current_ticket_human_git_handoff(
             accepted_review=accepted_review,
         )
 
-    git_snapshot = (
-        git_snapshot_fn() if callable(git_snapshot_fn) else _current_readonly_repository_git_snapshot()
-    )
+    if git_snapshot is None:
+        git_snapshot = _current_handoff_execution_git_snapshot(
+            candidate_paths=_review_candidate_paths_from_reference(
+                accepted_review.get("reviewed_candidate_reference")
+            ),
+            git_snapshot_fn=git_snapshot_fn,
+        )
     try:
         p17_result, p17_rendered = _build_p17_7_current_human_git_handoff_result(
             projection=projection,
@@ -7782,6 +7835,7 @@ def prepare_current_ticket_human_git_handoff(
         p17_rendered_powershell=p17_rendered,
         materialization_plan=materialization_plan,
         rendered_powershell=rendered,
+        git_snapshot=git_snapshot,
     )
     _persist_current_ticket_human_git_handoff_prepare_record(record)
     return _human_git_handoff_prepare_operational_result(
@@ -7889,6 +7943,30 @@ def complete_current_ticket_human_git_handoff(
             accepted_review=accepted_review,
         )
 
+    prepare_record = None
+    if _human_git_handoff_explicit_prepare_required(binding):
+        try:
+            prepare_record = load_current_ticket_human_git_handoff_prepare_record(
+                projection_record=projection,
+                review_decision_record=accepted_review,
+            )
+        except ProductRuntimeConflict as exc:
+            return _blocked_current_human_git_handoff_completion_result(
+                projection,
+                request=request,
+                blocker_code="HUMAN_GIT_HANDOFF_PREPARE_AUTHORITY_INVALID",
+                blocker_detail=str(exc) or "current human Git handoff preparation authority is invalid",
+                accepted_review=accepted_review,
+            )
+        if prepare_record is None:
+            return _blocked_current_human_git_handoff_completion_result(
+                projection,
+                request=request,
+                blocker_code="HUMAN_GIT_HANDOFF_PREPARE_AUTHORITY_GAP",
+                blocker_detail="current human Git handoff completion requires prepared handoff authority",
+                accepted_review=accepted_review,
+            )
+
     active_execution_blocker = _human_git_handoff_completion_active_execution_blocker(
         projection,
     )
@@ -7933,9 +8011,26 @@ def complete_current_ticket_human_git_handoff(
             referenced_paths=referenced_paths,
         )
 
-    git_snapshot = (
-        git_snapshot_fn() if callable(git_snapshot_fn) else _current_readonly_repository_git_snapshot()
+    git_snapshot = _current_handoff_execution_git_snapshot(
+        candidate_paths=tuple(request.approved_committed_paths),
+        git_snapshot_fn=git_snapshot_fn,
     )
+    if prepare_record is not None:
+        prepare_blocker = _human_git_handoff_completion_prepare_blocker(
+            request,
+            prepare_record=prepare_record,
+            git_snapshot=git_snapshot,
+        )
+        if prepare_blocker is not None:
+            code, detail, referenced_paths = prepare_blocker
+            return _blocked_current_human_git_handoff_completion_result(
+                projection,
+                request=request,
+                blocker_code=code,
+                blocker_detail=detail,
+                accepted_review=accepted_review,
+                referenced_paths=referenced_paths,
+            )
     verification_evidence, verification_blocker = _human_git_handoff_completion_verification_evidence(
         request,
         git_snapshot=git_snapshot,
@@ -18452,6 +18547,401 @@ def _human_git_handoff_dirty_status(
     }
 
 
+def _human_git_handoff_execution_context_digest(context: dict[str, Any]) -> str:
+    payload = {key: value for key, value in context.items() if key != "execution_context_SHA256"}
+    return _digest_payload(PEPPER_HUMAN_GIT_HANDOFF_EXECUTION_CONTEXT_DIGEST_ALGORITHM, payload)
+
+
+def _handoff_readonly_git_sha(repo_root: Path, *args: str) -> str | None:
+    env = {key: os.environ[key] for key in ("COMSPEC", "HOME", "LANG", "LC_ALL", "PATH", "PATHEXT", "Path", "SystemRoot", "TEMP", "TMP", "USERPROFILE", "WINDIR") if key in os.environ}
+    env["GIT_OPTIONAL_LOCKS"] = "0"
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    try:
+        completed = subprocess.run(
+            ["git", *args],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=5,
+            shell=False,
+            check=False,
+            env=env,
+        )
+    except Exception:
+        return None
+    if completed.returncode != 0:
+        return None
+    value = str(completed.stdout or "").strip().splitlines()[0:1]
+    if not value:
+        return None
+    sha = value[0].strip().lower()
+    return sha if re.fullmatch(r"[a-f0-9]{40}", sha) else None
+
+
+def _handoff_repository_root() -> Path | None:
+    try:
+        from tools import pepper_repository_tools as repo_tools
+
+        return repo_tools._repository_root()
+    except Exception:
+        return None
+
+
+def _handoff_repository_path_sha256(repo_root: Path, relative_path: str) -> str | None:
+    try:
+        normalized = _normalize_runtime_relative_path(relative_path)
+        root = repo_root.resolve()
+        path = (root / Path(*normalized.split("/"))).resolve()
+    except Exception:
+        return None
+    if path != root and root not in path.parents:
+        return None
+    if not path.is_file():
+        return None
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def _current_handoff_execution_git_snapshot(
+    *,
+    candidate_paths: tuple[str, ...],
+    git_snapshot_fn: Any = None,
+) -> dict[str, Any]:
+    snapshot = (
+        git_snapshot_fn() if callable(git_snapshot_fn) else _current_readonly_repository_git_snapshot()
+    )
+    if callable(git_snapshot_fn):
+        return dict(snapshot) if isinstance(snapshot, dict) else {}
+    result = dict(snapshot) if isinstance(snapshot, dict) else {}
+    repo_root = _handoff_repository_root()
+    if repo_root is None:
+        return result
+    branch = str(result.get("branch") or "").strip()
+    if branch and _git_snapshot_remote_parent(result) is None:
+        try:
+            safe_branch = _safe_git_branch_name(branch)
+        except ValueError:
+            safe_branch = ""
+        if safe_branch:
+            remote_head = _handoff_readonly_git_sha(repo_root, "rev-parse", f"origin/{safe_branch}")
+            if remote_head is not None:
+                result["remote_head"] = remote_head
+    head = str(result.get("head") or "").strip().lower()
+    if re.fullmatch(r"[a-f0-9]{40}", head) and not _git_snapshot_head_parent(result):
+        head_parent = _handoff_readonly_git_sha(repo_root, "rev-parse", f"{head}^")
+        if head_parent is not None:
+            result["head_parent"] = head_parent
+    path_sha: dict[str, str] = {}
+    existing = result.get("path_SHA256")
+    if isinstance(existing, dict):
+        for key, value in existing.items():
+            if isinstance(value, str) and _SAFE_SHA256.fullmatch(value.strip().lower()):
+                path_sha[str(key).replace("\\", "/")] = value.strip().lower()
+    for path in candidate_paths:
+        normalized = _normalize_runtime_relative_path(path)
+        if normalized not in path_sha:
+            current_sha = _handoff_repository_path_sha256(repo_root, normalized)
+            if current_sha is not None:
+                path_sha[normalized] = current_sha
+    if path_sha:
+        result["path_SHA256"] = path_sha
+    return result
+
+
+def _git_snapshot_head_parent(git_snapshot: dict[str, Any]) -> str | None:
+    snapshot = git_snapshot if isinstance(git_snapshot, dict) else {}
+    for key in (
+        "head_parent",
+        "head_parent_SHA256",
+        "parent_head",
+        "parent_head_SHA256",
+        "final_commit_parent",
+        "final_commit_parent_SHA256",
+        "commit_parent_SHA256",
+    ):
+        value = snapshot.get(key)
+        if isinstance(value, str) and re.fullmatch(r"[a-f0-9]{40}", value.strip().lower()):
+            return value.strip().lower()
+    return None
+
+
+def _human_git_handoff_index_status(git_snapshot: dict[str, Any]) -> dict[str, Any]:
+    snapshot = git_snapshot if isinstance(git_snapshot, dict) else {}
+    entries = snapshot.get("status_entries")
+    if not isinstance(entries, list):
+        entries = []
+    indexed: list[dict[str, str]] = []
+    for raw_entry in entries:
+        parsed = _status_entry_parts(raw_entry)
+        if parsed is None:
+            continue
+        status, path = parsed
+        if status == "??":
+            continue
+        if status[:1] != " ":
+            indexed.append({"status": status, "path": path})
+    return {
+        "status": "non_empty" if indexed else "empty",
+        "indexed_paths": indexed,
+        "indexed_path_count": len(indexed),
+    }
+
+
+def _handoff_record_candidate_sha_maps(
+    record: dict[str, Any],
+) -> tuple[dict[str, str | None], dict[str, str | None]]:
+    entries = record.get("materialization_candidate_entries")
+    if not isinstance(entries, list):
+        plan = record.get("human_candidate_materialization_plan")
+        entries = plan.get("candidates") if isinstance(plan, dict) else []
+    source_by_path: dict[str, str | None] = {}
+    candidate_by_path: dict[str, str | None] = {}
+    for raw_entry in entries if isinstance(entries, list) else []:
+        if not isinstance(raw_entry, dict):
+            continue
+        try:
+            path = _normalize_runtime_relative_path(raw_entry.get("relative_path") or raw_entry.get("path"))
+        except ProductRuntimeConflict:
+            continue
+        source_sha = raw_entry.get("source_SHA256")
+        candidate_sha = raw_entry.get("accepted_candidate_SHA256") or raw_entry.get("workspace_SHA256")
+        source_by_path[path] = source_sha.strip().lower() if isinstance(source_sha, str) and _SAFE_SHA256.fullmatch(source_sha.strip().lower()) else None
+        candidate_by_path[path] = candidate_sha.strip().lower() if isinstance(candidate_sha, str) and _SAFE_SHA256.fullmatch(candidate_sha.strip().lower()) else None
+    return source_by_path, candidate_by_path
+
+
+def _human_git_handoff_execution_context(
+    record: dict[str, Any],
+    *,
+    git_snapshot: dict[str, Any],
+) -> dict[str, Any]:
+    candidate_paths = tuple(_normalize_runtime_relative_path(path) for path in record.get("candidate_paths") or ())
+    tolerated_exclusions = tuple(record.get("tolerated_untracked_exclusions") or ())
+    source_by_path, candidate_by_path = _handoff_record_candidate_sha_maps(record)
+    dirty_status = _human_git_handoff_dirty_status(
+        git_snapshot,
+        candidate_paths=candidate_paths,
+        tolerated_untracked_exclusions=tolerated_exclusions,
+    )
+    index_status = _human_git_handoff_index_status(git_snapshot)
+    snapshot = git_snapshot if isinstance(git_snapshot, dict) else {}
+    path_maps_available = any(
+        isinstance(snapshot.get(key), dict)
+        for key in (
+            "path_SHA256",
+            "path_sha256",
+            "current_path_SHA256",
+            "current_path_sha256",
+            "file_SHA256_by_path",
+            "file_sha256_by_path",
+        )
+    )
+    current_by_path: dict[str, str | None] = {}
+    drift_paths: list[dict[str, str | None]] = []
+    materialized_paths: list[str] = []
+    unavailable_paths: list[str] = []
+    for path in candidate_paths:
+        current_sha = _git_snapshot_path_sha256(git_snapshot, path)
+        current_by_path[path] = current_sha
+        expected_source = source_by_path.get(path)
+        accepted_candidate = candidate_by_path.get(path)
+        if expected_source is None:
+            if current_sha is None:
+                continue
+            if accepted_candidate is not None and current_sha == accepted_candidate:
+                materialized_paths.append(path)
+                continue
+            drift_paths.append({
+                "path": path,
+                "expected_source_SHA256": expected_source,
+                "observed_SHA256": current_sha,
+            })
+            continue
+        if current_sha is None:
+            unavailable_paths.append(path if path_maps_available else f"{path}:path_sha_unavailable")
+            continue
+        if current_sha == expected_source:
+            continue
+        if accepted_candidate is not None and current_sha == accepted_candidate:
+            materialized_paths.append(path)
+            continue
+        drift_paths.append({
+            "path": path,
+            "expected_source_SHA256": expected_source,
+            "observed_SHA256": current_sha,
+        })
+    if drift_paths:
+        source_status = "drift"
+    elif unavailable_paths:
+        source_status = "unavailable"
+    elif materialized_paths:
+        source_status = "accepted_candidate_materialized"
+    else:
+        source_status = "unchanged"
+    context = {
+        "schema_version": 1,
+        "policy_id": PEPPER_HUMAN_GIT_HANDOFF_EXECUTION_CONTEXT_POLICY_ID,
+        "source_system": PEPPER_HUMAN_GIT_HANDOFF_PREPARE_SOURCE_SYSTEM,
+        "branch": str(snapshot.get("branch") or "").strip() or None,
+        "expected_branch": record.get("branch"),
+        "local_parent_SHA256": str(snapshot.get("head") or "").strip().lower() or None,
+        "remote_parent_SHA256": _git_snapshot_remote_parent(git_snapshot),
+        "expected_parent_SHA256": record.get("expected_parent_commit"),
+        "head_parent_SHA256": _git_snapshot_head_parent(git_snapshot),
+        "candidate_paths": list(candidate_paths),
+        "candidate_source_SHA256": source_by_path,
+        "candidate_current_SHA256": current_by_path,
+        "accepted_candidate_SHA256": candidate_by_path,
+        "candidate_source_basis_status": source_status,
+        "candidate_source_basis_drift_paths": drift_paths,
+        "candidate_source_basis_unavailable_paths": unavailable_paths,
+        "accepted_candidate_materialized_paths": sorted(materialized_paths),
+        "index_status": index_status,
+        "preflight_dirty_status": dirty_status,
+        "tolerated_untracked_exclusions": list(tolerated_exclusions),
+        "Git_commands_executed": 0,
+        "Git_mutation": False,
+    }
+    context["execution_context_SHA256"] = _human_git_handoff_execution_context_digest(context)
+    return context
+
+
+def _human_git_handoff_prepare_execution_context_status(
+    record: dict[str, Any],
+    *,
+    git_snapshot: dict[str, Any],
+) -> dict[str, Any]:
+    context = _human_git_handoff_execution_context(record, git_snapshot=git_snapshot)
+    expected_branch = str(record.get("branch") or "").strip()
+    observed_branch = str(context.get("branch") or "").strip()
+    expected_parent = str(record.get("expected_parent_commit") or "").strip().lower()
+    local_parent = str(context.get("local_parent_SHA256") or "").strip().lower()
+    remote_parent = str(context.get("remote_parent_SHA256") or "").strip().lower()
+    result = {
+        "status": "fresh",
+        "blocker_code": None,
+        "blocker_detail": None,
+        "execution_context": context,
+    }
+    if observed_branch != expected_branch:
+        result.update({
+            "status": "blocked",
+            "blocker_code": "READ_ONLY_GIT_BRANCH_MISMATCH",
+            "blocker_detail": "read-only repository branch evidence does not match prepared handoff branch",
+        })
+        return result
+    if not re.fullmatch(r"[a-f0-9]{40}", local_parent):
+        result.update({
+            "status": "blocked",
+            "blocker_code": "READ_ONLY_GIT_PARENT_UNAVAILABLE",
+            "blocker_detail": "current repository parent evidence is unavailable for handoff replay",
+        })
+        return result
+    if not re.fullmatch(r"[a-f0-9]{40}", remote_parent):
+        result.update({
+            "status": "blocked",
+            "blocker_code": "READ_ONLY_GIT_REMOTE_PARENT_UNAVAILABLE",
+            "blocker_detail": "remote repository parent evidence is unavailable for handoff replay",
+        })
+        return result
+    if local_parent != remote_parent:
+        result.update({
+            "status": "blocked",
+            "blocker_code": "REPOSITORY_PARENT_SYNCHRONIZATION_REQUIRED",
+            "blocker_detail": "local and remote handoff parents do not match",
+        })
+        return result
+    source_status = context["candidate_source_basis_status"]
+    if source_status == "drift":
+        result.update({
+            "status": "blocked",
+            "blocker_code": "ACCEPTED_CANDIDATE_SOURCE_BASIS_DRIFT",
+            "blocker_detail": "accepted candidate source paths no longer match the reviewed source SHA256 values",
+        })
+        return result
+    if source_status == "unavailable":
+        result.update({
+            "status": "blocked",
+            "blocker_code": "ACCEPTED_CANDIDATE_SOURCE_BASIS_UNAVAILABLE",
+            "blocker_detail": "accepted candidate source-path SHA256 evidence is unavailable",
+        })
+        return result
+    if context["index_status"]["status"] != "empty":
+        result.update({
+            "status": "blocked",
+            "blocker_code": "HUMAN_GIT_HANDOFF_INDEX_NOT_EMPTY",
+            "blocker_detail": "human Git handoff preparation requires an empty index",
+        })
+        return result
+    dirty_status = context["preflight_dirty_status"]
+    if int(dirty_status.get("unexpected_dirty_path_count") or 0) != 0:
+        result.update({
+            "status": "blocked",
+            "blocker_code": "HUMAN_GIT_HANDOFF_UNEXPECTED_DIRTY_STATE",
+            "blocker_detail": "unexpected tracked or untracked paths block human Git handoff re-preparation",
+        })
+        return result
+    if dirty_status.get("candidate_status_entries"):
+        result.update({
+            "status": "blocked",
+            "blocker_code": "ACCEPTED_CANDIDATE_SOURCE_BASIS_DIRTY",
+            "blocker_detail": "accepted candidate paths are dirty before human materialization",
+        })
+        return result
+    if source_status == "accepted_candidate_materialized" and local_parent != expected_parent:
+        result.update({
+            "status": "candidate_materialized_pending_completion",
+            "blocker_code": "HUMAN_GIT_HANDOFF_ALREADY_MATERIALIZED_PENDING_COMPLETION",
+            "blocker_detail": "accepted candidate bytes appear materialized; submit completion evidence instead of re-preparing",
+        })
+        return result
+    if local_parent == expected_parent:
+        return result
+    result.update({
+        "status": "stale_repository_parent",
+        "blocker_code": None,
+        "blocker_detail": "prepared handoff parent is stale but accepted candidate source paths remain unchanged",
+    })
+    return result
+
+
+def _human_git_handoff_reprepare_next_action(
+    binding: CurrentTicketLifecycleBinding,
+) -> dict[str, Any]:
+    return {
+        "id": _human_git_handoff_prepare_action_id(binding),
+        "label": (
+            f"{binding.ticket_id} human Git handoff preparation is stale; prepare a fresh "
+            "human-only handoff against the current synchronized parent."
+        ),
+        "target_ticket_id": binding.ticket_id,
+        "target_ticket_title": binding.ticket_title,
+        "required_human_action": "human_git_handoff_repreparation",
+    }
+
+
+def _human_git_handoff_blocked_next_action(
+    binding: CurrentTicketLifecycleBinding,
+    *,
+    blocker_code: str,
+) -> dict[str, Any]:
+    return {
+        "id": f"BLOCKED_{governed_ticket_lifecycle_action_token(binding.ticket_id)}_HUMAN_GIT_HANDOFF",
+        "label": (
+            f"{binding.ticket_id} human Git handoff is blocked by {blocker_code}; "
+            "governed revalidation or repository synchronization is required."
+        ),
+        "target_ticket_id": binding.ticket_id,
+        "target_ticket_title": binding.ticket_title,
+        "required_human_action": "resolve_handoff_blocker",
+        "blocker_code": blocker_code,
+    }
+
+
 def _build_human_candidate_materialization_plan(
     *,
     projection: dict[str, Any],
@@ -19093,6 +19583,97 @@ def _human_git_handoff_completion_path_blocker(
     return None
 
 
+def _human_git_handoff_explicit_prepare_required(
+    binding: CurrentTicketLifecycleBinding,
+) -> bool:
+    return _governed_ticket_sequence_key(binding.ticket_id) >= _governed_ticket_sequence_key(
+        PEPPER_HUMAN_GIT_HANDOFF_EXPLICIT_PREPARE_REQUIRED_FROM_TICKET_ID
+    )
+
+
+def _human_git_handoff_completion_prepare_blocker(
+    request: CurrentTicketHumanGitHandoffCompletionRequest,
+    *,
+    prepare_record: dict[str, Any],
+    git_snapshot: dict[str, Any],
+) -> tuple[str, str, tuple[str, ...]] | None:
+    prepared_paths = tuple(prepare_record.get("candidate_paths") or ())
+    if tuple(request.approved_committed_paths) != prepared_paths:
+        return (
+            "HUMAN_GIT_HANDOFF_PREPARE_PATH_MISMATCH",
+            "approved committed paths do not match the current prepared handoff candidate paths",
+            prepared_paths,
+        )
+    if request.branch != prepare_record.get("branch"):
+        return (
+            "HUMAN_GIT_HANDOFF_PREPARE_BRANCH_MISMATCH",
+            "completion branch does not match the current prepared handoff branch",
+            (str(prepare_record.get("branch") or ""),),
+        )
+    if request.review_decision_SHA256 != prepare_record.get("review_decision_SHA256"):
+        return (
+            "HUMAN_GIT_HANDOFF_PREPARE_REVIEW_DECISION_MISMATCH",
+            "completion review decision does not match the current prepared handoff",
+            (),
+        )
+    if request.reviewed_candidate_SHA256 != prepare_record.get("reviewed_candidate_SHA256"):
+        return (
+            "HUMAN_GIT_HANDOFF_PREPARE_CANDIDATE_MISMATCH",
+            "completion candidate digest does not match the current prepared handoff",
+            (),
+        )
+    if int(request.reviewed_run_id) != int(prepare_record.get("reviewed_run_id") or 0):
+        return (
+            "HUMAN_GIT_HANDOFF_PREPARE_REVIEWED_RUN_MISMATCH",
+            "completion reviewed run does not match the current prepared handoff",
+            (),
+        )
+    expected_exclusions = tuple(prepare_record.get("tolerated_untracked_exclusions") or ())
+    if tuple(request.excluded_paths) != expected_exclusions:
+        return (
+            "HUMAN_GIT_HANDOFF_PREPARE_EXCLUSION_MISMATCH",
+            "completion exclusions do not match the current prepared handoff exclusions",
+            expected_exclusions,
+        )
+    final_commit = request.commits[-1]
+    snapshot = git_snapshot if isinstance(git_snapshot, dict) else {}
+    head = str(snapshot.get("head") or "").strip().lower()
+    if not _git_sha_matches(final_commit, head):
+        return (
+            "HUMAN_GIT_HANDOFF_FINAL_COMMIT_NOT_CURRENT_HEAD",
+            "completion evidence final commit is not the current repository HEAD",
+            (final_commit,),
+        )
+    remote_head = _git_snapshot_remote_parent(git_snapshot)
+    if remote_head is None:
+        return (
+            "HUMAN_GIT_HANDOFF_REMOTE_HEAD_UNAVAILABLE",
+            "completion requires read-only remote HEAD evidence for the handoff branch",
+            (),
+        )
+    if not _git_sha_matches(final_commit, remote_head):
+        return (
+            "HUMAN_GIT_HANDOFF_REMOTE_HEAD_MISMATCH",
+            "completion final commit is not the remote handoff branch HEAD",
+            (remote_head,),
+        )
+    commit_parent = _git_snapshot_head_parent(git_snapshot)
+    if commit_parent is None:
+        return (
+            "HUMAN_GIT_HANDOFF_COMMIT_PARENT_UNAVAILABLE",
+            "completion requires read-only final commit parent evidence",
+            (),
+        )
+    expected_parent = str(prepare_record.get("expected_parent_commit") or "").strip().lower()
+    if commit_parent != expected_parent:
+        return (
+            "HUMAN_GIT_HANDOFF_STALE_PREPARE_PARENT_MISMATCH",
+            "completion final commit parent does not match the current prepared handoff parent",
+            (expected_parent, commit_parent),
+        )
+    return None
+
+
 def _current_readonly_repository_git_snapshot() -> dict[str, Any]:
     try:
         from tools import pepper_repository_tools as repo_tools
@@ -19453,6 +20034,7 @@ def _build_current_ticket_human_git_handoff_prepare_record(
     p17_rendered_powershell: str,
     materialization_plan: dict[str, Any],
     rendered_powershell: str,
+    git_snapshot: dict[str, Any],
 ) -> dict[str, Any]:
     binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
     prepared_at = _utc_now_iso()
@@ -19596,6 +20178,9 @@ def _build_current_ticket_human_git_handoff_prepare_record(
         "auto_rollback": False,
         "next_action": _human_git_handoff_prepare_next_action(binding),
     }
+    execution_context = _human_git_handoff_execution_context(record, git_snapshot=git_snapshot)
+    record["handoff_execution_context"] = execution_context
+    record["handoff_execution_context_SHA256"] = execution_context["execution_context_SHA256"]
     record["handoff_prepare_record_SHA256"] = _human_git_handoff_prepare_record_digest(record)
     return record
 
@@ -19605,7 +20190,7 @@ def _human_git_handoff_prepare_operational_result(
     *,
     idempotent_replay: bool,
 ) -> dict[str, Any]:
-    return {
+    result = {
         "source_system": record["source_system"],
         "schema_version": record["schema_version"],
         "policy_id": record["policy_id"],
@@ -19684,6 +20269,10 @@ def _human_git_handoff_prepare_operational_result(
         "auto_rollback": False,
         "next_action": record["next_action"],
     }
+    for key in ("handoff_execution_context", "handoff_execution_context_SHA256"):
+        if key in record:
+            result[key] = record[key]
+    return result
 
 
 def _blocked_current_human_git_handoff_prepare_result(
@@ -22112,17 +22701,56 @@ def _current_ticket_human_git_handoff_prepare_overlay(
     )
     if record is None:
         return None
+    binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
+    git_snapshot = _current_handoff_execution_git_snapshot(
+        candidate_paths=tuple(record.get("candidate_paths") or ()),
+    )
+    context_status = _human_git_handoff_prepare_execution_context_status(
+        record,
+        git_snapshot=git_snapshot,
+    )
+    status = str(context_status.get("status") or "blocked")
+    execution_context = context_status["execution_context"]
+    complete_ready = status in {"fresh", "candidate_materialized_pending_completion"}
+    if status == "stale_repository_parent":
+        readiness = "human_git_handoff_reprepare_required"
+        workflow_state = f"{binding.ticket_id}-HUMAN-GIT-HANDOFF-PREPARE-STALE-REPREPARE-REQUIRED"
+        human_git_handoff_state = "stale_repository_parent_reprepare_required"
+        git_handoff_state = "human_git_handoff_prepare_stale_repository_parent"
+        next_action = _human_git_handoff_reprepare_next_action(binding)
+    elif complete_ready:
+        readiness = "human_git_handoff_prepared_pending_human_execution"
+        workflow_state = record["workflow_state"]
+        human_git_handoff_state = record["human_git_handoff_state"]
+        if status == "candidate_materialized_pending_completion":
+            human_git_handoff_state = "materialized_pending_completion_evidence"
+        git_handoff_state = record["git_handoff_state"]
+        next_action = record["next_action"]
+    else:
+        blocker_code = str(context_status.get("blocker_code") or "HANDOFF_EXECUTION_CONTEXT_BLOCKED")
+        readiness = "human_git_handoff_reprepare_blocked"
+        workflow_state = f"{binding.ticket_id}-HUMAN-GIT-HANDOFF-PREPARE-BLOCKED"
+        human_git_handoff_state = "blocked_execution_context_requires_revalidation"
+        git_handoff_state = "human_git_handoff_prepare_execution_context_blocked"
+        next_action = _human_git_handoff_blocked_next_action(
+            binding,
+            blocker_code=blocker_code,
+        )
     return {
-        "readiness": "human_git_handoff_prepared_pending_human_execution",
-        "workflow_state": record["workflow_state"],
+        "readiness": readiness,
+        "workflow_state": workflow_state,
         "workflow_status": record["workflow_status"],
         "validation_state": record["validation_state"],
         "review_state": record["review_state"],
         "recovery_state": "not_required",
         "governed_workflow_state": record["governed_workflow_state"],
-        "human_git_handoff_state": record["human_git_handoff_state"],
-        "git_handoff_state": record["git_handoff_state"],
+        "human_git_handoff_state": human_git_handoff_state,
+        "git_handoff_state": git_handoff_state,
         "git_handoff_required": True,
+        "handoff_execution_context_status": status,
+        "handoff_execution_context": execution_context,
+        "handoff_execution_context_blocker_code": context_status.get("blocker_code"),
+        "handoff_execution_context_blocker_detail": context_status.get("blocker_detail"),
         "human_git_handoff_prepare_authority": {
             "policy_id": record["policy_id"],
             "source_system": record["source_system"],
@@ -22137,6 +22765,10 @@ def _current_ticket_human_git_handoff_prepare_overlay(
             "materialization_required": record["materialization_required"],
             "materialization_strategy": record["materialization_strategy"],
             "materialization_plan_SHA256": record["materialization_plan_SHA256"],
+            "expected_parent_commit": record["expected_parent_commit"],
+            "current_local_parent_SHA256": execution_context.get("local_parent_SHA256"),
+            "current_remote_parent_SHA256": execution_context.get("remote_parent_SHA256"),
+            "execution_context_status": status,
             "candidate_paths": record["candidate_paths"],
             "ticket_closed": False,
         },
@@ -22162,7 +22794,7 @@ def _current_ticket_human_git_handoff_prepare_overlay(
         "canonical_source_mutation_by_Pepper": False,
         "auto_retry": False,
         "auto_rollback": False,
-        "next_action": record["next_action"],
+        "next_action": next_action,
     }
 
 

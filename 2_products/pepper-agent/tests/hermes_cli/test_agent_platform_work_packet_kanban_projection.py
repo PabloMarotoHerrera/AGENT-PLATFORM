@@ -1149,6 +1149,7 @@ _P18_9_1_HANDOFF_EXCLUDED_PATHS = (
 )
 _P18_9_2_HANDOFF_BRANCH = "p18-9-2-control-center-overview"
 _P18_9_2_HANDOFF_PARENT = "1234567890abcdef1234567890abcdef12345678"
+_P18_9_2_HANDOFF_PARENT_B = "2234567890abcdef1234567890abcdef12345678"
 _P18_9_2_HANDOFF_COMMIT = "abcdef1234567890abcdef1234567890abcdef12"
 _P18_9_2_HANDOFF_CANDIDATE_PATHS = (
     "2_products/pepper-agent/web/src/agent-platform/runtime-overview/contract.ts",
@@ -1162,7 +1163,7 @@ def _p18_9_1_handoff_git_snapshot(
     branch: str = _P18_9_1_HANDOFF_BRANCH,
     head: str = _P18_9_1_HANDOFF_COMMITS[-1],
 ) -> dict[str, object]:
-    return {
+    snapshot = {
         "available": True,
         "read_only": True,
         "shell": False,
@@ -1173,6 +1174,7 @@ def _p18_9_1_handoff_git_snapshot(
         "status_entries": [" M 2_products/pepper-agent/package-lock.json"],
         "skipped_status_entries": {},
     }
+    return snapshot
 
 
 def _p18_9_2_handoff_git_snapshot(
@@ -1180,6 +1182,7 @@ def _p18_9_2_handoff_git_snapshot(
     branch: str = _P18_9_2_HANDOFF_BRANCH,
     head: str = _P18_9_2_HANDOFF_PARENT,
     remote_head: str | None = _P18_9_2_HANDOFF_PARENT,
+    head_parent: str | None = None,
     path_SHA256: dict[str, str] | None = None,
     status_entries: list[dict[str, str]] | None = None,
 ) -> dict[str, object]:
@@ -1191,7 +1194,7 @@ def _p18_9_2_handoff_git_snapshot(
                 "path": "2_products/pepper-agent/.runtime-logs/session.log",
             },
         ]
-    return {
+    snapshot = {
         "available": True,
         "read_only": True,
         "shell": False,
@@ -1204,6 +1207,9 @@ def _p18_9_2_handoff_git_snapshot(
         "skipped_status_entries": {},
         "path_SHA256": path_SHA256 or {},
     }
+    if head_parent is not None:
+        snapshot["head_parent"] = head_parent
+    return snapshot
 
 
 def _write_json_authority_record(path: Path, record: dict) -> None:
@@ -4399,6 +4405,16 @@ def _materialize_candidate_files_as_human(
         shutil.copy2(scratch_path, target_path)
 
 
+def _patch_p18_9_2_handoff_snapshot(monkeypatch, pr, snapshot: dict[str, object]) -> None:
+    monkeypatch.setattr(
+        pr,
+        "_current_handoff_execution_git_snapshot",
+        lambda *, candidate_paths, git_snapshot_fn=None: git_snapshot_fn()
+        if callable(git_snapshot_fn)
+        else snapshot,
+    )
+
+
 def test_p18_9_2_prepare_human_git_handoff_uses_p17_7_without_execution(
     projection_home,
     monkeypatch,
@@ -4422,6 +4438,13 @@ def test_p18_9_2_prepare_human_git_handoff_uses_p17_7_without_execution(
     assert tuple(inspection["candidate_paths"]) == _P18_9_2_HANDOFF_CANDIDATE_PATHS
     source_hashes, candidate_hashes = _p18_9_2_candidate_hash_maps(
         fixture.candidate_files
+    )
+    monkeypatch.setattr(
+        pr,
+        "_current_handoff_execution_git_snapshot",
+        lambda *, candidate_paths, git_snapshot_fn=None: git_snapshot_fn()
+        if callable(git_snapshot_fn)
+        else _p18_9_2_handoff_git_snapshot(path_SHA256=source_hashes),
     )
 
     prepared = pr.prepare_current_ticket_human_git_handoff(
@@ -4471,6 +4494,9 @@ def test_p18_9_2_prepare_human_git_handoff_uses_p17_7_without_execution(
     ]
     assert prepared["preflight_dirty_status"]["unexpected_dirty_path_count"] == 0
     assert prepared["canonical_source_mutation_by_Pepper"] is False
+    assert prepared["handoff_execution_context"]["local_parent_SHA256"] == _P18_9_2_HANDOFF_PARENT
+    assert prepared["handoff_execution_context"]["remote_parent_SHA256"] == _P18_9_2_HANDOFF_PARENT
+    assert prepared["handoff_execution_context"]["candidate_source_basis_status"] == "unchanged"
     assert prepared["human_git_handoff_state"] == "prepared_pending_human_execution"
     assert prepared["workflow_status"] == "review_accepted_pending_human_git_handoff"
     assert prepared["governed_workflow_state"] == "awaiting_human_git_handoff"
@@ -4587,9 +4613,12 @@ def test_p18_9_2_prepare_human_git_handoff_uses_p17_7_without_execution(
         project_id="PEPPER",
         ticket_id="P18.9.2",
         next_action_id="PREPARE_P18_9_2_HUMAN_GIT_HANDOFF",
-        git_snapshot_fn=lambda: pytest.fail("prepare replay must not inspect Git"),
+        git_snapshot_fn=lambda: _p18_9_2_handoff_git_snapshot(
+            path_SHA256=source_hashes,
+        ),
     )
     assert replay["idempotent_replay"] is True
+    assert replay["handoff_execution_context_status"] == "fresh"
     assert replay["handoff_prepare_record_SHA256"] == prepared[
         "handoff_prepare_record_SHA256"
     ]
@@ -4855,6 +4884,402 @@ def test_p18_9_2_prepare_human_git_handoff_blocks_source_sha_mismatch(
     assert not fixture.pr.human_git_handoff_prepare_record_path_for_ticket("P18.9.2").exists()
 
 
+def test_p18_9_2_prepare_human_git_handoff_reprepares_after_safe_parent_advance(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _accepted_p18_9_2_review_for_handoff_prepare(
+        projection_home,
+        monkeypatch,
+        pid=6852,
+    )
+    source_hashes, candidate_hashes = _p18_9_2_candidate_hash_maps(
+        fixture.candidate_files
+    )
+    snapshot_a = _p18_9_2_handoff_git_snapshot(path_SHA256=source_hashes)
+    _patch_p18_9_2_handoff_snapshot(monkeypatch, fixture.pr, snapshot_a)
+    review_record_path = fixture.pr.review_decision_record_path_for_ticket("P18.9.2")
+    review_record_before = review_record_path.read_bytes()
+
+    prepared_a = fixture.pr.prepare_current_ticket_human_git_handoff(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_HUMAN_GIT_HANDOFF",
+        git_snapshot_fn=lambda: snapshot_a,
+    )
+    assert prepared_a["expected_parent_commit"] == _P18_9_2_HANDOFF_PARENT
+    assert prepared_a["handoff_execution_context"]["candidate_source_basis_status"] == "unchanged"
+    assert fixture.pr.build_workflow_control_snapshot()["next_action"]["id"] == (
+        "COMPLETE_P18_9_2_HUMAN_GIT_HANDOFF"
+    )
+
+    snapshot_b = _p18_9_2_handoff_git_snapshot(
+        head=_P18_9_2_HANDOFF_PARENT_B,
+        remote_head=_P18_9_2_HANDOFF_PARENT_B,
+        path_SHA256=source_hashes,
+    )
+    _patch_p18_9_2_handoff_snapshot(monkeypatch, fixture.pr, snapshot_b)
+    stale_workflow = fixture.pr.build_workflow_control_snapshot()
+    assert stale_workflow["handoff_execution_context_status"] == "stale_repository_parent"
+    assert stale_workflow["next_action"]["id"] == "PREPARE_P18_9_2_HUMAN_GIT_HANDOFF"
+    assert stale_workflow["human_git_handoff_prepare_authority"][
+        "expected_parent_commit"
+    ] == _P18_9_2_HANDOFF_PARENT
+    assert stale_workflow["human_git_handoff_prepare_authority"][
+        "current_local_parent_SHA256"
+    ] == _P18_9_2_HANDOFF_PARENT_B
+
+    reprepared = fixture.pr.prepare_current_ticket_human_git_handoff(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_HUMAN_GIT_HANDOFF",
+        git_snapshot_fn=lambda: snapshot_b,
+    )
+
+    assert reprepared["handoff_preparation_recorded"] is True
+    assert reprepared["idempotent_replay"] is False
+    assert reprepared["expected_parent_commit"] == _P18_9_2_HANDOFF_PARENT_B
+    assert reprepared["handoff_prepare_identity_SHA256"] != prepared_a[
+        "handoff_prepare_identity_SHA256"
+    ]
+    assert reprepared["handoff_prepare_record_SHA256"] != prepared_a[
+        "handoff_prepare_record_SHA256"
+    ]
+    assert reprepared["materialization_plan_SHA256"] != prepared_a[
+        "materialization_plan_SHA256"
+    ]
+    assert reprepared["rendered_powershell_SHA256"] != prepared_a[
+        "rendered_powershell_SHA256"
+    ]
+    assert reprepared["P17_7_handoff_package_SHA256"] != prepared_a[
+        "P17_7_handoff_package_SHA256"
+    ]
+    assert reprepared["P17_7_handoff_result_SHA256"] != prepared_a[
+        "P17_7_handoff_result_SHA256"
+    ]
+    assert reprepared["review_decision_SHA256"] == fixture.accepted[
+        "review_decision_SHA256"
+    ]
+    assert reprepared["review_package_SHA256"] == fixture.review["review_package_SHA256"]
+    assert reprepared["reviewed_candidate_SHA256"] == fixture.accepted[
+        "reviewed_candidate_SHA256"
+    ]
+    assert reprepared["reviewed_run_id"] == fixture.retry["kanban_run_id"]
+    assert reprepared["materialization_required"] is True
+    assert reprepared["Git_commands_executed"] == 0
+    assert reprepared["Git_mutation"] is False
+    assert reprepared["canonical_source_mutation_by_Pepper"] is False
+    assert review_record_path.read_bytes() == review_record_before
+
+    record = fixture.pr.load_current_ticket_human_git_handoff_prepare_record(
+        projection_record=fixture.pr._load_current_projection_record(),
+        review_decision_record=fixture.accepted_record,
+    )
+    assert record is not None
+    assert record["expected_parent_commit"] == _P18_9_2_HANDOFF_PARENT_B
+    assert record["handoff_execution_context"]["local_parent_SHA256"] == (
+        _P18_9_2_HANDOFF_PARENT_B
+    )
+    assert {
+        item["relative_path"]: item["source_SHA256"]
+        for item in record["materialization_candidate_entries"]
+    } == source_hashes
+    assert {
+        item["relative_path"]: item["accepted_candidate_SHA256"]
+        for item in record["materialization_candidate_entries"]
+    } == candidate_hashes
+    history = fixture.pr.human_git_handoff_prepare_history_path_for_ticket(
+        "P18.9.2"
+    ).read_text(encoding="utf-8")
+    assert "stale_repository_parent" in history
+    assert _P18_9_2_HANDOFF_PARENT in history
+
+    replay_b = fixture.pr.prepare_current_ticket_human_git_handoff(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_HUMAN_GIT_HANDOFF",
+        git_snapshot_fn=lambda: snapshot_b,
+    )
+    assert replay_b["idempotent_replay"] is True
+    assert replay_b["handoff_prepare_record_SHA256"] == reprepared[
+        "handoff_prepare_record_SHA256"
+    ]
+    assert replay_b["handoff_execution_context_status"] == "fresh"
+
+
+def test_p18_9_2_prepare_human_git_handoff_blocks_candidate_source_basis_drift(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _accepted_p18_9_2_review_for_handoff_prepare(
+        projection_home,
+        monkeypatch,
+        pid=6853,
+    )
+    source_hashes, _candidate_hashes = _p18_9_2_candidate_hash_maps(
+        fixture.candidate_files
+    )
+    snapshot_a = _p18_9_2_handoff_git_snapshot(path_SHA256=source_hashes)
+    prepared_a = fixture.pr.prepare_current_ticket_human_git_handoff(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_HUMAN_GIT_HANDOFF",
+        git_snapshot_fn=lambda: snapshot_a,
+    )
+    drift_hashes = dict(source_hashes)
+    drift_hashes[_P18_9_2_HANDOFF_CANDIDATE_PATHS[0]] = "9" * 64
+    drift_snapshot = _p18_9_2_handoff_git_snapshot(
+        head=_P18_9_2_HANDOFF_PARENT_B,
+        remote_head=_P18_9_2_HANDOFF_PARENT_B,
+        path_SHA256=drift_hashes,
+    )
+    _patch_p18_9_2_handoff_snapshot(monkeypatch, fixture.pr, drift_snapshot)
+
+    workflow = fixture.pr.build_workflow_control_snapshot()
+    assert workflow["handoff_execution_context_status"] == "blocked"
+    assert workflow["handoff_execution_context_blocker_code"] == (
+        "ACCEPTED_CANDIDATE_SOURCE_BASIS_DRIFT"
+    )
+    assert workflow["next_action"]["id"] == "BLOCKED_P18_9_2_HUMAN_GIT_HANDOFF"
+
+    blocked = fixture.pr.prepare_current_ticket_human_git_handoff(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_HUMAN_GIT_HANDOFF",
+        git_snapshot_fn=lambda: drift_snapshot,
+    )
+
+    assert blocked["handoff_preparation_recorded"] is False
+    assert blocked["blocker_code"] == "ACCEPTED_CANDIDATE_SOURCE_BASIS_DRIFT"
+    assert blocked["review_decision_SHA256"] == fixture.accepted[
+        "review_decision_SHA256"
+    ]
+    assert blocked["reviewed_candidate_SHA256"] == fixture.accepted[
+        "reviewed_candidate_SHA256"
+    ]
+    current = fixture.pr.load_current_ticket_human_git_handoff_prepare_record(
+        projection_record=fixture.pr._load_current_projection_record(),
+        review_decision_record=fixture.accepted_record,
+    )
+    assert current is not None
+    assert current["handoff_prepare_record_SHA256"] == prepared_a[
+        "handoff_prepare_record_SHA256"
+    ]
+    assert current["expected_parent_commit"] == _P18_9_2_HANDOFF_PARENT
+    assert blocked["Git_commands_executed"] == 0
+    assert blocked["Git_mutation"] is False
+
+
+@pytest.mark.parametrize(
+    ("snapshot", "expected_code"),
+    [
+        (
+            _p18_9_2_handoff_git_snapshot(
+                branch="p18-9-2-wrong-branch",
+                path_SHA256={},
+            ),
+            "READ_ONLY_GIT_BRANCH_MISMATCH",
+        ),
+        (
+            _p18_9_2_handoff_git_snapshot(
+                head=_P18_9_2_HANDOFF_PARENT_B,
+                remote_head=_P18_9_2_HANDOFF_PARENT,
+                path_SHA256={},
+            ),
+            "REPOSITORY_PARENT_SYNCHRONIZATION_REQUIRED",
+        ),
+        (
+            _p18_9_2_handoff_git_snapshot(
+                head=_P18_9_2_HANDOFF_PARENT_B,
+                remote_head=_P18_9_2_HANDOFF_PARENT_B,
+                path_SHA256={},
+                status_entries=[
+                    {
+                        "status": "M ",
+                        "path": _P18_9_2_HANDOFF_CANDIDATE_PATHS[0],
+                    },
+                ],
+            ),
+            "HUMAN_GIT_HANDOFF_INDEX_NOT_EMPTY",
+        ),
+        (
+            _p18_9_2_handoff_git_snapshot(
+                head=_P18_9_2_HANDOFF_PARENT_B,
+                remote_head=_P18_9_2_HANDOFF_PARENT_B,
+                path_SHA256={},
+                status_entries=[
+                    {
+                        "status": " M",
+                        "path": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_lead_agent_workflow_context.py",
+                    },
+                ],
+            ),
+            "HUMAN_GIT_HANDOFF_UNEXPECTED_DIRTY_STATE",
+        ),
+        (
+            _p18_9_2_handoff_git_snapshot(
+                head=_P18_9_2_HANDOFF_PARENT_B,
+                remote_head=_P18_9_2_HANDOFF_PARENT_B,
+                path_SHA256={},
+                status_entries=[
+                    {
+                        "status": " M",
+                        "path": "2_products/pepper-agent/package-lock.json",
+                    },
+                ],
+            ),
+            "HUMAN_GIT_HANDOFF_UNEXPECTED_DIRTY_STATE",
+        ),
+    ],
+)
+def test_p18_9_2_prepare_human_git_handoff_blocks_stale_context_reprepare_gaps(
+    projection_home,
+    monkeypatch,
+    snapshot,
+    expected_code,
+) -> None:
+    fixture = _accepted_p18_9_2_review_for_handoff_prepare(
+        projection_home,
+        monkeypatch,
+        pid=6854,
+    )
+    source_hashes, _candidate_hashes = _p18_9_2_candidate_hash_maps(
+        fixture.candidate_files
+    )
+    snapshot_a = _p18_9_2_handoff_git_snapshot(path_SHA256=source_hashes)
+    fixture.pr.prepare_current_ticket_human_git_handoff(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_HUMAN_GIT_HANDOFF",
+        git_snapshot_fn=lambda: snapshot_a,
+    )
+    blocked_snapshot = dict(snapshot)
+    if not blocked_snapshot.get("path_SHA256"):
+        blocked_snapshot["path_SHA256"] = source_hashes
+
+    blocked = fixture.pr.prepare_current_ticket_human_git_handoff(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_HUMAN_GIT_HANDOFF",
+        git_snapshot_fn=lambda: blocked_snapshot,
+    )
+
+    assert blocked["handoff_preparation_recorded"] is False
+    assert blocked["blocker_code"] == expected_code
+    assert blocked["Git_commands_executed"] == 0
+    assert blocked["Git_mutation"] is False
+
+
+def test_p18_9_2_complete_human_git_handoff_rejects_stale_prepare_and_accepts_fresh_parent(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _accepted_p18_9_2_review_for_handoff_prepare(
+        projection_home,
+        monkeypatch,
+        pid=6855,
+    )
+    source_hashes, candidate_hashes = _p18_9_2_candidate_hash_maps(
+        fixture.candidate_files
+    )
+    snapshot_a = _p18_9_2_handoff_git_snapshot(path_SHA256=source_hashes)
+    fixture.pr.prepare_current_ticket_human_git_handoff(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_HUMAN_GIT_HANDOFF",
+        git_snapshot_fn=lambda: snapshot_a,
+    )
+    snapshot_b = _p18_9_2_handoff_git_snapshot(
+        head=_P18_9_2_HANDOFF_PARENT_B,
+        remote_head=_P18_9_2_HANDOFF_PARENT_B,
+        path_SHA256=source_hashes,
+    )
+    _patch_p18_9_2_handoff_snapshot(monkeypatch, fixture.pr, snapshot_b)
+    prepared_b = fixture.pr.prepare_current_ticket_human_git_handoff(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_HUMAN_GIT_HANDOFF",
+        git_snapshot_fn=lambda: snapshot_b,
+    )
+    assert prepared_b["expected_parent_commit"] == _P18_9_2_HANDOFF_PARENT_B
+
+    monkeypatch.setattr(
+        fixture.pr,
+        "_human_git_handoff_completion_successor_authority",
+        lambda _binding: {
+            "ticket_id": "P18.9.3",
+            "ticket_title": "Post-Control Center Continuation",
+            "next_action_id": "GENERATE_P18_9_3_REQUIRES_SEPARATE_HUMAN_ACTION",
+            "canonical_roadmap_authority": "synthetic-test-authority",
+            "roadmap_authority_path": "tests/fixtures/p18-9-3.md",
+            "roadmap_authority_section": "P18.9.3",
+            "dependency_ticket_ids": ("P18.9.2",),
+            "roadmap_purpose": "Synthetic successor for isolated C13 completion admissibility.",
+            "predecessor_ticket_id": "P18.9.2",
+            "readiness_state": "ready",
+            "authority_source": "test_fixture",
+            "ticket_contract": {},
+        },
+    )
+    stale_commit_snapshot = _p18_9_2_handoff_git_snapshot(
+        head=_P18_9_2_HANDOFF_COMMIT,
+        remote_head=_P18_9_2_HANDOFF_COMMIT,
+        head_parent=_P18_9_2_HANDOFF_PARENT,
+        path_SHA256=candidate_hashes,
+    )
+    _patch_p18_9_2_handoff_snapshot(monkeypatch, fixture.pr, stale_commit_snapshot)
+    stale_completion = fixture.pr.complete_current_ticket_human_git_handoff(
+        reviewed_run_id=fixture.accepted["reviewed_run_id"],
+        reviewed_candidate_SHA256=fixture.accepted["reviewed_candidate_SHA256"],
+        review_decision_SHA256=fixture.accepted["review_decision_SHA256"],
+        commits=(_P18_9_2_HANDOFF_COMMIT,),
+        branch=_P18_9_2_HANDOFF_BRANCH,
+        push_attestation="Human attempted stale-parent completion evidence.",
+        approved_committed_paths=_P18_9_2_HANDOFF_CANDIDATE_PATHS,
+        excluded_paths=("2_products/pepper-agent/.runtime-logs/**",),
+        validation_evidence=("Synthetic stale-parent completion evidence.",),
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="COMPLETE_P18_9_2_HUMAN_GIT_HANDOFF",
+        git_snapshot_fn=lambda: stale_commit_snapshot,
+    )
+    assert stale_completion["handoff_completion_recorded"] is False
+    assert stale_completion["blocker_code"] == (
+        "HUMAN_GIT_HANDOFF_STALE_PREPARE_PARENT_MISMATCH"
+    )
+
+    fresh_commit = "bcdef1234567890abcdef1234567890abcdef123"
+    fresh_commit_snapshot = _p18_9_2_handoff_git_snapshot(
+        head=fresh_commit,
+        remote_head=fresh_commit,
+        head_parent=_P18_9_2_HANDOFF_PARENT_B,
+        path_SHA256=candidate_hashes,
+    )
+    _patch_p18_9_2_handoff_snapshot(monkeypatch, fixture.pr, fresh_commit_snapshot)
+    completed = fixture.pr.complete_current_ticket_human_git_handoff(
+        reviewed_run_id=fixture.accepted["reviewed_run_id"],
+        reviewed_candidate_SHA256=fixture.accepted["reviewed_candidate_SHA256"],
+        review_decision_SHA256=fixture.accepted["review_decision_SHA256"],
+        commits=(fresh_commit,),
+        branch=_P18_9_2_HANDOFF_BRANCH,
+        push_attestation="Human completed fresh-parent C13 handoff evidence.",
+        approved_committed_paths=_P18_9_2_HANDOFF_CANDIDATE_PATHS,
+        excluded_paths=("2_products/pepper-agent/.runtime-logs/**",),
+        validation_evidence=("Synthetic fresh-parent completion evidence.",),
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="COMPLETE_P18_9_2_HUMAN_GIT_HANDOFF",
+        git_snapshot_fn=lambda: fresh_commit_snapshot,
+    )
+    assert completed["handoff_completion_recorded"] is True, (
+        completed.get("blocker_code"),
+        completed.get("blocker_detail"),
+    )
+    assert completed["approved_committed_paths"] == list(_P18_9_2_HANDOFF_CANDIDATE_PATHS)
+    assert completed["Git_commands_executed"] == 0
+    assert completed["Git_mutation"] is False
+
+
 @pytest.mark.parametrize(
     ("status_entries", "expected_status", "expected_tracked", "expected_untracked"),
     [
@@ -5049,6 +5474,19 @@ def test_p18_9_2_cross_checkout_human_materialization_and_staging_isolated_git(
     assert tuple(staged) == _P18_9_2_HANDOFF_CANDIDATE_PATHS
     _run_isolated_git(checkout_root, "commit", "-m", prepared["commit_message"])
     commit_sha = _run_isolated_git(checkout_root, "rev-parse", "HEAD")
+    completion_snapshot = _p18_9_2_handoff_git_snapshot(
+        head=commit_sha,
+        remote_head=commit_sha,
+        head_parent=_P18_9_2_HANDOFF_PARENT,
+        path_SHA256=candidate_hashes,
+        status_entries=[
+            {
+                "status": "??",
+                "path": "2_products/pepper-agent/.runtime-logs/session.log",
+            },
+        ],
+    )
+    _patch_p18_9_2_handoff_snapshot(monkeypatch, fixture.pr, completion_snapshot)
 
     monkeypatch.setattr(
         fixture.pr,
@@ -5083,17 +5521,7 @@ def test_p18_9_2_cross_checkout_human_materialization_and_staging_isolated_git(
         project_id="PEPPER",
         ticket_id="P18.9.2",
         next_action_id="COMPLETE_P18_9_2_HUMAN_GIT_HANDOFF",
-        git_snapshot_fn=lambda: _p18_9_2_handoff_git_snapshot(
-            head=commit_sha,
-            remote_head=commit_sha,
-            path_SHA256=candidate_hashes,
-            status_entries=[
-                {
-                    "status": "??",
-                    "path": "2_products/pepper-agent/.runtime-logs/session.log",
-                },
-            ],
-        ),
+        git_snapshot_fn=lambda: completion_snapshot,
     )
 
     assert completed["handoff_completion_recorded"] is True, (
