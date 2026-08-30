@@ -38,6 +38,7 @@ from hermes_cli.agent_platform.ticket_factory import (
     HumanApprovalEvidence,
     ParallelPlanningPolicy,
     ParallelizationHint,
+    PublishedTicketArtifact,
     ProjectSpec,
     RepositoryScopeSpec,
     ReviewedTicketProposal,
@@ -109,8 +110,14 @@ TICKET_ARCHITECT_RECONCILIATION_DIGEST_ALGORITHM = (
 TICKET_ARCHITECT_REJECTED_SUCCESSOR_REVISION_POLICY_ID = (
     "pepper-ticket-architect-rejected-successor-revision-v1"
 )
+TICKET_ARCHITECT_MATERIAL_REVISION_AUTHORITY_POLICY_ID = (
+    "pepper-ticket-architect-material-revision-authority-v1"
+)
 TICKET_ARCHITECT_REJECTED_SUCCESSOR_REVISION_DIGEST_ALGORITHM = (
     "agent-platform-ticket-architect-rejected-successor-revision-sha256-v1"
+)
+TICKET_ARCHITECT_MATERIAL_REVISION_AUTHORITY_DIGEST_ALGORITHM = (
+    "agent-platform-ticket-architect-material-revision-authority-sha256-v1"
 )
 TICKET_ARCHITECT_CONTRACT_DIGEST_ALGORITHM = (
     "agent-platform-ticket-architect-roadmap-contract-sha256-v1"
@@ -1149,8 +1156,27 @@ def _validate_generation_record_evidence(
         raise TicketArchitectBridgeConflict(f"TicketSpec must bind {target.ticket_id}")
     if ticket_spec.title != target.ticket_title:
         raise TicketArchitectBridgeConflict("TicketSpec title conflicts with roadmap")
-    if require_ticket_spec_contract and ticket_spec != _build_ticket_spec(target):
-        raise TicketArchitectBridgeConflict("TicketSpec conflicts with roadmap contract")
+    if require_ticket_spec_contract:
+        expected_ticket_spec = _build_ticket_spec(target)
+        revision_authority = record.get("revision_authority")
+        if revision_authority is not None:
+            authority = _validate_material_revision_authority(
+                revision_authority,
+                target=target,
+            )
+            if record.get("revision_authority_SHA256") != authority["revision_authority_SHA256"]:
+                raise TicketArchitectBridgeConflict("revision authority digest mismatch")
+            if record.get("revision_sequence") != int(authority["new_publication_revision"]):
+                raise TicketArchitectBridgeConflict("revision authority sequence mismatch")
+            expected_ticket_spec = _build_revision_ticket_spec(
+                expected_ticket_spec,
+                target=target,
+                revision_authority=authority,
+            )
+        elif record.get("revision_authority_SHA256") is not None:
+            raise TicketArchitectBridgeConflict("revision authority digest without authority")
+        if ticket_spec != expected_ticket_spec:
+            raise TicketArchitectBridgeConflict("TicketSpec conflicts with roadmap contract")
     if context_pack.ticket_id != target.ticket_id:
         raise TicketArchitectBridgeConflict(f"ContextPack must bind {target.ticket_id}")
     if dependency_plan.ticket_ids != (target.ticket_id,):
@@ -1220,6 +1246,58 @@ def _require_generation_artifact_identity(
         raise TicketArchitectBridgeConflict("WorkPacket must preserve TicketSpec")
     if compilation.work_packet.source_ticket_SHA256 != record.get("ticket_spec_SHA256"):
         raise TicketArchitectBridgeConflict("WorkPacket TicketSpec digest mismatch")
+
+
+def _validate_material_revision_generation(
+    *,
+    rejected_generation: dict[str, Any],
+    revised_generation: dict[str, Any],
+    revision_authority: dict[str, Any],
+) -> None:
+    authority = _validate_material_revision_authority(
+        revision_authority,
+        target=_target_from_record(revised_generation),
+    )
+    if revised_generation.get("revision_authority") != authority:
+        raise TicketArchitectBridgeGenerationError("revised generation lost revision authority")
+    if revised_generation.get("revision_authority_SHA256") != authority["revision_authority_SHA256"]:
+        raise TicketArchitectBridgeGenerationError("revised generation authority digest mismatch")
+
+    previous_publication = _publication_from_generation_record(rejected_generation)
+    publication_result = TicketPublicationResult.model_validate(
+        revised_generation["ticket_publication_result"]
+    )
+    compilation = WorkPacketCompilationResult.model_validate(
+        revised_generation["work_packet_compilation_result"]
+    )
+    expected_revision = int(authority["new_publication_revision"])
+    if int(authority["previous_publication_revision"]) != previous_publication.revision:
+        raise TicketArchitectBridgeGenerationError("revision authority predecessor revision mismatch")
+    if authority["previous_publication_id"] != previous_publication.publication_id:
+        raise TicketArchitectBridgeGenerationError("revision authority predecessor publication mismatch")
+    if publication_result.publication.revision != expected_revision:
+        raise TicketArchitectBridgeGenerationError("revised publication revision did not advance")
+    if publication_result.publication.supersedes_publication_id != previous_publication.publication_id:
+        raise TicketArchitectBridgeGenerationError("revised publication did not supersede rejected publication")
+    if compilation.work_packet.publication_revision != expected_revision:
+        raise TicketArchitectBridgeGenerationError("revised WorkPacket revision did not advance")
+    if publication_result.publication.canonical_ticket != compilation.work_packet.source_ticket:
+        raise TicketArchitectBridgeGenerationError("revised publication lost TicketSpec object binding")
+    if compilation.work_packet.source_ticket_SHA256 != revised_generation.get("ticket_spec_SHA256"):
+        raise TicketArchitectBridgeGenerationError("revised WorkPacket lost TicketSpec digest binding")
+
+    changed_fields = (
+        "ticket_spec_SHA256",
+        "dependency_plan_SHA256",
+        "lint_report_SHA256",
+        "work_packet_id",
+        "work_packet_SHA256",
+    )
+    for field_name in changed_fields:
+        if revised_generation.get(field_name) == rejected_generation.get(field_name):
+            raise TicketArchitectBridgeGenerationError(
+                f"material revision did not change {field_name}"
+            )
 
 
 def _validate_historical_generation_record(record: dict[str, Any]) -> dict[str, Any]:
@@ -1882,11 +1960,29 @@ def revise_rejected_successor_ticket(
             rejected_generation,
             decision_record=rejected_decision,
         )
+        revision_authority = _build_material_revision_authority(
+            rejected_generation=rejected_generation,
+            rejected_decision=rejected_decision,
+            target=target,
+            human_authorization_text=human_authorization_text,
+            authorizer_id=authorizer_id,
+        )
+        prior_publication = _publication_from_generation_record(rejected_generation)
 
         revision_workflow = _revision_generation_workflow(workflow, target=target)
         try:
-            revised_generation = _build_generation_record(revision_workflow, target=target)
+            revised_generation = _build_generation_record(
+                revision_workflow,
+                target=target,
+                revision_authority=revision_authority,
+                prior_publication=prior_publication,
+            )
             validate_generation_record(revised_generation, target=target)
+            _validate_material_revision_generation(
+                rejected_generation=rejected_generation,
+                revised_generation=revised_generation,
+                revision_authority=revision_authority,
+            )
         except TicketArchitectBridgeError:
             raise
         except Exception as exc:
@@ -1904,10 +2000,10 @@ def revise_rejected_successor_ticket(
         )
         decision_path = approval_decision_record_path_for_ticket(target.ticket_id)
         try:
+            _write_json_atomic(generation_record_path_for_ticket(target.ticket_id), revised_generation)
             decision_path.unlink()
         except FileNotFoundError:
             pass
-        _write_json_atomic(generation_record_path_for_ticket(target.ticket_id), revised_generation)
 
     result = _operational_result(revised_generation, idempotent_replay=False)
     result.update({
@@ -2187,6 +2283,219 @@ def _revision_generation_workflow(
     return bounded
 
 
+def _publication_from_generation_record(record: dict[str, Any]) -> PublishedTicketArtifact:
+    try:
+        return TicketPublicationResult.model_validate(
+            record["ticket_publication_result"]
+        ).publication
+    except (KeyError, ValueError) as exc:
+        raise TicketArchitectBridgeConflict(
+            "generated authority publication evidence is invalid"
+        ) from exc
+
+
+def _build_material_revision_authority(
+    *,
+    rejected_generation: dict[str, Any],
+    rejected_decision: dict[str, Any],
+    target: GovernedTicketGenerationTarget,
+    human_authorization_text: str,
+    authorizer_id: str,
+) -> dict[str, Any]:
+    previous_publication = _publication_from_generation_record(rejected_generation)
+    previous_revision = int(previous_publication.revision)
+    authority = {
+        "schema_version": TICKET_ARCHITECT_BRIDGE_SCHEMA_VERSION,
+        "policy_id": TICKET_ARCHITECT_MATERIAL_REVISION_AUTHORITY_POLICY_ID,
+        "authority_type": "rejected_successor_material_revision",
+        "project_id": target.project_id,
+        "macroproject_id": target.macroproject_id,
+        "ticket_id": target.ticket_id,
+        "ticket_title": target.ticket_title,
+        "revision_action_id": target.revise_next_action_id,
+        "new_generation_action_id": target.next_action_id,
+        "canonical_roadmap_authority": target.canonical_roadmap_authority,
+        "roadmap_authority_path": target.roadmap_authority_path,
+        "roadmap_authority_section": target.roadmap_authority_section,
+        "previous_bridge_SHA256": rejected_generation["bridge_SHA256"],
+        "previous_ticket_spec_SHA256": rejected_generation["ticket_spec_SHA256"],
+        "previous_dependency_plan_SHA256": rejected_generation["dependency_plan_SHA256"],
+        "previous_lint_report_SHA256": rejected_generation["lint_report_SHA256"],
+        "previous_work_packet_id": rejected_generation["work_packet_id"],
+        "previous_work_packet_SHA256": rejected_generation["work_packet_SHA256"],
+        "previous_publication_id": previous_publication.publication_id,
+        "previous_publication_revision": previous_revision,
+        "new_publication_revision": previous_revision + 1,
+        "rejected_approval_publication_SHA256": rejected_decision[
+            "approval_publication_SHA256"
+        ],
+        "rejected_approval_decision": rejected_decision["decision"],
+        "human_authorization_text": human_authorization_text,
+        "authorizer_id": authorizer_id,
+    }
+    authority["revision_authority_SHA256"] = _revision_authority_digest(authority)
+    return authority
+
+
+def _validate_material_revision_authority(
+    authority: dict[str, Any],
+    *,
+    target: GovernedTicketGenerationTarget,
+) -> dict[str, Any]:
+    if not isinstance(authority, dict):
+        raise TicketArchitectBridgeConflict("revision authority must be an object")
+    if authority.get("revision_authority_SHA256") != _revision_authority_digest(authority):
+        raise TicketArchitectBridgeConflict("revision authority digest mismatch")
+    expected = {
+        "schema_version": TICKET_ARCHITECT_BRIDGE_SCHEMA_VERSION,
+        "policy_id": TICKET_ARCHITECT_MATERIAL_REVISION_AUTHORITY_POLICY_ID,
+        "authority_type": "rejected_successor_material_revision",
+        "project_id": target.project_id,
+        "macroproject_id": target.macroproject_id,
+        "ticket_id": target.ticket_id,
+        "ticket_title": target.ticket_title,
+        "revision_action_id": target.revise_next_action_id,
+        "new_generation_action_id": target.next_action_id,
+        "canonical_roadmap_authority": target.canonical_roadmap_authority,
+        "roadmap_authority_path": target.roadmap_authority_path,
+        "roadmap_authority_section": target.roadmap_authority_section,
+        "rejected_approval_decision": HumanApprovalDecision.REJECT.value,
+    }
+    for key, value in expected.items():
+        if authority.get(key) != value:
+            raise TicketArchitectBridgeConflict(f"revision authority {key} mismatch")
+    try:
+        previous_revision = int(authority.get("previous_publication_revision") or 0)
+        new_revision = int(authority.get("new_publication_revision") or 0)
+    except (TypeError, ValueError) as exc:
+        raise TicketArchitectBridgeConflict(
+            "revision authority revision sequence mismatch"
+        ) from exc
+    if previous_revision < 1 or new_revision != previous_revision + 1:
+        raise TicketArchitectBridgeConflict("revision authority revision sequence mismatch")
+    if not str(authority.get("human_authorization_text") or "").strip():
+        raise TicketArchitectBridgeConflict("revision authority human correction is absent")
+    for field_name in (
+        "previous_bridge_SHA256",
+        "previous_ticket_spec_SHA256",
+        "previous_dependency_plan_SHA256",
+        "previous_lint_report_SHA256",
+        "previous_work_packet_SHA256",
+        "rejected_approval_publication_SHA256",
+    ):
+        _safe_digest(authority.get(field_name))
+    return authority
+
+
+def _build_revision_ticket_spec(
+    base: TicketSpec,
+    *,
+    target: GovernedTicketGenerationTarget,
+    revision_authority: dict[str, Any],
+) -> TicketSpec:
+    authority = _validate_material_revision_authority(
+        revision_authority,
+        target=target,
+    )
+    revision_number = int(authority["new_publication_revision"])
+    revision_label = f"R{revision_number:04d}"
+    correction_text = str(authority["human_authorization_text"]).strip()
+    authority_digest = authority["revision_authority_SHA256"]
+    base_commit_message = (
+        base.recommended_commit_message
+        or f"{_ticket_commit_slug(target.ticket_id)} Material revision {target.ticket_title}"
+    )
+    revision_commit_message = f"{base_commit_message} {revision_label}"
+    if len(revision_commit_message) > 512:
+        revision_commit_message = f"{_ticket_commit_slug(target.ticket_id)} Material revision {revision_label}"
+    revision_refs = (
+        AuthorityReferenceSpec(
+            kind=AuthorityReferenceKind.GOVERNANCE_RECORD,
+            value=f"{target.ticket_id}-MATERIAL-REVISION-{revision_label}-{authority_digest[:12]}",
+            rationale="Explicit human correction authority for the material generated-successor revision.",
+        ),
+        AuthorityReferenceSpec(
+            kind=AuthorityReferenceKind.GOVERNANCE_RECORD,
+            value=f"{target.ticket_id}-REJECTED-GENERATION-{authority['previous_bridge_SHA256'][:12]}",
+            rationale="Rejected predecessor generated-ticket authority remains immutable historical evidence.",
+        ),
+    )
+    next_validation_id = f"V{len(base.validation_steps) + 1}"
+    return TicketSpec(
+        project_id=base.project_id,
+        ticket_id=base.ticket_id,
+        title=base.title,
+        ticket_type=base.ticket_type,
+        objective=base.objective,
+        context=_dedupe_texts(
+            base.context
+            + (
+                (
+                    f"{revision_label} material revision supersedes "
+                    f"{authority['previous_publication_id']} after human rejection of "
+                    f"bridge {authority['previous_bridge_SHA256']}."
+                ),
+                f"Authoritative human correction for {target.ticket_id}: {correction_text}",
+                (
+                    "Revision provenance preserves canonical roadmap authority "
+                    f"{target.roadmap_authority_path} / {target.roadmap_authority_section}."
+                ),
+            )
+        ),
+        authority_references=base.authority_references + revision_refs,
+        dependencies=base.dependencies,
+        parallelization_hint=base.parallelization_hint,
+        scope=base.scope,
+        constraints=_dedupe_texts(
+            base.constraints
+            + (
+                (
+                    f"Material revision {revision_label} must address the authoritative "
+                    f"human correction: {correction_text}"
+                ),
+                (
+                    "Do not reuse prior-revision TicketSpec, WorkPacket, or publication "
+                    "identity as the revised authority."
+                ),
+            )
+        ),
+        tasks=_dedupe_texts(
+            base.tasks
+            + (
+                (
+                    f"Apply material revision {revision_label} for {target.ticket_id}: "
+                    f"{correction_text}"
+                ),
+            )
+        ),
+        acceptance_criteria=_dedupe_texts(
+            base.acceptance_criteria
+            + (
+                (
+                    f"The result addresses material revision {revision_label} human "
+                    f"correction: {correction_text}"
+                ),
+            )
+        ),
+        validation_steps=base.validation_steps
+        + (
+            TicketValidationStepSpec(
+                validation_id=next_validation_id,
+                description=(
+                    f"Human review confirms material revision {revision_label} correction is incorporated."
+                ),
+                command=None,
+                expected_result=(
+                    f"The reviewer can identify correction authority {authority_digest} and confirm: "
+                    f"{correction_text}"
+                ),
+            ),
+        ),
+        response_contract=base.response_contract,
+        recommended_commit_message=revision_commit_message,
+    )
+
+
 def _validate_revision_authorization_text(
     value: object,
     *,
@@ -2198,6 +2507,10 @@ def _validate_revision_authorization_text(
     normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch)).lower()
     if not raw:
         raise TicketArchitectBridgeInputError("human_authorization_text is required")
+    if "\x00" in raw:
+        raise TicketArchitectBridgeInputError("revision authorization text must not contain NUL")
+    if len(raw) > 1024:
+        raise TicketArchitectBridgeInputError("revision authorization text is too long")
     if "?" in raw or "¿" in raw:
         raise TicketArchitectBridgeInputError("revision authorization text must not be a question")
     if any(
@@ -2368,10 +2681,23 @@ def _build_generation_record(
     workflow: dict[str, Any],
     *,
     target: GovernedTicketGenerationTarget,
+    revision_authority: dict[str, Any] | None = None,
+    prior_publication: PublishedTicketArtifact | None = None,
 ) -> dict[str, Any]:
     project_spec = _build_project_spec(target)
     ticket_spec = _build_ticket_spec(target)
-    context_pack = _assemble_context_pack(project_spec, ticket_spec, target=target)
+    if revision_authority is not None:
+        ticket_spec = _build_revision_ticket_spec(
+            ticket_spec,
+            target=target,
+            revision_authority=revision_authority,
+        )
+    context_pack = _assemble_context_pack(
+        project_spec,
+        ticket_spec,
+        target=target,
+        revision_authority=revision_authority,
+    )
     planning_request = TicketPlanningRequest(
         project_spec=project_spec,
         tickets=(ticket_spec,),
@@ -2397,6 +2723,8 @@ def _build_generation_record(
         dependency_plan=dependency_plan,
         lint_report=lint_report,
         target=target,
+        revision_authority=revision_authority,
+        prior_publication=prior_publication,
     )
     transition_result = _build_workflow_transition(compilation_result, target=target)
     observed_at = _utc_now_iso()
@@ -2449,6 +2777,14 @@ def _build_generation_record(
         "Graphify_commands_executed": 0,
         "WorkPacket_compilation_count": 1,
     }
+    if revision_authority is not None:
+        authority = _validate_material_revision_authority(
+            revision_authority,
+            target=target,
+        )
+        record["revision_authority"] = authority
+        record["revision_authority_SHA256"] = authority["revision_authority_SHA256"]
+        record["revision_sequence"] = int(authority["new_publication_revision"])
     if target.ticket_contract:
         record["ticket_contract"] = _json_ready_contract(target.ticket_contract)
         record["ticket_contract_SHA256"] = _ticket_contract_digest(target.ticket_contract)
@@ -3072,6 +3408,7 @@ def _assemble_context_pack(
     ticket_spec: TicketSpec,
     *,
     target: GovernedTicketGenerationTarget,
+    revision_authority: dict[str, Any] | None = None,
 ) -> ContextPack:
     authority_refs = _authority_references(target)
     dependency_text = (
@@ -3079,7 +3416,7 @@ def _assemble_context_pack(
         if target.dependency_ticket_ids
         else "Roadmap dependencies: none."
     )
-    sources = (
+    sources = [
         ContextSourceSpec(
             source_id="CTX-P18-9-ROADMAP",
             kind=ContextSourceKind.HUMAN_INSTRUCTION,
@@ -3119,12 +3456,39 @@ def _assemble_context_pack(
             priority=ContextPriority.HIGH,
             required=True,
         ),
-    )
+    ]
+    if revision_authority is not None:
+        authority = _validate_material_revision_authority(
+            revision_authority,
+            target=target,
+        )
+        sources.append(
+            ContextSourceSpec(
+                source_id="CTX-MATERIAL-REVISION",
+                kind=ContextSourceKind.HUMAN_INSTRUCTION,
+                title=f"{target.ticket_id} material revision authority",
+                source_reference=authority["revision_authority_SHA256"],
+                content=(
+                    f"{target.ticket_id} material revision R{int(authority['new_publication_revision']):04d} "
+                    f"supersedes {authority['previous_publication_id']} after a rejected generated-successor "
+                    f"approval. Human correction: {authority['human_authorization_text']}"
+                ),
+                authority_references=tuple(
+                    reference
+                    for reference in ticket_spec.authority_references
+                    if reference.kind == AuthorityReferenceKind.GOVERNANCE_RECORD
+                    and str(authority["revision_authority_SHA256"][:12]) in reference.value
+                )[:1],
+                sensitivity=ContextSensitivity.INTERNAL,
+                priority=ContextPriority.CRITICAL,
+                required=True,
+            )
+        )
     return assemble_context_pack(
         ContextAssemblyRequest(
             project_spec=project_spec,
             ticket_spec=ticket_spec,
-            sources=sources,
+            sources=tuple(sources),
             policy=ContextAssemblyPolicy(max_items=8, max_total_characters=32768),
         )
     )
@@ -3171,7 +3535,18 @@ def _compile_work_packet(
     dependency_plan: TicketDependencyPlan,
     lint_report: TicketLintReport,
     target: GovernedTicketGenerationTarget,
+    revision_authority: dict[str, Any] | None = None,
+    prior_publication: PublishedTicketArtifact | None = None,
 ) -> tuple[TicketApprovalRecord, TicketPublicationResult, WorkPacketCompilationResult]:
+    if revision_authority is not None and prior_publication is None:
+        raise TicketArchitectBridgeGenerationError("revision publication requires prior publication")
+    if revision_authority is None and prior_publication is not None:
+        raise TicketArchitectBridgeGenerationError("prior publication requires revision authority")
+    authority = (
+        _validate_material_revision_authority(revision_authority, target=target)
+        if revision_authority is not None
+        else None
+    )
     generation_request = TicketGenerationRequest(
         project_spec=project_spec,
         ticket_spec=ticket_spec,
@@ -3184,8 +3559,15 @@ def _compile_work_packet(
             assignment=assignment,
             proposed_ticket=ticket_spec,
             rationale=(
-                f"{target.ticket_id} TicketSpec is generated deterministically from the "
-                "approved P18.9 roadmap item and bounded Pepper workflow evidence."
+                (
+                    f"{target.ticket_id} TicketSpec is materially revised from explicit "
+                    "human correction authority and bounded Pepper workflow evidence."
+                )
+                if authority is not None
+                else (
+                    f"{target.ticket_id} TicketSpec is generated deterministically from the "
+                    "approved P18.9 roadmap item and bounded Pepper workflow evidence."
+                )
             ),
             evidence_source_ids=tuple(item.source_id for item in context_pack.items),
             assumptions=(),
@@ -3236,15 +3618,32 @@ def _compile_work_packet(
             publication_evidence=TicketPublicationEvidence(
                 publisher_id="pepper-governed-runtime",
                 publication_reference=(
-                    f"{target.ticket_id} compile-only canonical TicketSpec publication."
+                    f"{target.ticket_id} material revision canonical TicketSpec publication."
+                    if authority is not None
+                    else f"{target.ticket_id} compile-only canonical TicketSpec publication."
                 ),
                 rationale=(
-                    "Logical P16 publication is required by the existing P17 compiler "
-                    "and grants no P18 execution authority."
+                    (
+                        "Logical P16 publication supersedes the rejected generated-successor "
+                        "publication and grants no P18 execution authority."
+                    )
+                    if authority is not None
+                    else (
+                        "Logical P16 publication is required by the existing P17 compiler "
+                        "and grants no P18 execution authority."
+                    )
                 ),
             ),
-            prior_publication=None,
-            supersession_rationale=None,
+            prior_publication=prior_publication,
+            supersession_rationale=(
+                (
+                    f"Supersedes rejected generated-successor publication "
+                    f"{authority['previous_publication_id']} under correction authority "
+                    f"{authority['revision_authority_SHA256']}."
+                )
+                if authority is not None
+                else None
+            ),
         )
     )
     authorization = build_work_packet_compilation_authorization(
@@ -3310,7 +3709,7 @@ def _build_workflow_transition(
     identity = build_governed_workflow_identity(
         project_id=target.macroproject_id,
         ticket_id=target.macroproject_id,
-        ticket_revision=1,
+        ticket_revision=compilation_result.work_packet.publication_revision,
         work_packet_id=compilation_result.work_packet.work_packet_id,
         work_packet_SHA256=compilation_result.work_packet.work_packet_SHA256,
     )
@@ -4019,16 +4418,27 @@ def _approval_decision_operational_result(
 
 def _authority_projection(record: dict[str, Any]) -> dict[str, Any]:
     ticket_id = _safe_ticket_id(record.get("ticket_id"))
-    return {
+    publication = record.get("ticket_publication_result", {}).get("publication", {})
+    work_packet = record.get("work_packet_compilation_result", {}).get("work_packet", {})
+    projection = {
         "authority_record": str(_STORE_DIR / f"{ticket_id}.json").replace("\\", "/"),
         "bridge_SHA256": record["bridge_SHA256"],
         "ticket_spec_SHA256": record["ticket_spec_SHA256"],
         "dependency_plan_SHA256": record["dependency_plan_SHA256"],
         "lint_report_SHA256": record["lint_report_SHA256"],
+        "publication_id": publication.get("publication_id"),
+        "publication_revision": publication.get("revision"),
+        "publication_artifact_SHA256": publication.get("artifact_SHA256"),
+        "supersedes_publication_id": publication.get("supersedes_publication_id"),
         "work_packet_id": record["work_packet_id"],
+        "work_packet_publication_revision": work_packet.get("publication_revision"),
         "work_packet_SHA256": record["work_packet_SHA256"],
         "workflow_transition_result_SHA256": record["workflow_transition_result_SHA256"],
     }
+    if record.get("revision_authority_SHA256") is not None:
+        projection["revision_authority_SHA256"] = record["revision_authority_SHA256"]
+        projection["revision_sequence"] = record.get("revision_sequence")
+    return projection
 
 
 def _canonical_next_ticket_authority_projection(
@@ -4177,6 +4587,22 @@ def _approval_decision_record_digest(record: dict[str, Any]) -> str:
     encoded = json.dumps(
         {
             "algorithm": TICKET_APPROVAL_PUBLICATION_DIGEST_ALGORITHM,
+            "record": _normalize(payload),
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _revision_authority_digest(record: dict[str, Any]) -> str:
+    payload = {
+        key: value for key, value in record.items() if key != "revision_authority_SHA256"
+    }
+    encoded = json.dumps(
+        {
+            "algorithm": TICKET_ARCHITECT_MATERIAL_REVISION_AUTHORITY_DIGEST_ALGORITHM,
             "record": _normalize(payload),
         },
         ensure_ascii=False,

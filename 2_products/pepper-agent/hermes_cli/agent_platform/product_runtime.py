@@ -2082,14 +2082,17 @@ def _current_pending_ticket_approval_record() -> dict[str, Any] | None:
 def _ticket_approval_summary(record: dict[str, Any]) -> dict[str, Any]:
     ticket_id = _safe_id(record.get("ticket_id"))
     ticket_title = _safe_text(record.get("ticket_title"), limit=300)
+    publication = _ticket_approval_publication_body(record)
+    revision_label = _ticket_approval_revision_label(record)
+    publication_id = publication.get("publication_id") or "unknown publication"
     return {
         "id": ticket_id,
         "semantics": "explicit_approval_request",
         "title": f"Review governed ticket approval: {ticket_id}",
         "summary": (
-            f"Generated {ticket_id} {ticket_title!r} is awaiting "
-            "explicit human ticket approval. The existing TicketSpec, WorkPacket ID, "
-            "WorkPacket digest and compile count are preserved."
+            f"Generated {ticket_id} {ticket_title!r} publication {publication_id} "
+            f"{revision_label} is awaiting explicit human ticket approval. The current "
+            "TicketSpec, WorkPacket ID, WorkPacket digest and compile count are preserved."
         ),
         "status": "pending",
         "request_type": "ticket_approval",
@@ -2116,7 +2119,8 @@ def _p18_9_0_ticket_approval_summary(record: dict[str, Any]) -> dict[str, Any]:
 
 def _ticket_approval_evidence(record: dict[str, Any]) -> list[dict[str, str]]:
     approval_id = _safe_id(record.get("ticket_id"))
-    return [
+    publication = _ticket_approval_publication_body(record)
+    evidence = [
         {
             "id": f"{approval_id}:bridge",
             "label": f"bridge authority SHA256: {record['bridge_SHA256']}",
@@ -2125,6 +2129,17 @@ def _ticket_approval_evidence(record: dict[str, Any]) -> list[dict[str, str]]:
             "id": f"{approval_id}:ticket_spec",
             "label": f"TicketSpec SHA256: {record['ticket_spec_SHA256']}",
         },
+    ]
+    if publication:
+        evidence.append({
+            "id": f"{approval_id}:publication",
+            "label": (
+                f"Publication {publication.get('publication_id')} "
+                f"{_ticket_approval_revision_label(record)} SHA256: "
+                f"{publication.get('artifact_SHA256')}"
+            ),
+        })
+    evidence.extend([
         {
             "id": f"{approval_id}:work_packet",
             "label": (
@@ -2136,13 +2151,21 @@ def _ticket_approval_evidence(record: dict[str, Any]) -> list[dict[str, str]]:
             "id": f"{approval_id}:workflow",
             "label": "workflow transition GWT-002 stops at awaiting_ticket_approval",
         },
-    ]
+    ])
+    if record.get("revision_authority_SHA256") is not None:
+        evidence.append({
+            "id": f"{approval_id}:revision_authority",
+            "label": f"revision authority SHA256: {record['revision_authority_SHA256']}",
+        })
+    return evidence
 
 
 def _ticket_approval_binding_identity(record: dict[str, Any]) -> dict[str, Any]:
     approval_record = record.get("ticket_approval_record")
     if not isinstance(approval_record, dict):
         approval_record = {}
+    publication = _ticket_approval_publication_body(record)
+    work_packet = _ticket_approval_work_packet_body(record)
     return {
         "approval_id": _safe_id(record.get("ticket_id")),
         "approval_status": "pending",
@@ -2152,11 +2175,34 @@ def _ticket_approval_binding_identity(record: dict[str, Any]) -> dict[str, Any]:
         "TicketSpec_SHA256": record.get("ticket_spec_SHA256"),
         "dependency_plan_SHA256": record.get("dependency_plan_SHA256"),
         "lint_report_SHA256": record.get("lint_report_SHA256"),
+        "publication_id": publication.get("publication_id"),
+        "publication_revision": publication.get("revision"),
+        "publication_artifact_SHA256": publication.get("artifact_SHA256"),
+        "supersedes_publication_id": publication.get("supersedes_publication_id"),
         "WorkPacket_ID": record.get("work_packet_id"),
+        "WorkPacket_publication_revision": work_packet.get("publication_revision"),
         "WorkPacket_SHA256": record.get("work_packet_SHA256"),
+        "revision_authority_SHA256": record.get("revision_authority_SHA256"),
+        "revision_sequence": record.get("revision_sequence"),
         "ticket_approval_record_SHA256": approval_record.get("approval_SHA256"),
         "workflow_transition_result_SHA256": record.get("workflow_transition_result_SHA256"),
     }
+
+
+def _ticket_approval_publication_body(record: dict[str, Any]) -> dict[str, Any]:
+    result = record.get("ticket_publication_result")
+    if not isinstance(result, dict):
+        return {}
+    publication = result.get("publication")
+    return publication if isinstance(publication, dict) else {}
+
+
+def _ticket_approval_revision_label(record: dict[str, Any]) -> str:
+    revision = _ticket_approval_publication_body(record).get("revision")
+    try:
+        return f"R{int(revision):04d}"
+    except (TypeError, ValueError):
+        return "unknown revision"
 
 
 def _ticket_approval_work_packet_body(record: dict[str, Any]) -> dict[str, Any]:
@@ -2176,6 +2222,7 @@ def _ticket_approval_compilation_evidence(record: dict[str, Any]) -> dict[str, A
 
 
 def _ticket_approval_exact_artifact_identity(record: dict[str, Any]) -> dict[str, Any]:
+    publication = _ticket_approval_publication_body(record)
     work_packet = _ticket_approval_work_packet_body(record)
     compilation_evidence = _ticket_approval_compilation_evidence(record)
     dependency_plan = record.get("dependency_plan")
@@ -2198,8 +2245,15 @@ def _ticket_approval_exact_artifact_identity(record: dict[str, Any]) -> dict[str
             lint_report.get("report_SHA256")
             or compilation_evidence.get("fresh_lint_report_SHA256")
         ),
+        "publication_id": publication.get("publication_id"),
+        "publication_revision": publication.get("revision"),
+        "publication_artifact_SHA256": publication.get("artifact_SHA256"),
+        "supersedes_publication_id": publication.get("supersedes_publication_id"),
         "WorkPacket_ID": work_packet.get("work_packet_id"),
+        "WorkPacket_publication_revision": work_packet.get("publication_revision"),
         "WorkPacket_SHA256": work_packet.get("work_packet_SHA256"),
+        "revision_authority_SHA256": record.get("revision_authority_SHA256"),
+        "revision_sequence": record.get("revision_sequence"),
     }
 
 
@@ -2217,8 +2271,15 @@ def _ticket_approval_identity_mismatches(
         "TicketSpec_SHA256",
         "dependency_plan_SHA256",
         "lint_report_SHA256",
+        "publication_id",
+        "publication_revision",
+        "publication_artifact_SHA256",
+        "supersedes_publication_id",
         "WorkPacket_ID",
+        "WorkPacket_publication_revision",
         "WorkPacket_SHA256",
+        "revision_authority_SHA256",
+        "revision_sequence",
         "ticket_approval_record_SHA256",
         "workflow_transition_result_SHA256",
     ):
@@ -2235,8 +2296,15 @@ def _ticket_approval_identity_mismatches(
         "TicketSpec_SHA256",
         "dependency_plan_SHA256",
         "lint_report_SHA256",
+        "publication_id",
+        "publication_revision",
+        "publication_artifact_SHA256",
+        "supersedes_publication_id",
         "WorkPacket_ID",
+        "WorkPacket_publication_revision",
         "WorkPacket_SHA256",
+        "revision_authority_SHA256",
+        "revision_sequence",
     ):
         if persisted_binding.get(field_name) != exact_identity.get(field_name):
             mismatches.append({
@@ -2287,6 +2355,7 @@ def _ticket_approval_missing_or_undefined_fields(
 
 _TICKET_APPROVAL_ARTIFACT_SECTION_ORDER = (
     "ticket_spec",
+    "ticket_publication_result",
     "work_packet",
     "dependency_plan",
     "lint_result",
@@ -2325,6 +2394,8 @@ def _ticket_approval_bridge_metadata(record: dict[str, Any]) -> dict[str, Any]:
         "ticket_spec_SHA256",
         "dependency_plan_SHA256",
         "lint_report_SHA256",
+        "revision_authority_SHA256",
+        "revision_sequence",
         "work_packet_id",
         "work_packet_SHA256",
         "workflow_transition_result_SHA256",
@@ -2344,12 +2415,23 @@ def _ticket_approval_bridge_metadata(record: dict[str, Any]) -> dict[str, Any]:
         "WorkPacket_compilation_count",
         "bridge_SHA256",
     )
-    return {key: record[key] for key in metadata_keys if key in record}
+    metadata = {key: record[key] for key in metadata_keys if key in record}
+    publication = _ticket_approval_publication_body(record)
+    if publication:
+        metadata.update({
+            "publication_id": publication.get("publication_id"),
+            "publication_revision": publication.get("revision"),
+            "publication_artifact_SHA256": publication.get("artifact_SHA256"),
+            "supersedes_publication_id": publication.get("supersedes_publication_id"),
+        })
+    return metadata
 
 
 def _ticket_approval_section_body(record: dict[str, Any], section_id: str) -> Any:
     if section_id == "ticket_spec":
         return record.get("ticket_spec")
+    if section_id == "ticket_publication_result":
+        return record.get("ticket_publication_result")
     if section_id == "work_packet":
         return _ticket_approval_work_packet_body(record)
     if section_id == "dependency_plan":
@@ -2368,6 +2450,7 @@ def _ticket_approval_section_body(record: dict[str, Any], section_id: str) -> An
 def _ticket_approval_section_type(section_id: str) -> str:
     return {
         "ticket_spec": "TicketSpec",
+        "ticket_publication_result": "TicketPublicationResult",
         "work_packet": "WorkPacket",
         "dependency_plan": "TicketDependencyPlan",
         "lint_result": "TicketLintReport",
@@ -2388,6 +2471,14 @@ def _ticket_approval_section_identity(record: dict[str, Any], section_id: str) -
     }
     if section_id == "ticket_spec":
         identity["sha256"] = record.get("ticket_spec_SHA256")
+    elif section_id == "ticket_publication_result":
+        result = record.get("ticket_publication_result")
+        if not isinstance(result, dict):
+            result = {}
+        publication = _ticket_approval_publication_body(record)
+        identity["id"] = publication.get("publication_id")
+        identity["revision"] = publication.get("revision")
+        identity["sha256"] = result.get("result_SHA256")
     elif section_id == "work_packet":
         identity["id"] = record.get("work_packet_id")
         identity["sha256"] = record.get("work_packet_SHA256")
@@ -2461,12 +2552,14 @@ def _ticket_approval_artifact_blocker(
         "missing_or_undefined_fields": [],
         "side_effect_authority": _ticket_approval_side_effect_authority(record),
     }
+    return result
 
 
 def _ticket_approval_derived_summary(record: dict[str, Any]) -> dict[str, Any]:
     ticket_spec = record.get("ticket_spec")
     if not isinstance(ticket_spec, dict):
         ticket_spec = {}
+    publication = _ticket_approval_publication_body(record)
     work_packet = _ticket_approval_work_packet_body(record)
     repository_scope = work_packet.get("repository_scope")
     if not isinstance(repository_scope, dict):
@@ -2481,6 +2574,12 @@ def _ticket_approval_derived_summary(record: dict[str, Any]) -> dict[str, Any]:
         "ticket_id": record.get("ticket_id"),
         "ticket_title": record.get("ticket_title"),
         "artifact_identity": _ticket_approval_binding_identity(record),
+        "publication": {
+            "publication_id": publication.get("publication_id"),
+            "revision": publication.get("revision"),
+            "artifact_SHA256": publication.get("artifact_SHA256"),
+            "supersedes_publication_id": publication.get("supersedes_publication_id"),
+        },
         "ticket_spec": {
             "ticket_type": ticket_spec.get("ticket_type"),
             "objective": ticket_spec.get("objective"),

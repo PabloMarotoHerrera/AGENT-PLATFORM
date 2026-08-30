@@ -309,6 +309,17 @@ def _p18_9_2_rejected_successor_workflow(record: dict) -> dict:
     return workflow
 
 
+def _publication(record: dict) -> dict:
+    return record["ticket_publication_result"]["publication"]
+
+
+def _revision_authorization_text(marker: str) -> str:
+    return (
+        f"Revise P18.9.2 with authoritative correction {marker}: "
+        "surface the governed attention summary as a first-class acceptance item."
+    )
+
+
 def test_generate_p18_9_0_bridge_success_and_persists(bridge_home) -> None:
     result = bridge.generate_p18_9_0_ticket(workflow=_workflow())
     record = bridge.load_p18_9_0_generation_record()
@@ -736,6 +747,7 @@ def test_revise_rejected_p18_9_2_successor_regenerates_same_ticket_to_pending_ap
         ticket_id="P18.9.2",
         generation_record=revised,
     ) is None
+    assert not bridge.generation_record_path_for_ticket("P18.9.4").exists()
     assert not bridge.approval_decision_record_path_for_ticket("P18.9.2").exists()
     assert len(history_lines) == 1
     assert history["revision_SHA256"] == bridge._revision_history_record_digest(history)
@@ -752,6 +764,284 @@ def test_revise_rejected_p18_9_2_successor_regenerates_same_ticket_to_pending_ap
     assert history["worker_execution"] is False
     assert history["Kanban_dispatch"] is False
     assert history["Git_mutation"] is False
+
+
+def test_revise_rejected_successor_materializes_new_revision_from_human_correction(
+    bridge_home,
+) -> None:
+    correction_marker = "C2-MATERIAL-REVISION-MARKER"
+    bridge.generate_current_ticket(workflow=_p18_9_2_workflow())
+    original = bridge.load_generation_record(ticket_id="P18.9.2")
+    assert original is not None
+    bridge.apply_ticket_approval_decision(
+        ticket_id="P18.9.2",
+        decision="reject",
+        actor="human.p18.9",
+    )
+    workflow = _p18_9_2_rejected_successor_workflow(original)
+
+    result = bridge.revise_rejected_successor_ticket(
+        workflow=workflow,
+        human_authorization_text=_revision_authorization_text(correction_marker),
+        authorizer_id="human.p18.9",
+        requested_project_id="PEPPER",
+        requested_ticket_id="P18.9.2",
+        requested_next_action_id="REVISE_P18_9_2",
+    )
+    revised = bridge.load_generation_record(ticket_id="P18.9.2")
+    assert revised is not None
+    history_lines = bridge.rejected_successor_revision_history_path_for_ticket(
+        "P18.9.2"
+    ).read_text(encoding="utf-8").splitlines()
+    history = json.loads(history_lines[0])
+    ticket_text = json.dumps(revised["ticket_spec"], ensure_ascii=False, sort_keys=True)
+    packet_text = json.dumps(
+        revised["work_packet_compilation_result"]["work_packet"],
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+    assert result["revision_applied"] is True
+    assert result["revision_status"] == "awaiting_ticket_approval"
+    assert revised["ticket_spec_SHA256"] != original["ticket_spec_SHA256"]
+    assert revised["dependency_plan_SHA256"] != original["dependency_plan_SHA256"]
+    assert revised["lint_report_SHA256"] != original["lint_report_SHA256"]
+    assert revised["work_packet_id"] != original["work_packet_id"]
+    assert revised["work_packet_SHA256"] != original["work_packet_SHA256"]
+    assert _publication(revised)["revision"] == _publication(original)["revision"] + 1
+    assert _publication(revised)["publication_id"] != _publication(original)["publication_id"]
+    assert _publication(revised)["supersedes_publication_id"] == _publication(original)[
+        "publication_id"
+    ]
+    assert correction_marker in ticket_text
+    assert correction_marker in packet_text
+    assert revised["work_packet_compilation_result"]["work_packet"]["source_ticket"] == revised[
+        "ticket_spec"
+    ]
+    assert revised["ticket_approval_record"]["approved_ticket"] == revised["ticket_spec"]
+    assert revised["ticket_publication_result"]["publication"]["canonical_ticket"] == revised[
+        "ticket_spec"
+    ]
+    assert revised["revision_authority"]["previous_bridge_SHA256"] == original[
+        "bridge_SHA256"
+    ]
+    assert revised["revision_authority"]["previous_ticket_spec_SHA256"] == original[
+        "ticket_spec_SHA256"
+    ]
+    assert revised["revision_authority"]["human_authorization_text"] == result[
+        "human_authorization_text"
+    ]
+    assert history["historical_rejected_generation_record"] == original
+    assert history["new_generation_record"] == revised
+    assert history["revised_ticket_spec_SHA256"] == revised["ticket_spec_SHA256"]
+    assert history["revised_work_packet_id"] == revised["work_packet_id"]
+    assert history["revised_work_packet_SHA256"] == revised["work_packet_SHA256"]
+    assert bridge.load_approval_decision_record(
+        ticket_id="P18.9.2",
+        generation_record=revised,
+    ) is None
+
+
+def test_revise_rejected_successor_repeats_monotonic_material_revisions(
+    bridge_home,
+) -> None:
+    bridge.generate_current_ticket(workflow=_p18_9_2_workflow())
+    original = bridge.load_generation_record(ticket_id="P18.9.2")
+    assert original is not None
+    bridge.apply_ticket_approval_decision(
+        ticket_id="P18.9.2",
+        decision="reject",
+        actor="human.p18.9",
+    )
+
+    bridge.revise_rejected_successor_ticket(
+        workflow=_p18_9_2_rejected_successor_workflow(original),
+        human_authorization_text=_revision_authorization_text("R2-MARKER"),
+        authorizer_id="human.p18.9",
+        requested_project_id="PEPPER",
+        requested_ticket_id="P18.9.2",
+        requested_next_action_id="REVISE_P18_9_2",
+    )
+    first_revision = bridge.load_generation_record(ticket_id="P18.9.2")
+    assert first_revision is not None
+    bridge.apply_ticket_approval_decision(
+        ticket_id="P18.9.2",
+        decision="reject",
+        actor="human.p18.9",
+    )
+
+    result = bridge.revise_rejected_successor_ticket(
+        workflow=_p18_9_2_rejected_successor_workflow(first_revision),
+        human_authorization_text=_revision_authorization_text("R3-MARKER"),
+        authorizer_id="human.p18.9",
+        requested_project_id="PEPPER",
+        requested_ticket_id="P18.9.2",
+        requested_next_action_id="REVISE_P18_9_2",
+    )
+    second_revision = bridge.load_generation_record(ticket_id="P18.9.2")
+    assert second_revision is not None
+    history_lines = bridge.rejected_successor_revision_history_path_for_ticket(
+        "P18.9.2"
+    ).read_text(encoding="utf-8").splitlines()
+    history = [json.loads(line) for line in history_lines]
+
+    assert result["revision_applied"] is True
+    assert result["next_action"]["id"] == "APPROVE_P18_9_2"
+    assert _publication(first_revision)["revision"] == _publication(original)["revision"] + 1
+    assert _publication(second_revision)["revision"] == _publication(first_revision)["revision"] + 1
+    assert _publication(second_revision)["supersedes_publication_id"] == _publication(
+        first_revision
+    )["publication_id"]
+    assert second_revision["revision_sequence"] == _publication(second_revision)["revision"]
+    assert second_revision["revision_authority"]["previous_bridge_SHA256"] == first_revision[
+        "bridge_SHA256"
+    ]
+    assert second_revision["revision_authority"]["previous_publication_id"] == _publication(
+        first_revision
+    )["publication_id"]
+    assert second_revision["ticket_spec_SHA256"] != first_revision["ticket_spec_SHA256"]
+    assert second_revision["dependency_plan_SHA256"] != first_revision[
+        "dependency_plan_SHA256"
+    ]
+    assert second_revision["lint_report_SHA256"] != first_revision["lint_report_SHA256"]
+    assert second_revision["work_packet_id"] != first_revision["work_packet_id"]
+    assert second_revision["work_packet_SHA256"] != first_revision["work_packet_SHA256"]
+    assert len(history) == 2
+    assert history[0]["historical_rejected_generation_record"] == original
+    assert history[0]["new_generation_record"] == first_revision
+    assert history[1]["historical_rejected_generation_record"] == first_revision
+    assert history[1]["new_generation_record"] == second_revision
+    assert bridge.load_approval_decision_record(
+        ticket_id="P18.9.2",
+        generation_record=second_revision,
+    ) is None
+
+
+def test_revise_rejected_successor_publication_failure_preserves_rejected_authority(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    bridge.generate_current_ticket(workflow=_p18_9_2_workflow())
+    original = bridge.load_generation_record(ticket_id="P18.9.2")
+    assert original is not None
+    decision_result = bridge.apply_ticket_approval_decision(
+        ticket_id="P18.9.2",
+        decision="reject",
+        actor="human.p18.9",
+    )
+    rejected_decision = bridge.load_approval_decision_record(
+        ticket_id="P18.9.2",
+        generation_record=original,
+    )
+    assert rejected_decision is not None
+
+    def fail_publication(_request):
+        raise RuntimeError("publication unavailable")
+
+    monkeypatch.setattr(bridge, "publish_canonical_ticket", fail_publication)
+
+    with pytest.raises(bridge.TicketArchitectBridgeGenerationError):
+        bridge.revise_rejected_successor_ticket(
+            workflow=_p18_9_2_rejected_successor_workflow(original),
+            human_authorization_text=_revision_authorization_text("FAILURE-MARKER"),
+            authorizer_id="human.p18.9",
+            requested_project_id="PEPPER",
+            requested_ticket_id="P18.9.2",
+            requested_next_action_id="REVISE_P18_9_2",
+        )
+
+    assert bridge.load_generation_record(ticket_id="P18.9.2") == original
+    assert bridge.load_approval_decision_record(
+        ticket_id="P18.9.2",
+        generation_record=original,
+    ) == rejected_decision
+    assert decision_result["decision"] == "reject"
+    assert not bridge.rejected_successor_revision_history_path_for_ticket("P18.9.2").exists()
+
+
+def test_revised_successor_pending_approval_binds_publication_revision_metadata(
+    bridge_home,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    bridge.generate_current_ticket(workflow=_p18_9_2_workflow())
+    original = bridge.load_generation_record(ticket_id="P18.9.2")
+    assert original is not None
+    bridge.apply_ticket_approval_decision(
+        ticket_id="P18.9.2",
+        decision="reject",
+        actor="human.p18.9",
+    )
+    bridge.revise_rejected_successor_ticket(
+        workflow=_p18_9_2_rejected_successor_workflow(original),
+        human_authorization_text=_revision_authorization_text("PENDING-METADATA-MARKER"),
+        authorizer_id="human.p18.9",
+        requested_project_id="PEPPER",
+        requested_ticket_id="P18.9.2",
+        requested_next_action_id="REVISE_P18_9_2",
+    )
+    revised = bridge.load_generation_record(ticket_id="P18.9.2")
+    assert revised is not None
+    publication = _publication(revised)
+
+    inbox = pr.build_approval_inbox_source()
+    detail = pr.build_approval_detail_source("P18.9.2")
+    inspection = detail["artifact_inspection"]
+    binding = inspection["approval_binding"]
+    sections = {item["section_id"]: item for item in inspection["artifact_sections"]}
+    evidence = {item["id"]: item["label"] for item in detail["evidence"]}
+    publication_section = pr.build_approval_artifact_section_source(
+        "P18.9.2",
+        "ticket_publication_result",
+    )
+    metadata_section = pr.build_approval_artifact_section_source(
+        "P18.9.2",
+        "bridge_metadata",
+    )
+
+    def exact_body(response: dict) -> object:
+        if not response["pagination"]["chunked"]:
+            return response["exact_body"]
+        chunks = [response["exact_body"]]
+        for chunk_index in range(1, response["pagination"]["total_chunks"]):
+            chunk = pr.build_approval_artifact_section_source(
+                "P18.9.2",
+                response["section_id"],
+                chunk_index=chunk_index,
+                max_chars=response["pagination"]["chunk_size_chars"],
+            )
+            chunks.append(chunk["exact_body"])
+        return json.loads("".join(chunks))
+
+    assert [item["id"] for item in inbox["approvals"]] == ["P18.9.2"]
+    assert publication["publication_id"] in inbox["approvals"][0]["summary"]
+    assert "R0002" in inbox["approvals"][0]["summary"]
+    assert binding["publication_id"] == publication["publication_id"]
+    assert binding["publication_revision"] == 2
+    assert binding["publication_artifact_SHA256"] == publication["artifact_SHA256"]
+    assert binding["supersedes_publication_id"] == _publication(original)["publication_id"]
+    assert binding["WorkPacket_publication_revision"] == 2
+    assert binding["revision_authority_SHA256"] == revised["revision_authority_SHA256"]
+    assert binding["revision_sequence"] == 2
+    assert sections["ticket_publication_result"]["id"] == publication["publication_id"]
+    assert sections["ticket_publication_result"]["revision"] == 2
+    assert publication["publication_id"] in evidence["P18.9.2:publication"]
+    assert revised["revision_authority_SHA256"] in evidence[
+        "P18.9.2:revision_authority"
+    ]
+    assert exact_body(publication_section) == revised["ticket_publication_result"]
+    assert publication_section["artifact_identity"]["id"] == publication["publication_id"]
+    assert publication_section["artifact_identity"]["revision"] == 2
+    metadata = exact_body(metadata_section)
+    assert metadata["publication_id"] == publication["publication_id"]
+    assert metadata["revision_authority_SHA256"] == revised[
+        "revision_authority_SHA256"
+    ]
+    assert detail["approval"]["request_type"] == "ticket_approval"
+    assert detail["approval"]["status"] == "pending"
+    assert inspection["side_effect_authority"]["worker_execution"] is False
+    assert inspection["side_effect_authority"]["Kanban_dispatch"] is False
+    assert inspection["side_effect_authority"]["Git_mutation"] is False
 
 
 def test_chat_revise_generated_successor_ticket_uses_revision_backend_without_execution(
@@ -2105,6 +2395,7 @@ def test_generated_ticket_approval_detail_exposes_compact_artifact_manifest(brid
     assert inspection["exact_contract"] is None
     assert set(sections) == {
         "ticket_spec",
+        "ticket_publication_result",
         "work_packet",
         "dependency_plan",
         "lint_result",
@@ -2114,6 +2405,12 @@ def test_generated_ticket_approval_detail_exposes_compact_artifact_manifest(brid
     }
     assert sections["ticket_spec"]["sha256"] == record["ticket_spec_SHA256"]
     assert sections["ticket_spec"]["exact_body_available"] is True
+    assert sections["ticket_publication_result"]["id"] == _publication(record)[
+        "publication_id"
+    ]
+    assert sections["ticket_publication_result"]["revision"] == _publication(record)[
+        "revision"
+    ]
     assert sections["work_packet"]["id"] == record["work_packet_id"]
     assert sections["work_packet"]["sha256"] == record["work_packet_SHA256"]
     assert sections["bridge_record"]["sha256"] == record["bridge_SHA256"]
@@ -2141,6 +2438,10 @@ def test_ticket_approval_artifact_sections_return_exact_bodies(bridge_home) -> N
     work_packet = record["work_packet_compilation_result"]["work_packet"]
 
     ticket_spec = pr.build_approval_artifact_section_source("P18.9.0", "ticket_spec")
+    publication = pr.build_approval_artifact_section_source(
+        "P18.9.0",
+        "ticket_publication_result",
+    )
     packet = pr.build_approval_artifact_section_source("P18.9.0", "work_packet")
     dependency_plan = pr.build_approval_artifact_section_source("P18.9.0", "dependency_plan")
     lint_result = pr.build_approval_artifact_section_source("P18.9.0", "lint_result")
@@ -2169,6 +2470,9 @@ def test_ticket_approval_artifact_sections_return_exact_bodies(bridge_home) -> N
 
     assert exact_body(ticket_spec) == record["ticket_spec"]
     assert ticket_spec["artifact_identity"]["sha256"] == record["ticket_spec_SHA256"]
+    assert exact_body(publication) == record["ticket_publication_result"]
+    assert publication["artifact_identity"]["id"] == _publication(record)["publication_id"]
+    assert publication["artifact_identity"]["revision"] == _publication(record)["revision"]
     assert exact_body(packet) == work_packet
     assert packet["artifact_identity"]["id"] == record["work_packet_id"]
     assert packet["artifact_identity"]["sha256"] == record["work_packet_SHA256"]
@@ -2186,6 +2490,7 @@ def test_ticket_approval_artifact_sections_return_exact_bodies(bridge_home) -> N
         and section["decisions"] == []
         for section in (
             ticket_spec,
+            publication,
             packet,
             dependency_plan,
             lint_result,
@@ -2259,6 +2564,7 @@ def test_p18_9_2_shaped_compact_manifest_and_exact_section_tools(
     assert inspection["exact_contract"] is None
     assert set(sections) == {
         "ticket_spec",
+        "ticket_publication_result",
         "work_packet",
         "dependency_plan",
         "lint_result",
@@ -2267,6 +2573,12 @@ def test_p18_9_2_shaped_compact_manifest_and_exact_section_tools(
         "bridge_record",
     }
     assert sections["ticket_spec"]["sha256"] == record["ticket_spec_SHA256"]
+    assert sections["ticket_publication_result"]["id"] == _publication(record)[
+        "publication_id"
+    ]
+    assert sections["ticket_publication_result"]["revision"] == _publication(record)[
+        "revision"
+    ]
     assert sections["work_packet"]["id"] == record["work_packet_id"]
     assert sections["work_packet"]["sha256"] == record["work_packet_SHA256"]
     assert len(json.dumps(manifest, ensure_ascii=False)) < 24000
@@ -2303,6 +2615,7 @@ def test_p18_9_2_shaped_compact_manifest_and_exact_section_tools(
         return json.loads("".join(chunks)), first
 
     ticket_spec, ticket_spec_response = read_tool_section("ticket_spec")
+    publication, publication_response = read_tool_section("ticket_publication_result")
     work_packet, work_packet_response = read_tool_section("work_packet")
     dependency_plan, dependency_response = read_tool_section("dependency_plan")
     lint_result, lint_response = read_tool_section("lint_result")
@@ -2310,6 +2623,7 @@ def test_p18_9_2_shaped_compact_manifest_and_exact_section_tools(
     bridge_metadata, bridge_response = read_tool_section("bridge_metadata")
 
     assert ticket_spec == record["ticket_spec"]
+    assert publication == record["ticket_publication_result"]
     assert work_packet == record["work_packet_compilation_result"]["work_packet"]
     assert dependency_plan == record["dependency_plan"]
     assert lint_result == record["lint_report"]
@@ -2320,6 +2634,12 @@ def test_p18_9_2_shaped_compact_manifest_and_exact_section_tools(
         "ticket_spec_SHA256"
     ]
     assert work_packet_response["artifact_identity"]["id"] == record["work_packet_id"]
+    assert publication_response["artifact_identity"]["id"] == _publication(record)[
+        "publication_id"
+    ]
+    assert publication_response["artifact_identity"]["revision"] == _publication(record)[
+        "revision"
+    ]
     assert work_packet_response["artifact_identity"]["sha256"] == record[
         "work_packet_SHA256"
     ]
