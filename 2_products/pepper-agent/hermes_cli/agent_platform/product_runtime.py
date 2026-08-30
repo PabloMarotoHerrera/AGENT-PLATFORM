@@ -22821,6 +22821,7 @@ def _human_git_handoff_completion_overlay_from_record(
         "human_git_handoff_state": record["human_git_handoff_state"],
         "git_handoff_state": record["git_handoff_state"],
         "git_handoff_required": False,
+        "handoff_completion_present": True,
         "ticket_closed": True,
         "next_ticket_ready": True,
         "next_ticket_generated": False,
@@ -23155,86 +23156,101 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
         snapshot.update(pending_successor_overlay)
     if pending_successor_blocker is not None:
         remaining_blockers.append(pending_successor_blocker)
+
+    def _finalize_completed_current_ticket_projection(
+        projection: dict[str, Any],
+    ) -> None:
+        nonlocal pending_successor_blocker
+        binding = resolve_current_ticket_lifecycle_binding(
+            projection_record=projection,
+        )
+        superseded_worker_blockers = {
+            f"{binding.ticket_hyphen_token}-WORKER-LIFECYCLE",
+            f"{binding.ticket_hyphen_token}-RETRY-WORKER-LIFECYCLE",
+        }
+        if (
+            pending_successor_blocker is not None
+            and pending_successor_blocker.get("id") in superseded_worker_blockers
+        ):
+            remaining_blockers[:] = [
+                blocker
+                for blocker in remaining_blockers
+                if blocker.get("id") not in superseded_worker_blockers
+            ]
+            pending_successor_blocker = None
+        if (
+            pending_successor_blocker is None
+            and generation_blocker is None
+            and str(snapshot.get("current_ticket_id") or "").strip() == ""
+        ):
+            successor_overlay, successor_blocker = (
+                _pending_generated_successor_ticket_approval_overlay(snapshot)
+            )
+            if successor_overlay is not None:
+                snapshot.update(successor_overlay)
+            if successor_blocker is not None:
+                remaining_blockers.append(successor_blocker)
+                pending_successor_blocker = successor_blocker
+
     current_ticket_id = str(snapshot.get("current_ticket_id") or "").strip()
     if current_ticket_id:
         try:
             projection = _load_current_projection_record()
             if projection.get("ticket_id") == current_ticket_id:
-                autonomy_overlay, autonomy_blocker = _current_ticket_governed_autonomy_overlay(
-                    projection,
-                )
-                if autonomy_overlay is not None:
-                    snapshot.update(autonomy_overlay)
-                if autonomy_blocker is not None:
-                    remaining_blockers.append(autonomy_blocker)
-                if snapshot.get("workflow_status") == "execution_completed":
-                    review_prepare_overlay, review_prepare_blocker = (
-                        _p18_9_0_review_prepare_overlay(
-                            projection,
-                            completed_overlay=snapshot,
-                        )
-                    )
-                    if review_prepare_overlay is not None:
-                        snapshot.update(review_prepare_overlay)
-                    if review_prepare_blocker is not None:
-                        remaining_blockers.append(review_prepare_blocker)
-                review_decision_overlay = _current_ticket_review_decision_overlay(
-                    projection,
-                )
-                if review_decision_overlay is not None:
-                    snapshot.update(review_decision_overlay)
-                handoff_prepare_overlay = _current_ticket_human_git_handoff_prepare_overlay(
-                    projection,
-                )
-                if handoff_prepare_overlay is not None:
-                    snapshot.update(handoff_prepare_overlay)
                 handoff_completion_overlay = _current_ticket_human_git_handoff_completion_overlay(
                     projection,
                 )
                 if handoff_completion_overlay is not None:
                     snapshot.update(handoff_completion_overlay)
-                    binding = resolve_current_ticket_lifecycle_binding(
-                        projection_record=projection,
+                    _finalize_completed_current_ticket_projection(projection)
+                else:
+                    autonomy_overlay, autonomy_blocker = _current_ticket_governed_autonomy_overlay(
+                        projection,
                     )
-                    superseded_worker_blockers = {
-                        f"{binding.ticket_hyphen_token}-WORKER-LIFECYCLE",
-                        f"{binding.ticket_hyphen_token}-RETRY-WORKER-LIFECYCLE",
-                    }
-                    if (
-                        pending_successor_blocker is not None
-                        and pending_successor_blocker.get("id") in superseded_worker_blockers
-                    ):
+                    if autonomy_overlay is not None:
+                        snapshot.update(autonomy_overlay)
+                    if autonomy_blocker is not None:
+                        remaining_blockers.append(autonomy_blocker)
+                    if snapshot.get("workflow_status") == "execution_completed":
+                        review_prepare_overlay, review_prepare_blocker = (
+                            _p18_9_0_review_prepare_overlay(
+                                projection,
+                                completed_overlay=snapshot,
+                            )
+                        )
+                        if review_prepare_overlay is not None:
+                            snapshot.update(review_prepare_overlay)
+                        if review_prepare_blocker is not None:
+                            remaining_blockers.append(review_prepare_blocker)
+                    review_decision_overlay = _current_ticket_review_decision_overlay(
+                        projection,
+                    )
+                    if review_decision_overlay is not None:
+                        snapshot.update(review_decision_overlay)
+                    handoff_prepare_overlay = _current_ticket_human_git_handoff_prepare_overlay(
+                        projection,
+                    )
+                    if handoff_prepare_overlay is not None:
+                        snapshot.update(handoff_prepare_overlay)
+                    handoff_completion_overlay = _current_ticket_human_git_handoff_completion_overlay(
+                        projection,
+                    )
+                    if handoff_completion_overlay is not None:
+                        snapshot.update(handoff_completion_overlay)
+                        _finalize_completed_current_ticket_projection(projection)
+                    if snapshot.get("review_state") in {"prepared_pending_human_acceptance", "accepted"}:
+                        binding = resolve_current_ticket_lifecycle_binding(
+                            projection_record=projection,
+                        )
+                        superseded_worker_blockers = {
+                            f"{binding.ticket_hyphen_token}-WORKER-LIFECYCLE",
+                            f"{binding.ticket_hyphen_token}-RETRY-WORKER-LIFECYCLE",
+                        }
                         remaining_blockers[:] = [
                             blocker
                             for blocker in remaining_blockers
                             if blocker.get("id") not in superseded_worker_blockers
                         ]
-                        pending_successor_blocker = None
-                    if (
-                        pending_successor_blocker is None
-                        and generation_blocker is None
-                        and str(snapshot.get("current_ticket_id") or "").strip() == ""
-                    ):
-                        successor_overlay, successor_blocker = (
-                            _pending_generated_successor_ticket_approval_overlay(snapshot)
-                        )
-                        if successor_overlay is not None:
-                            snapshot.update(successor_overlay)
-                        if successor_blocker is not None:
-                            remaining_blockers.append(successor_blocker)
-                if snapshot.get("review_state") in {"prepared_pending_human_acceptance", "accepted"}:
-                    binding = resolve_current_ticket_lifecycle_binding(
-                        projection_record=projection,
-                    )
-                    superseded_worker_blockers = {
-                        f"{binding.ticket_hyphen_token}-WORKER-LIFECYCLE",
-                        f"{binding.ticket_hyphen_token}-RETRY-WORKER-LIFECYCLE",
-                    }
-                    remaining_blockers[:] = [
-                        blocker
-                        for blocker in remaining_blockers
-                        if blocker.get("id") not in superseded_worker_blockers
-                    ]
         except Exception as exc:  # pragma: no cover - defensive live-state guard
             remaining_blockers.append({
                 "id": f"{current_ticket_id}-GOVERNED-AUTONOMY-AUTHORITY",

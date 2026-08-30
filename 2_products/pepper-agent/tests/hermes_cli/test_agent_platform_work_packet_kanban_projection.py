@@ -5397,6 +5397,129 @@ def test_p18_9_2_completed_generated_successor_projects_approval_boundary(
     assert not bridge.generation_record_path_for_ticket("P18.9.4").exists()
 
 
+def test_p18_9_2_completion_dominates_stale_handoff_prepare_and_successor_state(
+    projection_home,
+    monkeypatch,
+) -> None:
+    import tools.pepper_workflow_tools  # noqa: F401
+    from model_tools import handle_function_call
+
+    fixture = _accepted_p18_9_2_review_for_handoff_prepare(
+        projection_home,
+        monkeypatch,
+        pid=6860,
+    )
+    source_hashes, candidate_hashes = _p18_9_2_candidate_hash_maps(
+        fixture.candidate_files
+    )
+    prepare_snapshot = _p18_9_2_handoff_git_snapshot(path_SHA256=source_hashes)
+    fixture.pr.prepare_current_ticket_human_git_handoff(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_HUMAN_GIT_HANDOFF",
+        git_snapshot_fn=lambda: prepare_snapshot,
+    )
+    completion_commit = "bcdef1234567890abcdef1234567890abcdef123"
+    completion_snapshot = _p18_9_2_handoff_git_snapshot(
+        head=completion_commit,
+        remote_head=completion_commit,
+        head_parent=_P18_9_2_HANDOFF_PARENT,
+        path_SHA256=candidate_hashes,
+    )
+    _patch_p18_9_2_handoff_snapshot(monkeypatch, fixture.pr, completion_snapshot)
+    completed = fixture.pr.complete_current_ticket_human_git_handoff(
+        reviewed_run_id=fixture.accepted["reviewed_run_id"],
+        reviewed_candidate_SHA256=fixture.accepted["reviewed_candidate_SHA256"],
+        review_decision_SHA256=fixture.accepted["review_decision_SHA256"],
+        commits=(completion_commit,),
+        branch=_P18_9_2_HANDOFF_BRANCH,
+        push_attestation="Human completed P18.9.2 before stale successor reconstruction.",
+        approved_committed_paths=_P18_9_2_HANDOFF_CANDIDATE_PATHS,
+        excluded_paths=("2_products/pepper-agent/.runtime-logs/**",),
+        validation_evidence=("Synthetic P18.9.2 completion evidence.",),
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="COMPLETE_P18_9_2_HUMAN_GIT_HANDOFF",
+        git_snapshot_fn=lambda: completion_snapshot,
+    )
+    assert completed["handoff_completion_recorded"] is True, (
+        completed.get("blocker_code"),
+        completed.get("blocker_detail"),
+    )
+    Path(fixture.candidate_fixture["manifest_path"]).unlink()
+
+    generation_workflow = json.loads(handle_function_call("get_workflow_control", {}))
+    assert generation_workflow["current_ticket_id"] is None
+    assert generation_workflow["workflow_status"] == "completed"
+    assert generation_workflow["next_action"]["id"] == (
+        "GENERATE_P18_9_3_REQUIRES_SEPARATE_HUMAN_ACTION"
+    )
+    bridge.generate_current_ticket(workflow=generation_workflow["workflow_control"])
+    record = bridge.load_generation_record(ticket_id="P18.9.3")
+    assert record is not None
+    assert "ticket_contract" not in record
+
+    stale_prepare_path = fixture.pr.human_git_handoff_prepare_record_path_for_ticket(
+        "P18.9.2"
+    )
+    stale_prepare = json.loads(stale_prepare_path.read_text(encoding="utf-8"))
+    stale_prepare["materialization_required"] = not stale_prepare["materialization_required"]
+    stale_prepare["handoff_prepare_record_SHA256"] = (
+        fixture.pr._human_git_handoff_prepare_record_digest(stale_prepare)
+    )
+    _write_json_authority_record(stale_prepare_path, stale_prepare)
+
+    workflow = json.loads(handle_function_call("get_workflow_control", {}))
+    next_action = json.loads(handle_function_call("get_next_action", {}))
+
+    assert workflow["success"] is True
+    assert next_action["success"] is True
+    assert workflow["current_ticket_id"] is None
+    assert workflow["next_ticket_id"] == "P18.9.3"
+    assert workflow["workflow_status"] == "awaiting_ticket_approval"
+    assert workflow["approval_state"] == "pending_ticket_approval"
+    assert workflow["pending_ticket_approval_count"] == 1
+    assert workflow["workflow_control"]["closed_predecessor_ticket_id"] == "P18.9.2"
+    assert workflow["workflow_control"]["ticket_closed"] is True
+    assert workflow["workflow_control"]["git_handoff_required"] is False
+    assert workflow["workflow_control"]["handoff_completion_present"] is True
+    assert workflow["workflow_control"]["active_execution_count"] == 0
+    assert workflow["workflow_control"]["human_git_handoff_completion_authority"][
+        "ticket_closed"
+    ] is True
+    assert workflow["workflow_control"]["ticket_execution_authorized"] is False
+    assert workflow["workflow_control"]["WorkPacket_execution_authorized"] is False
+    assert workflow["workflow_control"]["worker_execution"] is False
+    assert workflow["workflow_control"]["Kanban_dispatch"] is False
+    assert workflow["Git_mutation"] is False
+    assert workflow["next_action"]["id"] == "APPROVE_P18_9_3"
+    assert workflow["next_action"].get("required_human_action") == "ticket_approval"
+    assert next_action["current_ticket_id"] is None
+    assert next_action["next_action"]["id"] == "APPROVE_P18_9_3"
+
+    path = bridge.generation_record_path_for_ticket("P18.9.3")
+    stale_successor = json.loads(path.read_text(encoding="utf-8"))
+    stale_successor["ticket_spec"]["title"] = "Stale Pre-C2 Pseudo Revision"
+    stale_successor["bridge_SHA256"] = bridge._record_digest(stale_successor)
+    _write_json_authority_record(path, stale_successor)
+
+    stale_workflow = json.loads(handle_function_call("get_workflow_control", {}))
+    assert stale_workflow["success"] is True
+    assert stale_workflow["current_ticket_id"] is None
+    assert stale_workflow["workflow_status"] == "completed"
+    assert stale_workflow["workflow_control"]["closed_predecessor_ticket_id"] == "P18.9.2"
+    assert stale_workflow["workflow_control"]["handoff_completion_present"] is True
+    assert stale_workflow["workflow_control"]["git_handoff_required"] is False
+    assert stale_workflow["next_action"]["id"] == (
+        "GENERATE_P18_9_3_REQUIRES_SEPARATE_HUMAN_ACTION"
+    )
+    assert any(
+        blocker.get("id") == "P18.9.3-SUCCESSOR-APPROVAL-AUTHORITY"
+        for blocker in stale_workflow["workflow_control"].get("remaining_blockers", [])
+    )
+    assert not bridge.generation_record_path_for_ticket("P18.9.4").exists()
+
+
 def test_p18_9_2_post_handoff_commit_reconstruction_preserves_completion_pending(
     projection_home,
     monkeypatch,
