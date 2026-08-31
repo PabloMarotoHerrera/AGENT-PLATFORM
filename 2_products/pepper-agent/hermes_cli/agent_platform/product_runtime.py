@@ -2420,6 +2420,7 @@ def _ticket_approval_bridge_metadata(record: dict[str, Any]) -> dict[str, Any]:
         "lint_report_SHA256",
         "revision_authority_SHA256",
         "revision_sequence",
+        "revision_contract_SHA256",
         "work_packet_id",
         "work_packet_SHA256",
         "workflow_transition_result_SHA256",
@@ -3367,6 +3368,7 @@ def generate_current_governed_ticket(
 def revise_generated_successor_ticket(
     *,
     human_authorization_text: str,
+    revision_contract: dict[str, Any] | None = None,
     authorizer_id: str = "pepper-chat-human",
     project_id: str | None = None,
     ticket_id: str | None = None,
@@ -3382,6 +3384,7 @@ def revise_generated_successor_ticket(
     return revise_rejected_successor_ticket(
         workflow=workflow,
         human_authorization_text=human_authorization_text,
+        revision_contract=revision_contract,
         authorizer_id=authorizer_id,
         requested_project_id=project_id,
         requested_ticket_id=ticket_id,

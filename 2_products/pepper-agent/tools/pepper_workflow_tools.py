@@ -893,6 +893,7 @@ def _revise_generated_successor_ticket(args: dict[str, Any], **_kwargs) -> str:
         )
         result = pr.revise_generated_successor_ticket(
             human_authorization_text=human_authorization_text,
+            revision_contract=args.get("revision_contract"),
             authorizer_id="pepper-chat-human",
             project_id=str(args.get("project_id") or "").strip() or None,
             ticket_id=str(args.get("ticket_id") or "").strip() or None,
@@ -1533,6 +1534,121 @@ _REVISE_GENERATED_SUCCESSOR_TICKET_SCHEMA = {
                 "Exact user phrase explicitly authorizing correction/regeneration of "
                 "the current rejected generated successor ticket."
             ),
+        },
+        "revision_contract": {
+            "type": "object",
+            "description": (
+                "Optional bounded structured TicketSpec material revision contract. "
+                "When supplied it replaces only objective, context, scope, constraints, "
+                "tasks, acceptance_criteria, and validation_steps for the same rejected ticket; "
+                "it grants no approval or execution authority."
+            ),
+            "required": [
+                "schema_version",
+                "ticket_id",
+                "objective",
+                "context",
+                "scope",
+                "constraints",
+                "tasks",
+                "acceptance_criteria",
+                "validation_steps",
+            ],
+            "properties": {
+                "schema_version": {"type": "integer", "enum": [1]},
+                "ticket_id": {
+                    "type": "string",
+                    "minLength": 4,
+                    "maxLength": 64,
+                    "pattern": r"^P[1-9][0-9]{0,3}(?:\.[A-Z0-9]+)+$",
+                    "description": "Binding only; must equal the rejected generated successor ticket.",
+                },
+                "objective": {"type": "string", "minLength": 1, "maxLength": 8192},
+                "context": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 32,
+                    "items": {"type": "string", "minLength": 1, "maxLength": 8192},
+                },
+                "scope": {
+                    "type": "object",
+                    "required": [
+                        "allowed_paths",
+                        "forbidden_paths",
+                        "allowed_actions",
+                        "forbidden_actions",
+                    ],
+                    "properties": {
+                        "allowed_paths": {
+                            "type": "array",
+                            "maxItems": 32,
+                            "items": {"type": "string", "minLength": 1, "maxLength": 512},
+                        },
+                        "forbidden_paths": {
+                            "type": "array",
+                            "maxItems": 32,
+                            "items": {"type": "string", "minLength": 1, "maxLength": 512},
+                        },
+                        "allowed_actions": {
+                            "type": "array",
+                            "maxItems": 32,
+                            "items": {"type": "string", "minLength": 1, "maxLength": 512},
+                        },
+                        "forbidden_actions": {
+                            "type": "array",
+                            "maxItems": 32,
+                            "items": {"type": "string", "minLength": 1, "maxLength": 512},
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+                "constraints": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 32,
+                    "items": {"type": "string", "minLength": 1, "maxLength": 8192},
+                },
+                "tasks": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 32,
+                    "items": {"type": "string", "minLength": 1, "maxLength": 8192},
+                },
+                "acceptance_criteria": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 32,
+                    "items": {"type": "string", "minLength": 1, "maxLength": 8192},
+                },
+                "validation_steps": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 32,
+                    "items": {
+                        "type": "object",
+                        "required": ["validation_id", "description", "command", "expected_result"],
+                        "properties": {
+                            "validation_id": {
+                                "type": "string",
+                                "pattern": r"^V[1-9][0-9]*$",
+                                "minLength": 2,
+                                "maxLength": 32,
+                            },
+                            "description": {"type": "string", "minLength": 1, "maxLength": 512},
+                            "command": {
+                                "anyOf": [
+                                    {"type": "string", "minLength": 1, "maxLength": 8192},
+                                    {"type": "null"},
+                                ]
+                            },
+                            "expected_result": {"type": "string", "minLength": 1, "maxLength": 8192},
+                            "required": {"type": "boolean"},
+                        },
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "additionalProperties": False,
         },
         "project_id": {
             "type": "string",

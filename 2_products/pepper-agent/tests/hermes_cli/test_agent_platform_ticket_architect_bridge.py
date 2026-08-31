@@ -293,16 +293,22 @@ def _legacy_p18_9_2_decision_record(generation: dict, decision: str) -> dict:
 
 
 def _p18_9_2_rejected_successor_workflow(record: dict) -> dict:
+    return _rejected_successor_workflow(record, _p18_9_2_workflow())
+
+
+def _rejected_successor_workflow(record: dict, base_workflow: dict) -> dict:
     overlay = bridge.generated_record_to_workflow_overlay(record)
-    canonical = bridge.resolve_canonical_next_ticket(_p18_9_2_workflow()).asdict()
-    workflow = {**_p18_9_2_workflow(), **overlay}
+    canonical = bridge.resolve_canonical_next_ticket(base_workflow).asdict()
+    workflow = {**base_workflow, **overlay}
+    ticket_id = str(record["ticket_id"])
+    ticket_title = str(record["ticket_title"])
     workflow.update({
         "current_ticket_id": None,
         "current_ticket_title": None,
-        "generated_successor_ticket_id": "P18.9.2",
-        "generated_successor_ticket_title": "Control Center Overview",
-        "next_ticket_id": "P18.9.2",
-        "next_ticket_title": "Control Center Overview",
+        "generated_successor_ticket_id": ticket_id,
+        "generated_successor_ticket_title": ticket_title,
+        "next_ticket_id": ticket_id,
+        "next_ticket_title": ticket_title,
         "canonical_next_ticket_authority": canonical,
         "active_execution_count": 0,
     })
@@ -318,6 +324,187 @@ def _revision_authorization_text(marker: str) -> str:
         f"Revise P18.9.2 with authoritative correction {marker}: "
         "surface the governed attention summary as a first-class acceptance item."
     )
+
+
+def _structured_revision_contract(
+    *,
+    ticket_id: str = "P18.9.2",
+    marker: str = "STRUCTURED-CORRECTION",
+    objective: str | None = None,
+) -> dict[str, object]:
+    return {
+        "schema_version": bridge.TICKET_SPEC_MATERIAL_REVISION_CONTRACT_SCHEMA_VERSION,
+        "ticket_id": ticket_id,
+        "objective": objective
+        or f"Replace stale generated-successor objective for {ticket_id} using {marker}.",
+        "context": [
+            f"{marker} context replaces stale canonical context for {ticket_id}.",
+            "Current project context, current ticket context, successor context, workflow status, workflow state, next action, required human action, and execution posture are structured revision inputs.",
+        ],
+        "scope": {
+            "allowed_paths": [
+                "2_products/pepper-agent/web/src/agent-platform/**",
+                "2_products/pepper-agent/web/src/components/**",
+            ],
+            "forbidden_paths": ["2_products/pepper-agent/hermes_cli/**"],
+            "allowed_actions": [
+                "Implement frontend product-contract changes only through existing Pepper surfaces."
+            ],
+            "forbidden_actions": [
+                "Do not run git add.",
+                "Do not run git commit.",
+                "Do not run git push.",
+                "Do not run git reset.",
+                "Do not run git clean.",
+                "Do not run git stash.",
+                "Do not run git worktree.",
+                "Do not invoke Graphify.",
+                "Do not invoke Docker.",
+                "Do not perform provider dispatch.",
+                "Do not perform model inference.",
+                "Do not perform Kanban dispatch.",
+                "Do not perform worker execution.",
+                "Do not perform runtime execution.",
+            ],
+        },
+        "constraints": [
+            f"{marker} constraints replace stale generated-successor constraints.",
+            "Rollback plan: remove only the structured replacement changes if human review rejects the revised TicketSpec.",
+            "Backend authority remains read-only by default and all execution authority remains false.",
+        ],
+        "tasks": [
+            f"{marker} task replaces stale generated-successor task list.",
+            "Wire the revised frontend surface without creating a duplicate governed runtime.",
+        ],
+        "acceptance_criteria": [
+            f"{marker} acceptance criterion replaces stale generated-successor criteria.",
+            "The generated revised TicketSpec carries the structured replacement fields and remains pending human approval.",
+        ],
+        "validation_steps": [
+            {
+                "validation_id": "V1",
+                "description": f"Focused frontend validation for {marker}.",
+                "command": "cd 2_products/pepper-agent/web && npx vitest run src/agent-platform/revision-contract.test.tsx",
+                "expected_result": "Focused frontend Vitest passes for the structured revision contract.",
+            },
+            {
+                "validation_id": "V2",
+                "description": "Typecheck revised frontend contract.",
+                "command": "cd 2_products/pepper-agent/web && npm run typecheck",
+                "expected_result": "Typecheck completes successfully without granting execution authority.",
+            },
+        ],
+    }
+
+
+P18_9_3_STRUCTURED_OBJECTIVE = (
+    "Promote the existing Chat capability into Pepper Lead Agent as a first-class governed "
+    "interaction surface while preserving the existing Hermes chat / PTY / TUI runtime and "
+    "Pepper governance boundaries."
+)
+
+
+def _p18_9_3_structured_revision_contract() -> dict[str, object]:
+    return {
+        "schema_version": bridge.TICKET_SPEC_MATERIAL_REVISION_CONTRACT_SCHEMA_VERSION,
+        "ticket_id": "P18.9.3",
+        "objective": P18_9_3_STRUCTURED_OBJECTIVE,
+        "context": [
+            "Reuse existing ChatPage, xterm, /api/pty, Hermes PTY, and Hermes TUI surfaces instead of creating another conversational runtime.",
+            "Represent current project context, current ticket/successor context, workflow status/state, next action, required human action, execution posture, and human-action boundary inside Pepper Lead Agent.",
+            "Support session resume, fresh session creation, and reconnect behavior through the existing Hermes chat runtime.",
+            "Surface Projects contextual navigation, Approvals contextual navigation, and Executions contextual navigation around the governed chat surface.",
+            "Keep governed openai-codex.primary setup/recovery as a boundary and preserve frontend-first implementation scope with backend read-only by default.",
+            "Respect roadmap boundaries for P18.9.4, P18.9.5, P18.9.6, P18.9.7, P18.9.12, P19, P20, and P21.",
+        ],
+        "scope": {
+            "allowed_paths": [
+                "2_products/pepper-agent/web/src/agent-platform/**",
+                "2_products/pepper-agent/web/src/pages/ChatPage.tsx",
+                "2_products/pepper-agent/web/src/components/**",
+            ],
+            "forbidden_paths": [
+                "2_products/pepper-agent/hermes_cli/agent_platform/workflow/**",
+                "2_products/pepper-agent/tools/**",
+            ],
+            "allowed_actions": [
+                "Reuse existing ChatPage, xterm, /api/pty, Hermes PTY, and Hermes TUI seams.",
+                "Implement frontend-first Lead Agent interaction surface navigation and state presentation.",
+            ],
+            "forbidden_actions": [
+                "Do not create a duplicate conversational runtime or bypass Pepper governance boundaries.",
+                "Do not run git add.",
+                "Do not run git commit.",
+                "Do not run git push.",
+                "Do not run git reset.",
+                "Do not run git clean.",
+                "Do not run git stash.",
+                "Do not run git worktree.",
+                "Do not invoke Graphify.",
+                "Do not invoke Docker.",
+                "Do not perform provider dispatch.",
+                "Do not perform model inference.",
+                "Do not perform Kanban dispatch.",
+                "Do not perform worker execution.",
+                "Do not perform runtime execution.",
+            ],
+        },
+        "constraints": [
+            "Existing Hermes chat / PTY / TUI runtime remains authoritative; Pepper Lead Agent must not duplicate it.",
+            "Backend behavior is read-only by default except existing governed setup/recovery boundaries for openai-codex.primary.",
+            "P18.9.4, P18.9.5, P18.9.6, P18.9.7, P18.9.12, P19, P20, and P21 remain out of scope.",
+            "Explicit non-goals include no new approval authority, no execution authority, no worker dispatch, no Kanban dispatch, no Git mutation, no Docker, and no Graphify.",
+            "Rollback plan: remove only the frontend Lead Agent shell changes if human review rejects the revised TicketSpec.",
+        ],
+        "tasks": [
+            "Promote existing ChatPage into Pepper Lead Agent as the first-class governed interaction surface.",
+            "Reuse existing xterm, /api/pty, Hermes PTY, and Hermes TUI integration seams.",
+            "Expose current project context, ticket/successor context, workflow status/state, next action, required human action, execution posture, and human-action boundary in the Lead Agent experience.",
+            "Support session resume, fresh session, and reconnect flows without a second conversational runtime.",
+            "Add contextual navigation for Projects, Approvals, and Executions around the chat surface.",
+            "Preserve governed openai-codex.primary setup/recovery boundary and frontend-first implementation scope.",
+        ],
+        "acceptance_criteria": [
+            "Pepper Lead Agent uses existing ChatPage, xterm, /api/pty, Hermes PTY, and Hermes TUI surfaces as runtime authority.",
+            "No duplicate conversational runtime is introduced.",
+            "Project, ticket/successor, workflow status/state, next action, required human action, execution posture, and human-action boundary context are visible to the Lead Agent surface.",
+            "Session resume, fresh session, and reconnect behavior remain backed by existing Hermes runtime behavior.",
+            "Projects, Approvals, and Executions contextual navigation are represented.",
+            "P18.9.4, P18.9.5, P18.9.6, P18.9.7, P18.9.12, P19, P20, and P21 boundaries are preserved as non-goals.",
+        ],
+        "validation_steps": [
+            {
+                "validation_id": "V1",
+                "description": "Focused frontend Vitest validates Lead Agent chat reuse.",
+                "command": "cd 2_products/pepper-agent/web && npx vitest run src/agent-platform/lead-agent-chat.test.tsx",
+                "expected_result": "Focused frontend Vitest passes for ChatPage/xterm/PTY/TUI reuse.",
+            },
+            {
+                "validation_id": "V2",
+                "description": "TypeScript typecheck validates the frontend-first integration.",
+                "command": "cd 2_products/pepper-agent/web && npm run typecheck",
+                "expected_result": "npm run typecheck completes successfully.",
+            },
+            {
+                "validation_id": "V3",
+                "description": "Frontend test suite validates session and navigation behavior.",
+                "command": "cd 2_products/pepper-agent/web && npm run test",
+                "expected_result": "npm run test completes successfully.",
+            },
+            {
+                "validation_id": "V4",
+                "description": "Frontend build validates production bundling.",
+                "command": "cd 2_products/pepper-agent/web && npm run build",
+                "expected_result": "npm run build completes successfully.",
+            },
+            {
+                "validation_id": "V5",
+                "description": "Repository diff check validates whitespace and patch integrity.",
+                "command": "git diff --check",
+                "expected_result": "git diff --check reports no whitespace errors.",
+            },
+        ],
+    }
 
 
 def test_generate_p18_9_0_bridge_success_and_persists(bridge_home) -> None:
@@ -917,6 +1104,394 @@ def test_revise_rejected_successor_repeats_monotonic_material_revisions(
     ) is None
 
 
+def test_structured_revision_contract_replaces_ticket_spec_fields_and_binds_authority(
+    bridge_home,
+) -> None:
+    bridge.generate_current_ticket(workflow=_p18_9_2_workflow())
+    original = bridge.load_generation_record(ticket_id="P18.9.2")
+    assert original is not None
+    bridge.apply_ticket_approval_decision(
+        ticket_id="P18.9.2",
+        decision="reject",
+        actor="human.p18.9",
+    )
+    rejected_decision = bridge.load_approval_decision_record(
+        ticket_id="P18.9.2",
+        generation_record=original,
+    )
+    assert rejected_decision is not None
+    target = bridge.resolve_generation_target_from_workflow(_p18_9_2_workflow())
+    contract = _structured_revision_contract(marker="C5-REPLACEMENT")
+    normalized_contract = bridge.validate_ticket_spec_material_revision_contract(
+        contract,
+        target=target,
+    ).model_dump(mode="json")
+    contract_digest = bridge.ticket_spec_material_revision_contract_digest(contract)
+
+    result = bridge.revise_rejected_successor_ticket(
+        workflow=_p18_9_2_rejected_successor_workflow(original),
+        human_authorization_text=(
+            "Authorize REVISE_P18_9_2 using the supplied structured TicketSpec "
+            "revision contract for material R0002."
+        ),
+        revision_contract=contract,
+        authorizer_id="human.p18.9",
+        requested_project_id="PEPPER",
+        requested_ticket_id="P18.9.2",
+        requested_next_action_id="REVISE_P18_9_2",
+    )
+    revised = bridge.load_generation_record(ticket_id="P18.9.2")
+    assert revised is not None
+    ticket = revised["ticket_spec"]
+    authority = revised["revision_authority"]
+    history_lines = bridge.rejected_successor_revision_history_path_for_ticket(
+        "P18.9.2"
+    ).read_text(encoding="utf-8").splitlines()
+    history = json.loads(history_lines[0])
+
+    assert result["revision_applied"] is True
+    assert result["revision_contract_SHA256"] == contract_digest
+    assert ticket["objective"] == normalized_contract["objective"]
+    assert ticket["scope"] == normalized_contract["scope"]
+    assert ticket["context"][: len(normalized_contract["context"])] == normalized_contract["context"]
+    assert ticket["constraints"][: len(normalized_contract["constraints"])] == normalized_contract["constraints"]
+    assert ticket["tasks"][: len(normalized_contract["tasks"])] == normalized_contract["tasks"]
+    assert ticket["acceptance_criteria"][: len(normalized_contract["acceptance_criteria"])] == normalized_contract[
+        "acceptance_criteria"
+    ]
+    assert ticket["validation_steps"][: len(normalized_contract["validation_steps"])] == normalized_contract[
+        "validation_steps"
+    ]
+    assert {step["command"] for step in ticket["validation_steps"]} >= {
+        "cd 2_products/pepper-agent/web && npx vitest run src/agent-platform/revision-contract.test.tsx",
+        "cd 2_products/pepper-agent/web && npm run typecheck",
+    }
+    original_ticket = original["ticket_spec"]
+    assert original_ticket["objective"] not in ticket["objective"]
+    assert not set(original_ticket["context"]) & set(ticket["context"])
+    assert not set(original_ticket["tasks"]) & set(ticket["tasks"])
+    assert not set(original_ticket["acceptance_criteria"]) & set(ticket["acceptance_criteria"])
+    assert authority["revision_contract"] == normalized_contract
+    assert authority["revision_contract_SHA256"] == contract_digest
+    assert revised["revision_contract_SHA256"] == contract_digest
+    assert history["revision_contract_SHA256"] == contract_digest
+    assert history["revision_contract"] == normalized_contract
+    assert authority["revision_authority_SHA256"] == revised["revision_authority_SHA256"]
+    tampered_authority = json.loads(json.dumps(authority))
+    tampered_authority["revision_contract_SHA256"] = "0" * 64
+    tampered_authority.pop("revision_authority_SHA256")
+    assert bridge._revision_authority_digest(tampered_authority) != authority[
+        "revision_authority_SHA256"
+    ]
+    assert revised["ticket_spec_SHA256"] != original["ticket_spec_SHA256"]
+    assert revised["dependency_plan_SHA256"] != original["dependency_plan_SHA256"]
+    assert revised["lint_report_SHA256"] != original["lint_report_SHA256"]
+    assert revised["work_packet_id"] != original["work_packet_id"]
+    assert revised["work_packet_SHA256"] != original["work_packet_SHA256"]
+    assert _publication(revised)["revision"] == _publication(original)["revision"] + 1
+    assert _publication(revised)["supersedes_publication_id"] == _publication(original)[
+        "publication_id"
+    ]
+    assert history["historical_rejected_generation_record"] == original
+    assert history["historical_rejected_approval_decision_record"] == rejected_decision
+    assert history["new_generation_record"] == revised
+    assert revised["work_packet_compilation_result"]["work_packet"]["execution_ready"] is False
+    assert result["ticket_execution_authorized"] is False
+    assert result["WorkPacket_execution_authorized"] is False
+    assert result["worker_execution"] is False
+    assert result["Kanban_dispatch"] is False
+    assert result["Git_mutation"] is False
+
+
+def test_structured_revision_contract_digest_is_deterministic_and_field_sensitive(
+    bridge_home,
+) -> None:
+    target = bridge.resolve_generation_target_from_workflow(_p18_9_2_workflow())
+    contract_data = _structured_revision_contract(marker="C5-DIGEST")
+    contract = bridge.validate_ticket_spec_material_revision_contract(
+        contract_data,
+        target=target,
+    )
+    same_contract = bridge.validate_ticket_spec_material_revision_contract(
+        json.loads(json.dumps(contract_data)),
+        target=target,
+    )
+    objective_changed = json.loads(json.dumps(contract_data))
+    objective_changed["objective"] += " Objective digest delta."
+    acceptance_changed = json.loads(json.dumps(contract_data))
+    acceptance_changed["acceptance_criteria"][0] += " Criterion digest delta."
+
+    digest = bridge.ticket_spec_material_revision_contract_digest(contract)
+
+    assert isinstance(bridge.TicketSpecMaterialRevisionContract, type)
+    assert digest == bridge.ticket_spec_material_revision_contract_digest(same_contract)
+    assert digest != bridge.ticket_spec_material_revision_contract_digest(
+        objective_changed
+    )
+    assert digest != bridge.ticket_spec_material_revision_contract_digest(
+        acceptance_changed
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "immutable_identity_override",
+        "unknown_field",
+        "malformed_validation_step",
+        "oversized_contract",
+        "oversized_entry",
+        "target_ticket_mismatch",
+    ],
+)
+def test_structured_revision_contract_invalid_input_fails_closed(
+    bridge_home,
+    mutation,
+) -> None:
+    bridge.generate_current_ticket(workflow=_p18_9_2_workflow())
+    original = bridge.load_generation_record(ticket_id="P18.9.2")
+    assert original is not None
+    bridge.apply_ticket_approval_decision(
+        ticket_id="P18.9.2",
+        decision="reject",
+        actor="human.p18.9",
+    )
+    rejected_decision = bridge.load_approval_decision_record(
+        ticket_id="P18.9.2",
+        generation_record=original,
+    )
+    assert rejected_decision is not None
+    contract = _structured_revision_contract(marker=f"C5-{mutation}")
+    if mutation == "immutable_identity_override":
+        contract["project_id"] = "PEPPER"
+    elif mutation == "unknown_field":
+        contract["arbitrary_ticket_spec_replacement"] = True
+    elif mutation == "malformed_validation_step":
+        contract["validation_steps"][0]["validation_id"] = "not-a-validation-id"
+    elif mutation == "oversized_contract":
+        contract["context"] = [f"context {index}" for index in range(33)]
+    elif mutation == "oversized_entry":
+        contract["context"][0] = "x" * 8193
+    elif mutation == "target_ticket_mismatch":
+        contract["ticket_id"] = "P18.9.3"
+
+    with pytest.raises(bridge.TicketArchitectBridgeInputError):
+        bridge.revise_rejected_successor_ticket(
+            workflow=_p18_9_2_rejected_successor_workflow(original),
+            human_authorization_text="Authorize REVISE_P18_9_2 with structured correction.",
+            revision_contract=contract,
+            authorizer_id="human.p18.9",
+            requested_project_id="PEPPER",
+            requested_ticket_id="P18.9.2",
+            requested_next_action_id="REVISE_P18_9_2",
+        )
+
+    assert bridge.load_generation_record(ticket_id="P18.9.2") == original
+    assert bridge.load_approval_decision_record(
+        ticket_id="P18.9.2",
+        generation_record=original,
+    ) == rejected_decision
+    assert not bridge.rejected_successor_revision_history_path_for_ticket("P18.9.2").exists()
+
+
+def test_structured_revision_contract_generation_write_failure_preserves_rejected_state(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    bridge.generate_current_ticket(workflow=_p18_9_2_workflow())
+    original = bridge.load_generation_record(ticket_id="P18.9.2")
+    assert original is not None
+    bridge.apply_ticket_approval_decision(
+        ticket_id="P18.9.2",
+        decision="reject",
+        actor="human.p18.9",
+    )
+    rejected_decision = bridge.load_approval_decision_record(
+        ticket_id="P18.9.2",
+        generation_record=original,
+    )
+    assert rejected_decision is not None
+    generation_path = bridge.generation_record_path_for_ticket("P18.9.2")
+    original_write_json_atomic = bridge._write_json_atomic
+
+    def fail_generation_record_write(path, record):
+        if path == generation_path:
+            raise OSError("generation store unavailable")
+        original_write_json_atomic(path, record)
+
+    monkeypatch.setattr(bridge, "_write_json_atomic", fail_generation_record_write)
+
+    with pytest.raises(
+        bridge.TicketArchitectBridgeGenerationError,
+        match="revision persistence failed",
+    ):
+        bridge.revise_rejected_successor_ticket(
+            workflow=_p18_9_2_rejected_successor_workflow(original),
+            human_authorization_text=(
+                "Authorize REVISE_P18_9_2 using the supplied structured TicketSpec "
+                "revision contract."
+            ),
+            revision_contract=_structured_revision_contract(marker="WRITE-FAILURE"),
+            authorizer_id="human.p18.9",
+            requested_project_id="PEPPER",
+            requested_ticket_id="P18.9.2",
+            requested_next_action_id="REVISE_P18_9_2",
+        )
+
+    assert bridge.load_generation_record(ticket_id="P18.9.2") == original
+    assert bridge.load_approval_decision_record(
+        ticket_id="P18.9.2",
+        generation_record=original,
+    ) == rejected_decision
+    assert not bridge.rejected_successor_revision_history_path_for_ticket("P18.9.2").exists()
+
+
+def test_p18_9_3_structured_revision_contract_can_materialize_future_r0003(
+    bridge_home,
+) -> None:
+    workflow = _later_p18_9_workflow(
+        ticket_id="P18.9.3",
+        ticket_title="Lead Agent Product Experience",
+        predecessor_ticket_id="P18.9.2",
+    )
+    bridge.generate_current_ticket(workflow=workflow)
+    original = bridge.load_generation_record(ticket_id="P18.9.3")
+    assert original is not None
+    bridge.apply_ticket_approval_decision(
+        ticket_id="P18.9.3",
+        decision="reject",
+        actor="human.p18.9",
+    )
+    bridge.revise_rejected_successor_ticket(
+        workflow=_rejected_successor_workflow(original, workflow),
+        human_authorization_text="Revise P18.9.3 after human rejection for material R0002.",
+        authorizer_id="human.p18.9",
+        requested_project_id="PEPPER",
+        requested_ticket_id="P18.9.3",
+        requested_next_action_id="REVISE_P18_9_3",
+    )
+    first_revision = bridge.load_generation_record(ticket_id="P18.9.3")
+    assert first_revision is not None
+    bridge.apply_ticket_approval_decision(
+        ticket_id="P18.9.3",
+        decision="reject",
+        actor="human.p18.9",
+    )
+    contract = _p18_9_3_structured_revision_contract()
+
+    result = bridge.revise_rejected_successor_ticket(
+        workflow=_rejected_successor_workflow(first_revision, workflow),
+        human_authorization_text=(
+            "Authorize REVISE_P18_9_3 using the supplied structured TicketSpec "
+            "revision contract for material R0003."
+        ),
+        revision_contract=contract,
+        authorizer_id="human.p18.9",
+        requested_project_id="PEPPER",
+        requested_ticket_id="P18.9.3",
+        requested_next_action_id="REVISE_P18_9_3",
+    )
+    second_revision = bridge.load_generation_record(ticket_id="P18.9.3")
+    assert second_revision is not None
+    ticket = second_revision["ticket_spec"]
+    ticket_text = json.dumps(ticket, ensure_ascii=False, sort_keys=True)
+    history = [
+        json.loads(line)
+        for line in bridge.rejected_successor_revision_history_path_for_ticket(
+            "P18.9.3"
+        ).read_text(encoding="utf-8").splitlines()
+    ]
+
+    assert result["revision_applied"] is True
+    assert result["next_action"]["id"] == "APPROVE_P18_9_3"
+    assert ticket["objective"] == P18_9_3_STRUCTURED_OBJECTIVE
+    assert [_publication(record)["revision"] for record in (original, first_revision, second_revision)] == [1, 2, 3]
+    assert _publication(first_revision)["supersedes_publication_id"] == _publication(original)[
+        "publication_id"
+    ]
+    assert _publication(second_revision)["supersedes_publication_id"] == _publication(
+        first_revision
+    )["publication_id"]
+    assert len({
+        original["ticket_spec_SHA256"],
+        first_revision["ticket_spec_SHA256"],
+        second_revision["ticket_spec_SHA256"],
+    }) == 3
+    assert len({
+        original["dependency_plan_SHA256"],
+        first_revision["dependency_plan_SHA256"],
+        second_revision["dependency_plan_SHA256"],
+    }) == 3
+    assert len({
+        original["lint_report_SHA256"],
+        first_revision["lint_report_SHA256"],
+        second_revision["lint_report_SHA256"],
+    }) == 3
+    assert len({
+        original["work_packet_SHA256"],
+        first_revision["work_packet_SHA256"],
+        second_revision["work_packet_SHA256"],
+    }) == 3
+    for required_text in (
+        "ChatPage",
+        "xterm",
+        "/api/pty",
+        "Hermes PTY",
+        "Hermes TUI",
+        "No duplicate conversational runtime",
+        "current project context",
+        "current ticket/successor context",
+        "workflow status/state",
+        "next action",
+        "required human action",
+        "execution posture",
+        "human-action boundary",
+        "session resume",
+        "fresh session",
+        "reconnect",
+        "Projects contextual navigation",
+        "Approvals contextual navigation",
+        "Executions contextual navigation",
+        "openai-codex.primary",
+        "frontend-first",
+        "backend read-only",
+        "P18.9.4",
+        "P18.9.5",
+        "P18.9.6",
+        "P18.9.7",
+        "P18.9.12",
+        "P19",
+        "P20",
+        "P21",
+        "non-goals",
+    ):
+        assert required_text in ticket_text
+    assert {step["command"] for step in ticket["validation_steps"]} >= {
+        "cd 2_products/pepper-agent/web && npx vitest run src/agent-platform/lead-agent-chat.test.tsx",
+        "cd 2_products/pepper-agent/web && npm run typecheck",
+        "cd 2_products/pepper-agent/web && npm run test",
+        "cd 2_products/pepper-agent/web && npm run build",
+        "git diff --check",
+    }
+    assert history[0]["historical_rejected_generation_record"] == original
+    assert history[0]["new_generation_record"] == first_revision
+    assert history[1]["historical_rejected_generation_record"] == first_revision
+    assert history[1]["new_generation_record"] == second_revision
+    assert history[1]["revision_contract_SHA256"] == second_revision[
+        "revision_contract_SHA256"
+    ]
+    assert second_revision["revision_sequence"] == 3
+    assert second_revision["work_packet_compilation_result"]["work_packet"]["execution_ready"] is False
+    assert result["pending_ticket_approval_count"] == 1
+    assert result["active_execution_count"] == 0
+    assert result["ticket_execution_authorized"] is False
+    assert result["WorkPacket_execution_authorized"] is False
+    assert result["worker_execution"] is False
+    assert result["Kanban_dispatch"] is False
+    assert result["Git_mutation"] is False
+    assert not bridge.generation_record_path_for_ticket("P18.9.4").exists()
+
+
 def test_revise_rejected_successor_publication_failure_preserves_rejected_authority(
     bridge_home,
     monkeypatch,
@@ -1105,6 +1680,149 @@ def test_chat_revise_generated_successor_ticket_uses_revision_backend_without_ex
     assert snapshot["worker_execution"] is False
     assert snapshot["Kanban_dispatch"] is False
     assert snapshot["Git_mutation"] is False
+
+
+def test_revise_generated_successor_ticket_schema_exposes_bounded_revision_contract(
+    bridge_home,
+) -> None:
+    import tools.pepper_workflow_tools  # noqa: F401
+    from tools.registry import registry
+
+    schema = registry.get_schema("revise_generated_successor_ticket")
+    assert schema is not None
+    params = schema["parameters"]
+    contract = params["properties"]["revision_contract"]
+
+    assert params["required"] == ["human_authorization_text"]
+    assert params["additionalProperties"] is False
+    assert contract["additionalProperties"] is False
+    assert set(contract["required"]) == {
+        "schema_version",
+        "ticket_id",
+        "objective",
+        "context",
+        "scope",
+        "constraints",
+        "tasks",
+        "acceptance_criteria",
+        "validation_steps",
+    }
+    assert contract["properties"]["objective"]["maxLength"] == 8192
+    assert contract["properties"]["context"]["maxItems"] == 32
+    assert contract["properties"]["validation_steps"]["maxItems"] == 32
+    assert contract["properties"]["scope"]["additionalProperties"] is False
+    assert "project_id" not in contract["properties"]
+    assert "dependencies" not in contract["properties"]
+    assert "execution_authority" not in contract["properties"]
+
+
+def test_chat_revise_generated_successor_ticket_passes_structured_contract_without_execution(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    bridge.generate_current_ticket(workflow=_p18_9_2_workflow())
+    record = bridge.load_generation_record(ticket_id="P18.9.2")
+    assert record is not None
+    bridge.apply_ticket_approval_decision(
+        ticket_id="P18.9.2",
+        decision="reject",
+        actor="human.p18.9",
+    )
+    monkeypatch.setattr(
+        pr,
+        "_p18_9_0_generation_overlay",
+        lambda: (_p18_9_2_workflow(), None),
+    )
+    contract = _structured_revision_contract(marker="C5-TOOL")
+    contract_digest = bridge.ticket_spec_material_revision_contract_digest(contract)
+
+    result = _chat_tool_result(
+        "revise_generated_successor_ticket",
+        {
+            "human_authorization_text": (
+                "Authorize REVISE_P18_9_2 using the supplied structured TicketSpec "
+                "revision contract."
+            ),
+            "revision_contract": contract,
+            "project_id": "PEPPER",
+            "ticket_id": "P18.9.2",
+            "next_action_id": "REVISE_P18_9_2",
+        },
+    )
+    revised = bridge.load_generation_record(ticket_id="P18.9.2")
+    assert revised is not None
+
+    assert result["success"] is True
+    assert result["source_tool"] == "revise_generated_successor_ticket"
+    assert result["revision_contract_SHA256"] == contract_digest
+    assert revised["ticket_spec"]["objective"] == contract["objective"]
+    assert revised["revision_authority"]["revision_contract_SHA256"] == contract_digest
+    assert result["next_action"]["id"] == "APPROVE_P18_9_2"
+    assert result["ticket_execution_authorized"] is False
+    assert result["WorkPacket_execution_authorized"] is False
+    assert result["runtime_execution_authorized"] is False
+    assert result["worker_execution"] is False
+    assert result["Kanban_dispatch"] is False
+    assert result["Git_mutation"] is False
+    assert result["auto_approval"] is False
+    assert result["auto_execution"] is False
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        {"revision_contract": _structured_revision_contract(marker="NO-AUTH")},
+        {
+            "human_authorization_text": "Authorize REVISE_P18_9_2 with structured correction.",
+            "revision_contract": {
+                **_structured_revision_contract(marker="UNKNOWN-CONTRACT-FIELD"),
+                "unknown_field": True,
+            },
+        },
+        {
+            "human_authorization_text": "Authorize REVISE_P18_9_2 with structured correction.",
+            "revision_contract": _structured_revision_contract(marker="WRONG-ACTION"),
+            "next_action_id": "APPROVE_P18_9_2",
+        },
+    ],
+)
+def test_chat_revise_generated_successor_ticket_rejects_structured_contract_guard_gaps(
+    bridge_home,
+    monkeypatch,
+    args,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    bridge.generate_current_ticket(workflow=_p18_9_2_workflow())
+    record = bridge.load_generation_record(ticket_id="P18.9.2")
+    assert record is not None
+    bridge.apply_ticket_approval_decision(
+        ticket_id="P18.9.2",
+        decision="reject",
+        actor="human.p18.9",
+    )
+    rejected_decision = bridge.load_approval_decision_record(
+        ticket_id="P18.9.2",
+        generation_record=record,
+    )
+    assert rejected_decision is not None
+    monkeypatch.setattr(
+        pr,
+        "_p18_9_0_generation_overlay",
+        lambda: (_p18_9_2_workflow(), None),
+    )
+
+    result = _chat_tool_result("revise_generated_successor_ticket", args)
+
+    assert result["success"] is False
+    assert bridge.load_generation_record(ticket_id="P18.9.2") == record
+    assert bridge.load_approval_decision_record(
+        ticket_id="P18.9.2",
+        generation_record=record,
+    ) == rejected_decision
+    assert not bridge.rejected_successor_revision_history_path_for_ticket("P18.9.2").exists()
 
 
 @pytest.mark.parametrize(
