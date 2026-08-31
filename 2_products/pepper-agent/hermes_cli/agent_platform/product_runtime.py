@@ -1615,6 +1615,10 @@ def _load_terminal_completed_predecessor_review_decision_record(
             raise
         if raw_review.get("review_decision_SHA256") != _review_decision_record_digest(raw_review):
             raise
+        if not _review_record_projection_identity_matches(raw_review, projection):
+            raise ProductRuntimeConflict(
+                "terminal completed predecessor review identity does not match projection"
+            ) from exc
         try:
             runtime_target = _terminal_completed_predecessor_runtime_review_target(
                 projection=projection,
@@ -1627,7 +1631,27 @@ def _load_terminal_completed_predecessor_review_decision_record(
             raise ProductRuntimeConflict(
                 "terminal completed predecessor review candidate does not match runtime evidence"
             ) from exc
-        raise
+        expected = {
+            "schema_version": PEPPER_REVIEW_DECISION_ACTION_SCHEMA_VERSION,
+            "policy_id": PEPPER_REVIEW_DECISION_ACTION_POLICY_ID,
+            "source_system": PEPPER_REVIEW_DECISION_ACTION_SOURCE_SYSTEM,
+            "review_decision": "accept",
+            "review_state": "accepted",
+            "validation_state": "review_accepted",
+            "workflow_status": "review_accepted_pending_human_git_handoff",
+            "governed_workflow_state": "awaiting_human_git_handoff",
+            "Git_mutation": False,
+            "Docker_commands_executed": 0,
+            "Graphify_commands_executed": 0,
+            "auto_retry": False,
+            "auto_rollback": False,
+        }
+        for key, value in expected.items():
+            if raw_review.get(key) != value:
+                raise ProductRuntimeConflict(
+                    "terminal completed predecessor accepted review state is invalid"
+                ) from exc
+        return raw_review
 
 
 def _terminal_completed_predecessor_runtime_review_target(
@@ -4515,11 +4539,108 @@ def load_current_ticket_human_git_handoff_completion_record(
         record = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise ProductRuntimeConflict("human Git handoff completion record is unreadable") from exc
-    return validate_current_ticket_human_git_handoff_completion_record(
+    try:
+        return validate_current_ticket_human_git_handoff_completion_record(
+            record,
+            projection_record=projection,
+            review_decision_record=review_decision_record,
+        )
+    except ProductRuntimeConflict as exc:
+        if review_decision_record is not None:
+            raise
+        compatible_review = _load_completed_handoff_compatible_review_decision_record(
+            projection=projection,
+            completion_record=record,
+            current_error=exc,
+        )
+        return validate_current_ticket_human_git_handoff_completion_record(
+            record,
+            projection_record=projection,
+            review_decision_record=compatible_review,
+        )
+
+
+def _load_completed_handoff_compatible_review_decision_record(
+    *,
+    projection: dict[str, Any],
+    completion_record: dict[str, Any],
+    current_error: ProductRuntimeConflict,
+) -> dict[str, Any]:
+    path = review_decision_record_path_for_ticket(str(projection["ticket_id"]))
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise current_error from exc
+    return _validate_completed_handoff_compatible_review_decision_record(
         record,
-        projection_record=projection,
-        review_decision_record=review_decision_record,
+        projection=projection,
+        completion_record=completion_record,
+        current_error=current_error,
     )
+
+
+def _validate_completed_handoff_compatible_review_decision_record(
+    record: dict[str, Any],
+    *,
+    projection: dict[str, Any],
+    completion_record: dict[str, Any],
+    current_error: ProductRuntimeConflict,
+) -> dict[str, Any]:
+    if not isinstance(record, dict):
+        raise current_error
+    if record.get("review_decision_SHA256") != _review_decision_record_digest(record):
+        raise current_error
+    if not _review_record_projection_identity_matches(record, projection):
+        raise current_error
+    expected = {
+        "schema_version": PEPPER_REVIEW_DECISION_ACTION_SCHEMA_VERSION,
+        "policy_id": PEPPER_REVIEW_DECISION_ACTION_POLICY_ID,
+        "source_system": PEPPER_REVIEW_DECISION_ACTION_SOURCE_SYSTEM,
+        "review_decision": "accept",
+        "review_state": "accepted",
+        "validation_state": "review_accepted",
+        "workflow_status": "review_accepted_pending_human_git_handoff",
+        "governed_workflow_state": "awaiting_human_git_handoff",
+        "Git_mutation": False,
+        "Docker_commands_executed": 0,
+        "Graphify_commands_executed": 0,
+        "auto_retry": False,
+        "auto_rollback": False,
+    }
+    for key, value in expected.items():
+        if record.get(key) != value:
+            raise current_error
+    if _int_or_none(record.get("reviewed_run_id")) != _int_or_none(
+        completion_record.get("reviewed_run_id")
+    ):
+        raise current_error
+    if record.get("reviewed_candidate_SHA256") != completion_record.get(
+        "reviewed_candidate_SHA256"
+    ):
+        raise current_error
+    if record.get("review_decision_SHA256") != completion_record.get(
+        "review_decision_SHA256"
+    ):
+        raise current_error
+    accepted_authority = completion_record.get("accepted_review_authority")
+    if not isinstance(accepted_authority, dict):
+        raise current_error
+    authority_expected = {
+        "policy_id": record.get("policy_id"),
+        "source_system": record.get("source_system"),
+        "review_decision": record.get("review_decision"),
+        "review_decision_SHA256": record.get("review_decision_SHA256"),
+        "review_decision_identity_SHA256": record.get("review_decision_identity_SHA256"),
+        "reviewed_candidate_SHA256": record.get("reviewed_candidate_SHA256"),
+    }
+    for key, value in authority_expected.items():
+        if accepted_authority.get(key) != value:
+            raise current_error
+    if _int_or_none(accepted_authority.get("reviewed_run_id")) != _int_or_none(
+        record.get("reviewed_run_id")
+    ):
+        raise current_error
+    return record
 
 
 def validate_current_ticket_human_git_handoff_prepare_record(

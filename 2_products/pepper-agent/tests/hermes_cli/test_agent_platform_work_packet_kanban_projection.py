@@ -5520,6 +5520,195 @@ def test_p18_9_2_completion_dominates_stale_handoff_prepare_and_successor_state(
     assert not bridge.generation_record_path_for_ticket("P18.9.4").exists()
 
 
+def test_p18_9_2_historical_completion_survives_kanban_candidate_reconstruction_drift(
+    projection_home,
+    monkeypatch,
+) -> None:
+    state = _completed_p18_9_2_with_drifted_candidate_workspace(
+        projection_home,
+        monkeypatch,
+        pid=6861,
+        completion_commit="cdef1234567890abcdef1234567890abcdef1234",
+    )
+
+    workflow = json.loads(state.handle_function_call("get_workflow_control", {}))
+    next_action = json.loads(state.handle_function_call("get_next_action", {}))
+
+    assert workflow["success"] is True
+    assert next_action["success"] is True
+    assert workflow["current_ticket_id"] is None
+    assert workflow["workflow_control"]["closed_predecessor_ticket_id"] == "P18.9.2"
+    assert workflow["workflow_control"]["ticket_closed"] is True
+    assert workflow["workflow_control"]["handoff_completion_present"] is True
+    assert workflow["workflow_control"]["git_handoff_required"] is False
+    assert workflow["workflow_control"]["active_execution_count"] == 0
+    assert workflow["workflow_status"] == "awaiting_ticket_approval"
+    assert workflow["pending_ticket_approval_count"] == 1
+    assert workflow["next_action"]["id"] == "APPROVE_P18_9_3"
+    assert workflow["next_action"].get("required_human_action") == "ticket_approval"
+    assert next_action["current_ticket_id"] is None
+    assert next_action["next_action"]["id"] == "APPROVE_P18_9_3"
+    assert workflow["workflow_control"]["ticket_execution_authorized"] is False
+    assert workflow["workflow_control"]["WorkPacket_execution_authorized"] is False
+    assert workflow["workflow_control"]["worker_execution"] is False
+    assert workflow["workflow_control"]["Kanban_dispatch"] is False
+    assert workflow["Git_mutation"] is False
+    assert not bridge.generation_record_path_for_ticket("P18.9.4").exists()
+
+
+@pytest.mark.parametrize("mutation", ["corrupt_digest", "unbound_review_authority"])
+def test_p18_9_2_historical_completion_compatibility_rejects_untrusted_authority(
+    projection_home,
+    monkeypatch,
+    mutation,
+) -> None:
+    state = _completed_p18_9_2_with_drifted_candidate_workspace(
+        projection_home,
+        monkeypatch,
+        pid=6862,
+        completion_commit="cdef2234567890abcdef1234567890abcdef1234",
+    )
+    record = json.loads(state.completion_path.read_text(encoding="utf-8"))
+    if mutation == "corrupt_digest":
+        record["completed_by"] = "tampered-completion-authority"
+    else:
+        record["accepted_review_authority"]["review_decision_SHA256"] = "f" * 64
+        record["completion_record_SHA256"] = (
+            state.fixture.pr._human_git_handoff_completion_record_digest(record)
+        )
+    _write_json_authority_record(state.completion_path, record)
+
+    projection = state.fixture.pr._load_current_projection_record()
+    with pytest.raises(state.fixture.pr.ProductRuntimeConflict):
+        state.fixture.pr.load_current_ticket_human_git_handoff_completion_record(
+            projection_record=projection,
+        )
+
+    workflow = state.fixture.pr.build_workflow_control_snapshot()
+
+    assert workflow["current_ticket_id"] == "P18.9.2"
+    assert workflow.get("closed_predecessor_ticket_id") != "P18.9.2"
+    assert workflow.get("handoff_completion_present") is not True
+    assert workflow["next_action"]["id"] != "APPROVE_P18_9_3"
+
+
+def test_p18_9_2_historical_completion_compatibility_does_not_fabricate_missing_completion(
+    projection_home,
+    monkeypatch,
+) -> None:
+    state = _completed_p18_9_2_with_drifted_candidate_workspace(
+        projection_home,
+        monkeypatch,
+        pid=6863,
+        completion_commit="cdef3234567890abcdef1234567890abcdef1234",
+    )
+    state.completion_path.unlink()
+
+    projection = state.fixture.pr._load_current_projection_record()
+    assert (
+        state.fixture.pr.load_current_ticket_human_git_handoff_completion_record(
+            projection_record=projection,
+        )
+        is None
+    )
+    workflow = state.fixture.pr.build_workflow_control_snapshot()
+
+    assert workflow["current_ticket_id"] == "P18.9.2"
+    assert workflow.get("closed_predecessor_ticket_id") != "P18.9.2"
+    assert workflow.get("handoff_completion_present") is not True
+    assert workflow["next_action"]["id"] != "APPROVE_P18_9_3"
+
+
+def _completed_p18_9_2_with_drifted_candidate_workspace(
+    projection_home,
+    monkeypatch,
+    *,
+    pid: int,
+    completion_commit: str,
+):
+    import tools.pepper_workflow_tools  # noqa: F401
+    from model_tools import handle_function_call
+
+    fixture = _accepted_p18_9_2_review_for_handoff_prepare(
+        projection_home,
+        monkeypatch,
+        pid=pid,
+    )
+    source_hashes, candidate_hashes = _p18_9_2_candidate_hash_maps(
+        fixture.candidate_files
+    )
+    prepare_snapshot = _p18_9_2_handoff_git_snapshot(path_SHA256=source_hashes)
+    fixture.pr.prepare_current_ticket_human_git_handoff(
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="PREPARE_P18_9_2_HUMAN_GIT_HANDOFF",
+        git_snapshot_fn=lambda: prepare_snapshot,
+    )
+    completion_snapshot = _p18_9_2_handoff_git_snapshot(
+        head=completion_commit,
+        remote_head=completion_commit,
+        head_parent=_P18_9_2_HANDOFF_PARENT,
+        path_SHA256=candidate_hashes,
+    )
+    _patch_p18_9_2_handoff_snapshot(monkeypatch, fixture.pr, completion_snapshot)
+    completed = fixture.pr.complete_current_ticket_human_git_handoff(
+        reviewed_run_id=fixture.accepted["reviewed_run_id"],
+        reviewed_candidate_SHA256=fixture.accepted["reviewed_candidate_SHA256"],
+        review_decision_SHA256=fixture.accepted["review_decision_SHA256"],
+        commits=(completion_commit,),
+        branch=_P18_9_2_HANDOFF_BRANCH,
+        push_attestation="Human completed P18.9.2 before historical Kanban reconstruction drift.",
+        approved_committed_paths=_P18_9_2_HANDOFF_CANDIDATE_PATHS,
+        excluded_paths=("2_products/pepper-agent/.runtime-logs/**",),
+        validation_evidence=("Synthetic historical P18.9.2 completion evidence.",),
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="COMPLETE_P18_9_2_HUMAN_GIT_HANDOFF",
+        git_snapshot_fn=lambda: completion_snapshot,
+    )
+    assert completed["handoff_completion_recorded"] is True, (
+        completed.get("blocker_code"),
+        completed.get("blocker_detail"),
+    )
+    generation_workflow = json.loads(handle_function_call("get_workflow_control", {}))
+    assert generation_workflow["current_ticket_id"] is None
+    bridge.generate_current_ticket(workflow=generation_workflow["workflow_control"])
+    assert bridge.load_generation_record(ticket_id="P18.9.3") is not None
+
+    review_prepare = json.loads(
+        fixture.pr.review_prepare_record_path_for_ticket("P18.9.2").read_text(
+            encoding="utf-8"
+        )
+    )
+    durable_completion_sha = review_prepare["kanban_completion_result_SHA256"]
+    assert durable_completion_sha == review_prepare["kanban_completion_result"][
+        "kanban_completion_result_SHA256"
+    ]
+
+    drift_path = (
+        Path(fixture.candidate_fixture["workspace_root"])
+        / "2_products/pepper-agent/web/src/agent-platform/runtime-overview/contract.ts"
+    )
+    drift_path.write_text(
+        "export interface RuntimeOverview { historicallyDrifted: string }\n",
+        encoding="utf-8",
+    )
+    drifted_completion = fixture.pr._kanban_completion_result_source(
+        fixture.pr._load_current_projection_record()
+    )
+    assert drifted_completion["kanban_completion_result_SHA256"] != durable_completion_sha
+    return SimpleNamespace(
+        fixture=fixture,
+        handle_function_call=handle_function_call,
+        completion_path=fixture.pr.human_git_handoff_completion_record_path_for_ticket(
+            "P18.9.2"
+        ),
+        completed=completed,
+        durable_completion_sha=durable_completion_sha,
+        drifted_completion=drifted_completion,
+    )
+
+
 def test_p18_9_2_post_handoff_commit_reconstruction_preserves_completion_pending(
     projection_home,
     monkeypatch,
