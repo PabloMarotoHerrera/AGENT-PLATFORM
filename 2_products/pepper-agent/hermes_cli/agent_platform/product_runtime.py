@@ -13976,6 +13976,54 @@ def _governed_autonomy_terminal_text_has_validation_failure(text: str) -> bool:
     )
 
 
+def _governed_autonomy_terminal_text_has_validation_success(text: str) -> bool:
+    normalized = text.replace("_", " ").replace("-", " ")
+    if "validation" in normalized or "gvcmd" in normalized:
+        test_counts = list(
+            re.finditer(
+                r"\b([1-9][0-9]*)\s*/\s*([1-9][0-9]*)\s+tests?\b",
+                normalized,
+            )
+        )
+        if test_counts:
+            return any(match.group(1) == match.group(2) for match in test_counts)
+    if any(
+        marker in normalized
+        for marker in (
+            "validation passed",
+            "validation passes",
+            "validation: passed",
+            "validation=passed",
+            "validation succeeded",
+            "workpacket validation passed",
+            "workpacket validation passes",
+            "governed v2 validation passed",
+            "governed v2 validation passes",
+        )
+    ):
+        return True
+    return "tests passed" in normalized and "validation" in normalized
+
+
+def _governed_autonomy_terminal_text_has_implementation_completion(text: str) -> bool:
+    normalized = text.replace("_", " ").replace("-", " ")
+    return any(
+        marker in normalized
+        for marker in (
+            "implementation completed",
+            "implementation complete",
+            "implementation is complete",
+            "implementation is ready",
+            "implementation ready",
+            "changes are implemented",
+            "change is implemented",
+            "candidate produced",
+            "fresh revision is ready",
+            "governed terminal run is ready",
+        )
+    )
+
+
 def _governed_autonomy_terminal_validated_candidate_review_required(
     run: dict[str, Any],
     *,
@@ -14004,17 +14052,11 @@ def _governed_autonomy_terminal_validated_candidate_review_required(
             "merge is human only",
         )
     )
-    validation_passed = any(
-        marker in normalized
-        for marker in (
-            "validation passed",
-            "validation: passed",
-            "validation=passed",
-            "workpacket validation passed",
-            "governed v2 validation passed",
-        )
-    ) or ("tests passed" in normalized and "validation" in normalized)
-    if not review_or_git_boundary or not validation_passed:
+    implementation_completed = (
+        _governed_autonomy_terminal_text_has_implementation_completion(text)
+    )
+    validation_passed = _governed_autonomy_terminal_text_has_validation_success(text)
+    if not review_or_git_boundary or not implementation_completed or not validation_passed:
         return False
     return True
 
@@ -14056,6 +14098,11 @@ def _terminal_run_review_boundary_evidence(
         _governed_autonomy_terminal_run_text(run_view),
     ):
         return None
+    validation_infrastructure_failure = _governed_autonomy_validation_infrastructure_failure(
+        run_view,
+    )
+    if validation_infrastructure_failure:
+        return None
     metadata = getattr(run, "metadata", None)
     structured_review_required = False
     if isinstance(metadata, dict):
@@ -14084,9 +14131,6 @@ def _terminal_run_review_boundary_evidence(
             )
             and human_boundary in {"", "human_review", "code_review", "human_code_review"}
         )
-    validation_infrastructure_failure = _governed_autonomy_validation_infrastructure_failure(
-        run_view,
-    )
     validated_review_required = _governed_autonomy_terminal_validated_candidate_review_required(
         run_view,
         candidate_changes=candidate_changes,
@@ -14095,8 +14139,6 @@ def _terminal_run_review_boundary_evidence(
     if not structured_review_required:
         if not validated_review_required:
             return None
-    if validation_infrastructure_failure:
-        return None
     detail = (
         getattr(run, "summary", None)
         or getattr(task, "last_failure_error", None)
@@ -22230,9 +22272,6 @@ def _current_ticket_execution_start_overlay(
             })
             overlay.update({
                 "readiness": "governed_autonomy_validated_candidate_review_ready",
-                "workflow_state": (
-                    f"{binding.ticket_id}-GOVERNED-AUTONOMY-AWAITING-HUMAN-GIT-HANDOFF"
-                ),
                 "governed_workflow_state": "awaiting_human_git_handoff",
                 "human_git_handoff_transition_required": True,
                 "git_handoff_required": True,
@@ -22575,9 +22614,6 @@ def _p18_9_0_retry_start_overlay(
             })
             overlay.update({
                 "readiness": "governed_autonomy_validated_candidate_review_ready",
-                "workflow_state": (
-                    f"{binding.ticket_id}-GOVERNED-AUTONOMY-AWAITING-HUMAN-GIT-HANDOFF"
-                ),
                 "governed_workflow_state": "awaiting_human_git_handoff",
                 "human_git_handoff_transition_required": True,
                 "git_handoff_required": True,
@@ -22987,9 +23023,6 @@ def _current_ticket_governed_autonomy_overlay(
                 )
                 review_ready_overlay.update({
                     "readiness": "governed_autonomy_validated_candidate_review_ready",
-                    "workflow_state": (
-                        f"{binding.ticket_id}-GOVERNED-AUTONOMY-AWAITING-HUMAN-GIT-HANDOFF"
-                    ),
                     "governed_workflow_state": "awaiting_human_git_handoff",
                     "human_git_handoff_transition_required": True,
                     "git_handoff_required": True,

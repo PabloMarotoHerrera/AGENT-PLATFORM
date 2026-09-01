@@ -1059,6 +1059,163 @@ def _finish_projected_run_as_review_required_terminal(
         conn.close()
 
 
+def _write_synthetic_terminal_candidate_manifest(
+    pr,
+    tmp_path: Path,
+    *,
+    label: str,
+    candidate_changes: bool = True,
+) -> dict[str, object]:
+    source_root = tmp_path / f"{label}-source"
+    workspace = tmp_path / f"{label}-workspace"
+    workspace.mkdir()
+    writable_rel = f"synthetic/{label}/src/writable.ts"
+    support_rel = f"synthetic/{label}/read-only/support.py"
+    _write_fixture_file(source_root, writable_rel, "export const value = 'source';\n")
+    _write_fixture_file(
+        workspace,
+        writable_rel,
+        "export const value = 'candidate';\n"
+        if candidate_changes
+        else "export const value = 'source';\n",
+    )
+    support_source = _write_fixture_file(source_root, support_rel, "SUPPORT = 'source'\n")
+    support_scratch = _write_fixture_file(
+        workspace,
+        support_rel,
+        "SUPPORT = 'source'\n",
+    )
+    manifest_path = workspace / pr.PEPPER_SCRATCH_SOURCE_MATERIALIZATION_MANIFEST
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "policy_id": pr.PEPPER_SCRATCH_SOURCE_MATERIALIZATION_POLICY_ID,
+        "source_materialized": True,
+        "source_root": str(source_root),
+        "workspace_root": str(workspace),
+        "manifest_path": str(manifest_path),
+        "writable_allowed_paths": [writable_rel],
+        "read_only_validation_support_files": [
+            {
+                "repository_relative_path": support_rel,
+                "source_SHA256": _sha256_path(support_source),
+                "scratch_SHA256": _sha256_path(support_scratch),
+                "materialized": True,
+                "read_only": True,
+            }
+        ],
+        "read_only_validation_support_copied_file_count": 1,
+        "product_diff_excluded_roots": [],
+    }
+    manifest_path.write_text(
+        json.dumps(manifest, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return {
+        "source_root": source_root,
+        "workspace": workspace,
+        "writable_rel": writable_rel,
+        "support_rel": support_rel,
+        "manifest_path": manifest_path,
+    }
+
+
+def _synthetic_terminal_task(
+    workspace: Path,
+    *,
+    status: str = "blocked",
+    block_kind: str | None = "needs_input",
+):
+    return SimpleNamespace(
+        id="t_synthetic",
+        status=status,
+        current_run_id=None,
+        worker_pid=None,
+        block_kind=block_kind,
+        last_failure_error=None,
+        workspace_path=str(workspace),
+    )
+
+
+def _synthetic_terminal_run(
+    *,
+    run_id: int,
+    status: str,
+    outcome: str,
+    summary: str,
+    error: str | None = None,
+    metadata: dict | None = None,
+):
+    now = int(time.time())
+    return SimpleNamespace(
+        id=run_id,
+        task_id="t_synthetic",
+        profile=_IMPLEMENTATION_PROFILE,
+        step_key=None,
+        status=status,
+        max_runtime_seconds=3600,
+        last_heartbeat_at=None,
+        started_at=now - 60,
+        ended_at=now,
+        outcome=outcome,
+        summary=summary,
+        error=error,
+        metadata=metadata,
+    )
+
+
+def _synthetic_projection(ticket_id: str) -> dict[str, object]:
+    return {
+        "product_id": "pepper",
+        "project_id": "PEPPER",
+        "macroproject_id": "P99",
+        "macroproject_title": "Synthetic C8 Lifecycle",
+        "ticket_id": ticket_id,
+        "ticket_title": f"Synthetic {ticket_id} Review Boundary",
+        "ticket_spec_SHA256": "b" * 64,
+        "work_packet_id": f"WP-{ticket_id.replace('.', '-')}-R0001-synthetic",
+        "work_packet_SHA256": "c" * 64,
+        "projection_SHA256": "d" * 64,
+    }
+
+
+def _synthetic_execution_start_record(ticket_id: str, *, run_id: int) -> dict[str, object]:
+    return {
+        "policy_id": "synthetic-start-policy",
+        "start_authorization_SHA256": "1" * 64,
+        "ticket_id": ticket_id,
+        "start_status": "started",
+        "dispatch_performed": True,
+        "execution_started": True,
+        "worker_execution": True,
+        "Kanban_dispatch": True,
+        "kanban_board_slug": "synthetic",
+        "kanban_task_id": "t_synthetic",
+        "kanban_run_id": run_id,
+    }
+
+
+def _synthetic_retry_start_record(ticket_id: str, *, run_id: int) -> dict[str, object]:
+    return {
+        "policy_id": "synthetic-retry-start-policy",
+        "retry_start_authorization_SHA256": "2" * 64,
+        "recovery_action_SHA256": "3" * 64,
+        "ticket_id": ticket_id,
+        "execution_started": True,
+        "retry_identity_model": "same_task_same_workpacket",
+        "previous_attempt_count": 1,
+        "next_attempt_number": 2,
+        "future_task_skills": [],
+        "future_retry_capability_surface": [],
+        "unresolved_Hermes_task_skills": [],
+        "retry_execution_count": 1,
+        "Kanban_requeue_calls": 1,
+        "Kanban_reclaim_calls": 0,
+        "kanban_board_slug": "synthetic",
+        "kanban_task_id": "t_synthetic",
+        "kanban_run_id": run_id,
+    }
+
+
 def _start_recovered_p18_9_2_retry_for_test(
     state,
     monkeypatch,
@@ -4293,6 +4450,319 @@ def test_approved_successor_recovered_retry_rejects_later_failed_run_stale_recov
     assert not pr.retry_start_record_path_for_ticket("P18.9.2").exists()
 
 
+def test_synthetic_terminal_matrix_classifies_validated_review_boundary_generically(
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    fixture = _write_synthetic_terminal_candidate_manifest(
+        pr,
+        tmp_path,
+        label="c8-matrix",
+    )
+    task = _synthetic_terminal_task(fixture["workspace"])
+    review_run = _synthetic_terminal_run(
+        run_id=2,
+        status="blocked",
+        outcome="blocked",
+        summary=(
+            "review-required: synthetic implementation completed and governed validation "
+            "passes (GVCMD-001: 160/160 tests), but code changes need human review."
+        ),
+    )
+    state = pr._p18_9_0_terminal_execution_state(
+        task,
+        [review_run],
+        ticket_id="P99.1",
+    )
+
+    assert state is not None
+    assert state["start_status"] == "completed"
+    assert state["terminal_outcome_class"] == "validated_review_required"
+    assert state["terminal_outcome_authority"] == (
+        "kanban_needs_input_block_with_candidate_changes_and_validation_evidence"
+    )
+    assert state["candidate_changes_available"] is True
+    assert {item["path"] for item in state["candidate_changes_reference"]["files"]} == {
+        fixture["writable_rel"]
+    }
+    assert fixture["support_rel"] not in {
+        item["path"] for item in state["candidate_changes_reference"]["files"]
+    }
+
+    completed_run = _synthetic_terminal_run(
+        run_id=3,
+        status="completed",
+        outcome="completed",
+        summary="ordinary worker execution completed",
+    )
+    completed_state = pr._p18_9_0_terminal_execution_state(
+        _synthetic_terminal_task(fixture["workspace"], status="done", block_kind=None),
+        [completed_run],
+        ticket_id="P99.1",
+    )
+    assert completed_state is not None
+    assert completed_state["start_status"] == "completed"
+    assert completed_state["outcome"] == "completed"
+    assert "terminal_outcome_class" not in completed_state
+
+
+def test_synthetic_structured_metadata_review_boundary_takes_precedence(
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    fixture = _write_synthetic_terminal_candidate_manifest(
+        pr,
+        tmp_path,
+        label="c8-structured",
+    )
+    run = _synthetic_terminal_run(
+        run_id=4,
+        status="blocked",
+        outcome="blocked",
+        summary="terminal run stopped at a human governance boundary",
+        metadata={
+            "review_required": True,
+            "implementation_complete": True,
+            "validation_passed": True,
+            "human_boundary": "human_code_review",
+        },
+    )
+
+    state = pr._p18_9_0_terminal_execution_state(
+        _synthetic_terminal_task(fixture["workspace"]),
+        [run],
+        ticket_id="P99.1",
+    )
+
+    assert state is not None
+    assert state["start_status"] == "completed"
+    assert state["terminal_outcome_class"] == "validated_review_required"
+    assert state["terminal_outcome_authority"] == "task_run_metadata"
+
+
+def test_synthetic_initial_execution_blocked_validated_review_boundary_projects_completed(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    ticket_id = "P99.1"
+    run_id = 11
+    fixture = _write_synthetic_terminal_candidate_manifest(
+        pr,
+        tmp_path,
+        label="c8-initial",
+    )
+    task = _synthetic_terminal_task(fixture["workspace"])
+    run = _synthetic_terminal_run(
+        run_id=run_id,
+        status="blocked",
+        outcome="blocked",
+        summary=(
+            "review-required: synthetic implementation completed and governed validation "
+            "passes (GVCMD-001: 160/160 tests), but code changes need human review."
+        ),
+    )
+    monkeypatch.setattr(
+        pr,
+        "load_p18_9_0_execution_start_record",
+        lambda projection_record=None: _synthetic_execution_start_record(
+            ticket_id,
+            run_id=run_id,
+        ),
+    )
+    monkeypatch.setattr(
+        pr,
+        "_p18_9_0_live_kanban_execution",
+        lambda _projection: (task, [run]),
+    )
+
+    overlay, blocker = pr._current_ticket_execution_start_overlay(
+        _synthetic_projection(ticket_id),
+    )
+
+    assert blocker is None
+    assert overlay["workflow_status"] == "execution_completed"
+    assert overlay["workflow_state"] == "P99.1-EXECUTION-COMPLETED"
+    assert overlay["execution_state"] == "no_active_executions"
+    assert overlay["recovery_state"] == "not_required"
+    assert overlay["review_state"] == "ready_for_review_validation"
+    assert overlay["terminal_outcome_class"] == "validated_review_required"
+    assert overlay["candidate_changes_available"] is True
+    assert overlay["next_action"]["id"] == "PREPARE_P99_1_REVIEW"
+    assert overlay["next_action"]["required_human_action"] == (
+        "review_validation_preparation_and_human_git_handoff"
+    )
+    assert overlay["next_action"]["id"] != "RECOVER_P99_1_EXECUTION"
+    assert {item["path"] for item in overlay["candidate_changes_reference"]["files"]} == {
+        fixture["writable_rel"]
+    }
+    assert fixture["support_rel"] not in {
+        item["path"] for item in overlay["candidate_changes_reference"]["files"]
+    }
+
+
+def test_synthetic_retry_execution_blocked_validated_review_boundary_projects_completed(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    ticket_id = "P99.2"
+    retry_run_id = 22
+    fixture = _write_synthetic_terminal_candidate_manifest(
+        pr,
+        tmp_path,
+        label="c8-retry",
+    )
+    task = _synthetic_terminal_task(fixture["workspace"])
+    failed_run = _synthetic_terminal_run(
+        run_id=21,
+        status="failed",
+        outcome="failed",
+        summary="attempt 1 failed before validation",
+        error="synthetic attempt 1 failure",
+    )
+    retry_run = _synthetic_terminal_run(
+        run_id=retry_run_id,
+        status="blocked",
+        outcome="blocked",
+        summary=(
+            "review-required: synthetic implementation completed and governed validation "
+            "passes (GVCMD-001: 160/160 tests), but code changes need human review."
+        ),
+    )
+    recovery = {"recovery_action_SHA256": "3" * 64}
+    monkeypatch.setattr(
+        pr,
+        "load_current_ticket_recovery_action_record",
+        lambda projection_record=None: recovery,
+    )
+    monkeypatch.setattr(
+        pr,
+        "load_current_ticket_retry_start_record",
+        lambda **_kwargs: _synthetic_retry_start_record(ticket_id, run_id=retry_run_id),
+    )
+    monkeypatch.setattr(pr, "_retry_start_record_cycle_id", lambda *_args: "cycle")
+    monkeypatch.setattr(pr, "_recovery_record_cycle_id", lambda *_args: "cycle")
+    monkeypatch.setattr(
+        pr,
+        "_p18_9_0_live_kanban_execution",
+        lambda _projection: (task, [failed_run, retry_run]),
+    )
+
+    overlay, blocker = pr._p18_9_0_retry_start_overlay(_synthetic_projection(ticket_id))
+
+    assert blocker is None
+    assert overlay["workflow_status"] == "execution_completed"
+    assert overlay["workflow_state"] == "P99.2-RETRY-EXECUTION-COMPLETED"
+    assert overlay["execution_state"] == "no_active_executions"
+    assert overlay["recovery_state"] == "not_required"
+    assert overlay["retry_state"] == "retry_completed"
+    assert overlay["retry_execution_count"] == 1
+    assert overlay["review_state"] == "ready_for_review_validation"
+    assert overlay["terminal_outcome_class"] == "validated_review_required"
+    assert overlay["candidate_changes_available"] is True
+    assert overlay["next_action"]["id"] == "PREPARE_P99_2_REVIEW"
+    assert overlay["next_action"]["id"] != "START_P99_2_RETRY_REQUIRES_HUMAN_AUTHORIZATION"
+    assert overlay["next_action"]["required_human_action"] == (
+        "review_validation_preparation_and_human_git_handoff"
+    )
+
+
+@pytest.mark.parametrize(
+    ("summary", "candidate_changes", "error"),
+    (
+        (
+            "review note: human review may be needed after this blocker.",
+            True,
+            None,
+        ),
+        (
+            "review-required: implementation completed and GVCMD-001: 159/160 tests.",
+            True,
+            None,
+        ),
+        (
+            "review-required: implementation completed and governed validation passes "
+            "(GVCMD-001: 159/160 tests).",
+            True,
+            None,
+        ),
+        (
+            "review-required: implementation completed and governed validation passes "
+            "(GVCMD-001: 160/160 tests).",
+            False,
+            None,
+        ),
+        (
+            "review-required: implementation completed and governed validation passes "
+            "(GVCMD-001: 160/160 tests).",
+            True,
+            "worker failed after reporting review-required",
+        ),
+        (
+            "review-required: implementation completed; validation infrastructure "
+            "failure = true; GVCMD-001: 160/160 tests.",
+            True,
+            None,
+        ),
+    ),
+)
+def test_synthetic_blocked_review_boundary_requires_complete_evidence(
+    tmp_path,
+    monkeypatch,
+    summary,
+    candidate_changes,
+    error,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    ticket_id = "P99.3"
+    run_id = 31
+    fixture = _write_synthetic_terminal_candidate_manifest(
+        pr,
+        tmp_path,
+        label=f"c8-negative-{abs(hash((summary, candidate_changes, error)))}",
+        candidate_changes=candidate_changes,
+    )
+    task = _synthetic_terminal_task(fixture["workspace"])
+    run = _synthetic_terminal_run(
+        run_id=run_id,
+        status="blocked",
+        outcome="blocked",
+        summary=summary,
+        error=error,
+    )
+    monkeypatch.setattr(
+        pr,
+        "load_p18_9_0_execution_start_record",
+        lambda projection_record=None: _synthetic_execution_start_record(
+            ticket_id,
+            run_id=run_id,
+        ),
+    )
+    monkeypatch.setattr(
+        pr,
+        "_p18_9_0_live_kanban_execution",
+        lambda _projection: (task, [run]),
+    )
+
+    overlay, blocker = pr._current_ticket_execution_start_overlay(
+        _synthetic_projection(ticket_id),
+    )
+
+    assert blocker is not None
+    assert overlay["workflow_status"] == "execution_failed"
+    assert overlay["workflow_state"] == "P99.3-EXECUTION-FAILED-RECOVERY-REQUIRED"
+    assert overlay["recovery_state"] == "recovery_required"
+    assert overlay["review_state"] == "not_started_execution_failed"
+    assert overlay["next_action"]["id"] == "RECOVER_P99_3_EXECUTION"
+    assert overlay.get("terminal_outcome_class") != "validated_review_required"
+
+
 def test_review_required_p18_9_2_retry_reconstructs_to_governed_review_boundary(
     projection_home,
     monkeypatch,
@@ -4307,9 +4777,9 @@ def test_review_required_p18_9_2_retry_reconstructs_to_governed_review_boundary(
         Path(retry["workspace_path"]),
     )
     summary = (
-        "review-required: P18.9.2 Control Center Overview implementation is ready "
-        "for human/code review; focused governed frontend validation passed "
-        "(GVCMD-001, 36 tests)."
+        "review-required: P18.9.2 Control Center Overview frontend changes are "
+        "implemented and governed validation passes (GVCMD-001: 160/160 tests), "
+        "but code changes need human review before marking the task done."
     )
     _finish_projected_run_as_review_required_terminal(
         kanban_db,
@@ -4322,9 +4792,7 @@ def test_review_required_p18_9_2_retry_reconstructs_to_governed_review_boundary(
     assert workflow["current_ticket_id"] == "P18.9.2"
     assert workflow["readiness"] == "governed_autonomy_validated_candidate_review_ready"
     assert workflow["workflow_status"] == "execution_completed"
-    assert workflow["workflow_state"] == (
-        "P18.9.2-GOVERNED-AUTONOMY-AWAITING-HUMAN-GIT-HANDOFF"
-    )
+    assert workflow["workflow_state"] == "P18.9.2-RETRY-EXECUTION-COMPLETED"
     assert workflow["validation_state"] == "execution_completed_pending_validation"
     assert workflow["review_state"] == "ready_for_review_validation"
     assert workflow["recovery_state"] == "not_required"
@@ -7488,9 +7956,7 @@ def test_p18_9_2_review_ready_terminal_triage_task_does_not_self_block_prepare(
 
     assert workflow["current_ticket_id"] == "P18.9.2"
     assert workflow["workflow_status"] == "execution_completed"
-    assert workflow["workflow_state"] == (
-        "P18.9.2-GOVERNED-AUTONOMY-AWAITING-HUMAN-GIT-HANDOFF"
-    )
+    assert workflow["workflow_state"] == "P18.9.2-RETRY-EXECUTION-COMPLETED"
     assert workflow["validation_state"] == "execution_completed_pending_validation"
     assert workflow["review_state"] == "ready_for_review_validation"
     assert workflow["recovery_state"] == "not_required"
@@ -7635,9 +8101,7 @@ def test_p18_9_2_corrective_candidate_allows_second_review_round(
     workflow = pr.build_workflow_control_snapshot()
     assert workflow["current_ticket_id"] == "P18.9.2"
     assert workflow["workflow_status"] == "execution_completed"
-    assert workflow["workflow_state"] == (
-        "P18.9.2-GOVERNED-AUTONOMY-AWAITING-HUMAN-GIT-HANDOFF"
-    )
+    assert workflow["workflow_state"] == "P18.9.2-GOVERNED-AUTONOMY-EXECUTION-COMPLETED"
     assert workflow["review_state"] == "ready_for_review_validation"
     assert workflow["validation_state"] == "execution_completed_pending_validation"
     assert workflow["active_execution_count"] == 0
@@ -11864,7 +12328,7 @@ def test_current_p18_9_1_governed_autonomy_terminal_validated_candidate_routes_t
     workflow = pr.build_workflow_control_snapshot()
     assert workflow["readiness"] == "governed_autonomy_validated_candidate_review_ready"
     assert workflow["workflow_state"] == (
-        "P18.9.1-GOVERNED-AUTONOMY-AWAITING-HUMAN-GIT-HANDOFF"
+        "P18.9.1-GOVERNED-AUTONOMY-EXECUTION-COMPLETED"
     )
     assert workflow["workflow_status"] == "execution_completed"
     assert workflow["validation_state"] == "execution_completed_pending_validation"
