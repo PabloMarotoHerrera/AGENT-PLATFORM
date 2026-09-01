@@ -1112,6 +1112,11 @@ def _current_generation_record_for_binding() -> dict[str, Any] | None:
 
 def _current_projected_ticket_id_from_records() -> str | None:
     try:
+        from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
+            load_approval_decision_record,
+            load_generation_record,
+            resolve_roadmap_ticket_authorities,
+        )
         from hermes_cli.agent_platform.workflow.work_packet_kanban_projection import (
             kanban_projection_record_path,
             load_kanban_projection_record,
@@ -1122,29 +1127,61 @@ def _current_projected_ticket_id_from_records() -> str | None:
     root = kanban_projection_record_path().parent
     if not root.exists():
         return None
-    candidates: list[Path] = []
     try:
-        candidates = sorted(
-            root.glob("*.json"),
-            key=lambda path: (
-                _governed_ticket_sequence_key(
-                    PEPPER_BOOTSTRAP_NEXT_TICKET_ID
-                    if path.name == kanban_projection_record_path().name
-                    else path.stem
-                ),
-                path.stat().st_mtime,
-            ),
-            reverse=True,
-        )
+        candidate_paths = tuple(sorted(root.glob("*.json"), key=lambda path: path.name))
     except OSError:
         return None
     canonical_name = kanban_projection_record_path().name
-    for path in candidates:
-        ticket_id = PEPPER_BOOTSTRAP_NEXT_TICKET_ID if path.name == canonical_name else path.stem
+    path_by_ticket_id = {
+        PEPPER_BOOTSTRAP_NEXT_TICKET_ID if path.name == canonical_name else path.stem: path
+        for path in candidate_paths
+    }
+    try:
+        roadmap_ticket_ids = tuple(
+            str(item["ticket_id"])
+            for item in resolve_roadmap_ticket_authorities()
+            if str(item.get("ticket_id") or "") in path_by_ticket_id
+        )
+    except Exception:
+        roadmap_ticket_ids = ()
+    orphan_ticket_ids = tuple(
+        sorted(
+            (ticket_id for ticket_id in path_by_ticket_id if ticket_id not in roadmap_ticket_ids),
+            key=_governed_ticket_sequence_key,
+        )
+    )
+    for ticket_id in reversed((*roadmap_ticket_ids, *orphan_ticket_ids)):
         try:
-            projection = load_kanban_projection_record(ticket_id=ticket_id)
+            generation = load_generation_record(ticket_id=ticket_id)
+        except Exception:
+            try:
+                projection = load_kanban_projection_record(ticket_id=ticket_id)
+            except Exception:
+                continue
+            if projection is not None:
+                return str(projection.get("ticket_id") or ticket_id)
+            continue
+        if generation is None:
+            continue
+        try:
+            decision = load_approval_decision_record(
+                ticket_id=ticket_id,
+                generation_record=generation,
+            )
         except Exception:
             continue
+        if decision is None or decision.get("decision") != "approve":
+            continue
+        try:
+            projection = load_kanban_projection_record(
+                ticket_id=ticket_id,
+                generation_record=generation,
+                decision_record=decision,
+            )
+        except Exception as exc:
+            raise ProductRuntimeConflict(
+                f"{ticket_id} current Kanban projection authority is invalid"
+            ) from exc
         if projection is not None:
             return str(projection.get("ticket_id") or ticket_id)
     return None
@@ -1167,6 +1204,8 @@ def _current_projection_record_for_binding() -> dict[str, Any] | None:
             if projection is not None:
                 return projection
         return load_p18_9_0_kanban_projection_record()
+    except ProductRuntimeConflict:
+        raise
     except Exception:
         return None
 
@@ -1686,16 +1725,23 @@ def _terminal_completed_predecessor_runtime_review_target(
         raise ProductRuntimeConflict(
             "terminal completed predecessor review run outcome does not match runtime evidence"
         )
-    candidate_reference = terminal_reconciliation.get("candidate_changes_reference")
-    if terminal_reconciliation.get("validated_candidate_review_required") is not True:
+    persisted_candidate_reference = review.get("reviewed_candidate_reference")
+    if _governed_autonomy_candidate_changes_available(persisted_candidate_reference):
         candidate_reference = _terminal_completed_predecessor_review_candidate_reference(
             review=review,
             terminal_reconciliation=terminal_reconciliation,
         )
-    elif not _governed_autonomy_candidate_changes_available(candidate_reference):
-        raise ProductRuntimeConflict(
-            "terminal completed predecessor candidate changes evidence is absent"
+    elif terminal_reconciliation.get("validated_candidate_review_required") is not True:
+        candidate_reference = _terminal_completed_predecessor_review_candidate_reference(
+            review=review,
+            terminal_reconciliation=terminal_reconciliation,
         )
+    else:
+        candidate_reference = terminal_reconciliation.get("candidate_changes_reference")
+        if not _governed_autonomy_candidate_changes_available(candidate_reference):
+            raise ProductRuntimeConflict(
+                "terminal completed predecessor candidate changes evidence is absent"
+            )
     return {
         "reviewed_run_id": terminal_reconciliation["terminal_run_id"],
         "candidate_SHA256": _digest_payload(
@@ -1795,6 +1841,88 @@ def _terminal_completed_predecessor_traversal_overlay(
         "completion_record_SHA256": evidence["human_git_handoff_completion_record"][
             "completion_record_SHA256"
         ],
+    }
+    return overlay
+
+
+def _completed_predecessor_successor_lifecycle_overlay(
+    workflow: dict[str, Any],
+    *,
+    predecessor_ticket_id: str,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    try:
+        completed_predecessor = load_terminal_completed_predecessor_evidence(
+            predecessor_ticket_id,
+        )
+    except Exception as exc:  # pragma: no cover - defensive live-state guard
+        try:
+            overlay = _completed_predecessor_handoff_completion_overlay(
+                predecessor_ticket_id,
+            )
+        except Exception as fallback_exc:  # pragma: no cover - defensive live-state guard
+            overlay = None
+            exc = fallback_exc
+        if overlay is None:
+            return None, {
+                "id": f"{governed_ticket_lifecycle_hyphen_token(predecessor_ticket_id)}-TERMINAL-COMPLETED-PREDECESSOR-AUTHORITY",
+                "status": "blocked_by_invalid_terminal_completed_predecessor_authority",
+                "evidence": _safe_text(exc, limit=300),
+            }
+    else:
+        if completed_predecessor is None:
+            return None, None
+        overlay = _terminal_completed_predecessor_traversal_overlay(completed_predecessor)
+    successor_workflow = dict(workflow)
+    successor_workflow.update(overlay)
+    successor_overlay, successor_blocker = _pending_generated_successor_ticket_approval_overlay(
+        successor_workflow,
+    )
+    if successor_overlay is not None:
+        overlay.update(successor_overlay)
+    return overlay, successor_blocker
+
+
+def _completed_predecessor_handoff_completion_overlay(
+    predecessor_ticket_id: str,
+) -> dict[str, Any] | None:
+    from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
+        load_historical_approved_predecessor_generation_authority,
+    )
+    from hermes_cli.agent_platform.workflow.work_packet_kanban_projection import (
+        load_kanban_projection_record,
+    )
+
+    authority = load_historical_approved_predecessor_generation_authority(
+        ticket_id=predecessor_ticket_id,
+    )
+    if authority is None:
+        return None
+    projection = load_kanban_projection_record(
+        ticket_id=predecessor_ticket_id,
+        generation_record=authority["generation_record"],
+        decision_record=authority["approval_decision_record"],
+        allow_terminal_completed_predecessor_historical=True,
+    )
+    if projection is None:
+        return None
+    completion = load_current_ticket_human_git_handoff_completion_record(
+        projection_record=projection,
+    )
+    if completion is None:
+        return None
+    overlay = _human_git_handoff_completion_overlay_from_record(completion)
+    overlay["historical_terminal_completed_predecessor_traversal"] = {
+        "verdict": "HISTORICAL_TERMINAL_COMPLETED_PREDECESSOR_TRAVERSAL_READY",
+        "ticket_id": predecessor_ticket_id,
+        "current_actionable_authority": False,
+        "generation_bridge_SHA256": authority["generation_record"].get("bridge_SHA256"),
+        "approval_publication_SHA256": authority["approval_decision_record"].get(
+            "approval_publication_SHA256"
+        ),
+        "projection_SHA256": projection.get("projection_SHA256"),
+        "review_decision_SHA256": completion.get("review_decision_SHA256"),
+        "completion_record_SHA256": completion.get("completion_record_SHA256"),
+        "terminal_completion_evidence": "human_git_handoff_completion",
     }
     return overlay
 
@@ -23276,10 +23404,34 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
     pending_successor_overlay, pending_successor_blocker = (
         _pending_generated_successor_ticket_approval_overlay(snapshot)
     )
+    closed_predecessor_ticket_id = str(
+        snapshot.get("closed_predecessor_ticket_id") or ""
+    ).strip()
     if pending_successor_overlay is not None:
         snapshot.update(pending_successor_overlay)
+        if (
+            closed_predecessor_ticket_id
+            and "historical_terminal_completed_predecessor_traversal" not in snapshot
+        ):
+            predecessor_overlay, predecessor_blocker = (
+                _completed_predecessor_successor_lifecycle_overlay(
+                    snapshot,
+                    predecessor_ticket_id=closed_predecessor_ticket_id,
+                )
+            )
+            if predecessor_overlay is not None:
+                snapshot.update(predecessor_overlay)
+            if predecessor_blocker is not None and not any(
+                blocker.get("id") == predecessor_blocker.get("id")
+                for blocker in remaining_blockers
+            ):
+                remaining_blockers.append(predecessor_blocker)
     if pending_successor_blocker is not None:
-        remaining_blockers.append(pending_successor_blocker)
+        if not any(
+            blocker.get("id") == pending_successor_blocker.get("id")
+            for blocker in remaining_blockers
+        ):
+            remaining_blockers.append(pending_successor_blocker)
 
     def _finalize_completed_current_ticket_projection(
         projection: dict[str, Any],
@@ -23318,9 +23470,33 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
 
     current_ticket_id = str(snapshot.get("current_ticket_id") or "").strip()
     if current_ticket_id:
+        def _apply_completed_predecessor_successor_overlay() -> bool:
+            successor_overlay, successor_blocker = (
+                _completed_predecessor_successor_lifecycle_overlay(
+                    snapshot,
+                    predecessor_ticket_id=current_ticket_id,
+                )
+            )
+            if successor_overlay is None:
+                return False
+            snapshot.update(successor_overlay)
+            if successor_blocker is not None:
+                remaining_blockers.append(successor_blocker)
+            return True
+
         try:
             projection = _load_current_projection_record()
-            if projection.get("ticket_id") == current_ticket_id:
+            if projection.get("ticket_id") != current_ticket_id:
+                if not _apply_completed_predecessor_successor_overlay():
+                    remaining_blockers.append({
+                        "id": f"{current_ticket_id}-CURRENT-PROJECTION-BINDING",
+                        "status": "blocked_by_current_projection_ticket_mismatch",
+                        "evidence": (
+                            f"current ticket {current_ticket_id} does not match current "
+                            f"projection {projection.get('ticket_id')}"
+                        ),
+                    })
+            else:
                 handoff_completion_overlay = _current_ticket_human_git_handoff_completion_overlay(
                     projection,
                 )
@@ -23376,11 +23552,32 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
                             if blocker.get("id") not in superseded_worker_blockers
                         ]
         except Exception as exc:  # pragma: no cover - defensive live-state guard
-            remaining_blockers.append({
-                "id": f"{current_ticket_id}-GOVERNED-AUTONOMY-AUTHORITY",
-                "status": "blocked_by_unreadable_governed_autonomy_projection",
-                "evidence": _safe_text(exc, limit=300),
-            })
+            if not _apply_completed_predecessor_successor_overlay():
+                remaining_blockers.append({
+                    "id": f"{current_ticket_id}-GOVERNED-AUTONOMY-AUTHORITY",
+                    "status": "blocked_by_unreadable_governed_autonomy_projection",
+                    "evidence": _safe_text(exc, limit=300),
+                })
+    closed_predecessor_ticket_id = str(
+        snapshot.get("closed_predecessor_ticket_id") or ""
+    ).strip()
+    if (
+        closed_predecessor_ticket_id
+        and "historical_terminal_completed_predecessor_traversal" not in snapshot
+    ):
+        predecessor_overlay, predecessor_blocker = (
+            _completed_predecessor_successor_lifecycle_overlay(
+                snapshot,
+                predecessor_ticket_id=closed_predecessor_ticket_id,
+            )
+        )
+        if predecessor_overlay is not None:
+            snapshot.update(predecessor_overlay)
+        if predecessor_blocker is not None and not any(
+            blocker.get("id") == predecessor_blocker.get("id")
+            for blocker in remaining_blockers
+        ):
+            remaining_blockers.append(predecessor_blocker)
     snapshot["blocker_count"] = len(remaining_blockers)
     snapshot["next_action_label"] = _next_action_label(snapshot.get("next_action"))
     return snapshot

@@ -1026,6 +1026,10 @@ def kanban_projection_to_workflow_overlay(record: dict[str, Any]) -> dict[str, A
     ticket_id = _safe_ticket_id(record.get("ticket_id"))
     validated = validate_kanban_projection_record(record, ticket_id=ticket_id)
     return {
+        "current_ticket_id": ticket_id,
+        "current_ticket_title": validated["ticket_title"],
+        "next_ticket_id": None,
+        "next_ticket_title": None,
         "readiness": "queued_not_executing",
         "workflow_state": f"{ticket_id}-QUEUED-NOT-EXECUTING",
         "workflow_status": "queued",
@@ -1666,6 +1670,8 @@ def _projection_authority(record: dict[str, Any]) -> dict[str, Any]:
     relative = path.relative_to(get_hermes_home())
     return {
         "authority_record": str(relative).replace("\\", "/"),
+        "ticket_id": ticket_id,
+        "ticket_title": record["ticket_title"],
         "projection_SHA256": record["projection_SHA256"],
         "kanban_task_id": record["kanban_task_id"],
         "kanban_task_idempotency_key": record["kanban_task_idempotency_key"],

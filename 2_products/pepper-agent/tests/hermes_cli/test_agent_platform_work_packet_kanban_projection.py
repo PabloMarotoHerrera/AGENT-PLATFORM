@@ -4147,6 +4147,52 @@ def _p18_9_2_review_ready_for_tool_test(projection_home, monkeypatch, *, pid: in
     return state, retry
 
 
+def _p18_9_2_governed_autonomy_review_ready_for_tool_test(
+    projection_home,
+    monkeypatch,
+    *,
+    pid: int,
+):
+    state = _recovered_p18_9_2_dependency_failure_fixture(projection_home, monkeypatch)
+    pr = state.pr
+    _patch_synthetic_scratch_materialization(monkeypatch, pr)
+    monkeypatch.setattr(state.kanban_db, "_pid_alive", lambda live_pid: int(live_pid) == pid)
+    activation = pr.activate_current_ticket_governed_autonomy(
+        human_request_text="I explicitly authorize governed autonomy activation status for P18.9.2.",
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+        next_action_id="START_P18_9_2_RETRY_REQUIRES_HUMAN_AUTHORIZATION",
+    )
+    assert activation["governed_autonomy_activation_recorded"] is True
+    runtime = pr.continue_current_ticket_governed_autonomy(
+        runtime_goal="Start synthetic governed P18.9.2 terminal run for predecessor evidence.",
+        strategy="DIRECT",
+        spawn_fn=lambda _task, _workspace, board=None, env_overlay=None: pid,
+        project_id="PEPPER",
+        ticket_id="P18.9.2",
+    )
+    assert runtime["runtime_decision"] == "DIRECT"
+    assert runtime["execution_started"] is True
+    assert runtime["kanban_run_id"] == state.failed_run_id + 1
+    state.candidate_fixture = _write_p18_9_2_terminal_candidate_fixture(
+        pr,
+        projection_home,
+        Path(runtime["workspace_path"]),
+    )
+    _finish_projected_run_as_review_required_terminal(
+        state.kanban_db,
+        state.projected,
+        runtime["kanban_run_id"],
+        summary=(
+            "review-required: P18.9.2 Control Center Overview governed terminal run "
+            "is ready for human/code review; focused governed frontend validation passed."
+        ),
+    )
+    state.governed_autonomy_activation = activation
+    state.governed_autonomy_runtime = runtime
+    return state, runtime
+
+
 def _p18_9_2_changes_requested_revision_pending_fixture(
     projection_home,
     monkeypatch,
@@ -4289,12 +4335,20 @@ def _p18_9_2_prepared_review_candidate_fixture(
     monkeypatch,
     *,
     pid: int = 6820,
+    governed_runtime: bool = False,
 ):
-    state, retry = _p18_9_2_review_ready_for_tool_test(
-        projection_home,
-        monkeypatch,
-        pid=pid,
-    )
+    if governed_runtime:
+        state, retry = _p18_9_2_governed_autonomy_review_ready_for_tool_test(
+            projection_home,
+            monkeypatch,
+            pid=pid,
+        )
+    else:
+        state, retry = _p18_9_2_review_ready_for_tool_test(
+            projection_home,
+            monkeypatch,
+            pid=pid,
+        )
     review = state.pr.prepare_current_ticket_review(
         project_id="PEPPER",
         ticket_id="P18.9.2",
@@ -4319,11 +4373,13 @@ def _accepted_p18_9_2_review_for_handoff_prepare(
     monkeypatch,
     *,
     pid: int = 6840,
+    governed_runtime: bool = False,
 ):
     fixture = _p18_9_2_prepared_review_candidate_fixture(
         projection_home,
         monkeypatch,
         pid=pid,
+        governed_runtime=governed_runtime,
     )
     accepted = fixture.pr.submit_current_ticket_review_decision(
         decision="accept",
@@ -5625,6 +5681,7 @@ def _completed_p18_9_2_with_drifted_candidate_workspace(
     *,
     pid: int,
     completion_commit: str,
+    governed_runtime: bool = False,
 ):
     import tools.pepper_workflow_tools  # noqa: F401
     from model_tools import handle_function_call
@@ -5633,6 +5690,7 @@ def _completed_p18_9_2_with_drifted_candidate_workspace(
         projection_home,
         monkeypatch,
         pid=pid,
+        governed_runtime=governed_runtime,
     )
     source_hashes, candidate_hashes = _p18_9_2_candidate_hash_maps(
         fixture.candidate_files
@@ -5707,6 +5765,279 @@ def _completed_p18_9_2_with_drifted_candidate_workspace(
         durable_completion_sha=durable_completion_sha,
         drifted_completion=drifted_completion,
     )
+
+
+def _completed_p18_9_2_with_approved_p18_9_3_successor(
+    projection_home,
+    monkeypatch,
+    *,
+    pid: int,
+    completion_commit: str,
+):
+    state = _completed_p18_9_2_with_drifted_candidate_workspace(
+        projection_home,
+        monkeypatch,
+        pid=pid,
+        completion_commit=completion_commit,
+        governed_runtime=True,
+    )
+    pr = state.fixture.pr
+    generation = bridge.load_generation_record(ticket_id="P18.9.3")
+    assert generation is not None
+    approved = pr.apply_approval_decision(
+        "P18.9.3",
+        pr.ApprovalDecisionRequest(decision="approve", actor="human.p18.9"),
+    )
+    assert approved["status"] == "approved"
+    decision = bridge.load_approval_decision_record(
+        ticket_id="P18.9.3",
+        generation_record=generation,
+    )
+    assert decision is not None
+    return SimpleNamespace(
+        **state.__dict__,
+        pr=pr,
+        successor_generation=generation,
+        successor_decision=decision,
+        successor_approved=approved,
+    )
+
+
+def _project_p18_9_3_successor(state):
+    projected = state.pr.project_current_approved_workpacket_to_kanban(
+        project_id="PEPPER",
+        ticket_id="P18.9.3",
+        next_action_id="P18_9_3_APPROVED_NO_EXECUTION",
+    )
+    projection_record = projection.load_kanban_projection_record(
+        ticket_id="P18.9.3",
+        generation_record=state.successor_generation,
+        decision_record=state.successor_decision,
+    )
+    assert projection_record is not None
+    return SimpleNamespace(
+        **state.__dict__,
+        projected_successor=projected,
+        successor_projection=projection_record,
+    )
+
+
+def test_p18_9_3_projected_successor_dominates_completed_p18_9_2_predecessor(
+    projection_home,
+    monkeypatch,
+) -> None:
+    state = _project_p18_9_3_successor(
+        _completed_p18_9_2_with_approved_p18_9_3_successor(
+            projection_home,
+            monkeypatch,
+            pid=6960,
+            completion_commit="c6aa1234567890abcdef1234567890abcdef1234",
+        )
+    )
+    from hermes_cli import kanban_db
+
+    projection_path = projection.kanban_projection_record_path_for_ticket("P18.9.3")
+    projection_bytes = projection_path.read_bytes()
+    first_snapshot = state.pr.build_workflow_control_snapshot()
+    second_snapshot = state.pr.build_workflow_control_snapshot()
+    current_projection = state.pr._load_current_projection_record()
+    binding_projection = state.pr._current_projection_record_for_binding()
+    predecessor_evidence = state.pr.load_terminal_completed_predecessor_evidence("P18.9.2")
+
+    conn = kanban_db.connect(board=state.successor_projection["kanban_board_slug"])
+    try:
+        tasks = kanban_db.list_tasks(conn)
+        successor_task = kanban_db.get_task(
+            conn,
+            state.successor_projection["kanban_task_id"],
+        )
+        predecessor_task = kanban_db.get_task(
+            conn,
+            predecessor_evidence["kanban_projection_record"]["kanban_task_id"],
+        )
+    finally:
+        conn.close()
+
+    for snapshot in (first_snapshot, second_snapshot):
+        assert snapshot["current_ticket_id"] == "P18.9.3"
+        assert snapshot["workflow_status"] == "queued"
+        assert snapshot["queue_state"] == "kanban_projection_ready_not_dispatched"
+        assert snapshot["pending_ticket_approval_count"] == 0
+        assert snapshot["active_execution_count"] == 0
+        assert snapshot["next_action"]["id"] == (
+            "START_P18_9_3_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION"
+        )
+        assert snapshot["next_action"]["target_ticket_id"] == "P18.9.3"
+        assert snapshot["kanban_projection_authority"]["ticket_id"] == "P18.9.3"
+        assert snapshot["kanban_projection_authority"]["projection_SHA256"] == (
+            state.successor_projection["projection_SHA256"]
+        )
+        assert snapshot["kanban_projection_authority"]["work_packet_id"] == (
+            state.successor_generation["work_packet_id"]
+        )
+        assert snapshot["ticket_execution_authorized"] is False
+        assert snapshot["WorkPacket_execution_authorized"] is False
+        assert snapshot["runtime_execution_authorized"] is False
+        assert snapshot["worker_execution"] is False
+        assert snapshot["Kanban_dispatch"] is False
+        assert snapshot["Git_mutation"] is False
+        traversal = snapshot["historical_terminal_completed_predecessor_traversal"]
+        assert traversal["ticket_id"] == "P18.9.2"
+        assert traversal["current_actionable_authority"] is False
+        assert snapshot["closed_predecessor_ticket_id"] == "P18.9.2"
+        assert snapshot["ticket_closed"] is True
+        assert snapshot["handoff_completion_present"] is True
+        assert snapshot["git_handoff_required"] is False
+        assert snapshot["next_action"]["id"] != "PREPARE_P18_9_2_REVIEW"
+
+    assert current_projection["ticket_id"] == "P18.9.3"
+    assert binding_projection is not None
+    assert binding_projection["ticket_id"] == "P18.9.3"
+    assert current_projection["ticket_spec_SHA256"] == state.successor_generation[
+        "ticket_spec_SHA256"
+    ]
+    assert current_projection["work_packet_id"] == state.successor_generation[
+        "work_packet_id"
+    ]
+    assert current_projection["work_packet_SHA256"] == state.successor_generation[
+        "work_packet_SHA256"
+    ]
+    assert current_projection["approval_publication_SHA256"] == state.successor_decision[
+        "approval_publication_SHA256"
+    ]
+    assert current_projection["projection_SHA256"] == state.successor_projection[
+        "projection_SHA256"
+    ]
+    assert state.pr.load_p18_9_0_execution_start_record(
+        projection_record=state.successor_projection,
+    ) is None
+    assert projection_path.read_bytes() == projection_bytes
+    assert first_snapshot["kanban_projection_authority"] == second_snapshot[
+        "kanban_projection_authority"
+    ]
+    assert successor_task is not None
+    assert successor_task.id == state.successor_projection["kanban_task_id"]
+    assert successor_task.status == "ready"
+    assert predecessor_task is not None
+    assert predecessor_evidence["current_actionable_authority"] is False
+    assert predecessor_evidence["generation_record"]["ticket_id"] == "P18.9.2"
+    assert predecessor_evidence["approval_decision_record"]["decision"] == "approve"
+    assert predecessor_evidence["kanban_projection_record"]["ticket_id"] == "P18.9.2"
+    assert predecessor_evidence["execution_start_record"]["ticket_id"] == "P18.9.2"
+    assert predecessor_evidence["governed_autonomy_activation_record"]["ticket_id"] == "P18.9.2"
+    assert predecessor_evidence["governed_autonomy_runtime_state"]["ticket_id"] == "P18.9.2"
+    assert predecessor_evidence["review_decision_record"]["review_decision"] == "accept"
+    assert predecessor_evidence["human_git_handoff_completion_record"]["ticket_id"] == "P18.9.2"
+    assert [task.id for task in tasks].count(state.successor_projection["kanban_task_id"]) == 1
+    assert not bridge.generation_record_path_for_ticket("P18.9.4").exists()
+
+
+def test_completed_p18_9_2_with_approved_p18_9_3_before_projection_remains_successor_current(
+    projection_home,
+    monkeypatch,
+) -> None:
+    state = _completed_p18_9_2_with_approved_p18_9_3_successor(
+        projection_home,
+        monkeypatch,
+        pid=6961,
+        completion_commit="c6ab1234567890abcdef1234567890abcdef1234",
+    )
+
+    snapshot = state.pr.build_workflow_control_snapshot()
+
+    assert snapshot["current_ticket_id"] == "P18.9.3"
+    assert snapshot["workflow_status"] == "ticket_approved"
+    assert snapshot["queue_state"] == "ticket_approved_not_queued"
+    assert snapshot["pending_ticket_approval_count"] == 0
+    assert snapshot["active_execution_count"] == 0
+    assert snapshot["next_action"]["id"] == "P18_9_3_APPROVED_NO_EXECUTION"
+    assert snapshot["next_action"]["target_ticket_id"] == "P18.9.3"
+    assert snapshot["historical_terminal_completed_predecessor_traversal"][
+        "current_actionable_authority"
+    ] is False
+    assert snapshot["closed_predecessor_ticket_id"] == "P18.9.2"
+    assert snapshot["ticket_closed"] is True
+    assert snapshot["handoff_completion_present"] is True
+    assert snapshot["git_handoff_required"] is False
+    assert snapshot["ticket_execution_authorized"] is False
+    assert snapshot["WorkPacket_execution_authorized"] is False
+    assert snapshot["worker_execution"] is False
+    assert snapshot["Kanban_dispatch"] is False
+    assert not projection.kanban_projection_record_path_for_ticket("P18.9.3").exists()
+    assert not bridge.generation_record_path_for_ticket("P18.9.4").exists()
+
+
+def test_invalid_p18_9_3_successor_projection_fails_closed_without_reactivating_p18_9_2(
+    projection_home,
+    monkeypatch,
+) -> None:
+    state = _project_p18_9_3_successor(
+        _completed_p18_9_2_with_approved_p18_9_3_successor(
+            projection_home,
+            monkeypatch,
+            pid=6962,
+            completion_commit="c6ac1234567890abcdef1234567890abcdef1234",
+        )
+    )
+    path = projection.kanban_projection_record_path_for_ticket("P18.9.3")
+    original = json.loads(path.read_text(encoding="utf-8"))
+    mutations = {
+        "missing": None,
+        "digest-invalid": {"kanban_task_status": "done"},
+        "wrong-generation": {"ticket_spec_SHA256": "0" * 64},
+        "wrong-approval": {"approval_publication_SHA256": "1" * 64},
+        "wrong-workpacket-id": {"work_packet_id": "WP-P18-9-3-R9999-invalid"},
+        "wrong-workpacket-sha": {"work_packet_SHA256": "2" * 64},
+    }
+
+    for label, updates in mutations.items():
+        if updates is None:
+            path.unlink()
+        else:
+            record = json.loads(json.dumps(original))
+            record.update(updates)
+            if label != "digest-invalid":
+                record["projection_SHA256"] = projection._projection_record_digest(record)
+            _write_json_authority_record(path, record)
+
+        if label == "missing":
+            assert state.pr._load_current_projection_record()["ticket_id"] == "P18.9.2"
+        else:
+            with pytest.raises(state.pr.ProductRuntimeConflict):
+                state.pr._load_current_projection_record()
+        snapshot = state.pr.build_workflow_control_snapshot()
+
+        assert snapshot["current_ticket_id"] == "P18.9.3"
+        assert snapshot["workflow_status"] == "ticket_approved"
+        assert snapshot["next_action"]["id"] == "P18_9_3_APPROVED_NO_EXECUTION"
+        assert snapshot["next_action"]["target_ticket_id"] == "P18.9.3"
+        assert snapshot["closed_predecessor_ticket_id"] == "P18.9.2"
+        assert snapshot["ticket_closed"] is True
+        assert snapshot["handoff_completion_present"] is True
+        assert snapshot["git_handoff_required"] is False
+        assert snapshot["historical_terminal_completed_predecessor_traversal"][
+            "current_actionable_authority"
+        ] is False
+        assert snapshot["ticket_execution_authorized"] is False
+        assert snapshot["WorkPacket_execution_authorized"] is False
+        assert snapshot["runtime_execution_authorized"] is False
+        assert snapshot["worker_execution"] is False
+        assert snapshot["Kanban_dispatch"] is False
+        assert snapshot["Git_mutation"] is False
+        assert snapshot["next_action"]["id"] != "PREPARE_P18_9_2_REVIEW"
+        if label != "missing":
+            assert any(
+                blocker.get("id") == "P18.9.3-SUCCESSOR-KANBAN-PROJECTION-AUTHORITY"
+                for blocker in snapshot.get("remaining_blockers", [])
+            )
+
+        _write_json_authority_record(path, original)
+        restored = state.pr.build_workflow_control_snapshot()
+        assert restored["current_ticket_id"] == "P18.9.3"
+        assert restored["workflow_status"] == "queued"
+        assert restored["kanban_projection_authority"]["projection_SHA256"] == original[
+            "projection_SHA256"
+        ]
 
 
 def test_p18_9_2_post_handoff_commit_reconstruction_preserves_completion_pending(
