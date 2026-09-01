@@ -10749,16 +10749,21 @@ _SCRATCH_SOURCE_PACKAGE_CLOSURES = (
         "package_rel": "2_products/pepper-agent/web",
         "source_dirs": ("src", "public"),
         "support_files": _SCRATCH_SOURCE_COMMON_PACKAGE_FILES,
+        "read_only_repository_files": (
+            "2_products/pepper-agent/hermes_cli/agent_platform/product_config.py",
+        ),
     },
     {
         "package_rel": "2_products/pepper-agent/apps/desktop",
         "source_dirs": ("src", "electron", "public"),
         "support_files": _SCRATCH_SOURCE_COMMON_PACKAGE_FILES,
+        "read_only_repository_files": (),
     },
     {
         "package_rel": "2_products/pepper-agent/ui-tui",
         "source_dirs": ("src",),
         "support_files": _SCRATCH_SOURCE_COMMON_PACKAGE_FILES,
+        "read_only_repository_files": (),
     },
 )
 _SCRATCH_DEPENDENCY_EXCLUDED_DIR_NAMES = frozenset({
@@ -11477,7 +11482,11 @@ def _materialize_workpacket_scratch_source_tree(
 ) -> dict[str, Any]:
     """Copy bounded readable source into scratch while preserving write scope."""
 
-    source = Path(source_root).expanduser() if source_root is not None else _agent_platform_repository_root()
+    source = (
+        Path(source_root).expanduser()
+        if source_root is not None
+        else _agent_platform_repository_root()
+    )
     try:
         resolved_source = source.resolve(strict=True)
     except OSError as exc:
@@ -11500,6 +11509,7 @@ def _materialize_workpacket_scratch_source_tree(
     cleaned_roots: set[str] = set()
     package_closures: set[str] = set()
     missing_paths: set[str] = set()
+    read_only_support_files: list[dict[str, Any]] = []
 
     for package in _selected_scratch_source_package_closures(authority.allowed_paths):
         package_rel = str(package["package_rel"])
@@ -11538,6 +11548,15 @@ def _materialize_workpacket_scratch_source_tree(
             )
             materialized_roots.add(rel)
             readable_roots.add(package_rel)
+        for filename in tuple(package.get("read_only_repository_files") or ()):
+            support = _materialize_read_only_validation_support_file(
+                str(filename),
+                source_root=resolved_source,
+                workspace_root=workspace,
+                copied_files=copied_files,
+            )
+            read_only_support_files.append(support)
+            materialized_roots.add(support["repository_relative_path"])
 
     for pattern in authority.allowed_paths:
         _materialize_allowed_source_pattern(
@@ -11568,6 +11587,11 @@ def _materialize_workpacket_scratch_source_tree(
         "writable_allowed_paths": list(authority.allowed_paths),
         "forbidden_paths": list(authority.forbidden_paths),
         "package_source_closures": sorted(package_closures),
+        "read_only_validation_support_files": sorted(
+            read_only_support_files,
+            key=lambda item: str(item["repository_relative_path"]),
+        ),
+        "read_only_validation_support_copied_file_count": len(read_only_support_files),
         "materialized_roots": sorted(materialized_roots),
         "missing_source_paths": sorted(missing_paths),
         "copied_file_count": len(copied_files),
@@ -11581,6 +11605,49 @@ def _materialize_workpacket_scratch_source_tree(
     return record
 
 
+def _materialize_read_only_validation_support_file(
+    relative_path: str,
+    *,
+    source_root: Path,
+    workspace_root: Path,
+    copied_files: set[str],
+) -> dict[str, Any]:
+    rel = _normalize_materialization_relative_path(relative_path)
+    src = source_root / rel
+    if not src.is_file():
+        raise ProductRuntimeDependencyGap(
+            DEPENDENCY_SOURCE_NOT_FOUND,
+            f"read-only validation support source is unavailable: {rel}",
+        )
+    source_sha = _sha256_file_or_none(src)
+    if source_sha is None:
+        raise ProductRuntimeDependencyGap(
+            DEPENDENCY_SOURCE_NOT_FOUND,
+            f"read-only validation support source is unreadable: {rel}",
+        )
+    scratch = workspace_root / rel
+    _copy_materialized_file(
+        src,
+        scratch,
+        source_root=source_root,
+        workspace_root=workspace_root,
+        copied_files=copied_files,
+    )
+    scratch_sha = _sha256_file_or_none(scratch)
+    if scratch_sha != source_sha:
+        raise ProductRuntimeDependencyGap(
+            DEPENDENCY_PROVENANCE_MISMATCH,
+            f"read-only validation support digest mismatch: {rel}",
+        )
+    return {
+        "repository_relative_path": rel,
+        "source_SHA256": source_sha,
+        "scratch_SHA256": scratch_sha,
+        "materialized": True,
+        "read_only": True,
+    }
+
+
 def _selected_scratch_source_package_closures(
     allowed_paths: tuple[str, ...],
 ) -> tuple[dict[str, Any], ...]:
@@ -11588,7 +11655,10 @@ def _selected_scratch_source_package_closures(
     for package in _SCRATCH_SOURCE_PACKAGE_CLOSURES:
         package_rel = str(package["package_rel"])
         prefix = f"{package_rel}/"
-        if any(str(path).strip() == package_rel or str(path).strip().startswith(prefix) for path in allowed_paths):
+        if any(
+            str(path).strip() == package_rel or str(path).strip().startswith(prefix)
+            for path in allowed_paths
+        ):
             selected.append(package)
     return tuple(selected)
 
@@ -12680,6 +12750,8 @@ def _governed_autonomy_materialization_manifest(
         "dependency_install_performed",
         "canonical_package_lock_materialized",
         "missing_source_paths",
+        "read_only_validation_support_files",
+        "read_only_validation_support_copied_file_count",
         "product_diff_excluded_roots",
     ):
         if key in manifest:

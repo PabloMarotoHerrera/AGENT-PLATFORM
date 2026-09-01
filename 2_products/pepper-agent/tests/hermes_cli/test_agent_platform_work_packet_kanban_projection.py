@@ -256,6 +256,32 @@ def _write_fixture_file(root: Path, relative_path: str, text: str) -> Path:
     return path
 
 
+_WEB_READ_ONLY_VALIDATION_SUPPORT_REL = (
+    "2_products/pepper-agent/hermes_cli/agent_platform/product_config.py"
+)
+_WEB_READ_ONLY_VALIDATION_SUPPORT_TEXT = (
+    "from enum import Enum\n\n"
+    "class FeatureState(str, Enum):\n"
+    "    ENABLED = 'enabled'\n"
+    "    DISABLED = 'disabled'\n\n"
+    "DEFAULT_FEATURE_FLAGS = {\n"
+    "    \"agent_platform.product_ui\": FeatureState.ENABLED,\n"
+    "}\n"
+)
+
+
+def _write_web_read_only_validation_support_file(
+    source_root: Path,
+    *,
+    text: str = _WEB_READ_ONLY_VALIDATION_SUPPORT_TEXT,
+) -> Path:
+    return _write_fixture_file(
+        source_root,
+        _WEB_READ_ONLY_VALIDATION_SUPPORT_REL,
+        text,
+    )
+
+
 def _node_import_meta_resolve(
     node: str,
     cwd: Path,
@@ -1579,6 +1605,7 @@ def test_scratch_source_materialization_copies_frontend_readable_closure(
         "2_products/pepper-agent/web/package.json",
         json.dumps({"scripts": {"test": "vitest run"}}),
     )
+    _write_web_read_only_validation_support_file(source_root)
     _write_fixture_file(
         source_root,
         "2_products/pepper-agent/web/package-lock.json",
@@ -1643,6 +1670,309 @@ def test_scratch_source_materialization_copies_frontend_readable_closure(
     assert canonical_app.read_text(encoding="utf-8") == "export const app = 'canonical';\n"
 
 
+def test_scratch_source_materialization_copies_web_read_only_validation_support(
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    source_root = tmp_path / "source"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    support_source = _write_web_read_only_validation_support_file(source_root)
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/package.json",
+        json.dumps({
+            "name": "web",
+            "type": "module",
+            "scripts": {"test": "vitest run"},
+            "dependencies": {"@hermes/shared": "file:../apps/shared"},
+        }),
+    )
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/src/App.tsx",
+        "export function App() { return null }\n",
+    )
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/src/pages/ChatPage.tsx",
+        "export function ChatPage() { return null }\n",
+    )
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/src/components/ChatSidebar.tsx",
+        "export function ChatSidebar() { return null }\n",
+    )
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/src/agent-platform/design-system/design-system.test.ts",
+        "export const BACKEND_CONFIG_URL = "
+        "new URL('../../../../hermes_cli/agent_platform/product_config.py', import.meta.url);\n",
+    )
+    allowed_paths = (
+        "2_products/pepper-agent/web/src/pages/ChatPage.tsx",
+        "2_products/pepper-agent/web/src/App.tsx",
+        "2_products/pepper-agent/web/src/agent-platform/**",
+        "2_products/pepper-agent/web/src/components/**",
+    )
+    authority = _source_materialization_authority(workspace, allowed_paths=allowed_paths)
+
+    record = pr._materialize_workpacket_scratch_source_tree(
+        authority,
+        source_root=source_root,
+    )
+
+    scratch_support = workspace / _WEB_READ_ONLY_VALIDATION_SUPPORT_REL
+    support_record = record["read_only_validation_support_files"][0]
+    assert scratch_support.read_text(encoding="utf-8") == support_source.read_text(
+        encoding="utf-8"
+    )
+    assert support_record["repository_relative_path"] == _WEB_READ_ONLY_VALIDATION_SUPPORT_REL
+    assert support_record["source_SHA256"] == _sha256_path(support_source)
+    assert support_record["scratch_SHA256"] == _sha256_path(scratch_support)
+    assert support_record["source_SHA256"] == support_record["scratch_SHA256"]
+    assert support_record["read_only"] is True
+    assert record["read_only_validation_support_copied_file_count"] == 1
+    assert record["writable_allowed_paths"] == list(allowed_paths)
+    assert _WEB_READ_ONLY_VALIDATION_SUPPORT_REL not in record["writable_allowed_paths"]
+    assert "2_products/pepper-agent/hermes_cli" not in record["package_source_closures"]
+
+
+def test_web_design_system_backend_config_path_resolves_inside_scratch(
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    source_root = tmp_path / "source"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _write_web_read_only_validation_support_file(source_root)
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/package.json",
+        json.dumps({"scripts": {"test": "vitest run"}}),
+    )
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/src/agent-platform/design-system/design-system.test.ts",
+        "const BACKEND_CONFIG_PATH = fileURLToPath("
+        "new URL('../../../../hermes_cli/agent_platform/product_config.py', import.meta.url));\n",
+    )
+    authority = _source_materialization_authority(
+        workspace,
+        allowed_paths=("2_products/pepper-agent/web/src/agent-platform/**",),
+    )
+
+    pr._materialize_workpacket_scratch_source_tree(authority, source_root=source_root)
+
+    scratch_test = (
+        workspace
+        / "2_products/pepper-agent/web/src/agent-platform/design-system/design-system.test.ts"
+    )
+    backend_config = (
+        scratch_test.parent
+        / "../../../../hermes_cli/agent_platform/product_config.py"
+    ).resolve(strict=True)
+    assert backend_config == (workspace / _WEB_READ_ONLY_VALIDATION_SUPPORT_REL).resolve(
+        strict=True
+    )
+    assert backend_config.is_file()
+
+
+def test_web_read_only_validation_support_is_readable_but_write_denied(
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+    from tools import governed_workpacket_file_guard as file_guard
+
+    source_root = tmp_path / "source"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _write_web_read_only_validation_support_file(source_root)
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/package.json",
+        json.dumps({"scripts": {"test": "vitest run"}}),
+    )
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/src/pages/ChatPage.tsx",
+        "export function ChatPage() { return null }\n",
+    )
+    allowed_paths = (
+        "2_products/pepper-agent/web/src/pages/ChatPage.tsx",
+        "2_products/pepper-agent/web/src/App.tsx",
+        "2_products/pepper-agent/web/src/agent-platform/**",
+        "2_products/pepper-agent/web/src/components/**",
+    )
+    authority = _source_materialization_authority(workspace, allowed_paths=allowed_paths)
+
+    pr._materialize_workpacket_scratch_source_tree(authority, source_root=source_root)
+
+    support_path = workspace / _WEB_READ_ONLY_VALIDATION_SUPPORT_REL
+    assert support_path.read_text(encoding="utf-8") == _WEB_READ_ONLY_VALIDATION_SUPPORT_TEXT
+    denial = file_guard.evaluate_write_target(authority, _WEB_READ_ONLY_VALIDATION_SUPPORT_REL)
+    assert denial is not None
+    assert denial.code == file_guard.WORKPACKET_WRITE_PATH_DENIED
+    assert "not included in WorkPacket allowed paths" in denial.detail
+
+
+def test_candidate_diff_excludes_read_only_validation_support_file(
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    source_root = tmp_path / "source"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _write_web_read_only_validation_support_file(source_root)
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/package.json",
+        json.dumps({"scripts": {"test": "vitest run"}}),
+    )
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/src/pages/ChatPage.tsx",
+        "export function ChatPage() { return null }\n",
+    )
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/src/components/ChatSidebar.tsx",
+        "export function ChatSidebar() { return null }\n",
+    )
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/src/agent-platform/design-system/design-system.test.ts",
+        "test('committed design system', () => {})\n",
+    )
+    allowed_paths = (
+        "2_products/pepper-agent/web/src/pages/ChatPage.tsx",
+        "2_products/pepper-agent/web/src/App.tsx",
+        "2_products/pepper-agent/web/src/agent-platform/**",
+        "2_products/pepper-agent/web/src/components/**",
+    )
+    authority = _source_materialization_authority(workspace, allowed_paths=allowed_paths)
+    record = pr._materialize_workpacket_scratch_source_tree(
+        authority,
+        source_root=source_root,
+    )
+
+    _write_fixture_file(
+        workspace,
+        "2_products/pepper-agent/web/src/agent-platform/lead-agent-chat.test.tsx",
+        "test('candidate lead chat', () => {})\n",
+    )
+    _write_fixture_file(
+        workspace,
+        "2_products/pepper-agent/web/src/components/ChatSidebar.tsx",
+        "export function ChatSidebar() { return 'candidate' }\n",
+    )
+    _write_fixture_file(
+        workspace,
+        "2_products/pepper-agent/web/src/pages/ChatPage.tsx",
+        "export function ChatPage() { return 'candidate' }\n",
+    )
+    _write_fixture_file(
+        workspace,
+        _WEB_READ_ONLY_VALIDATION_SUPPORT_REL,
+        "# accidental support-file drift must not become a candidate\n",
+    )
+
+    candidate = pr._governed_autonomy_candidate_changes_reference(record)
+
+    assert candidate is not None
+    assert candidate["available"] is True
+    assert {item["path"] for item in candidate["files"]} == {
+        "2_products/pepper-agent/web/src/agent-platform/lead-agent-chat.test.tsx",
+        "2_products/pepper-agent/web/src/components/ChatSidebar.tsx",
+        "2_products/pepper-agent/web/src/pages/ChatPage.tsx",
+    }
+    assert _WEB_READ_ONLY_VALIDATION_SUPPORT_REL not in {
+        item["path"] for item in candidate["files"]
+    }
+
+
+def test_web_read_only_validation_support_missing_source_fails_closed(
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    source_root = tmp_path / "source"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/package.json",
+        json.dumps({"scripts": {"test": "vitest run"}}),
+    )
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/src/pages/ChatPage.tsx",
+        "export function ChatPage() { return null }\n",
+    )
+    authority = _source_materialization_authority(
+        workspace,
+        allowed_paths=("2_products/pepper-agent/web/src/pages/ChatPage.tsx",),
+    )
+
+    with pytest.raises(pr.ProductRuntimeDependencyGap) as exc_info:
+        pr._materialize_workpacket_scratch_source_tree(
+            authority,
+            source_root=source_root,
+        )
+
+    assert exc_info.value.external_code == pr.IMPLEMENTATION_SCRATCH_VALIDATION_DEPENDENCY_GAP
+    assert exc_info.value.dependency_code == pr.DEPENDENCY_SOURCE_NOT_FOUND
+    assert _WEB_READ_ONLY_VALIDATION_SUPPORT_REL in str(exc_info.value)
+
+
+def test_web_read_only_validation_support_digest_mismatch_fails_closed(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    source_root = tmp_path / "source"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _write_web_read_only_validation_support_file(source_root)
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/package.json",
+        json.dumps({"scripts": {"test": "vitest run"}}),
+    )
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/src/pages/ChatPage.tsx",
+        "export function ChatPage() { return null }\n",
+    )
+    original_copy = pr._copy_materialized_file
+
+    def corrupt_support_copy(source_file, destination_file, **kwargs):
+        original_copy(source_file, destination_file, **kwargs)
+        relative = source_file.relative_to(kwargs["source_root"]).as_posix()
+        if relative == _WEB_READ_ONLY_VALIDATION_SUPPORT_REL:
+            destination_file.write_text("tampered support copy\n", encoding="utf-8")
+
+    monkeypatch.setattr(pr, "_copy_materialized_file", corrupt_support_copy)
+    authority = _source_materialization_authority(
+        workspace,
+        allowed_paths=("2_products/pepper-agent/web/src/pages/ChatPage.tsx",),
+    )
+
+    with pytest.raises(pr.ProductRuntimeDependencyGap) as exc_info:
+        pr._materialize_workpacket_scratch_source_tree(
+            authority,
+            source_root=source_root,
+        )
+
+    assert exc_info.value.external_code == pr.IMPLEMENTATION_SCRATCH_VALIDATION_DEPENDENCY_GAP
+    assert exc_info.value.dependency_code == pr.DEPENDENCY_PROVENANCE_MISMATCH
+    assert _WEB_READ_ONLY_VALIDATION_SUPPORT_REL in str(exc_info.value)
+
+
 def test_scratch_source_materialization_copies_python_allowed_files(
     tmp_path,
 ) -> None:
@@ -1697,6 +2027,7 @@ def test_scratch_source_materialization_skips_dependency_and_lockfile_noise(
         "2_products/pepper-agent/web/package.json",
         json.dumps({"scripts": {"test": "vitest run"}}),
     )
+    _write_web_read_only_validation_support_file(source_root)
     _write_fixture_file(
         source_root,
         "2_products/pepper-agent/web/package-lock.json",
@@ -1747,6 +2078,7 @@ def test_workpacket_validation_discovers_scratch_only_frontend_tests(
         "2_products/pepper-agent/web/package.json",
         json.dumps({"scripts": {"test": "vitest run"}}),
     )
+    _write_web_read_only_validation_support_file(source_root)
     _write_fixture_file(
         source_root,
         "2_products/pepper-agent/web/src/agent-platform/shell/navigation.ts",
@@ -1822,6 +2154,7 @@ def test_dependency_substrate_materializes_snapshot_and_runs_scratch_validation(
         "2_products/pepper-agent/web/package.json",
         json.dumps({"scripts": {"test": "vitest run"}}),
     )
+    _write_web_read_only_validation_support_file(source_root)
     _write_fixture_file(
         source_root,
         "2_products/pepper-agent/web/src/agent-platform/shell/scratch-validation.test.ts",
@@ -1944,6 +2277,7 @@ def test_dependency_substrate_materializes_internal_symlinked_files_as_physical_
         f"{web_package_rel}/package.json",
         json.dumps({"scripts": {"test": "vitest run"}}),
     )
+    _write_web_read_only_validation_support_file(source_root)
     _write_fixture_file(
         source_root,
         f"{web_package_rel}/src/agent-platform/shell/scratch-validation.test.ts",
@@ -2012,6 +2346,7 @@ def test_dependency_substrate_rejects_symlinked_files_that_escape_dependency_roo
         f"{web_package_rel}/package.json",
         json.dumps({"scripts": {"test": "vitest run"}}),
     )
+    _write_web_read_only_validation_support_file(source_root)
     symlinked_entry = source_root / f"{root_modules_rel}/vitest/vitest.mjs"
     symlinked_entry.parent.mkdir(parents=True, exist_ok=True)
     _make_file_symlink_or_skip(symlinked_entry, package_test)
@@ -2072,6 +2407,7 @@ def test_dependency_substrate_rejects_invalid_symlinked_files(
         f"{web_package_rel}/package.json",
         json.dumps({"scripts": {"test": "vitest run"}}),
     )
+    _write_web_read_only_validation_support_file(source_root)
     _write_fixture_file(
         source_root,
         f"{web_package_rel}/src/agent-platform/shell/scratch-validation.test.ts",
@@ -2141,6 +2477,7 @@ def test_dependency_substrate_missing_vitest_fails_before_worker_spawn(
         "2_products/pepper-agent/web/package.json",
         json.dumps({"scripts": {"test": "vitest run"}}),
     )
+    _write_web_read_only_validation_support_file(source_root)
     _write_fixture_file(
         source_root,
         "2_products/pepper-agent/web/src/agent-platform/shell/scratch-validation.test.ts",
@@ -2189,6 +2526,7 @@ def test_dependency_substrate_excludes_workspace_package_reparse_points(
         "2_products/pepper-agent/web/package.json",
         json.dumps({"scripts": {"test": "vitest run"}}),
     )
+    _write_web_read_only_validation_support_file(source_root)
     _write_fixture_file(
         source_root,
         "2_products/pepper-agent/web/src/agent-platform/shell/scratch-validation.test.ts",
@@ -2279,6 +2617,7 @@ def test_dependency_substrate_recreates_package_local_and_workspace_dependency_t
             },
         }),
     )
+    _write_web_read_only_validation_support_file(source_root)
     _write_fixture_file(
         source_root,
         f"{web_package_rel}/src/agent-platform/shell/shell.test.tsx",
