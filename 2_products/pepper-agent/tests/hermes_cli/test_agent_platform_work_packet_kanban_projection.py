@@ -1216,6 +1216,446 @@ def _synthetic_retry_start_record(ticket_id: str, *, run_id: int) -> dict[str, o
     }
 
 
+def _c9_ticket_title(ticket_id: str) -> str:
+    return f"Synthetic {ticket_id} Authority"
+
+
+def _c9_generation_record(ticket_id: str) -> dict[str, object]:
+    record = {
+        "ticket_id": ticket_id,
+        "ticket_title": _c9_ticket_title(ticket_id),
+        "bridge_SHA256": hashlib.sha256(ticket_id.encode("utf-8")).hexdigest(),
+        "human_ticket_approval_present": True,
+    }
+    if ticket_id.startswith("P99."):
+        ordinal = int(ticket_id.rsplit(".", 1)[1])
+        if ordinal > 0:
+            predecessor = f"P99.{ordinal - 1}"
+            record["predecessor_ticket_id"] = predecessor
+            record["roadmap_dependency_ticket_ids"] = [predecessor]
+    return record
+
+
+def _c9_projection_record(ticket_id: str) -> dict[str, object]:
+    return {
+        "project_id": "PEPPER",
+        "macroproject_id": "P99",
+        "macroproject_title": "Synthetic Current Authority",
+        "ticket_id": ticket_id,
+        "ticket_title": _c9_ticket_title(ticket_id),
+        "ticket_spec_SHA256": hashlib.sha256(f"{ticket_id}:spec".encode()).hexdigest(),
+        "work_packet_id": f"WP-{ticket_id.replace('.', '-')}-R0001-synthetic",
+        "work_packet_SHA256": hashlib.sha256(f"{ticket_id}:wp".encode()).hexdigest(),
+        "WorkPacket_compilation_count": 1,
+        "projection_SHA256": hashlib.sha256(f"{ticket_id}:projection".encode()).hexdigest(),
+        "approval_publication_SHA256": hashlib.sha256(
+            f"{ticket_id}:approval".encode()
+        ).hexdigest(),
+        "dependency_plan_SHA256": hashlib.sha256(
+            f"{ticket_id}:dependency".encode()
+        ).hexdigest(),
+        "kanban_board_slug": "synthetic",
+        "kanban_task_id": f"t_{ticket_id.replace('.', '_').lower()}",
+    }
+
+
+def _c9_next_action(ticket_id: str, action_id: str, required: str) -> dict[str, object]:
+    return {
+        "id": action_id,
+        "label": f"Synthetic next action for {ticket_id}.",
+        "target_ticket_id": ticket_id,
+        "target_ticket_title": _c9_ticket_title(ticket_id),
+        "required_human_action": required,
+    }
+
+
+def _c9_projection_overlay(pr, ticket_id: str) -> dict[str, object]:
+    actions = pr.governed_ticket_lifecycle_action_ids(ticket_id)
+    return {
+        "current_ticket_id": ticket_id,
+        "current_ticket_title": _c9_ticket_title(ticket_id),
+        "next_ticket_id": None,
+        "next_ticket_title": None,
+        "readiness": "queued_not_executing",
+        "workflow_state": f"{ticket_id}-QUEUED-NOT-EXECUTING",
+        "workflow_status": "queued",
+        "approval_state": "ticket_approved",
+        "pending_ticket_approval_count": 0,
+        "queue_state": "kanban_projection_ready_not_dispatched",
+        "execution_state": "not_started",
+        "active_execution_count": 0,
+        "validation_state": "queued_not_executed",
+        "review_state": "not_started_execution_pending",
+        "recovery_state": "not_required",
+        "git_handoff_state": "human_git_authority_preserved",
+        "kanban_projection_authority": {
+            "ticket_id": ticket_id,
+            "projection_SHA256": _c9_projection_record(ticket_id)["projection_SHA256"],
+        },
+        "ticket_execution_authorized": False,
+        "WorkPacket_execution_authorized": False,
+        "runtime_execution_authorized": False,
+        "worker_execution": False,
+        "Kanban_dispatch": False,
+        "Git_mutation": False,
+        "next_action": _c9_next_action(
+            ticket_id,
+            actions["execution_start"],
+            "execution_start_authorization",
+        ),
+    }
+
+
+def _c9_generation_overlay(pr, ticket_id: str) -> dict[str, object]:
+    actions = pr.governed_ticket_lifecycle_action_ids(ticket_id)
+    return {
+        "current_ticket_id": ticket_id,
+        "current_ticket_title": _c9_ticket_title(ticket_id),
+        "next_ticket_id": None,
+        "next_ticket_title": None,
+        "readiness": "ticket_approved",
+        "workflow_state": f"{ticket_id}-TICKET-APPROVED",
+        "workflow_status": "ticket_approved",
+        "approval_state": "ticket_approved",
+        "pending_ticket_approval_count": 0,
+        "queue_state": "ticket_approved_not_queued",
+        "validation_state": "ticket_approved_compile_only_not_executed",
+        "review_state": "human_ticket_approval_recorded",
+        "recovery_state": "not_required",
+        "git_handoff_state": "human_git_authority_preserved",
+        "generated_ticket_authority": {"ticket_id": ticket_id},
+        "ticket_approval_authority": {"ticket_id": ticket_id, "decision": "approve"},
+        "ticket_execution_authorized": False,
+        "WorkPacket_execution_authorized": False,
+        "runtime_execution_authorized": False,
+        "worker_execution": False,
+        "Kanban_dispatch": False,
+        "Git_mutation": False,
+        "next_action": _c9_next_action(
+            ticket_id,
+            actions["approved_no_execution"],
+            "governed_followup",
+        ),
+    }
+
+
+def _c9_completed_overlay(pr, ticket_id: str) -> dict[str, object]:
+    successor = f"P99.{int(ticket_id.rsplit('.', 1)[1]) + 1}"
+    return {
+        "current_ticket_id": None,
+        "current_ticket_title": None,
+        "closed_predecessor_ticket_id": ticket_id,
+        "next_ticket_id": successor,
+        "next_ticket_title": _c9_ticket_title(successor),
+        "readiness": "human_git_handoff_completed_next_ticket_ready",
+        "workflow_state": f"{ticket_id}-COMPLETED",
+        "workflow_status": "completed",
+        "queue_state": "current_ticket_closed_next_ticket_ready",
+        "execution_state": "no_active_executions",
+        "active_execution_count": 0,
+        "validation_state": "review_accepted",
+        "review_state": "accepted",
+        "recovery_state": "not_required",
+        "git_handoff_state": "human_git_handoff_completed",
+        "git_handoff_required": False,
+        "handoff_completion_present": True,
+        "ticket_closed": True,
+        "next_ticket_ready": True,
+        "historical_terminal_completed_predecessor_traversal": {
+            "ticket_id": ticket_id,
+            "current_actionable_authority": False,
+        },
+        "next_action": _c9_next_action(
+            successor,
+            pr.governed_ticket_lifecycle_action_ids(successor)["generate"],
+            "ticket_generation",
+        ),
+    }
+
+
+def _c9_lifecycle_overlay(pr, ticket_id: str, state: str) -> dict[str, object] | None:
+    actions = pr.governed_ticket_lifecycle_action_ids(ticket_id)
+    handoff_prepare = f"PREPARE_{ticket_id.replace('.', '_').upper()}_HUMAN_GIT_HANDOFF"
+    handoff_complete = f"COMPLETE_{ticket_id.replace('.', '_').upper()}_HUMAN_GIT_HANDOFF"
+    overlays = {
+        "queued": None,
+        "executing": {
+            "readiness": "execution_started",
+            "workflow_state": f"{ticket_id}-EXECUTING",
+            "workflow_status": "executing",
+            "queue_state": "kanban_dispatched",
+            "execution_state": "active_executions",
+            "active_execution_count": 1,
+            "validation_state": "execution_in_progress",
+            "review_state": "not_started_execution_in_progress",
+            "recovery_state": "not_required",
+            "execution_started": True,
+            "worker_execution": True,
+            "Kanban_dispatch": True,
+            "next_action": _c9_next_action(
+                ticket_id,
+                actions["monitor_execution"],
+                "execution_monitoring",
+            ),
+        },
+        "execution_failed": {
+            "readiness": "execution_failed_recovery_required",
+            "workflow_state": f"{ticket_id}-EXECUTION-FAILED-RECOVERY-REQUIRED",
+            "workflow_status": "execution_failed",
+            "queue_state": "kanban_execution_terminal",
+            "execution_state": "no_active_executions",
+            "active_execution_count": 0,
+            "validation_state": "execution_failed_before_validation",
+            "review_state": "not_started_execution_failed",
+            "recovery_state": "recovery_required",
+            "next_action": _c9_next_action(
+                ticket_id,
+                actions["execution_recovery"],
+                "execution_recovery_authorization",
+            ),
+        },
+        "retry_pending": {
+            "readiness": "execution_failed_retry_pending",
+            "workflow_state": f"{ticket_id}-RETRY-PENDING-NOT-DISPATCHED",
+            "workflow_status": "retry_pending",
+            "queue_state": "kanban_retry_prepared_not_dispatched",
+            "execution_state": "no_active_executions",
+            "active_execution_count": 0,
+            "validation_state": "execution_failed_retry_pending",
+            "review_state": "not_started_execution_failed",
+            "recovery_state": "retry_pending",
+            "retry_state": "retry_pending",
+            "next_action": _c9_next_action(
+                ticket_id,
+                actions["retry_start"],
+                "retry_start_authorization",
+            ),
+        },
+        "retrying": {
+            "readiness": "retry_execution_started",
+            "workflow_state": f"{ticket_id}-EXECUTING",
+            "workflow_status": "executing",
+            "queue_state": "kanban_dispatched",
+            "execution_state": "active_executions",
+            "active_execution_count": 1,
+            "validation_state": "execution_in_progress",
+            "review_state": "not_started_execution_in_progress",
+            "recovery_state": "not_required",
+            "retry_state": "retry_executing",
+            "execution_started": True,
+            "worker_execution": True,
+            "Kanban_dispatch": True,
+            "next_action": _c9_next_action(
+                ticket_id,
+                actions["monitor_execution"],
+                "execution_monitoring",
+            ),
+        },
+        "validated_review_ready": {
+            "readiness": "governed_autonomy_validated_candidate_review_ready",
+            "workflow_state": f"{ticket_id}-RETRY-EXECUTION-COMPLETED",
+            "workflow_status": "execution_completed",
+            "queue_state": "kanban_retry_execution_terminal",
+            "execution_state": "no_active_executions",
+            "active_execution_count": 0,
+            "validation_state": "execution_completed_pending_validation",
+            "review_state": "ready_for_review_validation",
+            "recovery_state": "not_required",
+            "retry_state": "retry_completed",
+            "git_handoff_required": True,
+            "git_handoff_state": "human_git_authority_preserved",
+            "validated_candidate_review_required": True,
+            "candidate_changes_available": True,
+            "next_action": _c9_next_action(
+                ticket_id,
+                actions["review_prepare"],
+                "review_validation_preparation_and_human_git_handoff",
+            ),
+        },
+        "review_prepared": {
+            "readiness": "review_prepared_pending_human_acceptance",
+            "workflow_state": f"{ticket_id}-REVIEW-PREPARED-PENDING-HUMAN-ACCEPTANCE",
+            "workflow_status": "review_prepared_pending_human_acceptance",
+            "queue_state": "kanban_retry_execution_terminal",
+            "execution_state": "no_active_executions",
+            "active_execution_count": 0,
+            "validation_state": "review_prepared_pending_human_acceptance",
+            "review_state": "prepared_pending_human_acceptance",
+            "recovery_state": "not_required",
+            "git_handoff_required": False,
+            "git_handoff_state": "not_required_for_ticket_result",
+            "review_prepare_authority": {"ticket_id": ticket_id},
+            "human_acceptance_required": True,
+            "human_acceptance_recorded": False,
+            "next_action": _c9_next_action(
+                ticket_id,
+                actions["review_acceptance"],
+                "review_acceptance",
+            ),
+        },
+        "review_accepted_handoff_pending": {
+            "readiness": "review_accepted_pending_human_git_handoff",
+            "workflow_state": f"{ticket_id}-REVIEW-ACCEPTED-AWAITING-HUMAN-GIT-HANDOFF",
+            "workflow_status": "review_accepted_pending_human_git_handoff",
+            "queue_state": "kanban_retry_execution_terminal",
+            "execution_state": "no_active_executions",
+            "active_execution_count": 0,
+            "validation_state": "review_accepted",
+            "review_state": "accepted",
+            "recovery_state": "not_required",
+            "git_handoff_required": True,
+            "git_handoff_state": "human_git_authority_preserved",
+            "review_decision_recorded": True,
+            "human_acceptance_recorded": True,
+            "next_action": _c9_next_action(
+                ticket_id,
+                handoff_prepare,
+                "human_git_handoff_prepare",
+            ),
+        },
+        "human_git_handoff_prepared": {
+            "readiness": "human_git_handoff_prepared_pending_completion",
+            "workflow_state": f"{ticket_id}-HUMAN-GIT-HANDOFF-PREPARED-PENDING-COMPLETION",
+            "workflow_status": "review_accepted_pending_human_git_handoff",
+            "queue_state": "kanban_retry_execution_terminal",
+            "execution_state": "no_active_executions",
+            "active_execution_count": 0,
+            "validation_state": "review_accepted",
+            "review_state": "accepted",
+            "recovery_state": "not_required",
+            "git_handoff_required": True,
+            "git_handoff_state": "human_git_handoff_prepared_pending_completion",
+            "review_decision_recorded": True,
+            "human_git_handoff_prepare_authority": {"ticket_id": ticket_id},
+            "next_action": _c9_next_action(
+                ticket_id,
+                handoff_complete,
+                "human_git_handoff_completion",
+            ),
+        },
+    }
+    if state not in overlays:
+        raise AssertionError(f"unknown C9 lifecycle state: {state}")
+    return overlays[state]
+
+
+def _patch_c9_synthetic_authority(
+    monkeypatch,
+    pr,
+    *,
+    current_ticket_id: str,
+    lifecycle_overlay: dict[str, object] | None,
+    completed_ticket_ids: tuple[str, ...] = ("P99.0", "P99.1"),
+    authority_ticket_ids: tuple[str, ...] = ("P99.0", "P99.1", "P99.2"),
+    bootstrap_completed_ticket_id: str = "P99.1",
+    predecessor_overrides: dict[str, str] | None = None,
+) -> None:
+    completed = set(completed_ticket_ids)
+    records = {ticket_id: _c9_generation_record(ticket_id) for ticket_id in authority_ticket_ids}
+    projections = {ticket_id: _c9_projection_record(ticket_id) for ticket_id in authority_ticket_ids}
+    records.setdefault(current_ticket_id, _c9_generation_record(current_ticket_id))
+    projections.setdefault(current_ticket_id, _c9_projection_record(current_ticket_id))
+    for ticket_id, predecessor in (predecessor_overrides or {}).items():
+        records.setdefault(ticket_id, _c9_generation_record(ticket_id))
+        records[ticket_id]["predecessor_ticket_id"] = predecessor
+        records[ticket_id]["roadmap_dependency_ticket_ids"] = [predecessor]
+
+    def canonical_next(workflow=None):
+        predecessor = str((workflow or {}).get("closed_predecessor_ticket_id") or "").strip()
+        if predecessor.startswith("P99."):
+            successor = f"P99.{int(predecessor.rsplit('.', 1)[1]) + 1}"
+        else:
+            successor = "P99.1"
+        return {
+            "ticket_id": successor,
+            "ticket_title": _c9_ticket_title(successor),
+            "next_action_id": pr.governed_ticket_lifecycle_action_ids(successor)["generate"],
+            "canonical_roadmap_authority": "synthetic-c9-roadmap",
+            "roadmap_authority_path": "tests/synthetic-c9-roadmap.md",
+            "roadmap_authority_section": successor,
+            "dependency_ticket_ids": (predecessor,) if predecessor else (),
+            "roadmap_purpose": "Synthetic C9 authority precedence.",
+            "predecessor_ticket_id": predecessor or None,
+            "readiness_state": "synthetic",
+            "authority_source": "synthetic_c9",
+            "ticket_contract": {},
+        }
+
+    def load_generation_record(*, ticket_id, **_kwargs):
+        return records.get(ticket_id)
+
+    def generated_record_to_workflow_overlay(record):
+        ticket_id = str(record["ticket_id"])
+        if ticket_id in completed:
+            return _c9_completed_overlay(pr, ticket_id)
+        return _c9_generation_overlay(pr, ticket_id)
+
+    def projection_for_generated(record):
+        ticket_id = str(record["ticket_id"])
+        return projections.get(ticket_id)
+
+    def completion_record(*, projection_record=None, **_kwargs):
+        ticket_id = str((projection_record or {}).get("ticket_id") or "")
+        return {"ticket_id": ticket_id} if ticket_id in completed else None
+
+    def completed_predecessor_evidence(ticket_id):
+        return {"ticket_id": ticket_id} if ticket_id in completed else None
+
+    def apply_lifecycle(overlay, projection):
+        if lifecycle_overlay is not None:
+            overlay.update(lifecycle_overlay)
+        return None
+
+    monkeypatch.setattr(pr, "resolve_canonical_next_ticket", canonical_next)
+    monkeypatch.setattr(
+        pr,
+        "_p18_9_0_generation_overlay",
+        lambda: (_c9_completed_overlay(pr, bootstrap_completed_ticket_id), None),
+    )
+    monkeypatch.setattr(
+        pr,
+        "_governed_authority_ticket_ids_from_records",
+        lambda: authority_ticket_ids,
+    )
+    monkeypatch.setattr(bridge, "load_generation_record", load_generation_record)
+    monkeypatch.setattr(
+        bridge,
+        "generated_record_to_workflow_overlay",
+        generated_record_to_workflow_overlay,
+    )
+    monkeypatch.setattr(pr, "_projection_record_for_generated_ticket", projection_for_generated)
+    monkeypatch.setattr(
+        pr,
+        "_projection_overlay_for_record",
+        lambda projection: _c9_projection_overlay(pr, str(projection["ticket_id"])),
+    )
+    monkeypatch.setattr(
+        pr,
+        "load_current_ticket_human_git_handoff_completion_record",
+        completion_record,
+    )
+    monkeypatch.setattr(
+        pr,
+        "load_terminal_completed_predecessor_evidence",
+        completed_predecessor_evidence,
+    )
+    monkeypatch.setattr(
+        pr,
+        "_terminal_completed_predecessor_traversal_overlay",
+        lambda evidence: _c9_completed_overlay(pr, str(evidence["ticket_id"])),
+    )
+    monkeypatch.setattr(
+        pr,
+        "_apply_current_projection_execution_lifecycle_overlay",
+        apply_lifecycle,
+    )
+    monkeypatch.setattr(pr, "_current_ticket_human_git_handoff_completion_overlay", lambda _p: None)
+    monkeypatch.setattr(pr, "_current_ticket_governed_autonomy_overlay", lambda _p: (None, None))
+    monkeypatch.setattr(pr, "_p18_9_0_review_prepare_overlay", lambda _p, completed_overlay: (None, None))
+    monkeypatch.setattr(pr, "_current_ticket_review_decision_overlay", lambda _p: None)
+    monkeypatch.setattr(pr, "_current_ticket_human_git_handoff_prepare_overlay", lambda _p: None)
+
+
 def _start_recovered_p18_9_2_retry_for_test(
     state,
     monkeypatch,
@@ -4761,6 +5201,173 @@ def test_synthetic_blocked_review_boundary_requires_complete_evidence(
     assert overlay["review_state"] == "not_started_execution_failed"
     assert overlay["next_action"]["id"] == "RECOVER_P99_3_EXECUTION"
     assert overlay.get("terminal_outcome_class") != "validated_review_required"
+
+
+@pytest.mark.parametrize(
+    ("state", "expected_status", "expected_review", "expected_recovery", "expected_action"),
+    (
+        (
+            "queued",
+            "queued",
+            "not_started_execution_pending",
+            "not_required",
+            "START_P99_2_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION",
+        ),
+        (
+            "executing",
+            "executing",
+            "not_started_execution_in_progress",
+            "not_required",
+            "MONITOR_P99_2_EXECUTION",
+        ),
+        (
+            "execution_failed",
+            "execution_failed",
+            "not_started_execution_failed",
+            "recovery_required",
+            "RECOVER_P99_2_EXECUTION",
+        ),
+        (
+            "retry_pending",
+            "retry_pending",
+            "not_started_execution_failed",
+            "retry_pending",
+            "START_P99_2_RETRY_REQUIRES_HUMAN_AUTHORIZATION",
+        ),
+        (
+            "retrying",
+            "executing",
+            "not_started_execution_in_progress",
+            "not_required",
+            "MONITOR_P99_2_EXECUTION",
+        ),
+        (
+            "validated_review_ready",
+            "execution_completed",
+            "ready_for_review_validation",
+            "not_required",
+            "PREPARE_P99_2_REVIEW",
+        ),
+        (
+            "review_prepared",
+            "review_prepared_pending_human_acceptance",
+            "prepared_pending_human_acceptance",
+            "not_required",
+            "AWAIT_HUMAN_P99_2_REVIEW_ACCEPTANCE",
+        ),
+        (
+            "review_accepted_handoff_pending",
+            "review_accepted_pending_human_git_handoff",
+            "accepted",
+            "not_required",
+            "PREPARE_P99_2_HUMAN_GIT_HANDOFF",
+        ),
+        (
+            "human_git_handoff_prepared",
+            "review_accepted_pending_human_git_handoff",
+            "accepted",
+            "not_required",
+            "COMPLETE_P99_2_HUMAN_GIT_HANDOFF",
+        ),
+    ),
+)
+def test_synthetic_c9_current_successor_survives_completed_predecessors_through_lifecycle(
+    monkeypatch,
+    state,
+    expected_status,
+    expected_review,
+    expected_recovery,
+    expected_action,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _patch_c9_synthetic_authority(
+        monkeypatch,
+        pr,
+        current_ticket_id="P99.2",
+        lifecycle_overlay=_c9_lifecycle_overlay(pr, "P99.2", state),
+        completed_ticket_ids=("P99.0", "P99.1"),
+        authority_ticket_ids=("P99.0", "P99.1", "P99.2"),
+        bootstrap_completed_ticket_id="P99.1",
+    )
+
+    snapshot = pr.build_workflow_control_snapshot()
+
+    assert snapshot["current_ticket_id"] == "P99.2"
+    assert snapshot["current_ticket_title"] == _c9_ticket_title("P99.2")
+    assert snapshot["workflow_status"] == expected_status
+    assert snapshot["review_state"] == expected_review
+    assert snapshot["recovery_state"] == expected_recovery
+    assert snapshot["next_action"]["id"] == expected_action
+    assert snapshot["next_action"]["target_ticket_id"] == "P99.2"
+    assert snapshot["next_ticket_id"] is None
+    assert snapshot["current_ticket_authority_precedence"] == {
+        "policy": "latest_valid_incomplete_current_ticket_over_historical_completion",
+        "ticket_id": "P99.2",
+        "authority_source": "generation_record_with_optional_projection",
+        "durable_completion_required_to_clear_current": True,
+    }
+    assert snapshot["historical_terminal_completed_predecessor_traversal"][
+        "current_actionable_authority"
+    ] is False
+    assert snapshot["next_action"]["id"] != "GENERATE_P99_1"
+    assert snapshot["next_action"]["id"] != "GENERATE_P99_3"
+
+
+def test_synthetic_c9_validated_review_ready_successor_dominates_bootstrap_completion(
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _patch_c9_synthetic_authority(
+        monkeypatch,
+        pr,
+        current_ticket_id="P99.3",
+        lifecycle_overlay=_c9_lifecycle_overlay(pr, "P99.3", "validated_review_ready"),
+        completed_ticket_ids=("P99.0",),
+        authority_ticket_ids=("P99.0", "P99.3"),
+        bootstrap_completed_ticket_id="P99.0",
+        predecessor_overrides={"P99.3": "P99.0"},
+    )
+
+    snapshot = pr.build_workflow_control_snapshot()
+
+    assert snapshot["current_ticket_id"] == "P99.3"
+    assert snapshot["workflow_status"] == "execution_completed"
+    assert snapshot["workflow_state"] == "P99.3-RETRY-EXECUTION-COMPLETED"
+    assert snapshot["review_state"] == "ready_for_review_validation"
+    assert snapshot["recovery_state"] == "not_required"
+    assert snapshot["next_action"]["id"] == "PREPARE_P99_3_REVIEW"
+    assert snapshot["next_action"]["target_ticket_id"] == "P99.3"
+    assert snapshot["next_action"]["id"] != "GENERATE_P99_1"
+
+
+def test_synthetic_c9_only_durable_completion_clears_current_successor_authority(
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _patch_c9_synthetic_authority(
+        monkeypatch,
+        pr,
+        current_ticket_id="P99.2",
+        lifecycle_overlay=_c9_lifecycle_overlay(pr, "P99.2", "validated_review_ready"),
+        completed_ticket_ids=("P99.0", "P99.1", "P99.2"),
+        authority_ticket_ids=("P99.0", "P99.1", "P99.2"),
+        bootstrap_completed_ticket_id="P99.2",
+    )
+
+    snapshot = pr.build_workflow_control_snapshot()
+
+    assert snapshot["current_ticket_id"] is None
+    assert snapshot["closed_predecessor_ticket_id"] == "P99.2"
+    assert snapshot["workflow_status"] == "completed"
+    assert snapshot["handoff_completion_present"] is True
+    assert snapshot["ticket_closed"] is True
+    assert snapshot["next_ticket_id"] == "P99.3"
+    assert snapshot["next_action"]["id"] == "GENERATE_P99_3"
+    assert snapshot["next_action"]["target_ticket_id"] == "P99.3"
+    assert "current_ticket_authority_precedence" not in snapshot
 
 
 def test_review_required_p18_9_2_retry_reconstructs_to_governed_review_boundary(

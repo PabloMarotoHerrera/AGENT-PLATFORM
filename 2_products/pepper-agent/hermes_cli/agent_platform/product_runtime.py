@@ -1105,6 +1105,9 @@ def _current_generation_record_for_binding() -> dict[str, Any] | None:
             load_p18_9_0_generation_record,
         )
 
+        current = _current_incomplete_generation_record_from_records()
+        if current is not None:
+            return current
         return load_p18_9_0_generation_record()
     except Exception:
         return None
@@ -1191,6 +1194,296 @@ def _governed_ticket_sequence_key(ticket_id: str) -> tuple[int, ...]:
     return tuple(int(part) for part in re.findall(r"\d+", str(ticket_id or "")))
 
 
+def _governed_authority_ticket_ids_from_records() -> tuple[str, ...]:
+    try:
+        from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
+            CANONICAL_TICKET_ID,
+            generation_record_path_for_ticket,
+            resolve_roadmap_ticket_authorities,
+        )
+        from hermes_cli.agent_platform.workflow.work_packet_kanban_projection import (
+            kanban_projection_record_path,
+        )
+    except Exception:
+        return ()
+
+    ticket_ids: set[str] = set()
+    try:
+        projection_path = kanban_projection_record_path()
+        projection_root = projection_path.parent
+        if projection_root.exists():
+            for path in projection_root.glob("*.json"):
+                ticket_id = (
+                    PEPPER_BOOTSTRAP_NEXT_TICKET_ID
+                    if path.name == projection_path.name
+                    else path.stem
+                )
+                if _SAFE_ID.fullmatch(ticket_id):
+                    ticket_ids.add(ticket_id)
+    except OSError:
+        pass
+
+    try:
+        generation_root = generation_record_path_for_ticket(CANONICAL_TICKET_ID).parent
+        if generation_root.exists():
+            for path in generation_root.glob("*.json"):
+                if path.name.endswith(".approval-decision.json"):
+                    continue
+                ticket_id = path.stem
+                if _SAFE_ID.fullmatch(ticket_id):
+                    ticket_ids.add(ticket_id)
+    except OSError:
+        pass
+
+    if not ticket_ids:
+        return ()
+    try:
+        roadmap_ticket_ids = tuple(
+            str(item["ticket_id"])
+            for item in resolve_roadmap_ticket_authorities()
+            if str(item.get("ticket_id") or "") in ticket_ids
+        )
+    except Exception:
+        roadmap_ticket_ids = ()
+    seen = set(roadmap_ticket_ids)
+    orphan_ticket_ids = tuple(
+        sorted(
+            (ticket_id for ticket_id in ticket_ids if ticket_id not in seen),
+            key=_governed_ticket_sequence_key,
+        )
+    )
+    return (*roadmap_ticket_ids, *orphan_ticket_ids)
+
+
+def _projection_has_valid_durable_ticket_completion(
+    projection: dict[str, Any] | None,
+) -> bool:
+    if not isinstance(projection, dict):
+        return False
+    try:
+        return (
+            load_current_ticket_human_git_handoff_completion_record(
+                projection_record=projection,
+            )
+            is not None
+        )
+    except Exception:
+        return False
+
+
+def _legacy_bootstrap_review_acceptance_completion(
+    projection: dict[str, Any] | None,
+) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    if not isinstance(projection, dict):
+        return None
+    if str(projection.get("ticket_id") or "").strip() != PEPPER_BOOTSTRAP_NEXT_TICKET_ID:
+        return None
+    review_prepare = load_p18_9_0_review_prepare_record(projection_record=projection)
+    if review_prepare is None:
+        return None
+    record = load_current_ticket_review_acceptance_record(
+        projection_record=projection,
+        review_prepare_record=review_prepare,
+    )
+    if record is None:
+        return None
+    if (
+        record.get("ticket_closed") is True
+        and record.get("P18_9_0_closed") is True
+        and record.get("P18_9_0_completed") is True
+    ):
+        return record, review_prepare
+    return None
+
+
+def _projection_has_terminal_ticket_completion(
+    projection: dict[str, Any] | None,
+) -> bool:
+    if _projection_has_valid_durable_ticket_completion(projection):
+        return True
+    try:
+        return _legacy_bootstrap_review_acceptance_completion(projection) is not None
+    except Exception:
+        return False
+
+
+def _legacy_bootstrap_review_acceptance_completion_overlay(
+    predecessor_ticket_id: str,
+) -> dict[str, Any] | None:
+    if predecessor_ticket_id != PEPPER_BOOTSTRAP_NEXT_TICKET_ID:
+        return None
+    from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
+        load_historical_approved_predecessor_generation_authority,
+    )
+    from hermes_cli.agent_platform.workflow.work_packet_kanban_projection import (
+        load_kanban_projection_record,
+    )
+
+    authority = load_historical_approved_predecessor_generation_authority(
+        ticket_id=predecessor_ticket_id,
+    )
+    if authority is None:
+        return None
+    projection = load_kanban_projection_record(
+        ticket_id=predecessor_ticket_id,
+        generation_record=authority["generation_record"],
+        decision_record=authority["approval_decision_record"],
+        allow_terminal_completed_predecessor_historical=True,
+    )
+    if projection is None:
+        return None
+    completion = _legacy_bootstrap_review_acceptance_completion(projection)
+    if completion is None:
+        return None
+    record, review_prepare = completion
+    overlay, blocker = _current_ticket_review_acceptance_overlay(
+        projection,
+        review_prepare_record=review_prepare,
+    )
+    if blocker is not None:
+        raise ProductRuntimeConflict(
+            str(blocker.get("evidence") or blocker.get("status") or "legacy bootstrap review acceptance is invalid")
+        )
+    if overlay is None:
+        return None
+    overlay = dict(overlay)
+    overlay["historical_terminal_completed_predecessor_traversal"] = {
+        "verdict": "HISTORICAL_TERMINAL_COMPLETED_PREDECESSOR_TRAVERSAL_READY",
+        "ticket_id": predecessor_ticket_id,
+        "current_actionable_authority": False,
+        "generation_bridge_SHA256": authority["generation_record"].get("bridge_SHA256"),
+        "approval_publication_SHA256": authority["approval_decision_record"].get(
+            "approval_publication_SHA256"
+        ),
+        "projection_SHA256": projection.get("projection_SHA256"),
+        "review_acceptance_action_SHA256": record.get("review_acceptance_action_SHA256"),
+        "terminal_completion_evidence": "legacy_bootstrap_review_acceptance",
+    }
+    return overlay
+
+
+def _completed_predecessor_terminal_overlay(
+    predecessor_ticket_id: str,
+) -> dict[str, Any] | None:
+    errors: list[Exception] = []
+    try:
+        completed_predecessor = load_terminal_completed_predecessor_evidence(
+            predecessor_ticket_id,
+        )
+    except Exception as exc:
+        errors.append(exc)
+    else:
+        if completed_predecessor is not None:
+            return _terminal_completed_predecessor_traversal_overlay(completed_predecessor)
+
+    for loader in (
+        _completed_predecessor_handoff_completion_overlay,
+        _legacy_bootstrap_review_acceptance_completion_overlay,
+    ):
+        try:
+            overlay = loader(predecessor_ticket_id)
+        except Exception as exc:  # pragma: no cover - defensive live-state guard
+            errors.append(exc)
+            continue
+        if overlay is not None:
+            return overlay
+    if errors:
+        raise errors[-1]
+    return None
+
+
+def _current_authority_predecessor_ticket_id(
+    ticket_id: str,
+    generation_record: dict[str, Any] | None,
+) -> str | None:
+    if isinstance(generation_record, dict):
+        predecessor = str(generation_record.get("predecessor_ticket_id") or "").strip()
+        if predecessor and predecessor != ticket_id and _SAFE_ID.fullmatch(predecessor):
+            return predecessor
+        dependencies = (
+            generation_record.get("roadmap_dependency_ticket_ids")
+            or generation_record.get("dependency_ticket_ids")
+            or ()
+        )
+        if isinstance(dependencies, list | tuple) and len(dependencies) == 1:
+            dependency = str(dependencies[0] or "").strip()
+            if dependency and dependency != ticket_id and _SAFE_ID.fullmatch(dependency):
+                return dependency
+    try:
+        from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
+            resolve_roadmap_ticket_authorities,
+        )
+
+        items = resolve_roadmap_ticket_authorities()
+    except Exception:
+        return None
+    for index, item in enumerate(items):
+        if str(item.get("ticket_id") or "") != ticket_id:
+            continue
+        if index <= 0:
+            return None
+        predecessor = str(items[index - 1].get("ticket_id") or "").strip()
+        return predecessor if predecessor and _SAFE_ID.fullmatch(predecessor) else None
+    return None
+
+
+def _completed_predecessor_overlay_for_current_authority(
+    ticket_id: str,
+    generation_record: dict[str, Any] | None,
+) -> tuple[dict[str, Any] | None, bool]:
+    predecessor = _current_authority_predecessor_ticket_id(ticket_id, generation_record)
+    if not predecessor:
+        return None, True
+    try:
+        overlay = _completed_predecessor_terminal_overlay(predecessor)
+    except Exception:
+        return None, False
+    if overlay is None:
+        return None, False
+    return overlay, True
+
+
+def _current_incomplete_generation_record_from_records() -> dict[str, Any] | None:
+    try:
+        from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
+            generated_record_to_workflow_overlay,
+            load_generation_record,
+        )
+    except Exception:
+        return None
+
+    for ticket_id in reversed(_governed_authority_ticket_ids_from_records()):
+        try:
+            record = load_generation_record(
+                ticket_id=ticket_id,
+                allow_terminal_rejected_historical=True,
+            )
+        except Exception:
+            continue
+        if record is None:
+            continue
+        try:
+            overlay = generated_record_to_workflow_overlay(record)
+        except Exception:
+            continue
+        if not str(overlay.get("current_ticket_id") or "").strip():
+            continue
+        projection = None
+        try:
+            projection = _projection_record_for_generated_ticket(record)
+        except Exception:
+            pass
+        if _projection_has_terminal_ticket_completion(projection):
+            continue
+        _predecessor_overlay, predecessor_valid = (
+            _completed_predecessor_overlay_for_current_authority(ticket_id, record)
+        )
+        if not predecessor_valid:
+            continue
+        return record
+    return None
+
+
 def _current_projection_record_for_binding() -> dict[str, Any] | None:
     try:
         from hermes_cli.agent_platform.workflow.work_packet_kanban_projection import (
@@ -1221,7 +1514,7 @@ def resolve_current_ticket_lifecycle_binding(
     projection = projection_record
     if projection is None:
         projection = _current_projection_record_for_binding()
-    if generation is None:
+    if generation is None and projection is None:
         generation = _current_generation_record_for_binding()
     if projection_record is not None and isinstance(projection, dict):
         authority = projection
@@ -1851,27 +2144,15 @@ def _completed_predecessor_successor_lifecycle_overlay(
     predecessor_ticket_id: str,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     try:
-        completed_predecessor = load_terminal_completed_predecessor_evidence(
-            predecessor_ticket_id,
-        )
+        overlay = _completed_predecessor_terminal_overlay(predecessor_ticket_id)
     except Exception as exc:  # pragma: no cover - defensive live-state guard
-        try:
-            overlay = _completed_predecessor_handoff_completion_overlay(
-                predecessor_ticket_id,
-            )
-        except Exception as fallback_exc:  # pragma: no cover - defensive live-state guard
-            overlay = None
-            exc = fallback_exc
-        if overlay is None:
-            return None, {
-                "id": f"{governed_ticket_lifecycle_hyphen_token(predecessor_ticket_id)}-TERMINAL-COMPLETED-PREDECESSOR-AUTHORITY",
-                "status": "blocked_by_invalid_terminal_completed_predecessor_authority",
-                "evidence": _safe_text(exc, limit=300),
-            }
-    else:
-        if completed_predecessor is None:
-            return None, None
-        overlay = _terminal_completed_predecessor_traversal_overlay(completed_predecessor)
+        return None, {
+            "id": f"{governed_ticket_lifecycle_hyphen_token(predecessor_ticket_id)}-TERMINAL-COMPLETED-PREDECESSOR-AUTHORITY",
+            "status": "blocked_by_invalid_terminal_completed_predecessor_authority",
+            "evidence": _safe_text(exc, limit=300),
+        }
+    if overlay is None:
+        return None, None
     successor_workflow = dict(workflow)
     successor_workflow.update(overlay)
     successor_overlay, successor_blocker = _pending_generated_successor_ticket_approval_overlay(
@@ -1973,6 +2254,50 @@ def _execution_operational_summary() -> dict[str, Any]:
     }
 
 
+def _apply_current_projection_execution_lifecycle_overlay(
+    overlay: dict[str, Any],
+    projection: dict[str, Any],
+) -> dict[str, Any] | None:
+    projection_blocker = None
+    historical_lifecycle_blocker_consumed = False
+    start_overlay, start_blocker = _current_ticket_execution_start_overlay(projection)
+    if start_overlay is not None:
+        overlay.update(start_overlay)
+        retry_start_overlay, retry_start_blocker = _p18_9_0_retry_start_overlay(
+            projection,
+        )
+        if retry_start_overlay is not None:
+            overlay.update(retry_start_overlay)
+            retry_lifecycle = retry_start_overlay.get("worker_lifecycle")
+            historical_lifecycle_blocker_consumed = bool(
+                isinstance(retry_lifecycle, dict)
+                and retry_lifecycle.get("historical_lifecycle_blocker_consumed")
+            )
+        if retry_start_blocker is not None:
+            projection_blocker = retry_start_blocker
+        if retry_start_overlay is None:
+            recovery_overlay, recovery_blocker = _p18_9_0_recovery_overlay(
+                projection,
+                start_overlay=start_overlay,
+            )
+            if recovery_overlay is not None:
+                overlay.update(recovery_overlay)
+                recovery_lifecycle = recovery_overlay.get("worker_lifecycle")
+                historical_lifecycle_blocker_consumed = bool(
+                    isinstance(recovery_lifecycle, dict)
+                    and recovery_lifecycle.get("historical_lifecycle_blocker_consumed")
+                )
+            if recovery_blocker is not None:
+                projection_blocker = recovery_blocker
+    if (
+        start_blocker is not None
+        and projection_blocker is None
+        and not historical_lifecycle_blocker_consumed
+    ):
+        projection_blocker = start_blocker
+    return projection_blocker
+
+
 def _pending_generated_successor_ticket_approval_overlay(
     workflow: dict[str, Any],
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
@@ -2050,42 +2375,10 @@ def _pending_generated_successor_ticket_approval_overlay(
         "Git_mutation": False,
     })
     if approved and projection is not None:
-        historical_lifecycle_blocker_consumed = False
-        start_overlay, start_blocker = _current_ticket_execution_start_overlay(projection)
-        if start_overlay is not None:
-            overlay.update(start_overlay)
-            retry_start_overlay, retry_start_blocker = _p18_9_0_retry_start_overlay(
-                projection,
-            )
-            if retry_start_overlay is not None:
-                overlay.update(retry_start_overlay)
-                retry_lifecycle = retry_start_overlay.get("worker_lifecycle")
-                historical_lifecycle_blocker_consumed = bool(
-                    isinstance(retry_lifecycle, dict)
-                    and retry_lifecycle.get("historical_lifecycle_blocker_consumed")
-                )
-            if retry_start_blocker is not None:
-                projection_blocker = retry_start_blocker
-            if retry_start_overlay is None:
-                recovery_overlay, recovery_blocker = _p18_9_0_recovery_overlay(
-                    projection,
-                    start_overlay=start_overlay,
-                )
-                if recovery_overlay is not None:
-                    overlay.update(recovery_overlay)
-                    recovery_lifecycle = recovery_overlay.get("worker_lifecycle")
-                    historical_lifecycle_blocker_consumed = bool(
-                        isinstance(recovery_lifecycle, dict)
-                        and recovery_lifecycle.get("historical_lifecycle_blocker_consumed")
-                    )
-                if recovery_blocker is not None:
-                    projection_blocker = recovery_blocker
-        if (
-            start_blocker is not None
-            and projection_blocker is None
-            and not historical_lifecycle_blocker_consumed
-        ):
-            projection_blocker = start_blocker
+        projection_blocker = _apply_current_projection_execution_lifecycle_overlay(
+            overlay,
+            projection,
+        )
     if not approved:
         overlay.update({
             "current_ticket_id": None,
@@ -2114,6 +2407,106 @@ def _pending_generated_successor_ticket_approval_overlay(
             ),
         })
     return overlay, projection_blocker
+
+
+def _current_incomplete_ticket_authority_overlay() -> tuple[
+    dict[str, Any] | None,
+    dict[str, Any] | None,
+]:
+    try:
+        from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
+            generated_record_to_workflow_overlay,
+            load_generation_record,
+        )
+        from hermes_cli.agent_platform.workflow.work_packet_kanban_projection import (
+            load_kanban_projection_record,
+        )
+    except Exception:
+        return None, None
+
+    for ticket_id in reversed(_governed_authority_ticket_ids_from_records()):
+        projection = None
+        projection_blocker = None
+        try:
+            generation = load_generation_record(
+                ticket_id=ticket_id,
+                allow_terminal_rejected_historical=True,
+            )
+        except Exception:
+            generation = None
+
+        if generation is not None:
+            try:
+                overlay = generated_record_to_workflow_overlay(generation)
+            except Exception:
+                continue
+            if not str(overlay.get("current_ticket_id") or "").strip():
+                continue
+            predecessor_overlay, predecessor_valid = (
+                _completed_predecessor_overlay_for_current_authority(ticket_id, generation)
+            )
+            if not predecessor_valid:
+                continue
+            try:
+                projection = _projection_record_for_generated_ticket(generation)
+                if projection is not None:
+                    if _projection_has_terminal_ticket_completion(projection):
+                        continue
+                    overlay.update(_projection_overlay_for_record(projection))
+            except Exception as exc:  # pragma: no cover - defensive live-state guard
+                projection_blocker = {
+                    "id": f"{ticket_id}-SUCCESSOR-KANBAN-PROJECTION-AUTHORITY",
+                    "status": "blocked_by_invalid_generated_successor_projection_authority",
+                    "evidence": _safe_text(exc, limit=300),
+                }
+            if projection is not None:
+                lifecycle_blocker = _apply_current_projection_execution_lifecycle_overlay(
+                    overlay,
+                    projection,
+                )
+                if lifecycle_blocker is not None:
+                    projection_blocker = lifecycle_blocker
+            if predecessor_overlay is not None:
+                current_overlay = overlay
+                overlay = dict(predecessor_overlay)
+                overlay.update(current_overlay)
+            overlay["current_ticket_authority_precedence"] = {
+                "policy": "latest_valid_incomplete_current_ticket_over_historical_completion",
+                "ticket_id": ticket_id,
+                "authority_source": "generation_record_with_optional_projection",
+                "durable_completion_required_to_clear_current": True,
+            }
+            return overlay, projection_blocker
+
+        try:
+            projection = load_kanban_projection_record(ticket_id=ticket_id)
+        except Exception:
+            continue
+        if projection is None or _projection_has_terminal_ticket_completion(projection):
+            continue
+        predecessor_overlay, predecessor_valid = (
+            _completed_predecessor_overlay_for_current_authority(ticket_id, None)
+        )
+        if not predecessor_valid:
+            continue
+        overlay = _projection_overlay_for_record(projection)
+        projection_blocker = _apply_current_projection_execution_lifecycle_overlay(
+            overlay,
+            projection,
+        )
+        if predecessor_overlay is not None:
+            current_overlay = overlay
+            overlay = dict(predecessor_overlay)
+            overlay.update(current_overlay)
+        overlay["current_ticket_authority_precedence"] = {
+            "policy": "latest_valid_incomplete_current_ticket_over_historical_completion",
+            "ticket_id": ticket_id,
+            "authority_source": "projection_record",
+            "durable_completion_required_to_clear_current": True,
+        }
+        return overlay, projection_blocker
+
+    return None, None
 
 
 def _subsystems() -> tuple[str, ...]:
@@ -23483,6 +23876,16 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
         snapshot["workflow_status"] = "blocked_invalid_generated_ticket_authority"
         snapshot["queue_state"] = "blocked_invalid_generated_ticket_authority"
         snapshot["ready_verdict"] = "p18_9_0_generation_authority_invalid"
+    current_authority_overlay, current_authority_blocker = (
+        _current_incomplete_ticket_authority_overlay()
+    )
+    if current_authority_overlay is not None:
+        snapshot.update(current_authority_overlay)
+    if current_authority_blocker is not None and not any(
+        blocker.get("id") == current_authority_blocker.get("id")
+        for blocker in remaining_blockers
+    ):
+        remaining_blockers.append(current_authority_blocker)
     if (
         generation_blocker is None
         and snapshot.get("current_ticket_id") in {None, ""}
