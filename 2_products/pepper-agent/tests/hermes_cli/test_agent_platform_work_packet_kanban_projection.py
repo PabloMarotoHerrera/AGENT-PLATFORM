@@ -1846,6 +1846,322 @@ def _patch_c10_governed_terminal_review_round(
     )
 
 
+def _c11_projection_record(pr, ticket_id: str, *, macroproject_id: str = "P99") -> dict[str, object]:
+    projection_record = _c9_projection_record(ticket_id)
+    projection_record.update({
+        "macroproject_id": macroproject_id,
+        "macroproject_title": f"Synthetic {macroproject_id} Historical Authority",
+        "assignee_profile": "implementation_product",
+        "selected_profile": "implementation_product",
+        "approval_status": "approved",
+        "approval_decision": "approve",
+        "dependency_admission": {"decision": "admit", "dependency_blockers": []},
+        "workspace_kind": "scratch",
+        "concurrent_workers_for_ticket": 1,
+        "task_max_retries": 1,
+        "next_action": {
+            "id": pr.governed_ticket_lifecycle_action_ids(ticket_id)["execution_start"],
+            "target_ticket_id": ticket_id,
+            "target_ticket_title": _c9_ticket_title(ticket_id),
+        },
+    })
+    return projection_record
+
+
+def _c11_candidate_reference(label: str) -> dict[str, object]:
+    source_sha = hashlib.sha256(f"{label}:source".encode()).hexdigest()
+    scratch_sha = hashlib.sha256(f"{label}:scratch".encode()).hexdigest()
+    return {
+        "available": True,
+        "files_changed": 1,
+        "modified_file_count": 1,
+        "created_file_count": 0,
+        "deleted_file_count": 0,
+        "files": [
+            {
+                "path": f"synthetic/{label}/current.ts",
+                "change_type": "modified",
+                "source_SHA256": source_sha,
+                "scratch_SHA256": scratch_sha,
+            }
+        ],
+    }
+
+
+def _c11_reviewed_candidate_sha(
+    pr,
+    projection_record: dict[str, object],
+    *,
+    run_id: int,
+    candidate_reference: dict[str, object],
+) -> str:
+    return pr._digest_payload(
+        "pepper-current-ticket-reviewed-candidate-reference-sha256-v1",
+        {
+            "ticket_id": projection_record["ticket_id"],
+            "work_packet_SHA256": projection_record["work_packet_SHA256"],
+            "terminal_run_id": run_id,
+            "candidate_changes_reference": candidate_reference,
+        },
+    )
+
+
+def _c11_terminal_reconciliation(
+    projection_record: dict[str, object],
+    *,
+    run_id: int,
+    candidate_reference: dict[str, object],
+    runtime_review_valid: bool,
+) -> dict[str, object]:
+    return {
+        "terminal_run_id": run_id,
+        "terminal_run_status": "blocked" if runtime_review_valid else "completed",
+        "terminal_run_outcome": "blocked" if runtime_review_valid else "completed",
+        "terminal_run_ended_at": run_id * 10 + 5,
+        "terminal_run_failure_category": None,
+        "terminal_run_failure_summary": (
+            "review-required: implementation completed and governed validation passes "
+            "(GVCMD-001: 160/160 tests)."
+            if runtime_review_valid
+            else "legacy terminal record completed before current review-boundary classifier"
+        ),
+        "validation_infrastructure_failure": False,
+        "validation_observation_reference": {
+            "tool_name": "workpacket_validation",
+            "infrastructure_failure": False,
+            "validation_passed": True,
+            "validated_candidate_review_required": runtime_review_valid,
+        },
+        "source_materialization_reference": {
+            "manifest_path": f"/tmp/{projection_record['ticket_id']}/manifest.json",
+        },
+        "candidate_changes_reference": candidate_reference,
+        "candidate_changes_available": True,
+        "validated_candidate_review_required": runtime_review_valid,
+        "blocker_code": None,
+        "blocker_detail": None,
+        "next_autonomous_action": None,
+        "next_human_action": None,
+        "next_action": None,
+    }
+
+
+def _c11_successor_authority(pr, ticket_id: str) -> dict[str, object]:
+    successor = f"P99.{int(ticket_id.rsplit('.', 1)[1]) + 1}"
+    return {
+        "ticket_id": successor,
+        "ticket_title": _c9_ticket_title(successor),
+        "next_action_id": pr.governed_ticket_lifecycle_action_ids(successor)["generate"],
+        "canonical_roadmap_authority": "synthetic-c11-roadmap",
+        "roadmap_authority_path": "tests/synthetic-c11-roadmap.md",
+        "roadmap_authority_section": successor,
+        "dependency_ticket_ids": (ticket_id,),
+        "roadmap_purpose": "Synthetic C11 successor ratification.",
+        "predecessor_ticket_id": ticket_id,
+        "readiness_state": "synthetic_c11_successor_ready",
+        "authority_source": "synthetic_c11",
+        "ticket_contract": {},
+    }
+
+
+def _c11_review_decision_record(
+    pr,
+    projection_record: dict[str, object],
+    *,
+    activation_record: dict[str, object],
+    terminal_reconciliation: dict[str, object],
+    candidate_reference: dict[str, object],
+    run_id: int,
+) -> dict[str, object]:
+    target = {
+        "authority_kind": "governed_autonomy",
+        "activation": activation_record,
+        "terminal_reconciliation": terminal_reconciliation,
+        "reviewed_run_id": run_id,
+        "candidate_reference": candidate_reference,
+        "candidate_SHA256": _c11_reviewed_candidate_sha(
+            pr,
+            projection_record,
+            run_id=run_id,
+            candidate_reference=candidate_reference,
+        ),
+    }
+    return pr._build_current_ticket_review_decision_record(
+        request=pr.CurrentTicketReviewDecisionRequest(
+            decision="accept",
+            feedback=f"Human accepts synthetic {projection_record['ticket_id']} candidate.",
+            reviewed_run_id=run_id,
+            project_id="PEPPER",
+            ticket_id=str(projection_record["ticket_id"]),
+        ),
+        projection=projection_record,
+        target=target,
+    )
+
+
+def _c11_handoff_completion_record(
+    pr,
+    projection_record: dict[str, object],
+    *,
+    accepted_review: dict[str, object],
+    commit: str,
+) -> dict[str, object]:
+    ticket_id = str(projection_record["ticket_id"])
+    request = pr.CurrentTicketHumanGitHandoffCompletionRequest(
+        reviewed_run_id=int(accepted_review["reviewed_run_id"]),
+        reviewed_candidate_SHA256=str(accepted_review["reviewed_candidate_SHA256"]),
+        review_decision_SHA256=str(accepted_review["review_decision_SHA256"]),
+        commits=(commit,),
+        branch=f"c11/{ticket_id.replace('.', '-').lower()}",
+        push_attestation="Human pushed the synthetic C11 historical completion.",
+        approved_committed_paths=("synthetic/c11/current.ts",),
+        excluded_paths=(),
+        validation_evidence=("Synthetic C11 completion validation evidence.",),
+        human_attested_evidence=("Synthetic C11 human attestation.",),
+        project_id="PEPPER",
+        ticket_id=ticket_id,
+        next_action_id=pr._human_git_handoff_completion_action_id(ticket_id),
+    )
+    return pr._build_current_ticket_human_git_handoff_completion_record(
+        request=request,
+        projection=projection_record,
+        workflow={
+            "next_action": {"id": pr._human_git_handoff_completion_action_id(ticket_id)},
+            "active_execution_count": 0,
+            "execution_state": "no_active_executions",
+            "recovery_state": "not_required",
+            "validation_state": "review_accepted",
+            "review_state": "accepted",
+            "git_handoff_state": "human_git_handoff_prepared_pending_completion",
+            "governed_workflow_state": "awaiting_human_git_handoff",
+            "remaining_blockers": [],
+        },
+        accepted_review=accepted_review,
+        verification_evidence=[{"id": "synthetic-c11", "classification": "HUMAN_ATTESTED"}],
+        successor_authority=_c11_successor_authority(pr, ticket_id),
+    )
+
+
+def _install_c11_historical_authority_context(monkeypatch, pr):
+    records: dict[str, dict[str, object]] = {}
+
+    def load_historical_authority(*, ticket_id):
+        item = records.get(str(ticket_id))
+        if item is None:
+            return None
+        return {
+            "generation_record": item["generation"],
+            "approval_decision_record": item["approval"],
+        }
+
+    def load_projection(*, ticket_id=None, **_kwargs):
+        item = records.get(str(ticket_id))
+        return item["projection"] if item is not None else None
+
+    def load_execution_start(*, projection_record=None):
+        item = records.get(str((projection_record or {}).get("ticket_id") or ""))
+        return item["execution_start"] if item is not None else None
+
+    def load_activation(*, projection_record=None):
+        item = records.get(str((projection_record or {}).get("ticket_id") or ""))
+        return item["activation"] if item is not None else None
+
+    def load_runtime(*, projection_record=None, activation_record=None):
+        _ = activation_record
+        item = records.get(str((projection_record or {}).get("ticket_id") or ""))
+        return item["runtime"] if item is not None else None
+
+    def terminal_reconciliation(runtime, *, effective_authority=None):
+        _ = effective_authority
+        item = records.get(str((runtime or {}).get("ticket_id") or ""))
+        return item["terminal"] if item is not None else None
+
+    def canonical_next(workflow=None):
+        predecessor = str((workflow or {}).get("closed_predecessor_ticket_id") or "P99.1")
+        return _c11_successor_authority(pr, predecessor)
+
+    monkeypatch.setattr(bridge, "load_historical_approved_predecessor_generation_authority", load_historical_authority)
+    monkeypatch.setattr(projection, "load_kanban_projection_record", load_projection)
+    monkeypatch.setattr(pr, "load_p18_9_0_execution_start_record", load_execution_start)
+    monkeypatch.setattr(pr, "load_terminal_completed_predecessor_governed_autonomy_activation_record", load_activation)
+    monkeypatch.setattr(pr, "load_current_ticket_governed_autonomy_runtime_state", load_runtime)
+    monkeypatch.setattr(pr, "_governed_autonomy_runtime_terminal_reconciliation", terminal_reconciliation)
+    monkeypatch.setattr(pr, "resolve_canonical_next_ticket", canonical_next)
+    return records
+
+
+def _add_c11_completed_ticket(
+    records: dict[str, dict[str, object]],
+    pr,
+    ticket_id: str,
+    *,
+    runtime_review_valid: bool = False,
+    macroproject_id: str = "P99",
+    commit: str = "c" * 40,
+) -> dict[str, object]:
+    projection_record = _c11_projection_record(
+        pr,
+        ticket_id,
+        macroproject_id=macroproject_id,
+    )
+    candidate_reference = _c11_candidate_reference(ticket_id.replace(".", "-"))
+    activation = {
+        "activation_action_SHA256": hashlib.sha256(f"{ticket_id}:activation".encode()).hexdigest(),
+        "governed_autonomy_envelope_SHA256": hashlib.sha256(f"{ticket_id}:envelope".encode()).hexdigest(),
+    }
+    terminal = _c11_terminal_reconciliation(
+        projection_record,
+        run_id=7,
+        candidate_reference=candidate_reference,
+        runtime_review_valid=runtime_review_valid,
+    )
+    review = _c11_review_decision_record(
+        pr,
+        projection_record,
+        activation_record=activation,
+        terminal_reconciliation=terminal,
+        candidate_reference=candidate_reference,
+        run_id=7,
+    )
+    handoff = _c11_handoff_completion_record(
+        pr,
+        projection_record,
+        accepted_review=review,
+        commit=commit,
+    )
+    generation = _c9_generation_record(ticket_id)
+    generation.update({
+        "project_id": projection_record["project_id"],
+        "macroproject_id": projection_record["macroproject_id"],
+        "ticket_spec_SHA256": projection_record["ticket_spec_SHA256"],
+        "work_packet_id": projection_record["work_packet_id"],
+        "work_packet_SHA256": projection_record["work_packet_SHA256"],
+    })
+    records[ticket_id] = {
+        "generation": generation,
+        "approval": {
+            "ticket_id": ticket_id,
+            "decision": "approve",
+            "status": "approved",
+            "approval_publication_SHA256": projection_record["approval_publication_SHA256"],
+        },
+        "projection": projection_record,
+        "execution_start": {"ticket_id": ticket_id, "start_authorization_SHA256": "1" * 64},
+        "activation": activation,
+        "runtime": {"ticket_id": ticket_id, "runtime_state_SHA256": "2" * 64},
+        "terminal": terminal,
+        "review": review,
+        "handoff": handoff,
+    }
+    for path, record in (
+        (pr.review_decision_record_path_for_ticket(ticket_id), review),
+        (pr.human_git_handoff_completion_record_path_for_ticket(ticket_id), handoff),
+    ):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _write_json_authority_record(path, record)
+    return records[ticket_id]
+
+
 def _start_recovered_p18_9_2_retry_for_test(
     state,
     monkeypatch,
@@ -5778,6 +6094,270 @@ def test_synthetic_c10_same_ticket_stale_review_round_is_historical_for_new_term
         for item in decision_history
     )
     assert not pr.review_decision_record_path_for_ticket(ticket_id).exists()
+
+
+def test_synthetic_c11_historical_runtime_drift_is_diagnostic_not_current_blocker(
+    projection_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _ = projection_home
+    records = _install_c11_historical_authority_context(monkeypatch, pr)
+    _add_c11_completed_ticket(records, pr, "P99.1", runtime_review_valid=False)
+
+    evidence = pr.load_terminal_completed_predecessor_evidence("P99.1")
+    overlay, blocker = pr._completed_predecessor_successor_lifecycle_overlay(
+        {
+            "project_id": "PEPPER",
+            "macroproject_id": "P99",
+            "closed_predecessor_ticket_id": "P99.1",
+            "current_ticket_id": "P99.2",
+            "workflow_status": "execution_completed",
+            "remaining_blockers": [],
+        },
+        predecessor_ticket_id="P99.1",
+    )
+
+    assert evidence is not None
+    assert evidence["current_actionable_authority"] is False
+    diagnostics = evidence["historical_authority_diagnostics"]
+    assert diagnostics["classification"] == "HISTORICAL_RUNTIME_COMPATIBILITY_ONLY"
+    assert diagnostics["current_actionable_authority"] is False
+    assert diagnostics["evidence"] == (
+        "terminal completed predecessor runtime is not validated for review"
+    )
+    assert blocker is None
+    assert overlay is not None
+    traversal = overlay["historical_terminal_completed_predecessor_traversal"]
+    assert traversal["ticket_id"] == "P99.1"
+    assert traversal["current_actionable_authority"] is False
+    assert traversal["historical_authority_diagnostics"] == diagnostics
+    assert overlay["next_action"]["id"] != "PREPARE_P99_1_REVIEW"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "completion_digest",
+        "ticket_identity",
+        "workpacket_identity",
+        "reviewed_candidate",
+        "accepted_review_authority",
+        "missing_completion",
+    ),
+)
+def test_synthetic_c11_corrupt_historical_durable_authority_still_blocks(
+    projection_home,
+    monkeypatch,
+    mutation,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _ = projection_home
+    records = _install_c11_historical_authority_context(monkeypatch, pr)
+    _add_c11_completed_ticket(records, pr, "P99.1", runtime_review_valid=False)
+    path = pr.human_git_handoff_completion_record_path_for_ticket("P99.1")
+    if mutation == "missing_completion":
+        path.unlink()
+    else:
+        record = json.loads(path.read_text(encoding="utf-8"))
+        if mutation == "completion_digest":
+            record["completed_by"] = "tampered-c11-completion-authority"
+        elif mutation == "ticket_identity":
+            record["ticket_id"] = "P99.9"
+            record["completion_record_SHA256"] = (
+                pr._human_git_handoff_completion_record_digest(record)
+            )
+        elif mutation == "workpacket_identity":
+            record["work_packet_SHA256"] = "f" * 64
+            record["completion_record_SHA256"] = (
+                pr._human_git_handoff_completion_record_digest(record)
+            )
+        elif mutation == "reviewed_candidate":
+            record["reviewed_candidate_SHA256"] = "e" * 64
+            record["completion_record_SHA256"] = (
+                pr._human_git_handoff_completion_record_digest(record)
+            )
+        elif mutation == "accepted_review_authority":
+            record["accepted_review_authority"]["review_decision_SHA256"] = "d" * 64
+            record["completion_record_SHA256"] = (
+                pr._human_git_handoff_completion_record_digest(record)
+            )
+        _write_json_authority_record(path, record)
+
+    overlay, blocker = pr._completed_predecessor_successor_lifecycle_overlay(
+        {
+            "project_id": "PEPPER",
+            "macroproject_id": "P99",
+            "closed_predecessor_ticket_id": "P99.1",
+            "current_ticket_id": "P99.2",
+            "workflow_status": "execution_completed",
+            "remaining_blockers": [],
+        },
+        predecessor_ticket_id="P99.1",
+    )
+
+    assert overlay is None
+    assert blocker is not None
+    assert blocker["status"] == "blocked_by_invalid_terminal_completed_predecessor_authority"
+    assert blocker["id"] == "P99-1-TERMINAL-COMPLETED-PREDECESSOR-AUTHORITY"
+
+
+def test_synthetic_c11_direct_and_transitive_runtime_drift_do_not_block_current_review(
+    projection_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _ = projection_home
+    records = _install_c11_historical_authority_context(monkeypatch, pr)
+    _add_c11_completed_ticket(
+        records,
+        pr,
+        "P99.1",
+        runtime_review_valid=False,
+        commit="a" * 40,
+    )
+    _add_c11_completed_ticket(
+        records,
+        pr,
+        "P99.2",
+        runtime_review_valid=False,
+        commit="b" * 40,
+    )
+
+    direct_overlay, direct_blocker = pr._completed_predecessor_successor_lifecycle_overlay(
+        {
+            "project_id": "PEPPER",
+            "macroproject_id": "P99",
+            "closed_predecessor_ticket_id": "P99.2",
+            "current_ticket_id": "P99.3",
+            "workflow_status": "execution_completed",
+            "remaining_blockers": [],
+        },
+        predecessor_ticket_id="P99.2",
+    )
+    ancestor_overlay, ancestor_blocker = pr._completed_predecessor_successor_lifecycle_overlay(
+        {
+            "project_id": "PEPPER",
+            "macroproject_id": "P99",
+            "closed_predecessor_ticket_id": "P99.1",
+            "current_ticket_id": "P99.3",
+            "workflow_status": "execution_completed",
+            "remaining_blockers": [],
+        },
+        predecessor_ticket_id="P99.1",
+    )
+
+    assert direct_blocker is None
+    assert ancestor_blocker is None
+    assert direct_overlay["historical_terminal_completed_predecessor_traversal"][
+        "ticket_id"
+    ] == "P99.2"
+    assert ancestor_overlay["historical_terminal_completed_predecessor_traversal"][
+        "ticket_id"
+    ] == "P99.1"
+    assert direct_overlay["historical_terminal_completed_predecessor_traversal"][
+        "current_actionable_authority"
+    ] is False
+    assert ancestor_overlay["historical_terminal_completed_predecessor_traversal"][
+        "current_actionable_authority"
+    ] is False
+
+
+def test_synthetic_c11_unrelated_lineage_predecessor_is_ignored(
+    projection_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _ = projection_home
+    records = _install_c11_historical_authority_context(monkeypatch, pr)
+    _add_c11_completed_ticket(
+        records,
+        pr,
+        "P99.1",
+        runtime_review_valid=False,
+        macroproject_id="P99",
+    )
+
+    overlay, valid = pr._completed_predecessor_overlay_for_current_authority(
+        "P100.2",
+        {
+            "project_id": "PEPPER",
+            "macroproject_id": "P100",
+            "ticket_id": "P100.2",
+            "predecessor_ticket_id": "P99.1",
+        },
+    )
+
+    assert overlay is None
+    assert valid is True
+
+
+def test_synthetic_c11_review_prepare_eligible_after_historical_runtime_diagnostic(
+    projection_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _ = projection_home
+    records = _install_c11_historical_authority_context(monkeypatch, pr)
+    _add_c11_completed_ticket(records, pr, "P99.2", runtime_review_valid=False)
+    current_projection = _c11_projection_record(pr, "P99.3")
+    original_resolve_binding = pr.resolve_current_ticket_lifecycle_binding
+
+    def resolve_c11_binding(*, generation_record=None, projection_record=None):
+        return original_resolve_binding(
+            generation_record=generation_record,
+            projection_record=projection_record or current_projection,
+        )
+
+    current_completion = _c10_review_round_completion(
+        pr,
+        current_projection,
+        run_id=12,
+        candidate_label="c11-current",
+    )
+    review_ready = _c10_review_ready_workflow(pr, current_projection)
+    predecessor_overlay, predecessor_blocker = pr._completed_predecessor_successor_lifecycle_overlay(
+        {
+            **review_ready,
+            "closed_predecessor_ticket_id": "P99.2",
+            "remaining_blockers": [],
+        },
+        predecessor_ticket_id="P99.2",
+    )
+    assert predecessor_blocker is None
+    assert predecessor_overlay is not None
+    review_ready["historical_terminal_completed_predecessor_traversal"] = predecessor_overlay[
+        "historical_terminal_completed_predecessor_traversal"
+    ]
+    review_ready["remaining_blockers"] = []
+    monkeypatch.setattr(pr, "resolve_current_ticket_lifecycle_binding", resolve_c11_binding)
+    monkeypatch.setattr(pr, "_load_current_projection_record", lambda: current_projection)
+    monkeypatch.setattr(pr, "_validate_execution_start_authority", lambda _projection: None)
+    monkeypatch.setattr(pr, "build_workflow_control_snapshot", lambda: review_ready)
+    monkeypatch.setattr(pr, "_current_review_round_completion_source", lambda _projection: current_completion)
+    monkeypatch.setattr(
+        pr,
+        "_acceptance_contract_for_review_projection",
+        lambda projection_record: _c10_acceptance_contract(pr, projection_record),
+    )
+
+    prepared = pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id="P99.3",
+        next_action_id="PREPARE_P99_3_REVIEW",
+    )
+
+    assert prepared["review_prepare_status"] == "prepared_pending_human_acceptance"
+    assert prepared["review_preparation_recorded"] is True
+    assert prepared["successful_run_id"] == 12
+    assert prepared["dispatch_performed"] is False
+    assert prepared["execution_started"] is False
+    assert prepared["Git_mutation"] is False
 
 
 def test_review_required_p18_9_2_retry_reconstructs_to_governed_review_boundary(

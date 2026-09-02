@@ -1309,6 +1309,8 @@ def _projection_has_terminal_ticket_completion(
 
 def _legacy_bootstrap_review_acceptance_completion_overlay(
     predecessor_ticket_id: str,
+    *,
+    lineage_scope: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     if predecessor_ticket_id != PEPPER_BOOTSTRAP_NEXT_TICKET_ID:
         return None
@@ -1331,6 +1333,8 @@ def _legacy_bootstrap_review_acceptance_completion_overlay(
         allow_terminal_completed_predecessor_historical=True,
     )
     if projection is None:
+        return None
+    if not _historical_projection_matches_lineage_scope(projection, lineage_scope):
         return None
     completion = _legacy_bootstrap_review_acceptance_completion(projection)
     if completion is None:
@@ -1364,6 +1368,8 @@ def _legacy_bootstrap_review_acceptance_completion_overlay(
 
 def _completed_predecessor_terminal_overlay(
     predecessor_ticket_id: str,
+    *,
+    lineage_scope: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     errors: list[Exception] = []
     try:
@@ -1374,6 +1380,11 @@ def _completed_predecessor_terminal_overlay(
         errors.append(exc)
     else:
         if completed_predecessor is not None:
+            if not _historical_predecessor_matches_lineage_scope(
+                completed_predecessor,
+                lineage_scope,
+            ):
+                return None
             return _terminal_completed_predecessor_traversal_overlay(completed_predecessor)
 
     for loader in (
@@ -1381,7 +1392,7 @@ def _completed_predecessor_terminal_overlay(
         _legacy_bootstrap_review_acceptance_completion_overlay,
     ):
         try:
-            overlay = loader(predecessor_ticket_id)
+            overlay = loader(predecessor_ticket_id, lineage_scope=lineage_scope)
         except Exception as exc:  # pragma: no cover - defensive live-state guard
             errors.append(exc)
             continue
@@ -1434,8 +1445,13 @@ def _completed_predecessor_overlay_for_current_authority(
     predecessor = _current_authority_predecessor_ticket_id(ticket_id, generation_record)
     if not predecessor:
         return None, True
+    if _historical_predecessor_outside_lineage_scope(predecessor, generation_record):
+        return None, True
     try:
-        overlay = _completed_predecessor_terminal_overlay(predecessor)
+        overlay = _completed_predecessor_terminal_overlay(
+            predecessor,
+            lineage_scope=generation_record,
+        )
     except Exception:
         return None, False
     if overlay is None:
@@ -1890,36 +1906,118 @@ def load_terminal_completed_predecessor_evidence(ticket_id: str) -> dict[str, An
         raise ProductRuntimeConflict(
             "terminal completed predecessor governed-autonomy runtime is absent"
         )
-    review = _load_terminal_completed_predecessor_review_decision_record(
-        projection=projection,
-        runtime=runtime,
-    )
-    if review is None:
-        raise ProductRuntimeConflict(
-            "terminal completed predecessor accepted review decision is absent"
+    try:
+        review = _load_terminal_completed_predecessor_review_decision_record(
+            projection=projection,
+            runtime=runtime,
         )
-    runtime_target = _terminal_completed_predecessor_runtime_review_target(
+        if review is None:
+            raise ProductRuntimeConflict(
+                "terminal completed predecessor accepted review decision is absent"
+            )
+        runtime_target = _terminal_completed_predecessor_runtime_review_target(
+            projection=projection,
+            runtime=runtime,
+            review=review,
+        )
+        if int(review.get("reviewed_run_id") or 0) != int(runtime_target["reviewed_run_id"]):
+            raise ProductRuntimeConflict(
+                "terminal completed predecessor review run does not match runtime evidence"
+            )
+        if review.get("reviewed_candidate_SHA256") != runtime_target["candidate_SHA256"]:
+            raise ProductRuntimeConflict(
+                "terminal completed predecessor review candidate does not match runtime evidence"
+            )
+        handoff = load_current_ticket_human_git_handoff_completion_record(
+            projection_record=projection,
+            review_decision_record=review,
+        )
+    except ProductRuntimeConflict as runtime_error:
+        try:
+            return _terminal_completed_predecessor_durable_completion_evidence(
+                safe_ticket_id=safe_ticket_id,
+                generation=generation,
+                decision=decision,
+                projection=projection,
+                execution_start=execution_start,
+                activation=activation,
+                runtime=runtime,
+                runtime_error=runtime_error,
+            )
+        except ProductRuntimeConflict as durable_error:
+            if "review candidate" in str(runtime_error):
+                raise runtime_error
+            raise durable_error from runtime_error
+    if handoff is None:
+        raise ProductRuntimeConflict(
+            "terminal completed predecessor human Git handoff completion is absent"
+        )
+    return _terminal_completed_predecessor_evidence_record(
+        safe_ticket_id=safe_ticket_id,
+        generation=generation,
+        decision=decision,
         projection=projection,
+        execution_start=execution_start,
+        activation=activation,
         runtime=runtime,
         review=review,
+        handoff=handoff,
     )
-    if int(review.get("reviewed_run_id") or 0) != int(runtime_target["reviewed_run_id"]):
-        raise ProductRuntimeConflict(
-            "terminal completed predecessor review run does not match runtime evidence"
-        )
-    if review.get("reviewed_candidate_SHA256") != runtime_target["candidate_SHA256"]:
-        raise ProductRuntimeConflict(
-            "terminal completed predecessor review candidate does not match runtime evidence"
-        )
+
+
+def _terminal_completed_predecessor_durable_completion_evidence(
+    *,
+    safe_ticket_id: str,
+    generation: dict[str, Any],
+    decision: dict[str, Any],
+    projection: dict[str, Any],
+    execution_start: dict[str, Any],
+    activation: dict[str, Any],
+    runtime: dict[str, Any],
+    runtime_error: ProductRuntimeConflict,
+) -> dict[str, Any]:
     handoff = load_current_ticket_human_git_handoff_completion_record(
         projection_record=projection,
-        review_decision_record=review,
     )
     if handoff is None:
         raise ProductRuntimeConflict(
             "terminal completed predecessor human Git handoff completion is absent"
         )
-    return {
+    review = _load_completed_handoff_compatible_review_decision_record(
+        projection=projection,
+        completion_record=handoff,
+        current_error=ProductRuntimeConflict(
+            "terminal completed predecessor accepted review decision is invalid"
+        ),
+    )
+    return _terminal_completed_predecessor_evidence_record(
+        safe_ticket_id=safe_ticket_id,
+        generation=generation,
+        decision=decision,
+        projection=projection,
+        execution_start=execution_start,
+        activation=activation,
+        runtime=runtime,
+        review=review,
+        handoff=handoff,
+        runtime_error=runtime_error,
+    )
+
+
+def _terminal_completed_predecessor_evidence_record(
+    *,
+    safe_ticket_id: str,
+    generation: dict[str, Any],
+    decision: dict[str, Any],
+    projection: dict[str, Any],
+    execution_start: dict[str, Any],
+    activation: dict[str, Any],
+    runtime: dict[str, Any],
+    review: dict[str, Any],
+    handoff: dict[str, Any],
+    runtime_error: ProductRuntimeConflict | None = None,
+) -> dict[str, Any]:
+    evidence = {
         "verdict": "HISTORICAL_TERMINAL_COMPLETED_PREDECESSOR_TRAVERSAL_READY",
         "semantics": "read_only_historical_completed_predecessor_traversal",
         "current_actionable_authority": False,
@@ -1933,6 +2031,13 @@ def load_terminal_completed_predecessor_evidence(ticket_id: str) -> dict[str, An
         "review_decision_record": review,
         "human_git_handoff_completion_record": handoff,
     }
+    if runtime_error is not None:
+        evidence["historical_authority_diagnostics"] = {
+            "classification": "HISTORICAL_RUNTIME_COMPATIBILITY_ONLY",
+            "current_actionable_authority": False,
+            "evidence": _safe_text(runtime_error, limit=300),
+        }
+    return evidence
 
 
 def _load_terminal_completed_predecessor_review_decision_record(
@@ -2140,7 +2245,56 @@ def _terminal_completed_predecessor_traversal_overlay(
             "completion_record_SHA256"
         ],
     }
+    diagnostics = evidence.get("historical_authority_diagnostics")
+    if isinstance(diagnostics, dict):
+        overlay["historical_terminal_completed_predecessor_traversal"][
+            "historical_authority_diagnostics"
+        ] = diagnostics
     return overlay
+
+
+def _historical_projection_matches_lineage_scope(
+    projection: dict[str, Any],
+    lineage_scope: dict[str, Any] | None,
+) -> bool:
+    if not isinstance(lineage_scope, dict):
+        return True
+    for key in ("project_id", "macroproject_id"):
+        expected = str(lineage_scope.get(key) or "").strip()
+        observed = str(projection.get(key) or "").strip()
+        if expected and observed and expected != observed:
+            return False
+    return True
+
+
+def _historical_predecessor_matches_lineage_scope(
+    evidence: dict[str, Any],
+    lineage_scope: dict[str, Any] | None,
+) -> bool:
+    projection = evidence.get("kanban_projection_record")
+    if not isinstance(projection, dict):
+        return True
+    return _historical_projection_matches_lineage_scope(
+        projection,
+        lineage_scope,
+    )
+
+
+def _historical_predecessor_outside_lineage_scope(
+    predecessor_ticket_id: str,
+    lineage_scope: dict[str, Any] | None,
+) -> bool:
+    if not isinstance(lineage_scope, dict):
+        return False
+    if not any(str(lineage_scope.get(key) or "").strip() for key in ("project_id", "macroproject_id")):
+        return False
+    try:
+        evidence = load_terminal_completed_predecessor_evidence(predecessor_ticket_id)
+    except Exception:
+        return False
+    if evidence is None:
+        return False
+    return not _historical_predecessor_matches_lineage_scope(evidence, lineage_scope)
 
 
 def _completed_predecessor_successor_lifecycle_overlay(
@@ -2149,7 +2303,10 @@ def _completed_predecessor_successor_lifecycle_overlay(
     predecessor_ticket_id: str,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     try:
-        overlay = _completed_predecessor_terminal_overlay(predecessor_ticket_id)
+        overlay = _completed_predecessor_terminal_overlay(
+            predecessor_ticket_id,
+            lineage_scope=workflow,
+        )
     except Exception as exc:  # pragma: no cover - defensive live-state guard
         return None, {
             "id": f"{governed_ticket_lifecycle_hyphen_token(predecessor_ticket_id)}-TERMINAL-COMPLETED-PREDECESSOR-AUTHORITY",
@@ -2170,6 +2327,8 @@ def _completed_predecessor_successor_lifecycle_overlay(
 
 def _completed_predecessor_handoff_completion_overlay(
     predecessor_ticket_id: str,
+    *,
+    lineage_scope: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
         load_historical_approved_predecessor_generation_authority,
@@ -2190,6 +2349,8 @@ def _completed_predecessor_handoff_completion_overlay(
         allow_terminal_completed_predecessor_historical=True,
     )
     if projection is None:
+        return None
+    if not _historical_projection_matches_lineage_scope(projection, lineage_scope):
         return None
     completion = load_current_ticket_human_git_handoff_completion_record(
         projection_record=projection,
