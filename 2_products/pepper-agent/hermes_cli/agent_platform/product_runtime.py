@@ -1466,6 +1466,11 @@ def _current_incomplete_generation_record_from_records() -> dict[str, Any] | Non
             overlay = generated_record_to_workflow_overlay(record)
         except Exception:
             continue
+        if overlay.get("workflow_status") in {
+            "awaiting_ticket_approval",
+            "awaiting_correction",
+        }:
+            continue
         if not str(overlay.get("current_ticket_id") or "").strip():
             continue
         projection = None
@@ -2439,6 +2444,11 @@ def _current_incomplete_ticket_authority_overlay() -> tuple[
             try:
                 overlay = generated_record_to_workflow_overlay(generation)
             except Exception:
+                continue
+            if overlay.get("workflow_status") in {
+                "awaiting_ticket_approval",
+                "awaiting_correction",
+            }:
                 continue
             if not str(overlay.get("current_ticket_id") or "").strip():
                 continue
@@ -4484,10 +4494,16 @@ def load_current_ticket_review_prepare_record(
             f"{projection['ticket_id']} review-preparation record is unreadable"
         ) from exc
     try:
-        return validate_p18_9_0_review_prepare_record(
+        validated = validate_p18_9_0_review_prepare_record(
             record,
             projection_record=projection,
         )
+        if allow_historical_mismatch and _review_prepare_superseded_by_current_round(
+            validated,
+            projection=projection,
+        ):
+            return None
+        return validated
     except ProductRuntimeConflict:
         if allow_historical_mismatch and _review_prepare_superseded_by_current_round(
             record,
@@ -4553,7 +4569,9 @@ def _review_prepare_superseded_by_current_round(
     }
     if any(record.get(key) != value for key, value in expected.items()):
         return False
-    completion = _kanban_completion_result_source(projection)
+    if _projection_has_valid_durable_ticket_completion(projection):
+        return False
+    completion = _current_review_round_completion_source(projection)
     if completion.get("blocker_code"):
         return False
     recorded_run = _int_or_none(record.get("successful_run_id"))
@@ -4570,18 +4588,43 @@ def _review_prepare_completion_for_validation(
     *,
     projection: dict[str, Any],
 ) -> dict[str, Any]:
-    completion = _kanban_completion_result_source(projection)
+    completion = _current_review_round_completion_source(projection)
     blocker = str(completion.get("blocker_code") or "")
     if not blocker:
+        recorded_run = _int_or_none(record.get("successful_run_id"))
+        current_run = _int_or_none(completion.get("run_id"))
+        if recorded_run == current_run and record.get(
+            "kanban_completion_result_SHA256"
+        ) != completion.get("kanban_completion_result_SHA256"):
+            return _review_prepare_durable_completion_for_validation(
+                record,
+                projection=projection,
+                live_run_id=current_run,
+                blocker_detail="review-preparation current completion result drift",
+            )
         return completion
     if blocker not in PEPPER_REVIEW_PREPARE_DURABLE_COMPLETION_FALLBACK_BLOCKERS:
         raise ProductRuntimeConflict(blocker)
+    return _review_prepare_durable_completion_for_validation(
+        record,
+        projection=projection,
+        live_run_id=_int_or_none(completion.get("run_id")),
+        blocker_detail=blocker,
+    )
+
+
+def _review_prepare_durable_completion_for_validation(
+    record: dict[str, Any],
+    *,
+    projection: dict[str, Any],
+    live_run_id: int | None,
+    blocker_detail: str,
+) -> dict[str, Any]:
     durable_completion = record.get("kanban_completion_result")
     if not isinstance(durable_completion, dict):
-        raise ProductRuntimeConflict(blocker)
-    live_run_id = _int_or_none(completion.get("run_id"))
+        raise ProductRuntimeConflict(blocker_detail)
     if live_run_id != _int_or_none(record.get("successful_run_id")):
-        raise ProductRuntimeConflict(blocker)
+        raise ProductRuntimeConflict(blocker_detail)
     durable_completion_sha = durable_completion.get("kanban_completion_result_SHA256")
     if durable_completion_sha != _kanban_completion_result_digest(durable_completion):
         raise ProductRuntimeConflict(
@@ -4682,7 +4725,7 @@ def _review_decision_superseded_by_current_round(
         return False
     if _review_decision_revision_request_consumed_by_runtime(record, projection=projection):
         return True
-    completion = _kanban_completion_result_source(projection)
+    completion = _current_review_round_completion_source(projection)
     if completion.get("blocker_code"):
         return False
     current_run = _int_or_none(completion.get("run_id"))
@@ -5025,6 +5068,32 @@ def validate_current_ticket_human_git_handoff_completion_record(
     for key, value in expected.items():
         if record.get(key) != value:
             raise ProductRuntimeConflict(f"human Git handoff completion record {key} mismatch")
+    accepted_authority = record.get("accepted_review_authority")
+    if not isinstance(accepted_authority, dict):
+        raise ProductRuntimeConflict(
+            "human Git handoff completion accepted review authority mismatch"
+        )
+    authority_expected = {
+        "policy_id": accepted_review.get("policy_id"),
+        "source_system": accepted_review.get("source_system"),
+        "review_decision": accepted_review.get("review_decision"),
+        "review_decision_SHA256": accepted_review.get("review_decision_SHA256"),
+        "review_decision_identity_SHA256": accepted_review.get(
+            "review_decision_identity_SHA256"
+        ),
+        "reviewed_candidate_SHA256": accepted_review.get("reviewed_candidate_SHA256"),
+    }
+    for key, value in authority_expected.items():
+        if accepted_authority.get(key) != value:
+            raise ProductRuntimeConflict(
+                "human Git handoff completion accepted review authority mismatch"
+            )
+    if _int_or_none(accepted_authority.get("reviewed_run_id")) != _int_or_none(
+        accepted_review.get("reviewed_run_id")
+    ):
+        raise ProductRuntimeConflict(
+            "human Git handoff completion accepted review authority mismatch"
+        )
     if record.get("completion_identity_SHA256") != _human_git_handoff_completion_identity_digest(record):
         raise ProductRuntimeConflict("human Git handoff completion identity mismatch")
     commits = tuple(record.get("ordered_commit_SHAs") or ())
@@ -7988,7 +8057,7 @@ def prepare_current_ticket_review(
         return _review_prepare_operational_result(existing, idempotent_replay=True)
     if existing_conflict is not None:
         workflow_blocker = _review_prepare_workflow_blocker(workflow)
-        if workflow_blocker is not None and workflow.get("workflow_status") != "execution_completed":
+        if workflow_blocker is not None:
             code, detail = workflow_blocker
             return _blocked_current_review_prepare_result(
                 projection,
@@ -7996,17 +8065,12 @@ def prepare_current_ticket_review(
                 blocker_code=code,
                 blocker_detail=detail,
             )
-        path = review_prepare_record_path_for_ticket(str(projection["ticket_id"]))
-        _archive_existing_authority_record(
-            path,
-            review_prepare_history_path_for_ticket(str(projection["ticket_id"])),
-            reason="superseded_or_invalid_review_prepare_authority",
+        return _blocked_current_review_prepare_result(
+            projection,
+            request=request,
+            blocker_code="REVIEW_PREPARE_AUTHORITY_INVALID",
+            blocker_detail=str(existing_conflict) or "current review-preparation authority is invalid",
         )
-        try:
-            path.unlink()
-        except FileNotFoundError:
-            pass
-        workflow = build_workflow_control_snapshot()
 
     workflow_blocker = _review_prepare_workflow_blocker(workflow)
     if workflow_blocker is not None:
@@ -8018,7 +8082,7 @@ def prepare_current_ticket_review(
             blocker_detail=detail,
         )
 
-    completion = _kanban_completion_result_source(projection)
+    completion = _current_review_round_completion_source(projection)
     if completion.get("blocker_code"):
         return _blocked_current_review_prepare_result(
             projection,
@@ -21627,6 +21691,98 @@ def _review_prepare_human_git_handoff_required(completion: dict[str, Any]) -> bo
             completion.get("candidate_changes_reference"),
         )
     )
+
+
+def _governed_autonomy_current_review_round_completion_source(
+    projection: dict[str, Any],
+) -> dict[str, Any] | None:
+    activation = load_current_ticket_governed_autonomy_activation_record(
+        projection_record=projection,
+    )
+    if activation is None:
+        return None
+    runtime = load_current_ticket_governed_autonomy_runtime_state(
+        projection_record=projection,
+        activation_record=activation,
+    )
+    if runtime is None:
+        return None
+    if (
+        runtime.get("governed_autonomy_runtime_status")
+        == "review_revision_request_recorded_pending_continuation"
+    ):
+        return None
+    effective_authority = _resolve_effective_current_governed_autonomy_authority(
+        projection=projection,
+        activation=activation,
+        previous=runtime,
+    )
+    _require_current_governed_autonomy_authority_match(
+        projection=projection,
+        activation=activation,
+        previous=runtime,
+        effective_authority=effective_authority,
+    )
+    terminal = _governed_autonomy_runtime_terminal_reconciliation(
+        runtime,
+        effective_authority=effective_authority,
+    )
+    if terminal is None or terminal.get("validated_candidate_review_required") is not True:
+        return None
+    candidate_changes = terminal.get("candidate_changes_reference")
+    if not _governed_autonomy_candidate_changes_available(candidate_changes):
+        return None
+    run_id = _int_or_none(terminal.get("terminal_run_id"))
+    if run_id is None:
+        return None
+    source = {
+        "blocker_code": None,
+        "blocker_detail": None,
+        "kanban_board_slug": _normalize_board(str(projection["kanban_board_slug"])),
+        "kanban_task_id": projection["kanban_task_id"],
+        "kanban_task_status": None,
+        "kanban_task_assignee": projection.get("assignee_profile"),
+        "kanban_task_workspace_kind": None,
+        "kanban_task_workspace_path": runtime.get("workspace_path"),
+        "kanban_task_current_run_id": None,
+        "run_id": run_id,
+        "run_status": terminal.get("terminal_run_status") or "blocked",
+        "run_outcome": terminal.get("terminal_run_outcome") or "blocked",
+        "run_profile": runtime.get("selected_profile") or projection.get("selected_profile"),
+        "run_started_at": None,
+        "run_ended_at": terminal.get("terminal_run_ended_at"),
+        "run_summary": terminal.get("terminal_run_failure_summary"),
+        "run_metadata": None,
+        "task_result": None,
+        "completion_detail_sources": [
+            "governed_autonomy_runtime_terminal_reconciliation",
+        ],
+        "reported_files_modified": [],
+        "reported_git_mutation": False,
+        "task_run_count": None,
+        "Kanban_SQLite_canonical_authority": False,
+        "logs_parsed_for_completion_authority": False,
+        "terminal_outcome_class": "validated_review_required",
+        "review_required": True,
+        "review_boundary_kind": "human_code_review",
+        "terminal_outcome_authority": "governed_autonomy_runtime_terminal_reconciliation",
+        "kanban_block_kind": None,
+        "validation_observation_reference": terminal["validation_observation_reference"],
+        "source_materialization_reference": terminal["source_materialization_reference"],
+        "candidate_changes_reference": candidate_changes,
+        "candidate_changes_available": True,
+    }
+    source["kanban_completion_result_SHA256"] = _kanban_completion_result_digest(source)
+    return source
+
+
+def _current_review_round_completion_source(projection: dict[str, Any]) -> dict[str, Any]:
+    governed_completion = _governed_autonomy_current_review_round_completion_source(
+        projection,
+    )
+    if governed_completion is not None:
+        return governed_completion
+    return _kanban_completion_result_source(projection)
 
 
 def _kanban_completion_result_source(projection: dict[str, Any]) -> dict[str, Any]:

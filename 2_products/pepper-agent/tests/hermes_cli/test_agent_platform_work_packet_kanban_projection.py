@@ -1656,6 +1656,196 @@ def _patch_c9_synthetic_authority(
     monkeypatch.setattr(pr, "_current_ticket_human_git_handoff_prepare_overlay", lambda _p: None)
 
 
+def _c10_acceptance_contract(pr, projection_record: dict[str, object]) -> dict[str, object]:
+    contract = {
+        "schema_version": pr.PEPPER_REVIEW_PREPARE_ACTION_SCHEMA_VERSION,
+        "project_id": projection_record["project_id"],
+        "ticket_id": projection_record["ticket_id"],
+        "ticket_title": projection_record["ticket_title"],
+        "ticket_spec_SHA256": projection_record["ticket_spec_SHA256"],
+        "work_packet_id": projection_record["work_packet_id"],
+        "work_packet_SHA256": projection_record["work_packet_SHA256"],
+        "acceptance_criteria": ["Synthetic review round acceptance."],
+        "validation_steps": ["Synthetic validation passed."],
+        "response_contract": {
+            "completion_verdict": "ready_for_human_review",
+            "required_sections": ["Summary"],
+        },
+        "work_packet_validation_steps": ["GVCMD-synthetic"],
+        "completion_verdict": "ready_for_human_review",
+        "required_response_sections": ["Summary"],
+        "acceptance_contract_source": f"synthetic:{projection_record['ticket_id']}",
+    }
+    contract["criteria_revision_SHA256"] = pr._criteria_revision_digest(contract)
+    contract["acceptance_contract_SHA256"] = pr._acceptance_contract_digest(contract)
+    return contract
+
+
+def _c10_review_round_completion(
+    pr,
+    projection_record: dict[str, object],
+    *,
+    run_id: int,
+    candidate_label: str,
+) -> dict[str, object]:
+    source_sha = hashlib.sha256(f"{candidate_label}:source".encode()).hexdigest()
+    scratch_sha = hashlib.sha256(f"{candidate_label}:scratch".encode()).hexdigest()
+    candidate_reference = {
+        "available": True,
+        "files_changed": 1,
+        "modified_file_count": 1,
+        "created_file_count": 0,
+        "deleted_file_count": 0,
+        "files": [
+            {
+                "path": f"synthetic/{candidate_label}/src/current.ts",
+                "change_type": "modified",
+                "source_SHA256": source_sha,
+                "scratch_SHA256": scratch_sha,
+            }
+        ],
+    }
+    completion = {
+        "blocker_code": None,
+        "blocker_detail": None,
+        "kanban_board_slug": projection_record["kanban_board_slug"],
+        "kanban_task_id": projection_record["kanban_task_id"],
+        "kanban_task_status": "blocked",
+        "kanban_task_assignee": "implementation_product",
+        "kanban_task_workspace_kind": "scratch",
+        "kanban_task_workspace_path": f"/tmp/{candidate_label}",
+        "kanban_task_current_run_id": None,
+        "run_id": run_id,
+        "run_status": "blocked",
+        "run_outcome": "blocked",
+        "run_profile": "implementation_product",
+        "run_started_at": run_id * 10,
+        "run_ended_at": run_id * 10 + 5,
+        "run_summary": f"Synthetic {candidate_label} validated review-required candidate.",
+        "run_metadata": None,
+        "task_result": None,
+        "completion_detail_sources": ["synthetic_terminal_review_boundary"],
+        "reported_files_modified": [],
+        "reported_git_mutation": False,
+        "task_run_count": run_id,
+        "Kanban_SQLite_canonical_authority": False,
+        "logs_parsed_for_completion_authority": False,
+        "terminal_outcome_class": "validated_review_required",
+        "review_required": True,
+        "review_boundary_kind": "human_code_review",
+        "terminal_outcome_authority": "synthetic_governed_terminal_lineage",
+        "kanban_block_kind": "needs_input",
+        "validation_observation_reference": {
+            "tool_name": "workpacket_validation",
+            "infrastructure_failure": False,
+            "validation_passed": True,
+            "validated_candidate_review_required": True,
+        },
+        "source_materialization_reference": {
+            "manifest_path": f"/tmp/{candidate_label}/.hermes-agent-platform/workpacket-source-materialization.json",
+        },
+        "candidate_changes_reference": candidate_reference,
+        "candidate_changes_available": True,
+    }
+    completion["kanban_completion_result_SHA256"] = pr._kanban_completion_result_digest(
+        completion,
+    )
+    return completion
+
+
+def _c10_review_ready_workflow(
+    pr,
+    projection_record: dict[str, object],
+) -> dict[str, object]:
+    binding = pr.resolve_current_ticket_lifecycle_binding(
+        projection_record=projection_record,
+    )
+    return {
+        "project_id": binding.project_id,
+        "macroproject_id": binding.macroproject_id,
+        "current_ticket_id": binding.ticket_id,
+        "current_ticket_title": binding.ticket_title,
+        "workflow_status": "execution_completed",
+        "workflow_state": f"{binding.ticket_id}-RETRY-EXECUTION-COMPLETED",
+        "queue_state": "kanban_retry_execution_terminal",
+        "execution_state": "no_active_executions",
+        "active_execution_count": 0,
+        "validation_state": "execution_completed_pending_validation",
+        "review_state": "ready_for_review_validation",
+        "recovery_state": "not_required",
+        "remaining_blockers": [],
+        "execution_start_authority": {"start_authorization_SHA256": "1" * 64},
+        "retry_start_authority": {"retry_start_authorization_SHA256": "2" * 64},
+        "next_action": {
+            "id": binding.review_prepare_next_action_id,
+            "target_ticket_id": binding.ticket_id,
+            "target_ticket_title": binding.ticket_title,
+            "required_human_action": "review_validation_preparation_and_human_git_handoff",
+        },
+    }
+
+
+def _patch_c10_governed_terminal_review_round(
+    monkeypatch,
+    pr,
+    completion: dict[str, object],
+) -> None:
+    activation = {
+        "activation_action_SHA256": "a" * 64,
+        "governed_autonomy_envelope_SHA256": "b" * 64,
+    }
+    runtime = {
+        "governed_autonomy_runtime_status": "direct_execution_terminal_validated_review_required",
+        "runtime_state_SHA256": "c" * 64,
+        "workspace_path": completion["kanban_task_workspace_path"],
+        "selected_profile": completion["run_profile"],
+    }
+    terminal = {
+        "terminal_run_id": completion["run_id"],
+        "terminal_run_status": completion["run_status"],
+        "terminal_run_outcome": completion["run_outcome"],
+        "terminal_run_ended_at": completion["run_ended_at"],
+        "terminal_run_failure_category": None,
+        "terminal_run_failure_summary": completion["run_summary"],
+        "validation_infrastructure_failure": False,
+        "validation_observation_reference": completion["validation_observation_reference"],
+        "source_materialization_reference": completion["source_materialization_reference"],
+        "candidate_changes_reference": completion["candidate_changes_reference"],
+        "candidate_changes_available": True,
+        "validated_candidate_review_required": True,
+        "blocker_code": None,
+        "blocker_detail": None,
+        "next_autonomous_action": None,
+        "next_human_action": "prepare governed review validation",
+        "next_action": None,
+    }
+    monkeypatch.setattr(
+        pr,
+        "load_current_ticket_governed_autonomy_activation_record",
+        lambda *, projection_record=None: activation,
+    )
+    monkeypatch.setattr(
+        pr,
+        "load_current_ticket_governed_autonomy_runtime_state",
+        lambda *, projection_record=None, activation_record=None: runtime,
+    )
+    monkeypatch.setattr(
+        pr,
+        "_resolve_effective_current_governed_autonomy_authority",
+        lambda **_kwargs: {"current_execution_state": {}},
+    )
+    monkeypatch.setattr(
+        pr,
+        "_require_current_governed_autonomy_authority_match",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        pr,
+        "_governed_autonomy_runtime_terminal_reconciliation",
+        lambda _runtime, *, effective_authority=None: terminal,
+    )
+
+
 def _start_recovered_p18_9_2_retry_for_test(
     state,
     monkeypatch,
@@ -5370,6 +5560,226 @@ def test_synthetic_c9_only_durable_completion_clears_current_successor_authority
     assert "current_ticket_authority_precedence" not in snapshot
 
 
+def test_synthetic_c10_same_ticket_stale_review_round_is_historical_for_new_terminal_round(
+    projection_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+    from hermes_cli import kanban_db
+
+    ticket_id = "P99.5"
+    projection_record = _c9_projection_record(ticket_id)
+    kanban_db.create_board(str(projection_record["kanban_board_slug"]))
+    lifecycle_overlay = _c9_lifecycle_overlay(pr, ticket_id, "validated_review_ready")
+    assert lifecycle_overlay is not None
+    lifecycle_overlay.update({
+        "project_id": projection_record["project_id"],
+        "macroproject_id": projection_record["macroproject_id"],
+        "macroproject_title": projection_record["macroproject_title"],
+    })
+    original_review_prepare_overlay = pr._p18_9_0_review_prepare_overlay
+    _patch_c9_synthetic_authority(
+        monkeypatch,
+        pr,
+        current_ticket_id=ticket_id,
+        lifecycle_overlay=lifecycle_overlay,
+        completed_ticket_ids=("P99.4",),
+        authority_ticket_ids=("P99.4", ticket_id),
+        bootstrap_completed_ticket_id="P99.4",
+        predecessor_overrides={ticket_id: "P99.4"},
+    )
+    monkeypatch.setattr(pr, "_load_current_projection_record", lambda: projection_record)
+    monkeypatch.setattr(pr, "_current_projection_record_for_binding", lambda: projection_record)
+    monkeypatch.setattr(pr, "_validate_execution_start_authority", lambda _projection: None)
+    monkeypatch.setattr(
+        pr,
+        "_acceptance_contract_for_review_projection",
+        lambda projection: _c10_acceptance_contract(pr, projection),
+    )
+    monkeypatch.setattr(pr, "_p18_9_0_review_prepare_overlay", original_review_prepare_overlay)
+
+    old_completion = _c10_review_round_completion(
+        pr,
+        projection_record,
+        run_id=10,
+        candidate_label="candidate-a",
+    )
+    new_completion = _c10_review_round_completion(
+        pr,
+        projection_record,
+        run_id=11,
+        candidate_label="candidate-b",
+    )
+    predecessor_projection = _c9_projection_record("P99.4")
+    predecessor_prepare = pr._build_review_prepare_record(
+        request=pr.CurrentTicketReviewPrepareRequest(
+            project_id="PEPPER",
+            ticket_id="P99.4",
+            next_action_id="PREPARE_P99_4_REVIEW",
+        ),
+        projection=predecessor_projection,
+        workflow=_c10_review_ready_workflow(pr, predecessor_projection),
+        completion=_c10_review_round_completion(
+            pr,
+            predecessor_projection,
+            run_id=99,
+            candidate_label="predecessor-candidate",
+        ),
+        acceptance_contract=_c10_acceptance_contract(pr, predecessor_projection),
+    )
+    predecessor_path = pr.review_prepare_record_path_for_ticket("P99.4")
+    predecessor_path.parent.mkdir(parents=True, exist_ok=True)
+    predecessor_path.write_text(
+        json.dumps(predecessor_prepare, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(pr, "_kanban_completion_result_source", lambda _projection: old_completion)
+    old_prepare = pr._build_review_prepare_record(
+        request=pr.CurrentTicketReviewPrepareRequest(
+            project_id="PEPPER",
+            ticket_id=ticket_id,
+            next_action_id="PREPARE_P99_5_REVIEW",
+        ),
+        projection=projection_record,
+        workflow=_c10_review_ready_workflow(pr, projection_record),
+        completion=old_completion,
+        acceptance_contract=_c10_acceptance_contract(pr, projection_record),
+    )
+    pr._persist_review_prepare_record(old_prepare)
+    assert pr._review_prepare_superseded_by_current_round(
+        old_prepare,
+        projection=projection_record,
+    ) is False
+    old_prepare_bytes = pr.review_prepare_record_path_for_ticket(ticket_id).read_bytes()
+    old_prepare_replay = pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id=ticket_id,
+        next_action_id="PREPARE_P99_5_REVIEW",
+    )
+    assert old_prepare_replay["idempotent_replay"] is True
+    assert old_prepare_replay["successful_run_id"] == 10
+    assert pr.review_prepare_record_path_for_ticket(ticket_id).read_bytes() == old_prepare_bytes
+    assert not pr.review_prepare_history_path_for_ticket(ticket_id).exists()
+
+    old_decision = pr.submit_current_ticket_review_decision(
+        decision="accept",
+        feedback="Human accepted the old synthetic candidate before a newer terminal round existed.",
+        reviewed_run_id=10,
+        project_id="PEPPER",
+        ticket_id=ticket_id,
+        next_action_id="SUBMIT_P99_5_REVIEW_DECISION",
+    )
+    assert old_decision["reviewed_run_id"] == 10
+    assert pr.review_prepare_record_path_for_ticket(ticket_id).exists()
+    assert pr.review_decision_record_path_for_ticket(ticket_id).exists()
+
+    _patch_c10_governed_terminal_review_round(monkeypatch, pr, new_completion)
+    assert pr._current_review_round_completion_source(projection_record)["run_id"] == 11
+    raw_prepare = json.loads(
+        pr.review_prepare_record_path_for_ticket(ticket_id).read_text(encoding="utf-8"),
+    )
+    raw_decision = json.loads(
+        pr.review_decision_record_path_for_ticket(ticket_id).read_text(encoding="utf-8"),
+    )
+    assert pr._review_prepare_superseded_by_current_round(
+        raw_prepare,
+        projection=projection_record,
+    ) is True
+    assert pr._review_decision_superseded_by_current_round(
+        raw_decision,
+        projection=projection_record,
+    ) is True
+    assert pr._review_prepare_superseded_by_current_round(
+        predecessor_prepare,
+        projection=projection_record,
+    ) is False
+
+    before = pr.build_workflow_control_snapshot()
+    assert before["current_ticket_id"] == ticket_id
+    assert before["workflow_status"] == "execution_completed"
+    assert before["review_state"] == "ready_for_review_validation"
+    assert before["remaining_blockers"] == []
+    assert before["next_action"]["id"] == "PREPARE_P99_5_REVIEW"
+    assert "review_prepare_authority" not in before
+    assert before.get("review_decision_recorded") is not True
+
+    prepared = pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id=ticket_id,
+        next_action_id="PREPARE_P99_5_REVIEW",
+    )
+
+    assert prepared.get("blocker_code") is None, prepared.get("blocker_detail")
+    assert prepared["review_prepare_status"] == "prepared_pending_human_acceptance", prepared
+    assert prepared["review_preparation_recorded"] is True
+    assert prepared["idempotent_replay"] is False
+    assert prepared["successful_run_id"] == 11
+    assert prepared["successful_run_id"] != old_prepare["successful_run_id"]
+    assert prepared["review_prepare_action_SHA256"] != old_prepare[
+        "review_prepare_action_SHA256"
+    ]
+    assert prepared["review_package_SHA256"] != old_prepare["review_package_SHA256"]
+    assert prepared["kanban_completion_result"]["run_id"] == 11
+    assert prepared["kanban_completion_result"]["candidate_changes_reference"]["files"][0][
+        "path"
+    ] == "synthetic/candidate-b/src/current.ts"
+    assert prepared["Git_mutation"] is False
+    assert prepared["dispatch_performed"] is False
+    assert prepared["execution_started"] is False
+    assert predecessor_path.exists()
+
+    with pytest.raises(pr.ProductRuntimeConflict, match="review decision targets run"):
+        pr.submit_current_ticket_review_decision(
+            decision="accept",
+            feedback="Human accepts the stale synthetic candidate after a newer round exists.",
+            reviewed_run_id=10,
+            project_id="PEPPER",
+            ticket_id=ticket_id,
+            next_action_id="SUBMIT_P99_5_REVIEW_DECISION",
+        )
+    assert not pr.review_decision_record_path_for_ticket(ticket_id).exists()
+
+    after = pr.build_workflow_control_snapshot()
+    assert after["workflow_status"] == "review_prepared_pending_human_acceptance"
+    assert after["review_prepare_authority"]["successful_run_id"] == 11
+    assert after["review_decision_required"] is True
+    assert after.get("review_decision_recorded") is not True
+    assert after["next_action"]["id"] == "SUBMIT_P99_5_REVIEW_DECISION"
+    replay = pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id=ticket_id,
+        next_action_id="PREPARE_P99_5_REVIEW",
+    )
+    assert replay["idempotent_replay"] is True
+    assert replay["review_prepare_action_SHA256"] == prepared[
+        "review_prepare_action_SHA256"
+    ]
+
+    prepare_history = [
+        json.loads(line)["record"]
+        for line in pr.review_prepare_history_path_for_ticket(ticket_id).read_text(
+            encoding="utf-8",
+        ).splitlines()
+        if line.strip()
+    ]
+    assert any(
+        item["review_prepare_action_SHA256"] == old_prepare["review_prepare_action_SHA256"]
+        for item in prepare_history
+    )
+    decision_history = [
+        json.loads(line)["record"]
+        for line in pr.review_decision_history_path_for_ticket(ticket_id).read_text(
+            encoding="utf-8",
+        ).splitlines()
+        if line.strip()
+    ]
+    assert any(
+        item["review_decision_SHA256"] == old_decision["review_decision_SHA256"]
+        for item in decision_history
+    )
+    assert not pr.review_decision_record_path_for_ticket(ticket_id).exists()
+
+
 def test_review_required_p18_9_2_retry_reconstructs_to_governed_review_boundary(
     projection_home,
     monkeypatch,
@@ -8119,6 +8529,22 @@ def test_p18_9_2_review_prepare_overlay_fails_closed_for_stale_or_malformed_auth
     assert workflow["execution_started"] is False
     assert workflow["worker_execution"] is False
     assert workflow["Git_mutation"] is False
+    tampered_path = state.pr.review_prepare_record_path_for_ticket("P18.9.2")
+    tampered_bytes = tampered_path.read_bytes()
+    for _attempt in range(2):
+        blocked = state.pr.prepare_current_ticket_review(
+            project_id="PEPPER",
+            ticket_id="P18.9.2",
+            next_action_id="PREPARE_P18_9_2_REVIEW",
+        )
+        assert blocked["review_prepare_status"] == "blocked"
+        assert blocked["review_preparation_recorded"] is False
+        assert blocked["blocker_code"] == "WORKFLOW_BLOCKER_PRESENT"
+        assert blocked["dispatch_performed"] is False
+        assert blocked["execution_started"] is False
+        assert blocked["Git_mutation"] is False
+        assert tampered_path.read_bytes() == tampered_bytes
+        assert not state.pr.review_decision_record_path_for_ticket("P18.9.2").exists()
 
 
 def test_p18_9_0_review_prepare_compatibility_does_not_shadow_current_p18_9_2(
