@@ -29,6 +29,8 @@ import { Card } from "@nous-research/ui/ui/components/card";
 import { GatewayClient, type ConnectionState } from "@/lib/gatewayClient";
 import { buildWsUrl } from "@/lib/api";
 import { titleFromSessionInfoPayload } from "@/lib/chat-title";
+import { useRuntimeOverview } from "@/agent-platform/runtime-overview/use-runtime-overview";
+import type { RuntimeWorkflowControl } from "@/agent-platform/runtime-overview/contract";
 
 import { cn } from "@/lib/utils";
 import { AlertCircle, RefreshCw } from "lucide-react";
@@ -65,6 +67,82 @@ interface ChatSidebarProps {
   className?: string;
   onDashboardNewSessionRequest?: () => void;
   onSessionTitleChange?: (title: string | null) => void;
+}
+
+function requiredLabel(value: boolean) {
+  return value ? "Required" : "Not required";
+}
+
+function workflowCurrentWork(control: RuntimeWorkflowControl) {
+  return control.currentTicketId
+    ? `${control.currentTicketId}: ${control.currentTicketTitle ?? "Untitled governed ticket"}`
+    : "No current governed ticket is active.";
+}
+
+function workflowAttention(control: RuntimeWorkflowControl) {
+  return [
+    control.pendingTicketApprovalCount > 0 ? "ticket approval pending" : null,
+    control.reviewDecisionRequired ? "review decision required" : null,
+    control.humanAcceptanceRequired && !control.humanAcceptanceRecorded ? "human acceptance required" : null,
+    control.gitHandoffRequired ? "Git handoff required" : null,
+    control.readyRequiresHumanSmoke ? "human smoke check required" : null,
+    control.remainingBlockerCount > 0 ? "blockers remain" : null,
+    control.failureCategory ? "recovery evidence present" : null,
+  ].filter(Boolean).join("; ") || "No human-attention condition is currently raised.";
+}
+
+function SidebarCell({ label, value }: { readonly label: string; readonly value: string | number }) {
+  return (
+    <div className="min-w-0 rounded-md border border-border-subtle/70 px-2 py-1.5">
+      <div className="text-[0.65rem] uppercase tracking-[0.12em] text-text-tertiary">{label}</div>
+      <div className="mt-1 break-words font-mono text-xs text-text-primary">{value}</div>
+    </div>
+  );
+}
+
+export function ChatSidebarGovernedContext({
+  workflowControl,
+}: {
+  readonly workflowControl: RuntimeWorkflowControl | null;
+}) {
+  return (
+    <Card className="px-3 py-3 text-xs">
+      <div className="text-display text-xs tracking-wider text-text-tertiary">
+        Governed workflow context
+      </div>
+      <p className="mt-2 leading-relaxed text-text-secondary">
+        Presentation-only view of the backend-projected runtime workflow-control read model.
+      </p>
+
+      {workflowControl ? (
+        <div className="mt-3 space-y-3">
+          <div>
+            <div className="text-[0.65rem] uppercase tracking-[0.12em] text-text-tertiary">Current work</div>
+            <div className="mt-1 break-words text-sm font-medium text-text-primary">
+              {workflowCurrentWork(workflowControl)}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-2">
+            <SidebarCell label="Workflow status" value={workflowControl.workflowStatus} />
+            <SidebarCell label="Workflow state" value={workflowControl.workflowState} />
+            <SidebarCell label="Recovery state" value={workflowControl.recoveryState} />
+            <SidebarCell label="Next governed action" value={workflowControl.nextActionId} />
+            <SidebarCell label="Required human action" value={workflowControl.nextActionRequiredHumanAction} />
+            <SidebarCell label="Execution posture" value={workflowControl.executionState} />
+            <SidebarCell label="Manual chat control" value={requiredLabel(workflowControl.manualChatControlRequired)} />
+          </div>
+
+          <p className="leading-relaxed text-text-secondary">{workflowControl.nextActionLabel}</p>
+          <p className="leading-relaxed text-text-secondary">{workflowAttention(workflowControl)}</p>
+        </div>
+      ) : (
+        <p className="mt-3 leading-relaxed text-text-secondary">
+          Workflow-control read model unavailable; no lifecycle authority is derived locally.
+        </p>
+      )}
+    </Card>
+  );
 }
 
 export function ChatSidebar({
@@ -219,6 +297,7 @@ export function ChatSidebar({
   const modelName = "gpt-5.5";
   const modelLabel = modelName.split("/").slice(-1)[0] ?? "gpt-5.5";
   const banner = error;
+  const workflowControl = useRuntimeOverview().snapshot?.workflowControl ?? null;
 
   return (
     <aside
@@ -268,6 +347,25 @@ export function ChatSidebar({
           </div>
         </Card>
       )}
+
+      <ChatSidebarGovernedContext workflowControl={workflowControl} />
+
+      <Card className="px-3 py-3 text-xs">
+        <div className="text-display text-xs tracking-wider text-text-tertiary">
+          WORK navigation
+        </div>
+        <div className="mt-3 grid gap-2">
+          <a className="rounded-md border border-border-subtle/70 px-2 py-1.5 text-text-primary hover:bg-surface-hover" href="/agent-platform/projects">
+            Projects and tickets
+          </a>
+          <a className="rounded-md border border-border-subtle/70 px-2 py-1.5 text-text-primary hover:bg-surface-hover" href="/agent-platform/approvals">
+            Approvals
+          </a>
+          <a className="rounded-md border border-border-subtle/70 px-2 py-1.5 text-text-primary hover:bg-surface-hover" href="/agent-platform/executions">
+            Executions
+          </a>
+        </div>
+      </Card>
 
     </aside>
   );

@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { RUNTIME_OVERVIEW_DESCRIPTOR } from "./descriptor";
 import { parseRuntimeOverviewSnapshot } from "./contract";
 import { RuntimeOverviewView } from "./runtime-overview-page";
+import { ChatSidebarGovernedContext } from "@/components/ChatSidebar";
 import {
   createRuntimeOverviewPoller,
   INITIAL_RUNTIME_OVERVIEW_STATE,
@@ -306,6 +307,47 @@ describe("Runtime Overview surface and descriptor", () => {
     expect(ready).toContain("No active executions are running.");
     expect(ready).toContain("No human-attention condition is currently raised.");
     expect(ready).toContain("Idle");
+  });
+
+  it("renders the Lead Agent sidebar governed workflow fields from backend projection", () => {
+    const snapshot = parseRuntimeOverviewSnapshot(statusResponse({
+      agent_platform_workflow_control: workflowControl({
+        current_ticket_id: "P18.9.3",
+        current_ticket_title: "Lead Agent Product Experience",
+        workflow_status: "human_review_changes_requested",
+        workflow_state: "P18.9-LEAD-AGENT-CORRECTION-RUNNING",
+        recovery_state: "fresh_execution_after_review",
+        execution_state: "retry_execution_in_flight",
+        manual_chat_control_required: true,
+        next_action: {
+          id: "P18.9.3-render-workflow-context",
+          label: "Render backend-projected workflow fields in Pepper Lead Agent context.",
+          target_ticket_id: "P18.9.3",
+          target_ticket_title: "Lead Agent Product Experience",
+          required_human_action: "human_review_decision",
+        },
+      }),
+    }))!;
+
+    const ready = renderToStaticMarkup(
+      <ChatSidebarGovernedContext workflowControl={snapshot.workflowControl} />,
+    );
+
+    expect(ready).toContain("Governed workflow context");
+    expect(ready).toContain("Presentation-only view of the backend-projected runtime workflow-control read model.");
+    expect(ready).toContain("P18.9.3: Lead Agent Product Experience");
+    expect(ready).toContain("Workflow status");
+    expect(ready).toContain("human_review_changes_requested");
+    expect(ready).toContain("Workflow state");
+    expect(ready).toContain("P18.9-LEAD-AGENT-CORRECTION-RUNNING");
+    expect(ready).toContain("Recovery state");
+    expect(ready).toContain("fresh_execution_after_review");
+    expect(ready).toContain("P18.9.3-render-workflow-context");
+    expect(ready).toContain("human_review_decision");
+    expect(ready).toContain("retry_execution_in_flight");
+    expect(ready).toContain("Manual chat control");
+    expect(ready).toContain("Required");
+    expect(ready).not.toContain("model switch");
   });
 
   it("renders active execution summary", () => {

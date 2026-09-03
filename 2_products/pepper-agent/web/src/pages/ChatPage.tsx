@@ -327,7 +327,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
       return;
     }
 
-    setTitle(sessionTitle);
+    setTitle(sessionTitle ?? "Pepper Lead Agent");
     return () => setTitle(null);
   }, [isActive, sessionTitle, setTitle]);
 
