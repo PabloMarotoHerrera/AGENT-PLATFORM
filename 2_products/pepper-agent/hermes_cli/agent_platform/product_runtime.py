@@ -8320,7 +8320,6 @@ def inspect_current_ticket_review_candidate(
         review_prepare = validate_p18_9_0_review_prepare_record(
             raw_record,
             projection_record=projection,
-            allow_durable_completion_fallback=False,
         )
     except ProductRuntimeCandidateInspectionBlocked as exc:
         return _review_candidate_inspection_blocked_result(
@@ -8390,19 +8389,59 @@ def inspect_current_ticket_review_candidate(
                 blocker_detail=detail,
             )
     else:
-        return _review_candidate_inspection_blocked_result(
-            projection,
-            operation=operation,
-            review_prepare=review_prepare,
-            blocker_code="CURRENT_REVIEW_NOT_PREPARED_PENDING_HUMAN_DECISION",
-            blocker_detail="candidate inspection requires the current prepared review boundary",
+        prepared_authority_without_decision = (
+            review_prepare.get("review_prepare_status") == "prepared_pending_human_acceptance"
+            and review_prepare.get("review_state") == "prepared_pending_human_acceptance"
         )
+        if prepared_authority_without_decision:
+            try:
+                active_decision = load_current_ticket_review_decision_record(
+                    projection_record=projection,
+                    allow_historical_mismatch=True,
+                )
+            except ProductRuntimeConflict as exc:
+                return _review_candidate_inspection_blocked_result(
+                    projection,
+                    operation=operation,
+                    review_prepare=review_prepare,
+                    blocker_code="CURRENT_REVIEW_DECISION_AUTHORITY_INVALID",
+                    blocker_detail=str(exc) or "current review decision authority is invalid",
+                )
+            if active_decision is not None:
+                return _review_candidate_inspection_blocked_result(
+                    projection,
+                    operation=operation,
+                    review_prepare=review_prepare,
+                    blocker_code="CURRENT_REVIEW_ALREADY_DECIDED",
+                    blocker_detail="candidate inspection must not shadow an already-recorded review decision",
+                )
+            try:
+                _current_review_candidate_authority_context(
+                    projection=projection,
+                    review_prepare=review_prepare,
+                )
+            except ProductRuntimeCandidateInspectionBlocked as exc:
+                return _review_candidate_inspection_blocked_result(
+                    projection,
+                    operation=operation,
+                    review_prepare=review_prepare,
+                    blocker_code=_review_candidate_context_blocker_code(exc.blocker_code),
+                    blocker_detail=exc.blocker_detail,
+                )
+        else:
+            return _review_candidate_inspection_blocked_result(
+                projection,
+                operation=operation,
+                review_prepare=review_prepare,
+                blocker_code="CURRENT_REVIEW_NOT_PREPARED_PENDING_HUMAN_DECISION",
+                blocker_detail="candidate inspection requires the current prepared review boundary",
+            )
 
     try:
         result = _build_current_review_candidate_inspection_result(
             projection=projection,
-            review_prepare=review_prepare,
             operation=operation,
+            review_prepare=review_prepare,
             candidate_path=candidate_path,
             max_bytes=max_bytes,
         )
@@ -8422,7 +8461,7 @@ def inspect_current_ticket_review_candidate(
             projection,
             operation=operation,
             review_prepare=review_prepare,
-            blocker_code=exc.blocker_code,
+            blocker_code=_review_candidate_context_blocker_code(exc.blocker_code),
             blocker_detail=exc.blocker_detail,
         )
 
@@ -13743,6 +13782,16 @@ def _review_candidate_inspection_blocked_result(
         "WorkPacket_scope_validation_result": "blocked",
     })
     return result
+
+
+def _review_candidate_context_blocker_code(blocker_code: str) -> str:
+    if blocker_code in {
+        "SOURCE_MATERIALIZATION_IDENTITY_MISMATCH",
+        "SOURCE_MATERIALIZATION_REFERENCE_MISMATCH",
+        "CANDIDATE_MANIFEST_MALFORMED",
+    }:
+        return "CANDIDATE_INTEGRITY_BLOCKER"
+    return blocker_code
 
 
 def _review_candidate_reference_digest(

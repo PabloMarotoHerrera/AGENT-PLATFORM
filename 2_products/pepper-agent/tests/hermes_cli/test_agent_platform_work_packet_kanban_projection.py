@@ -2662,6 +2662,314 @@ def _assert_c12_not_review_ready(
         assert observation.get("validated_candidate_review_required") is not True
 
 
+def _c13_projection_record(pr, ticket_id: str) -> dict[str, object]:
+    macroproject_id = ticket_id.rsplit(".", 1)[0] if "." in ticket_id else "P99"
+    return _c11_projection_record(pr, ticket_id, macroproject_id=macroproject_id)
+
+
+def _c13_install_candidate_manifest_identity(
+    pr,
+    fixture: dict[str, object],
+    projection_record: dict[str, object],
+) -> dict[str, object]:
+    manifest_path = fixture["manifest_path"]
+    assert isinstance(manifest_path, Path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.update({
+        "policy_id": pr.PEPPER_SCRATCH_SOURCE_MATERIALIZATION_POLICY_ID,
+        "ticket_id": projection_record["ticket_id"],
+        "ticket_spec_SHA256": projection_record["ticket_spec_SHA256"],
+        "work_packet_id": projection_record["work_packet_id"],
+        "work_packet_SHA256": projection_record["work_packet_SHA256"],
+        "projection_SHA256": projection_record["projection_SHA256"],
+    })
+    manifest_path.write_text(
+        json.dumps(manifest, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return manifest
+
+
+def _c13_review_round_completion(
+    pr,
+    projection_record: dict[str, object],
+    tmp_path: Path,
+    *,
+    run_id: int,
+    label: str,
+) -> SimpleNamespace:
+    fixture = _write_synthetic_terminal_candidate_manifest(
+        pr,
+        tmp_path,
+        label=label,
+    )
+    _c13_install_candidate_manifest_identity(pr, fixture, projection_record)
+    manifest, materialization_reference = pr._governed_autonomy_materialization_manifest(
+        fixture["workspace"],
+    )
+    candidate_changes = pr._governed_autonomy_candidate_changes_reference(manifest)
+    assert pr._governed_autonomy_candidate_changes_available(candidate_changes)
+    summary = (
+        "review-required: synthetic C13 correction is implemented and governed "
+        "validation passes (GVCMD-001: 42/42 tests), but code changes need human review."
+    )
+    completion = {
+        "blocker_code": None,
+        "blocker_detail": None,
+        "kanban_board_slug": projection_record["kanban_board_slug"],
+        "kanban_task_id": projection_record["kanban_task_id"],
+        "kanban_task_status": None,
+        "kanban_task_assignee": projection_record["assignee_profile"],
+        "kanban_task_workspace_kind": "scratch",
+        "kanban_task_workspace_path": str(fixture["workspace"]),
+        "kanban_task_current_run_id": None,
+        "run_id": run_id,
+        "run_status": "blocked",
+        "run_outcome": "blocked",
+        "run_profile": projection_record["selected_profile"],
+        "run_started_at": run_id * 10,
+        "run_ended_at": run_id * 10 + 5,
+        "run_summary": summary,
+        "run_metadata": None,
+        "task_result": None,
+        "completion_detail_sources": [
+            "synthetic_c13_current_review_round_completion",
+        ],
+        "reported_files_modified": [],
+        "reported_git_mutation": False,
+        "task_run_count": None,
+        "Kanban_SQLite_canonical_authority": False,
+        "logs_parsed_for_completion_authority": False,
+        "terminal_outcome_class": "validated_review_required",
+        "review_required": True,
+        "review_boundary_kind": "human_code_review",
+        "terminal_outcome_authority": "synthetic_c13_current_review_round",
+        "kanban_block_kind": "needs_input",
+        "validation_observation_reference": {
+            "tool_name": "workpacket_validation",
+            "infrastructure_failure": False,
+            "validation_passed": True,
+            "validated_candidate_review_required": True,
+            "error_excerpt": summary,
+        },
+        "source_materialization_reference": materialization_reference,
+        "candidate_changes_reference": candidate_changes,
+        "candidate_changes_available": True,
+    }
+    completion["kanban_completion_result_SHA256"] = pr._kanban_completion_result_digest(
+        completion,
+    )
+    return SimpleNamespace(
+        completion=completion,
+        fixture=fixture,
+        candidate_path=fixture["writable_rel"],
+        support_path=fixture["support_rel"],
+    )
+
+
+def _c13_review_ready_workflow(
+    pr,
+    projection_record: dict[str, object],
+) -> dict[str, object]:
+    ticket_id = str(projection_record["ticket_id"])
+    return {
+        "project_id": projection_record["project_id"],
+        "macroproject_id": projection_record["macroproject_id"],
+        "macroproject_title": projection_record["macroproject_title"],
+        "current_ticket_id": ticket_id,
+        "current_ticket_title": projection_record["ticket_title"],
+        "workflow_state": f"{ticket_id}-GOVERNED-AUTONOMY-EXECUTION-COMPLETED",
+        "workflow_status": "execution_completed",
+        "queue_state": "governed_autonomy_kanban_execution_terminal",
+        "execution_state": "no_active_executions",
+        "active_execution_count": 0,
+        "validation_state": "execution_completed_pending_validation",
+        "review_state": "ready_for_review_validation",
+        "recovery_state": "not_required",
+        "remaining_blockers": [],
+        "next_action": {
+            "id": pr.governed_ticket_lifecycle_action_ids(ticket_id)["review_prepare"],
+            "target_ticket_id": ticket_id,
+            "target_ticket_title": projection_record["ticket_title"],
+            "required_human_action": "review_validation_preparation",
+        },
+    }
+
+
+def _c13_prepared_review_workflow(
+    pr,
+    projection_record: dict[str, object],
+    review_prepare: dict[str, object],
+) -> dict[str, object]:
+    workflow = _c13_review_ready_workflow(pr, projection_record)
+    ticket_id = str(projection_record["ticket_id"])
+    workflow.update({
+        "workflow_state": f"{ticket_id}-REVIEW-PREPARED-PENDING-HUMAN-ACCEPTANCE",
+        "workflow_status": "review_prepared_pending_human_acceptance",
+        "validation_state": "review_prepared_pending_human_acceptance",
+        "review_state": "prepared_pending_human_acceptance",
+        "review_prepare_authority": pr._review_prepare_authority_projection(review_prepare),
+        "review_decision_required": True,
+        "review_decision_recorded": False,
+        "human_acceptance_required": True,
+        "human_acceptance_recorded": False,
+        "git_handoff_required": bool(review_prepare["git_handoff_required"]),
+        "git_handoff_state": review_prepare["git_handoff_state"],
+        "next_action": {
+            "id": pr._review_decision_request_action_id(ticket_id),
+            "target_ticket_id": ticket_id,
+            "target_ticket_title": projection_record["ticket_title"],
+            "required_human_action": "review_decision",
+        },
+    })
+    return workflow
+
+
+def _c13_install_review_context(
+    pr,
+    monkeypatch,
+    projection_record: dict[str, object],
+    state: dict[str, object],
+) -> None:
+    monkeypatch.setattr(pr, "_load_current_projection_record", lambda: projection_record)
+    monkeypatch.setattr(pr, "_current_projection_record_for_binding", lambda: projection_record)
+    monkeypatch.setattr(pr, "_validate_execution_start_authority", lambda _projection: None)
+    monkeypatch.setattr(
+        pr,
+        "_current_review_round_completion_source",
+        lambda _projection: state["completion"],
+    )
+    monkeypatch.setattr(
+        pr,
+        "_acceptance_contract_for_review_projection",
+        lambda _projection: state["contract"],
+    )
+    monkeypatch.setattr(pr, "build_workflow_control_snapshot", lambda: state["workflow"])
+
+
+def _c13_persist_review_prepare(pr, record: dict[str, object]) -> None:
+    pr.review_prepare_record_path_for_ticket(str(record["ticket_id"])).write_text(
+        json.dumps(record, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _c13_reseal_review_prepare(
+    pr,
+    projection_record: dict[str, object],
+    record: dict[str, object],
+    *,
+    completion: dict[str, object],
+    contract: dict[str, object],
+) -> dict[str, object]:
+    completion["kanban_completion_result_SHA256"] = pr._kanban_completion_result_digest(
+        completion,
+    )
+    record["kanban_completion_result"] = completion
+    record["kanban_completion_result_SHA256"] = completion[
+        "kanban_completion_result_SHA256"
+    ]
+    record["review_package_SHA256"] = pr._review_prepare_package_digest(
+        projection=projection_record,
+        completion=completion,
+        acceptance_contract=contract,
+    )
+    record["review_prepare_action_SHA256"] = pr._review_prepare_record_digest(record)
+    _c13_persist_review_prepare(pr, record)
+    return record
+
+
+def _c13_prepare_round(
+    pr,
+    projection_record: dict[str, object],
+    state: dict[str, object],
+    *,
+    completion: dict[str, object],
+    contract: dict[str, object],
+) -> dict[str, object]:
+    ticket_id = str(projection_record["ticket_id"])
+    state["completion"] = completion
+    state["contract"] = contract
+    state["workflow"] = _c13_review_ready_workflow(pr, projection_record)
+    prepared = pr.prepare_current_ticket_review(
+        project_id=str(projection_record["project_id"]),
+        ticket_id=ticket_id,
+        next_action_id=pr.governed_ticket_lifecycle_action_ids(ticket_id)["review_prepare"],
+    )
+    assert prepared["review_prepare_status"] == "prepared_pending_human_acceptance"
+    assert prepared["successful_run_id"] == completion["run_id"]
+    state["workflow"] = _c13_prepared_review_workflow(
+        pr,
+        projection_record,
+        prepared,
+    )
+    return prepared
+
+
+def _c13_prepared_review_fixture(
+    pr,
+    tmp_path: Path,
+    monkeypatch,
+    *,
+    ticket_id: str,
+    round_count: int,
+    changed_contract_round: int | None = None,
+) -> SimpleNamespace:
+    projection_record = _c13_projection_record(pr, ticket_id)
+    state: dict[str, object] = {}
+    _c13_install_review_context(pr, monkeypatch, projection_record, state)
+    base_contract = _c10_acceptance_contract(pr, projection_record)
+    prepared_rounds = []
+    round_sources = []
+    for run_id in range(1, round_count + 1):
+        source = _c13_review_round_completion(
+            pr,
+            projection_record,
+            tmp_path,
+            run_id=run_id,
+            label=f"c13-{ticket_id.replace('.', '-')}-round-{run_id}",
+        )
+        contract = (
+            _drifted_acceptance_contract(pr, base_contract)
+            if changed_contract_round is not None and run_id >= changed_contract_round
+            else base_contract
+        )
+        prepared = _c13_prepare_round(
+            pr,
+            projection_record,
+            state,
+            completion=source.completion,
+            contract=contract,
+        )
+        prepared_rounds.append(prepared)
+        round_sources.append(source)
+    return SimpleNamespace(
+        pr=pr,
+        projection=projection_record,
+        state=state,
+        base_contract=base_contract,
+        contract=state["contract"],
+        current_completion=state["completion"],
+        review=prepared_rounds[-1],
+        prepared_rounds=prepared_rounds,
+        round_sources=round_sources,
+        current_source=round_sources[-1],
+        candidate_path=round_sources[-1].candidate_path,
+        support_path=round_sources[-1].support_path,
+    )
+
+
+def _c13_review_prepare_history_records(pr, ticket_id: str) -> list[dict[str, object]]:
+    path = pr.review_prepare_history_path_for_ticket(ticket_id)
+    if not path.exists():
+        return []
+    return [
+        json.loads(line)["record"]
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
 def _start_recovered_p18_9_2_retry_for_test(
     state,
     monkeypatch,
@@ -7060,6 +7368,374 @@ def test_synthetic_c12_review_prepare_after_governed_revision(
     assert prepared["dispatch_performed"] is False
     assert prepared["execution_started"] is False
     assert prepared["Git_mutation"] is False
+
+
+@pytest.mark.parametrize(
+    ("ticket_id", "round_count"),
+    (("P99.7", 1), ("P99.8", 2), ("P100.3", 3)),
+)
+def test_synthetic_c13_multi_round_current_review_candidate_inspection_matrix(
+    projection_home,
+    tmp_path,
+    monkeypatch,
+    ticket_id,
+    round_count,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _ = projection_home
+    fixture = _c13_prepared_review_fixture(
+        pr,
+        tmp_path,
+        monkeypatch,
+        ticket_id=ticket_id,
+        round_count=round_count,
+    )
+    raw_kanban_completion = dict(fixture.current_completion)
+    raw_kanban_completion["terminal_outcome_authority"] = (
+        "synthetic_c13_raw_kanban_divergent_view"
+    )
+    raw_kanban_completion["kanban_completion_result_SHA256"] = (
+        pr._kanban_completion_result_digest(raw_kanban_completion)
+    )
+    assert raw_kanban_completion["kanban_completion_result_SHA256"] != fixture.review[
+        "kanban_completion_result_SHA256"
+    ]
+    monkeypatch.setattr(
+        pr,
+        "_kanban_completion_result_source",
+        lambda _projection: raw_kanban_completion,
+    )
+
+    listed = pr.inspect_current_ticket_review_candidate(
+        operation="list",
+        project_id="PEPPER",
+        ticket_id=ticket_id,
+        reviewed_run_id=fixture.review["successful_run_id"],
+        review_package_SHA256=fixture.review["review_package_SHA256"],
+        review_prepare_action_SHA256=fixture.review["review_prepare_action_SHA256"],
+    )
+    metadata = pr.inspect_current_ticket_review_candidate(operation="metadata")
+    aggregate = pr.inspect_current_ticket_review_candidate(operation="aggregate_diff")
+    content = pr.inspect_current_ticket_review_candidate(
+        operation="content",
+        candidate_path=fixture.candidate_path,
+    )
+    diff = pr.inspect_current_ticket_review_candidate(
+        operation="diff",
+        candidate_path=fixture.candidate_path,
+    )
+
+    for result in (listed, metadata):
+        assert result["inspection_status"] == "available", result
+        assert result["reviewed_run_id"] == round_count
+        assert result["review_package_SHA256"] == fixture.review["review_package_SHA256"]
+        assert result["review_prepare_action_SHA256"] == fixture.review[
+            "review_prepare_action_SHA256"
+        ]
+        assert result["acceptance_contract_SHA256"] == fixture.contract[
+            "acceptance_contract_SHA256"
+        ]
+        assert result["candidate_paths"] == [fixture.candidate_path]
+        assert fixture.support_path not in result["candidate_paths"]
+        assert result["integrity_validation_result"] == "passed"
+        assert result["WorkPacket_scope_validation_result"] == "passed"
+        assert result["review_decision_recorded"] is False
+        assert result["review_state_mutation"] is False
+        assert result["candidate_mutation"] is False
+        assert result["Git_mutation"] is False
+
+    assert aggregate["inspection_status"] == "aggregate_diff_available"
+    assert content["inspection_status"] == "content_available"
+    assert diff["inspection_status"] == "diff_available"
+    assert fixture.review["acceptance_contract_SHA256"] == fixture.contract[
+        "acceptance_contract_SHA256"
+    ]
+    assert fixture.review["acceptance_contract"]["acceptance_contract_SHA256"] == (
+        fixture.contract["acceptance_contract_SHA256"]
+    )
+    assert len(_c13_review_prepare_history_records(pr, ticket_id)) == round_count - 1
+    if round_count > 1:
+        historical_guard = pr.inspect_current_ticket_review_candidate(
+            operation="list",
+            review_package_SHA256=fixture.prepared_rounds[0]["review_package_SHA256"],
+        )
+        assert historical_guard["inspection_status"] == "blocked"
+        assert historical_guard["blocker_code"] == "REVIEW_PACKAGE_GUARD_MISMATCH"
+
+    workflow = pr.build_workflow_control_snapshot()
+    assert workflow["workflow_status"] == "review_prepared_pending_human_acceptance"
+    assert workflow["workflow_state"] == f"{ticket_id}-REVIEW-PREPARED-PENDING-HUMAN-ACCEPTANCE"
+    assert workflow["review_state"] == "prepared_pending_human_acceptance"
+    assert workflow["review_decision_recorded"] is False
+    assert workflow["human_acceptance_recorded"] is False
+    assert workflow["active_execution_count"] == 0
+    assert workflow["recovery_state"] == "not_required"
+    assert workflow["next_action"]["id"] == pr._review_decision_request_action_id(ticket_id)
+
+
+def test_synthetic_c13_valid_prepare_authority_survives_workflow_projection_gap(
+    projection_home,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _ = projection_home
+    fixture = _c13_prepared_review_fixture(
+        pr,
+        tmp_path,
+        monkeypatch,
+        ticket_id="P99.7",
+        round_count=2,
+    )
+    fixture.state["workflow"] = _c13_review_ready_workflow(pr, fixture.projection)
+
+    listed = pr.inspect_current_ticket_review_candidate(operation="list")
+
+    assert listed["inspection_status"] == "available", listed
+    assert listed["reviewed_run_id"] == 2
+    assert listed["review_package_SHA256"] == fixture.review["review_package_SHA256"]
+    assert listed["review_prepare_action_SHA256"] == fixture.review[
+        "review_prepare_action_SHA256"
+    ]
+    assert listed["review_decision_recorded"] is False
+    assert listed["Git_mutation"] is False
+
+
+def test_synthetic_c13_workflow_projection_gap_does_not_shadow_review_decision(
+    projection_home,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _ = projection_home
+    fixture = _c13_prepared_review_fixture(
+        pr,
+        tmp_path,
+        monkeypatch,
+        ticket_id="P99.7",
+        round_count=2,
+    )
+    fixture.state["workflow"] = _c13_review_ready_workflow(pr, fixture.projection)
+    monkeypatch.setattr(
+        pr,
+        "load_current_ticket_review_decision_record",
+        lambda **_kwargs: {"review_decision": "accepted"},
+    )
+
+    result = pr.inspect_current_ticket_review_candidate(operation="list")
+
+    assert result["inspection_status"] == "blocked"
+    assert result["blocker_code"] == "CURRENT_REVIEW_ALREADY_DECIDED"
+    assert result["review_decision_recorded"] is False
+    assert result["Git_mutation"] is False
+
+
+def test_synthetic_c13_changed_acceptance_contract_round_validates_per_current_round(
+    projection_home,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _ = projection_home
+    fixture = _c13_prepared_review_fixture(
+        pr,
+        tmp_path,
+        monkeypatch,
+        ticket_id="P99.7",
+        round_count=2,
+        changed_contract_round=2,
+    )
+    history = _c13_review_prepare_history_records(pr, "P99.7")
+
+    assert len(history) == 1
+    assert history[0]["acceptance_contract_SHA256"] == fixture.base_contract[
+        "acceptance_contract_SHA256"
+    ]
+    assert fixture.review["acceptance_contract_SHA256"] == fixture.contract[
+        "acceptance_contract_SHA256"
+    ]
+    assert fixture.review["acceptance_contract_SHA256"] != fixture.base_contract[
+        "acceptance_contract_SHA256"
+    ]
+
+    listed = pr.inspect_current_ticket_review_candidate(operation="list")
+
+    assert listed["inspection_status"] == "available"
+    assert listed["reviewed_run_id"] == 2
+    assert listed["acceptance_contract_SHA256"] == fixture.contract[
+        "acceptance_contract_SHA256"
+    ]
+    assert listed["review_package_SHA256"] == fixture.review["review_package_SHA256"]
+
+
+def test_synthetic_c13_unrelated_historical_review_records_are_ignored(
+    projection_home,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _ = projection_home
+    fixture = _c13_prepared_review_fixture(
+        pr,
+        tmp_path,
+        monkeypatch,
+        ticket_id="P99.8",
+        round_count=2,
+    )
+    unrelated_history = pr.review_prepare_history_path_for_ticket("P100.3")
+    unrelated_history.parent.mkdir(parents=True, exist_ok=True)
+    unrelated_history.write_text(
+        json.dumps(
+            {
+                "archive_reason": "synthetic_unrelated_corrupt_history",
+                "record": {
+                    "ticket_id": "P100.3",
+                    "review_prepare_action_SHA256": "not-a-sha",
+                },
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    listed = pr.inspect_current_ticket_review_candidate(operation="list")
+
+    assert listed["inspection_status"] == "available"
+    assert listed["ticket_id"] == "P99.8"
+    assert listed["review_package_SHA256"] == fixture.review["review_package_SHA256"]
+    assert listed["review_decision_recorded"] is False
+
+
+@pytest.mark.parametrize(
+    ("mutation", "operation", "expected_code"),
+    (
+        ("current_contract_mismatch", "list", "CANDIDATE_INTEGRITY_BLOCKER"),
+        ("malformed_current_contract", "list", "CANDIDATE_INTEGRITY_BLOCKER"),
+        ("historical_contract_malformed", "list", "CANDIDATE_INTEGRITY_BLOCKER"),
+        ("review_package_digest_corrupt", "list", "CANDIDATE_INTEGRITY_BLOCKER"),
+        ("stale_historical_prepare_as_current", "list", "CANDIDATE_INTEGRITY_BLOCKER"),
+        ("candidate_digest_corrupt", "content", "CANDIDATE_INTEGRITY_BLOCKER"),
+        ("wrong_workpacket_record", "list", "CANDIDATE_INTEGRITY_BLOCKER"),
+        ("wrong_workpacket_manifest", "list", "CANDIDATE_INTEGRITY_BLOCKER"),
+        ("scope_violation", "list", "WORKPACKET_SCOPE_MISMATCH"),
+    ),
+)
+def test_synthetic_c13_negative_integrity_matrix_remains_fail_closed(
+    projection_home,
+    tmp_path,
+    monkeypatch,
+    mutation,
+    operation,
+    expected_code,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _ = projection_home
+    fixture = _c13_prepared_review_fixture(
+        pr,
+        tmp_path,
+        monkeypatch,
+        ticket_id="P99.7",
+        round_count=2,
+    )
+    prepare_path = pr.review_prepare_record_path_for_ticket("P99.7")
+
+    if mutation == "current_contract_mismatch":
+        fixture.state["contract"] = _drifted_acceptance_contract(pr, fixture.contract)
+    elif mutation == "malformed_current_contract":
+        malformed = dict(fixture.contract)
+        malformed["acceptance_contract_SHA256"] = "not-a-sha"
+        fixture.state["contract"] = malformed
+    elif mutation == "historical_contract_malformed":
+        record = json.loads(prepare_path.read_text(encoding="utf-8"))
+        record["acceptance_contract"] = dict(record["acceptance_contract"])
+        record["acceptance_contract"]["acceptance_contract_SHA256"] = "not-a-sha"
+        record["review_prepare_action_SHA256"] = pr._review_prepare_record_digest(record)
+        _c13_persist_review_prepare(pr, record)
+    elif mutation == "review_package_digest_corrupt":
+        record = json.loads(prepare_path.read_text(encoding="utf-8"))
+        record["review_package_SHA256"] = "f" * 64
+        record["review_prepare_action_SHA256"] = pr._review_prepare_record_digest(record)
+        _c13_persist_review_prepare(pr, record)
+    elif mutation == "stale_historical_prepare_as_current":
+        _c13_persist_review_prepare(
+            pr,
+            dict(_c13_review_prepare_history_records(pr, "P99.7")[0]),
+        )
+    elif mutation == "candidate_digest_corrupt":
+        workspace_path = fixture.current_source.fixture["workspace"] / fixture.candidate_path
+        workspace_path.write_text("export const value = 'drifted';\n", encoding="utf-8")
+    elif mutation == "wrong_workpacket_record":
+        record = json.loads(prepare_path.read_text(encoding="utf-8"))
+        record["work_packet_SHA256"] = "e" * 64
+        record["review_prepare_action_SHA256"] = pr._review_prepare_record_digest(record)
+        _c13_persist_review_prepare(pr, record)
+    elif mutation == "wrong_workpacket_manifest":
+        manifest_path = fixture.current_source.fixture["manifest_path"]
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["work_packet_SHA256"] = "e" * 64
+        manifest_path.write_text(
+            json.dumps(manifest, sort_keys=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    elif mutation == "scope_violation":
+        record = json.loads(prepare_path.read_text(encoding="utf-8"))
+        completion = json.loads(json.dumps(fixture.current_completion))
+        completion["candidate_changes_reference"]["files"][0]["path"] = (
+            "synthetic/c13/outside-workpacket.ts"
+        )
+        _c13_reseal_review_prepare(
+            pr,
+            fixture.projection,
+            record,
+            completion=completion,
+            contract=fixture.contract,
+        )
+        fixture.state["completion"] = completion
+
+    result = pr.inspect_current_ticket_review_candidate(
+        operation=operation,
+        candidate_path=fixture.candidate_path if operation in {"content", "diff"} else None,
+    )
+
+    assert result["inspection_status"] == "blocked", result
+    assert result["blocker_code"] == expected_code
+    assert result["integrity_validation_result"] == "blocked"
+    assert result["WorkPacket_scope_validation_result"] == "blocked"
+    assert result["Git_mutation"] is False
+
+
+def test_synthetic_c13_reviewed_run_guard_still_rejects_wrong_current_round(
+    projection_home,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _ = projection_home
+    fixture = _c13_prepared_review_fixture(
+        pr,
+        tmp_path,
+        monkeypatch,
+        ticket_id="P99.7",
+        round_count=2,
+    )
+
+    result = pr.inspect_current_ticket_review_candidate(
+        operation="list",
+        reviewed_run_id=fixture.review["successful_run_id"] - 1,
+    )
+
+    assert result["inspection_status"] == "blocked"
+    assert result["blocker_code"] == "REVIEW_RUN_GUARD_MISMATCH"
+    assert result["reviewed_run_id"] == fixture.review["successful_run_id"]
+    assert result["Git_mutation"] is False
 
 
 def test_review_required_p18_9_2_retry_reconstructs_to_governed_review_boundary(
