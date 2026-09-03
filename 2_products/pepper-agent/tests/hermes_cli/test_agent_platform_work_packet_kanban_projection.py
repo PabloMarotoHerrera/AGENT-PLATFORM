@@ -2162,6 +2162,506 @@ def _add_c11_completed_ticket(
     return records[ticket_id]
 
 
+_C12_TICKET_ID = "P99.7"
+_C12_RUN_ID = 42
+_C12_VALIDATED_REVIEW_SUMMARY = (
+    "review-required: synthetic frontend correction is implemented in the fresh "
+    "workspace and governed validation passes (GVCMD-001: 42/42 tests), but code "
+    "changes need human review before marking the task done."
+)
+_C12_ORIGINS = (
+    "initial_execution",
+    "retry_execution",
+    "same_authority_governed_continuation",
+    "human_review_changes_requested_revision",
+    "generic_fresh_execution_continuation",
+)
+
+
+def _c12_terminal_run_dict(
+    *,
+    run_id: int,
+    summary: str,
+    error: str | None = None,
+) -> dict[str, object]:
+    now = int(time.time())
+    return {
+        "id": run_id,
+        "task_id": "t_c12_synthetic",
+        "profile": _IMPLEMENTATION_PROFILE,
+        "step_key": None,
+        "status": "blocked",
+        "max_runtime_seconds": 3600,
+        "last_heartbeat_at": None,
+        "started_at": now - 60,
+        "ended_at": now,
+        "outcome": "blocked",
+        "failure_category": "blocked",
+        "failure_summary": summary,
+        "summary": summary,
+        "metadata": None,
+        "error": error,
+    }
+
+
+def _c12_governed_activation_result(
+    pr,
+    projection_record: dict[str, object],
+    activation_record: dict[str, object],
+) -> dict[str, object]:
+    return {
+        "source_system": pr.PEPPER_GOVERNED_AUTONOMY_ACTION_SOURCE_SYSTEM,
+        "policy_id": pr.PEPPER_GOVERNED_AUTONOMY_ACTION_POLICY_ID,
+        "activation_action_SHA256": activation_record["activation_action_SHA256"],
+        "governed_autonomy_activation_origin": "synthetic_c12",
+        "legacy_activation_compatibility_applied": False,
+        "historical_activation_record_preserved": False,
+        "historical_runtime_limitation_classification": None,
+        "effective_live_lineage_activation_authorized": True,
+        "additional_human_activation_required": False,
+        "authority_revalidated": True,
+        "governed_autonomy_status": "active_authority_ready_for_continuation",
+        "governed_autonomy_policy_id": pr.PEPPER_GOVERNED_AUTONOMY_ACTION_POLICY_ID,
+        "governed_autonomy_envelope_SHA256": activation_record[
+            "governed_autonomy_envelope_SHA256"
+        ],
+        "backend_derived_live_authority_SHA256": "d" * 64,
+        "authority_derivation_source": "synthetic_c12_current_projection",
+        "01AH_envelope_lifecycle_classification": "current_authority",
+        "capability_gap_SHA256": None,
+        "continuation_lineage_SHA256": "e" * 64,
+        "same_authority_subset_validated": True,
+        "same_authority_delegation_policy_id": pr.PEPPER_GOVERNED_AUTONOMY_A2A_POLICY_ID,
+        "same_authority_delegation_status": "synthetic_available",
+        "same_authority_delegation_authorized": True,
+        "same_authority_delegation_blocker_code": None,
+        "live_lineage_activation_authorized": True,
+        "live_lineage_activation_status": "active_authority_ready_for_continuation",
+        "live_lineage_activation_blocker_code": None,
+        "historical_live_lineage_activation_authorized": False,
+        "historical_live_lineage_activation_status": None,
+        "historical_live_lineage_activation_blocker_code": None,
+        "kanban_run_count": 1,
+        "human_smoke_marker": pr.PEPPER_GOVERNED_AUTONOMY_READY_MARKER,
+        "project_id": projection_record["project_id"],
+        "ticket_id": projection_record["ticket_id"],
+    }
+
+
+def _c12_fresh_execution_reference(
+    pr,
+    projection_record: dict[str, object],
+    origin: str,
+) -> dict[str, object] | None:
+    if origin == "same_authority_governed_continuation":
+        return None
+    provenance = (
+        "human_review_changes_requested"
+        if origin == "human_review_changes_requested_revision"
+        else "same_authority_fresh_execution_request"
+    )
+    transition = (
+        "HUMAN_REVIEW_CHANGES_REQUESTED_REVISION"
+        if origin == "human_review_changes_requested_revision"
+        else "FRESH_EXECUTION_TRANSITION_REPRESENTED"
+    )
+    reference = {
+        "fresh_execution_requested": True,
+        "transition_classification": transition,
+        "fresh_execution_provenance": provenance,
+        "execution_attempt_reason": "synthetic_c12_origin_matrix",
+        "ticket_id": projection_record["ticket_id"],
+        "projection_SHA256": projection_record["projection_SHA256"],
+        "reviewed_candidate_copied_to_revision_base": False,
+        "revision_source_base": "current_canonical_source",
+    }
+    reference["fresh_execution_request_SHA256"] = pr._digest_payload(
+        "synthetic-c12-fresh-execution-request-v1",
+        reference,
+    )
+    return reference
+
+
+def _c12_governed_runtime_state(
+    pr,
+    projection_record: dict[str, object],
+    activation_record: dict[str, object],
+    *,
+    workspace: Path,
+    origin: str,
+    run_id: int = _C12_RUN_ID,
+) -> dict[str, object]:
+    fresh_reference = _c12_fresh_execution_reference(pr, projection_record, origin)
+    budget_segment_reference = (
+        {
+            "budget_segment_origin": "human_review_changes_requested",
+            "reviewed_run_id": run_id - 1,
+            "reviewed_candidate_SHA256": "f" * 64,
+        }
+        if origin == "human_review_changes_requested_revision"
+        else None
+    )
+    return {
+        "source_system": pr.PEPPER_GOVERNED_AUTONOMY_RUNTIME_SOURCE_SYSTEM,
+        "policy_id": pr.PEPPER_GOVERNED_AUTONOMY_RUNTIME_POLICY_ID,
+        "project_id": projection_record["project_id"],
+        "macroproject_id": projection_record["macroproject_id"],
+        "macroproject_title": projection_record["macroproject_title"],
+        "ticket_id": projection_record["ticket_id"],
+        "ticket_title": projection_record["ticket_title"],
+        "ticket_spec_SHA256": projection_record["ticket_spec_SHA256"],
+        "work_packet_id": projection_record["work_packet_id"],
+        "work_packet_SHA256": projection_record["work_packet_SHA256"],
+        "projection_SHA256": projection_record["projection_SHA256"],
+        "activation_action_SHA256": activation_record["activation_action_SHA256"],
+        "governed_autonomy_envelope_SHA256": activation_record[
+            "governed_autonomy_envelope_SHA256"
+        ],
+        "governed_autonomy_runtime_status": "direct_continuation_recorded",
+        "runtime_decision": "DIRECT",
+        "runtime_state_SHA256": hashlib.sha256(f"c12:{origin}:runtime".encode()).hexdigest(),
+        "runtime_goal_SHA256": hashlib.sha256(f"c12:{origin}:goal".encode()).hexdigest(),
+        "runtime_goal_excerpt": f"Synthetic C12 {origin} terminal observation.",
+        "previous_runtime_state_SHA256": None,
+        "authority_revalidated": True,
+        "same_authority_subset_validated": True,
+        "latest_decision_evidence": {"runtime_decision": "DIRECT", "origin": origin},
+        "fresh_execution_requested": fresh_reference is not None,
+        "fresh_execution_request_SHA256": (
+            fresh_reference.get("fresh_execution_request_SHA256")
+            if fresh_reference is not None
+            else None
+        ),
+        "fresh_execution_request_reference": fresh_reference,
+        "execution_attempt_reason": (
+            fresh_reference.get("execution_attempt_reason")
+            if fresh_reference is not None
+            else None
+        ),
+        "prior_terminal_run_id": run_id - 1 if fresh_reference is not None else None,
+        "process_continuation_count": 1,
+        "self_repair_count": 0,
+        "task_local_tool_candidate_count": 0,
+        "command_evaluation_count": 0,
+        "A2A_delegation_count": 0,
+        "validation_failure_count": 0,
+        "no_progress_count": 0,
+        "latest_no_progress_fingerprint_SHA256": None,
+        "progress_marker_SHA256s": [],
+        "budget_limits": {"max_continuations": 5},
+        "budget_remaining": {"max_continuations": 4},
+        "budget_exhausted": False,
+        "budget_segment_reference": budget_segment_reference,
+        "budget_segment_previous_runtime_state_SHA256": None,
+        "blocker_code": None,
+        "blocker_detail": None,
+        "next_autonomous_action": None,
+        "next_human_action": None,
+        "source_run_id": None,
+        "source_run_status": None,
+        "source_run_outcome": None,
+        "historical_source_run_immutable": True,
+        "legacy_human_recovery_retry_micro_gates_required": False,
+        "legacy_run_mutation_performed": False,
+        "kanban_board_slug": projection_record["kanban_board_slug"],
+        "kanban_task_id": projection_record["kanban_task_id"],
+        "kanban_run_created": True,
+        "kanban_run_id": run_id,
+        "workspace_path": str(workspace),
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "worker_process_started": False,
+        "Kanban_dispatch": False,
+        "lineage_dispatch_performed": False,
+        "A2A_dispatch_performed": False,
+        "current_invocation_side_effects": {},
+        "provider_dispatch_count": 0,
+        "model_inference_count": 0,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+        "human_smoke_marker": pr.PEPPER_GOVERNED_AUTONOMY_READY_MARKER,
+    }
+
+
+def _c12_governed_continuation_workflow(
+    pr,
+    tmp_path: Path,
+    monkeypatch,
+    *,
+    origin: str,
+    ticket_id: str = _C12_TICKET_ID,
+    summary: str = _C12_VALIDATED_REVIEW_SUMMARY,
+    candidate_changes: bool = True,
+    error: str | None = None,
+) -> tuple[dict[str, object], dict[str, object] | None, dict[str, object] | None]:
+    projection_record = _c11_projection_record(pr, ticket_id)
+    fixture = _write_synthetic_terminal_candidate_manifest(
+        pr,
+        tmp_path,
+        label=f"c12-{origin}",
+        candidate_changes=candidate_changes,
+    )
+    activation = {
+        "activation_action_SHA256": hashlib.sha256(f"c12:{origin}:activation".encode()).hexdigest(),
+        "governed_autonomy_envelope_SHA256": hashlib.sha256(f"c12:{origin}:envelope".encode()).hexdigest(),
+        "governed_autonomy_status": "active_authority_ready_for_continuation",
+    }
+    runtime_state = _c12_governed_runtime_state(
+        pr,
+        projection_record,
+        activation,
+        workspace=fixture["workspace"],
+        origin=origin,
+    )
+    terminal_run = _c12_terminal_run_dict(
+        run_id=_C12_RUN_ID,
+        summary=summary,
+        error=error,
+    )
+    task_visibility = {
+        "id": projection_record["kanban_task_id"],
+        "status": "blocked",
+        "assignee": projection_record["assignee_profile"],
+        "workspace_kind": "scratch",
+        "workspace_path": str(fixture["workspace"]),
+        "current_run_id": None,
+        "block_kind": "needs_input",
+        "skills": [],
+    }
+    effective_authority = {
+        "owned_lineage_state": {"owned_governed_run_id": _C12_RUN_ID},
+        "current_execution_state": {
+            "task": task_visibility,
+            "runs": [terminal_run],
+        },
+        "continuation_eligible": True,
+        "authority_revalidated": True,
+        "diagnostics": {},
+    }
+    monkeypatch.setattr(
+        pr,
+        "load_current_ticket_governed_autonomy_activation_record",
+        lambda projection_record=None: activation,
+    )
+    monkeypatch.setattr(
+        pr,
+        "load_current_ticket_governed_autonomy_runtime_state",
+        lambda projection_record=None, activation_record=None: runtime_state,
+    )
+    monkeypatch.setattr(
+        pr,
+        "_resolve_effective_current_governed_autonomy_authority",
+        lambda **_kwargs: effective_authority,
+    )
+    monkeypatch.setattr(
+        pr,
+        "_require_current_governed_autonomy_authority_match",
+        lambda **_kwargs: {},
+    )
+    monkeypatch.setattr(
+        pr,
+        "_governed_autonomy_activation_operational_result",
+        lambda record, idempotent_replay=True: _c12_governed_activation_result(
+            pr,
+            projection_record,
+            activation,
+        ),
+    )
+    monkeypatch.setattr(pr, "_governed_autonomy_active_execution_replay", lambda *_args: False)
+    overlay, blocker = pr._current_ticket_governed_autonomy_overlay(projection_record)
+    if overlay is None:
+        return projection_record, None, blocker
+    workflow = {
+        "project_id": projection_record["project_id"],
+        "macroproject_id": projection_record["macroproject_id"],
+        "macroproject_title": projection_record["macroproject_title"],
+        **_c9_projection_overlay(pr, ticket_id),
+    }
+    workflow.update(overlay)
+    workflow.setdefault("remaining_blockers", [])
+    return projection_record, workflow, blocker
+
+
+def _c12_initial_execution_workflow(
+    pr,
+    tmp_path: Path,
+    monkeypatch,
+    *,
+    ticket_id: str = _C12_TICKET_ID,
+    summary: str = _C12_VALIDATED_REVIEW_SUMMARY,
+    candidate_changes: bool = True,
+    error: str | None = None,
+) -> tuple[dict[str, object], dict[str, object] | None, dict[str, object] | None]:
+    fixture = _write_synthetic_terminal_candidate_manifest(
+        pr,
+        tmp_path,
+        label="c12-initial",
+        candidate_changes=candidate_changes,
+    )
+    task = _synthetic_terminal_task(fixture["workspace"])
+    run = _synthetic_terminal_run(
+        run_id=_C12_RUN_ID,
+        status="blocked",
+        outcome="blocked",
+        summary=summary,
+        error=error,
+    )
+    monkeypatch.setattr(
+        pr,
+        "load_p18_9_0_execution_start_record",
+        lambda projection_record=None: _synthetic_execution_start_record(ticket_id, run_id=_C12_RUN_ID),
+    )
+    monkeypatch.setattr(pr, "_p18_9_0_live_kanban_execution", lambda _projection: (task, [run]))
+    overlay, blocker = pr._current_ticket_execution_start_overlay(_synthetic_projection(ticket_id))
+    return _synthetic_projection(ticket_id), overlay, blocker
+
+
+def _c12_retry_execution_workflow(
+    pr,
+    tmp_path: Path,
+    monkeypatch,
+    *,
+    ticket_id: str = _C12_TICKET_ID,
+    summary: str = _C12_VALIDATED_REVIEW_SUMMARY,
+    candidate_changes: bool = True,
+    error: str | None = None,
+) -> tuple[dict[str, object], dict[str, object] | None, dict[str, object] | None]:
+    fixture = _write_synthetic_terminal_candidate_manifest(
+        pr,
+        tmp_path,
+        label="c12-retry",
+        candidate_changes=candidate_changes,
+    )
+    task = _synthetic_terminal_task(fixture["workspace"])
+    failed_run = _synthetic_terminal_run(
+        run_id=_C12_RUN_ID - 1,
+        status="failed",
+        outcome="failed",
+        summary="synthetic pre-retry failure",
+        error="synthetic pre-retry failure",
+    )
+    retry_run = _synthetic_terminal_run(
+        run_id=_C12_RUN_ID,
+        status="blocked",
+        outcome="blocked",
+        summary=summary,
+        error=error,
+    )
+    monkeypatch.setattr(
+        pr,
+        "load_current_ticket_recovery_action_record",
+        lambda projection_record=None: {"recovery_action_SHA256": "3" * 64},
+    )
+    monkeypatch.setattr(
+        pr,
+        "load_current_ticket_retry_start_record",
+        lambda **_kwargs: _synthetic_retry_start_record(ticket_id, run_id=_C12_RUN_ID),
+    )
+    monkeypatch.setattr(pr, "_retry_start_record_cycle_id", lambda *_args: "cycle")
+    monkeypatch.setattr(pr, "_recovery_record_cycle_id", lambda *_args: "cycle")
+    monkeypatch.setattr(
+        pr,
+        "_p18_9_0_live_kanban_execution",
+        lambda _projection: (task, [failed_run, retry_run]),
+    )
+    overlay, blocker = pr._p18_9_0_retry_start_overlay(_synthetic_projection(ticket_id))
+    return _synthetic_projection(ticket_id), overlay, blocker
+
+
+def _c12_origin_workflow(
+    pr,
+    tmp_path: Path,
+    monkeypatch,
+    *,
+    origin: str,
+    ticket_id: str = _C12_TICKET_ID,
+    summary: str = _C12_VALIDATED_REVIEW_SUMMARY,
+    candidate_changes: bool = True,
+    error: str | None = None,
+) -> tuple[dict[str, object], dict[str, object] | None, dict[str, object] | None]:
+    if origin == "initial_execution":
+        return _c12_initial_execution_workflow(
+            pr,
+            tmp_path,
+            monkeypatch,
+            ticket_id=ticket_id,
+            summary=summary,
+            candidate_changes=candidate_changes,
+            error=error,
+        )
+    if origin == "retry_execution":
+        return _c12_retry_execution_workflow(
+            pr,
+            tmp_path,
+            monkeypatch,
+            ticket_id=ticket_id,
+            summary=summary,
+            candidate_changes=candidate_changes,
+            error=error,
+        )
+    return _c12_governed_continuation_workflow(
+        pr,
+        tmp_path,
+        monkeypatch,
+        origin=origin,
+        ticket_id=ticket_id,
+        summary=summary,
+        candidate_changes=candidate_changes,
+        error=error,
+    )
+
+
+def _c12_semantic_source(workflow: dict[str, object]) -> dict[str, object]:
+    governed = workflow.get("governed_autonomy")
+    return governed if isinstance(governed, dict) else workflow
+
+
+def _assert_c12_review_ready(
+    pr,
+    workflow: dict[str, object] | None,
+    blocker: dict[str, object] | None,
+    *,
+    ticket_id: str = _C12_TICKET_ID,
+) -> None:
+    assert blocker is None
+    assert workflow is not None
+    assert workflow["workflow_status"] == "execution_completed"
+    assert workflow["review_state"] == "ready_for_review_validation"
+    assert workflow["recovery_state"] == "not_required"
+    assert workflow["execution_state"] == "no_active_executions"
+    assert workflow.get("active_execution_count", 0) == 0
+    assert workflow["next_action"]["id"] == pr.governed_ticket_lifecycle_action_ids(ticket_id)[
+        "review_prepare"
+    ]
+    source = _c12_semantic_source(workflow)
+    assert source["terminal_outcome_class"] == "validated_review_required"
+    assert source.get("kanban_block_kind") in {None, "needs_input"}
+    assert source["candidate_changes_available"] is True
+    observation = source["validation_observation_reference"]
+    assert observation["infrastructure_failure"] is False
+    assert observation["validation_passed"] is True
+    assert observation["validated_candidate_review_required"] is True
+
+
+def _assert_c12_not_review_ready(
+    workflow: dict[str, object] | None,
+    blocker: dict[str, object] | None,
+) -> None:
+    assert workflow is not None or blocker is not None
+    if workflow is None:
+        return
+    assert (
+        workflow.get("workflow_status") != "execution_completed"
+        or workflow.get("review_state") != "ready_for_review_validation"
+    )
+    source = _c12_semantic_source(workflow)
+    observation = source.get("validation_observation_reference")
+    if isinstance(observation, dict):
+        assert observation.get("validated_candidate_review_required") is not True
+
+
 def _start_recovered_p18_9_2_retry_for_test(
     state,
     monkeypatch,
@@ -6355,6 +6855,208 @@ def test_synthetic_c11_review_prepare_eligible_after_historical_runtime_diagnost
     assert prepared["review_prepare_status"] == "prepared_pending_human_acceptance"
     assert prepared["review_preparation_recorded"] is True
     assert prepared["successful_run_id"] == 12
+    assert prepared["dispatch_performed"] is False
+    assert prepared["execution_started"] is False
+    assert prepared["Git_mutation"] is False
+
+
+@pytest.mark.parametrize(
+    "summary",
+    (
+        "review-required: implementation completed; validation passed; human review required.",
+        "review-required: implementation completed; validation passes; human review required.",
+        "review-required: implementation completed; validation succeeded; human review required.",
+        "review-required: implementation completed; governed validation passed; human review required.",
+        "review-required: implementation completed; governed validation passes; human review required.",
+        "review-required: implementation completed; 42/42 tests; human review required.",
+        "review-required: implementation completed; GVCMD-001: 42/42 tests; human review required.",
+        "review-required: correction is implemented; governed validation passes; human review required.",
+    ),
+)
+def test_synthetic_c12_validation_success_markers_are_generic(summary) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    assert pr._governed_autonomy_terminal_validated_candidate_review_required(
+        {
+            "status": "blocked",
+            "outcome": "blocked",
+            "failure_category": "blocked",
+            "failure_summary": summary,
+            "summary": summary,
+            "error": None,
+        },
+        candidate_changes={"available": True, "files_changed": 1},
+        validation_infrastructure_failure=False,
+    ) is True
+
+
+@pytest.mark.parametrize(
+    "summary",
+    (
+        "review-required: implementation completed; validation passes; 41/42 tests; human review required.",
+        "review-required: implementation completed; validation failed; 42/42 tests; human review required.",
+        "review-required: implementation completed; tests failed; 42/42 tests; human review required.",
+        "review-required: implementation completed; human review required.",
+    ),
+)
+def test_synthetic_c12_validation_failure_markers_remain_blocked(summary) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    assert pr._governed_autonomy_terminal_validated_candidate_review_required(
+        {
+            "status": "blocked",
+            "outcome": "blocked",
+            "failure_category": "blocked",
+            "failure_summary": summary,
+            "summary": summary,
+            "error": None,
+        },
+        candidate_changes={"available": True, "files_changed": 1},
+        validation_infrastructure_failure=False,
+    ) is False
+
+
+@pytest.mark.parametrize("origin", _C12_ORIGINS)
+def test_synthetic_c12_origin_independence_validated_review_boundary(
+    tmp_path,
+    monkeypatch,
+    origin,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _projection, workflow, blocker = _c12_origin_workflow(
+        pr,
+        tmp_path,
+        monkeypatch,
+        origin=origin,
+    )
+
+    _assert_c12_review_ready(pr, workflow, blocker)
+
+
+@pytest.mark.parametrize("origin", _C12_ORIGINS)
+@pytest.mark.parametrize(
+    ("case", "summary", "candidate_changes", "error"),
+    (
+        (
+            "partial_validation",
+            "review-required: correction is implemented; governed validation passes; "
+            "GVCMD-001: 41/42 tests; code changes need human review.",
+            True,
+            None,
+        ),
+        (
+            "candidate_absent",
+            _C12_VALIDATED_REVIEW_SUMMARY,
+            False,
+            None,
+        ),
+        (
+            "infrastructure_failure",
+            "review-required: correction is implemented; governed validation passes; "
+            "validation infrastructure failure = true; GVCMD-001: 42/42 tests; "
+            "code changes need human review.",
+            True,
+            None,
+        ),
+        (
+            "implementation_incomplete",
+            "review-required: correction remains pending; governed validation passes; "
+            "GVCMD-001: 42/42 tests; code changes need human review.",
+            True,
+            None,
+        ),
+        (
+            "human_review_absent",
+            "correction is implemented; governed validation passes; GVCMD-001: 42/42 tests; "
+            "no human decision is required.",
+            True,
+            None,
+        ),
+        (
+            "worker_error",
+            _C12_VALIDATED_REVIEW_SUMMARY,
+            True,
+            "worker error: process crashed after reporting candidate evidence",
+        ),
+    ),
+)
+def test_synthetic_c12_negative_origin_matrix_preserves_blockers(
+    tmp_path,
+    monkeypatch,
+    origin,
+    case,
+    summary,
+    candidate_changes,
+    error,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _ = case
+    _projection, workflow, blocker = _c12_origin_workflow(
+        pr,
+        tmp_path,
+        monkeypatch,
+        origin=origin,
+        summary=summary,
+        candidate_changes=candidate_changes,
+        error=error,
+    )
+
+    _assert_c12_not_review_ready(workflow, blocker)
+
+
+def test_synthetic_c12_review_prepare_after_governed_revision(
+    projection_home,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from hermes_cli import kanban_db
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _ = projection_home
+    current_projection, workflow, blocker = _c12_governed_continuation_workflow(
+        pr,
+        tmp_path,
+        monkeypatch,
+        origin="human_review_changes_requested_revision",
+    )
+    _assert_c12_review_ready(pr, workflow, blocker)
+    kanban_db.create_board(str(current_projection["kanban_board_slug"]))
+    original_resolve_binding = pr.resolve_current_ticket_lifecycle_binding
+
+    def resolve_c12_binding(*, generation_record=None, projection_record=None):
+        return original_resolve_binding(
+            generation_record=generation_record,
+            projection_record=projection_record or current_projection,
+        )
+
+    monkeypatch.setattr(pr, "resolve_current_ticket_lifecycle_binding", resolve_c12_binding)
+    monkeypatch.setattr(pr, "_load_current_projection_record", lambda: current_projection)
+    monkeypatch.setattr(pr, "_current_projection_record_for_binding", lambda: current_projection)
+    monkeypatch.setattr(pr, "_validate_execution_start_authority", lambda _projection: None)
+    monkeypatch.setattr(pr, "build_workflow_control_snapshot", lambda: workflow)
+    monkeypatch.setattr(
+        pr,
+        "_acceptance_contract_for_review_projection",
+        lambda current_projection: _c10_acceptance_contract(pr, current_projection),
+    )
+
+    prepared = pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id=_C12_TICKET_ID,
+        next_action_id="PREPARE_P99_7_REVIEW",
+    )
+
+    assert prepared["review_prepare_status"] == "prepared_pending_human_acceptance"
+    assert prepared["review_preparation_recorded"] is True
+    assert prepared["successful_run_id"] == _C12_RUN_ID
+    assert prepared["kanban_completion_result"]["terminal_outcome_class"] == (
+        "validated_review_required"
+    )
+    assert prepared["kanban_completion_result"]["validation_observation_reference"][
+        "validation_passed"
+    ] is True
     assert prepared["dispatch_performed"] is False
     assert prepared["execution_started"] is False
     assert prepared["Git_mutation"] is False

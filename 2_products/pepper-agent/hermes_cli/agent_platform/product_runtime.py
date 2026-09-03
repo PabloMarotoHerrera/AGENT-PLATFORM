@@ -14590,21 +14590,23 @@ def _governed_autonomy_terminal_text_has_validation_failure(text: str) -> bool:
             "product validation failed",
             "governed v2 validation failed",
             "tests failed",
+            "worker error",
+            "worker failed",
+            "worker crashed",
         )
     )
 
 
 def _governed_autonomy_terminal_text_has_validation_success(text: str) -> bool:
     normalized = text.replace("_", " ").replace("-", " ")
-    if "validation" in normalized or "gvcmd" in normalized:
-        test_counts = list(
-            re.finditer(
-                r"\b([1-9][0-9]*)\s*/\s*([1-9][0-9]*)\s+tests?\b",
-                normalized,
-            )
+    test_counts = list(
+        re.finditer(
+            r"\b([1-9][0-9]*)\s*/\s*([1-9][0-9]*)\s+tests?\b",
+            normalized,
         )
-        if test_counts:
-            return any(match.group(1) == match.group(2) for match in test_counts)
+    )
+    if test_counts:
+        return all(match.group(1) == match.group(2) for match in test_counts)
     if any(
         marker in normalized
         for marker in (
@@ -14615,6 +14617,8 @@ def _governed_autonomy_terminal_text_has_validation_success(text: str) -> bool:
             "validation succeeded",
             "workpacket validation passed",
             "workpacket validation passes",
+            "governed validation passed",
+            "governed validation passes",
             "governed v2 validation passed",
             "governed v2 validation passes",
         )
@@ -14625,7 +14629,7 @@ def _governed_autonomy_terminal_text_has_validation_success(text: str) -> bool:
 
 def _governed_autonomy_terminal_text_has_implementation_completion(text: str) -> bool:
     normalized = text.replace("_", " ").replace("-", " ")
-    return any(
+    if any(
         marker in normalized
         for marker in (
             "implementation completed",
@@ -14638,6 +14642,14 @@ def _governed_autonomy_terminal_text_has_implementation_completion(text: str) ->
             "candidate produced",
             "fresh revision is ready",
             "governed terminal run is ready",
+        )
+    ):
+        return True
+    return bool(
+        re.search(
+            r"\b(?:implementation|changes?|corrections?|fix(?:es)?|updates?|revisions?|work)\s+"
+            r"(?:is|are|was|were)\s+implemented\b",
+            normalized,
         )
     )
 
@@ -14660,6 +14672,8 @@ def _governed_autonomy_terminal_validated_candidate_review_required(
         marker in normalized
         for marker in (
             "review required",
+            "need human review",
+            "needs human review",
             "human git",
             "human only",
             "git authority",
@@ -14749,29 +14763,51 @@ def _terminal_run_review_boundary_evidence(
             )
             and human_boundary in {"", "human_review", "code_review", "human_code_review"}
         )
-    validated_review_required = _governed_autonomy_terminal_validated_candidate_review_required(
-        run_view,
-        candidate_changes=candidate_changes,
-        validation_infrastructure_failure=validation_infrastructure_failure,
-    )
-    if not structured_review_required:
-        if not validated_review_required:
-            return None
     detail = (
         getattr(run, "summary", None)
         or getattr(task, "last_failure_error", None)
         or f"Kanban run {getattr(run, 'id', 'unknown')} reached a review boundary"
     )
-    return {
-        "terminal_outcome_class": "validated_review_required",
-        "review_required": True,
-        "review_boundary_kind": "human_code_review",
-        "terminal_outcome_authority": (
+    return _governed_autonomy_validated_review_boundary_evidence(
+        run=run_view,
+        candidate_changes=candidate_changes,
+        validation_infrastructure_failure=validation_infrastructure_failure,
+        detail=detail,
+        source_materialization_reference=materialization_reference,
+        terminal_outcome_authority=(
             "task_run_metadata"
             if structured_review_required
             else "kanban_needs_input_block_with_candidate_changes_and_validation_evidence"
         ),
-        "kanban_block_kind": getattr(task, "block_kind", None),
+        kanban_block_kind=getattr(task, "block_kind", None),
+        structured_review_required=structured_review_required,
+    )
+
+
+def _governed_autonomy_validated_review_boundary_evidence(
+    *,
+    run: dict[str, Any],
+    candidate_changes: dict[str, Any] | None,
+    validation_infrastructure_failure: bool,
+    detail: object,
+    source_materialization_reference: dict[str, Any] | None,
+    terminal_outcome_authority: str,
+    kanban_block_kind: object = None,
+    structured_review_required: bool = False,
+) -> dict[str, Any] | None:
+    validated_review_required = _governed_autonomy_terminal_validated_candidate_review_required(
+        run,
+        candidate_changes=candidate_changes,
+        validation_infrastructure_failure=validation_infrastructure_failure,
+    )
+    if not structured_review_required and not validated_review_required:
+        return None
+    return {
+        "terminal_outcome_class": "validated_review_required",
+        "review_required": True,
+        "review_boundary_kind": "human_code_review",
+        "terminal_outcome_authority": terminal_outcome_authority,
+        "kanban_block_kind": kanban_block_kind,
         "validation_observation_reference": {
             "tool_name": "workpacket_validation",
             "infrastructure_failure": False,
@@ -14779,7 +14815,7 @@ def _terminal_run_review_boundary_evidence(
             "validated_candidate_review_required": True,
             "error_excerpt": _safe_text(detail, limit=500),
         },
-        "source_materialization_reference": materialization_reference,
+        "source_materialization_reference": source_materialization_reference,
         "candidate_changes_reference": candidate_changes,
         "candidate_changes_available": True,
         "blocker_detail": _safe_text(detail, limit=500),
@@ -14790,6 +14826,9 @@ def _governed_autonomy_validation_infrastructure_failure(
     run: dict[str, Any],
 ) -> bool:
     text = _governed_autonomy_terminal_run_text(run)
+    normalized = text.replace("_", " ").replace("-", " ")
+    if re.search(r"validation infrastructure failure\s*(is|=|:)\s*true", normalized):
+        return True
     validation_hint = "workpacket_validation" in text or "validation" in text
     infrastructure_hint = any(
         marker in text
@@ -14854,11 +14893,20 @@ def _governed_autonomy_runtime_terminal_reconciliation(
     validation_infra_failure = _governed_autonomy_validation_infrastructure_failure(
         owned_run,
     )
-    validated_review_required = _governed_autonomy_terminal_validated_candidate_review_required(
-        owned_run,
+    review_boundary = _governed_autonomy_validated_review_boundary_evidence(
+        run=owned_run,
         candidate_changes=candidate_changes,
         validation_infrastructure_failure=validation_infra_failure,
+        detail=detail,
+        source_materialization_reference=materialization_reference,
+        terminal_outcome_authority="governed_autonomy_runtime_terminal_reconciliation",
+        kanban_block_kind=(
+            task_visibility.get("block_kind")
+            if isinstance(task_visibility, dict)
+            else getattr(task_visibility, "block_kind", None)
+        ),
     )
+    validated_review_required = review_boundary is not None
     if completed:
         runtime_status = "direct_execution_terminal_completed"
         blocker_code = None
@@ -14906,7 +14954,7 @@ def _governed_autonomy_runtime_terminal_reconciliation(
         next_action = None
         next_autonomous_action = None
         next_human_action = "human review or recovery authority required for terminal governed run"
-    return {
+    reconciliation = {
         "terminal_run_reconciled": True,
         "governed_autonomy_runtime_status": runtime_status,
         "terminal_run_id": owned_run_id,
@@ -14922,12 +14970,18 @@ def _governed_autonomy_runtime_terminal_reconciliation(
             "validation_passed": validation_passed,
             "validated_candidate_review_required": validated_review_required,
             "error_excerpt": _safe_text(detail, limit=500),
-        },
-        "source_materialization_reference": materialization_reference,
-        "candidate_changes_reference": candidate_changes,
-        "candidate_changes_available": _governed_autonomy_candidate_changes_available(
-            candidate_changes,
-        ),
+        }
+        if review_boundary is None
+        else review_boundary["validation_observation_reference"],
+        "source_materialization_reference": materialization_reference
+        if review_boundary is None
+        else review_boundary["source_materialization_reference"],
+        "candidate_changes_reference": candidate_changes
+        if review_boundary is None
+        else review_boundary["candidate_changes_reference"],
+        "candidate_changes_available": _governed_autonomy_candidate_changes_available(candidate_changes)
+        if review_boundary is None
+        else review_boundary["candidate_changes_available"],
         "validated_candidate_review_required": validated_review_required,
         "blocker_code": blocker_code,
         "blocker_detail": _safe_text(detail, limit=500) if blocker_code else None,
@@ -14935,6 +14989,16 @@ def _governed_autonomy_runtime_terminal_reconciliation(
         "next_human_action": next_human_action,
         "next_action": next_action,
     }
+    if review_boundary is not None:
+        for key in (
+            "terminal_outcome_class",
+            "review_required",
+            "review_boundary_kind",
+            "terminal_outcome_authority",
+            "kanban_block_kind",
+        ):
+            reconciliation[key] = review_boundary[key]
+    return reconciliation
 
 
 def _governed_autonomy_fresh_execution_request_reference(
@@ -15311,6 +15375,15 @@ def _governed_autonomy_apply_terminal_reconciliation(
     })
     if terminal_reconciliation.get("next_action") is not None:
         payload["next_action"] = terminal_reconciliation["next_action"]
+    for key in (
+        "terminal_outcome_class",
+        "review_required",
+        "review_boundary_kind",
+        "terminal_outcome_authority",
+        "kanban_block_kind",
+    ):
+        if key in terminal_reconciliation:
+            payload[key] = terminal_reconciliation[key]
     return payload
 
 
