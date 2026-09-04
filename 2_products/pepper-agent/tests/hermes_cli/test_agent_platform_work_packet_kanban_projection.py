@@ -2970,6 +2970,308 @@ def _c13_review_prepare_history_records(pr, ticket_id: str) -> list[dict[str, ob
     ]
 
 
+def _c14_successor_ticket_id(ticket_id: str) -> str:
+    prefix, separator, suffix = ticket_id.rpartition(".")
+    if separator and suffix.isdigit():
+        return f"{prefix}.{int(suffix) + 1}"
+    return f"{ticket_id}.1"
+
+
+def _c14_predecessor_ticket_id(ticket_id: str) -> str:
+    prefix, separator, suffix = ticket_id.rpartition(".")
+    if separator and suffix.isdigit() and int(suffix) > 0:
+        return f"{prefix}.{int(suffix) - 1}"
+    return f"{ticket_id}.0"
+
+
+def _c14_successor_authority(pr, predecessor_ticket_id: str) -> dict[str, object]:
+    successor = _c14_successor_ticket_id(predecessor_ticket_id)
+    return {
+        "ticket_id": successor,
+        "ticket_title": _c9_ticket_title(successor),
+        "next_action_id": pr.governed_ticket_lifecycle_action_ids(successor)["generate"],
+        "canonical_roadmap_authority": "synthetic-c14-roadmap",
+        "roadmap_authority_path": "tests/synthetic-c14-roadmap.md",
+        "roadmap_authority_section": successor,
+        "dependency_ticket_ids": (predecessor_ticket_id,),
+        "roadmap_purpose": "Synthetic C14 durable completion precedence.",
+        "predecessor_ticket_id": predecessor_ticket_id,
+        "readiness_state": "ready",
+        "authority_source": "synthetic_c14",
+        "ticket_contract": {},
+    }
+
+
+def _c14_handoff_completion_workflow(
+    pr,
+    projection_record: dict[str, object],
+) -> dict[str, object]:
+    ticket_id = str(projection_record["ticket_id"])
+    return {
+        "project_id": projection_record["project_id"],
+        "macroproject_id": projection_record["macroproject_id"],
+        "current_ticket_id": ticket_id,
+        "current_ticket_title": projection_record["ticket_title"],
+        "readiness": "human_git_handoff_prepared_pending_completion",
+        "workflow_state": f"{ticket_id}-HUMAN-GIT-HANDOFF-PREPARED-PENDING-COMPLETION",
+        "workflow_status": "review_accepted_pending_human_git_handoff",
+        "queue_state": "kanban_retry_execution_terminal",
+        "execution_state": "no_active_executions",
+        "active_execution_count": 0,
+        "validation_state": "review_accepted",
+        "review_state": "accepted",
+        "recovery_state": "not_required",
+        "governed_workflow_state": "awaiting_human_git_handoff",
+        "git_handoff_required": True,
+        "git_handoff_state": "human_git_authority_preserved",
+        "remaining_blockers": [],
+        "next_action": {
+            "id": pr._human_git_handoff_completion_action_id(ticket_id),
+            "target_ticket_id": ticket_id,
+            "target_ticket_title": projection_record["ticket_title"],
+            "required_human_action": "human_git_handoff_completion_evidence",
+        },
+    }
+
+
+def _c14_write_historical_changes_requested_review(
+    pr,
+    ticket_id: str,
+    review_prepare: dict[str, object],
+) -> None:
+    path = pr.review_decision_history_path_for_ticket(ticket_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "ticket_id": ticket_id,
+        "review_decision": "changes_requested",
+        "review_state": "correction_required",
+        "reviewed_run_id": review_prepare["successful_run_id"],
+        "review_package_SHA256": review_prepare["review_package_SHA256"],
+        "review_prepare_action_SHA256": review_prepare["review_prepare_action_SHA256"],
+        "historical_only": True,
+    }
+    path.write_text(
+        json.dumps(
+            {
+                "archive_reason": "synthetic_c14_prior_changes_requested_round",
+                "record": record,
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _c14_review_authority_fixture(
+    pr,
+    tmp_path: Path,
+    monkeypatch,
+    *,
+    ticket_id: str,
+    round_count: int = 1,
+    historical_changes_requested: bool = False,
+) -> SimpleNamespace:
+    real_build_workflow = pr.build_workflow_control_snapshot
+    fixture = _c13_prepared_review_fixture(
+        pr,
+        tmp_path,
+        monkeypatch,
+        ticket_id=ticket_id,
+        round_count=round_count,
+    )
+    accepted = pr.submit_current_ticket_review_decision(
+        decision="accept",
+        feedback=f"Human accepts synthetic {ticket_id} C14 candidate for Git handoff.",
+        reviewed_run_id=fixture.review["successful_run_id"],
+        project_id="PEPPER",
+        ticket_id=ticket_id,
+        next_action_id=pr._review_decision_request_action_id(ticket_id),
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("accept must not spawn"),
+    )
+    accepted_record = pr.load_current_ticket_review_decision_record(
+        projection_record=fixture.projection,
+    )
+    assert accepted_record is not None
+    if historical_changes_requested and len(fixture.prepared_rounds) > 1:
+        _c14_write_historical_changes_requested_review(
+            pr,
+            ticket_id,
+            fixture.prepared_rounds[0],
+        )
+    monkeypatch.setattr(pr, "build_workflow_control_snapshot", real_build_workflow)
+    return SimpleNamespace(
+        **fixture.__dict__,
+        accepted=accepted,
+        accepted_record=accepted_record,
+        ticket_id=ticket_id,
+    )
+
+
+def _c14_persist_completion_record(
+    pr,
+    fixture: SimpleNamespace,
+    *,
+    commit: str = "abcdef1234567890abcdef1234567890abcdef12",
+) -> dict[str, object]:
+    request = pr.CurrentTicketHumanGitHandoffCompletionRequest(
+        reviewed_run_id=fixture.accepted_record["reviewed_run_id"],
+        reviewed_candidate_SHA256=fixture.accepted_record["reviewed_candidate_SHA256"],
+        review_decision_SHA256=fixture.accepted_record["review_decision_SHA256"],
+        commits=(commit,),
+        branch="synthetic-c14-human-git",
+        push_attestation=f"Human completed synthetic {fixture.ticket_id} C14 handoff.",
+        approved_committed_paths=(fixture.candidate_path,),
+        excluded_paths=("2_products/pepper-agent/.runtime-logs/**",),
+        validation_evidence=(f"Synthetic {fixture.ticket_id} C14 validation passed.",),
+        human_attested_evidence=(f"Synthetic {fixture.ticket_id} human Git evidence.",),
+        project_id="PEPPER",
+        ticket_id=fixture.ticket_id,
+        next_action_id=pr._human_git_handoff_completion_action_id(fixture.ticket_id),
+    )
+    record = pr._build_current_ticket_human_git_handoff_completion_record(
+        request=request,
+        projection=fixture.projection,
+        workflow=_c14_handoff_completion_workflow(pr, fixture.projection),
+        accepted_review=fixture.accepted_record,
+        verification_evidence=[
+            {
+                "classification": "HUMAN_ATTESTED",
+                "evidence": "synthetic C14 durable completion evidence",
+            },
+        ],
+        successor_authority=_c14_successor_authority(pr, fixture.ticket_id),
+    )
+    pr.validate_current_ticket_human_git_handoff_completion_record(
+        record,
+        projection_record=fixture.projection,
+        review_decision_record=fixture.accepted_record,
+    )
+    path = pr.human_git_handoff_completion_record_path_for_ticket(fixture.ticket_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _write_json_authority_record(path, record)
+    return record
+
+
+def _c14_reseal_completion_record(pr, record: dict[str, object]) -> dict[str, object]:
+    record["completion_identity_SHA256"] = pr._human_git_handoff_completion_identity_digest(
+        record,
+    )
+    record["completion_record_SHA256"] = pr._human_git_handoff_completion_record_digest(
+        record,
+    )
+    return record
+
+
+def _c14_install_successor_traversal_scenario(
+    pr,
+    monkeypatch,
+    fixture: SimpleNamespace,
+    *,
+    lifecycle_overlay: dict[str, object] | None,
+) -> None:
+    from hermes_cli.agent_platform.workflow import work_packet_kanban_projection as wk
+
+    ticket_id = fixture.ticket_id
+    predecessor = _c14_predecessor_ticket_id(ticket_id)
+    records = {
+        predecessor: _c9_generation_record(predecessor),
+        ticket_id: _c9_generation_record(ticket_id),
+    }
+    records[ticket_id]["predecessor_ticket_id"] = predecessor
+    records[ticket_id]["roadmap_dependency_ticket_ids"] = [predecessor]
+    projections = {
+        predecessor: _c9_projection_record(predecessor),
+        ticket_id: fixture.projection,
+    }
+
+    def load_generation_record(*, ticket_id, **_kwargs):
+        return records.get(ticket_id)
+
+    def generated_record_to_workflow_overlay(record):
+        record_ticket_id = str(record["ticket_id"])
+        if record_ticket_id == predecessor:
+            return _c9_completed_overlay(pr, record_ticket_id)
+        return _c9_generation_overlay(pr, record_ticket_id)
+
+    def load_projection_record(*, ticket_id=None, **_kwargs):
+        return projections.get(str(ticket_id or ""))
+
+    def projection_for_generated(record):
+        return projections.get(str(record["ticket_id"]))
+
+    def completed_predecessor_evidence(candidate_ticket_id):
+        if candidate_ticket_id == predecessor:
+            return {"ticket_id": candidate_ticket_id}
+        return None
+
+    def canonical_next(workflow=None):
+        closed_predecessor = str(
+            (workflow or {}).get("closed_predecessor_ticket_id") or predecessor
+        )
+        return _c14_successor_authority(pr, closed_predecessor)
+
+    def apply_lifecycle(overlay, projection):
+        if lifecycle_overlay is None:
+            return None
+        overlay.update(lifecycle_overlay)
+        if lifecycle_overlay.get("workflow_status") == "execution_failed":
+            blocker_id = (
+                f"{pr.governed_ticket_lifecycle_hyphen_token(str(projection['ticket_id']))}"
+                "-RETRY-WORKER-LIFECYCLE"
+            )
+            return {
+                "id": blocker_id,
+                "status": "blocked_by_synthetic_c14_retry_failure",
+                "evidence": "synthetic C14 historical retry failure",
+            }
+        return None
+
+    monkeypatch.setattr(pr, "resolve_canonical_next_ticket", canonical_next)
+    monkeypatch.setattr(
+        pr,
+        "_p18_9_0_generation_overlay",
+        lambda: (_c9_completed_overlay(pr, predecessor), None),
+    )
+    monkeypatch.setattr(
+        pr,
+        "_governed_authority_ticket_ids_from_records",
+        lambda: (predecessor, ticket_id),
+    )
+    monkeypatch.setattr(bridge, "load_generation_record", load_generation_record)
+    monkeypatch.setattr(
+        bridge,
+        "generated_record_to_workflow_overlay",
+        generated_record_to_workflow_overlay,
+    )
+    monkeypatch.setattr(wk, "load_kanban_projection_record", load_projection_record)
+    monkeypatch.setattr(pr, "_projection_record_for_generated_ticket", projection_for_generated)
+    monkeypatch.setattr(
+        pr,
+        "_projection_overlay_for_record",
+        lambda projection: _c9_projection_overlay(pr, str(projection["ticket_id"])),
+    )
+    monkeypatch.setattr(
+        pr,
+        "load_terminal_completed_predecessor_evidence",
+        completed_predecessor_evidence,
+    )
+    monkeypatch.setattr(
+        pr,
+        "_terminal_completed_predecessor_traversal_overlay",
+        lambda evidence: _c9_completed_overlay(pr, str(evidence["ticket_id"])),
+    )
+    monkeypatch.setattr(
+        pr,
+        "_apply_current_projection_execution_lifecycle_overlay",
+        apply_lifecycle,
+    )
+    monkeypatch.setattr(pr, "_current_ticket_governed_autonomy_overlay", lambda _p: (None, None))
+    monkeypatch.setattr(pr, "_p18_9_0_review_prepare_overlay", lambda _p, completed_overlay: (None, None))
+    monkeypatch.setattr(pr, "_current_ticket_review_decision_overlay", lambda _p: None)
+    monkeypatch.setattr(pr, "_current_ticket_human_git_handoff_prepare_overlay", lambda _p: None)
+
+
 def _start_recovered_p18_9_2_retry_for_test(
     state,
     monkeypatch,
@@ -7736,6 +8038,274 @@ def test_synthetic_c13_reviewed_run_guard_still_rejects_wrong_current_round(
     assert result["blocker_code"] == "REVIEW_RUN_GUARD_MISMATCH"
     assert result["reviewed_run_id"] == fixture.review["successful_run_id"]
     assert result["Git_mutation"] is False
+
+
+def test_synthetic_c14_accepted_candidate_before_completion_still_requires_handoff(
+    projection_home,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _ = projection_home
+    fixture = _c14_review_authority_fixture(
+        pr,
+        tmp_path,
+        monkeypatch,
+        ticket_id="P99.7",
+    )
+    _c14_install_successor_traversal_scenario(
+        pr,
+        monkeypatch,
+        fixture,
+        lifecycle_overlay=_c9_lifecycle_overlay(pr, "P99.7", "human_git_handoff_prepared"),
+    )
+
+    workflow = pr.build_workflow_control_snapshot()
+
+    assert workflow["current_ticket_id"] == "P99.7"
+    assert workflow["workflow_status"] == "review_accepted_pending_human_git_handoff"
+    assert workflow["review_state"] == "accepted"
+    assert workflow["recovery_state"] == "not_required"
+    assert workflow["git_handoff_required"] is True
+    assert workflow["next_action"]["id"] == "COMPLETE_P99_7_HUMAN_GIT_HANDOFF"
+    assert workflow["Git_mutation"] is False
+
+
+@pytest.mark.parametrize("ticket_id", ["P99.7", "P100.3"])
+def test_synthetic_c14_valid_completion_supersedes_successor_retry_failure(
+    projection_home,
+    tmp_path,
+    monkeypatch,
+    ticket_id,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _ = projection_home
+    fixture = _c14_review_authority_fixture(
+        pr,
+        tmp_path,
+        monkeypatch,
+        ticket_id=ticket_id,
+    )
+    completion = _c14_persist_completion_record(pr, fixture)
+    _c14_install_successor_traversal_scenario(
+        pr,
+        monkeypatch,
+        fixture,
+        lifecycle_overlay=_c9_lifecycle_overlay(pr, ticket_id, "execution_failed"),
+    )
+
+    workflow = pr.build_workflow_control_snapshot()
+
+    assert workflow["current_ticket_id"] is None
+    assert workflow["closed_predecessor_ticket_id"] == ticket_id
+    assert workflow["workflow_status"] == "completed"
+    assert workflow["workflow_state"] == f"{ticket_id}-COMPLETED"
+    assert workflow["ticket_closed"] is True
+    assert workflow["handoff_completion_present"] is True
+    assert workflow["recovery_state"] == "not_required"
+    assert workflow["active_execution_count"] == 0
+    assert workflow["next_ticket_id"] == _c14_successor_ticket_id(ticket_id)
+    assert workflow["next_action"]["id"] == completion["next_action"]["id"]
+    assert "RECOVER" not in workflow["next_action"]["id"]
+    assert not any(
+        "WORKER-LIFECYCLE" in str(blocker.get("id"))
+        for blocker in workflow.get("remaining_blockers", [])
+    )
+    assert workflow["human_git_handoff_completion_authority"][
+        "completion_record_SHA256"
+    ] == completion["completion_record_SHA256"]
+    assert workflow["Git_mutation"] is False
+
+
+def test_synthetic_c14_multi_round_completion_binds_later_acceptance(
+    projection_home,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _ = projection_home
+    fixture = _c14_review_authority_fixture(
+        pr,
+        tmp_path,
+        monkeypatch,
+        ticket_id="P99.8",
+        round_count=2,
+        historical_changes_requested=True,
+    )
+    completion = _c14_persist_completion_record(pr, fixture)
+    _c14_install_successor_traversal_scenario(
+        pr,
+        monkeypatch,
+        fixture,
+        lifecycle_overlay=_c9_lifecycle_overlay(pr, "P99.8", "execution_failed"),
+    )
+
+    workflow = pr.build_workflow_control_snapshot()
+    historical_decisions = pr.review_decision_history_path_for_ticket("P99.8").read_text(
+        encoding="utf-8",
+    )
+
+    assert "changes_requested" in historical_decisions
+    assert len(_c13_review_prepare_history_records(pr, "P99.8")) == 1
+    assert completion["reviewed_run_id"] == fixture.prepared_rounds[-1]["successful_run_id"]
+    assert workflow["workflow_status"] == "completed"
+    assert workflow["closed_predecessor_ticket_id"] == "P99.8"
+    assert workflow["recovery_state"] == "not_required"
+    assert workflow["human_git_handoff_completion_authority"]["reviewed_run_id"] == 2
+    assert "RECOVER" not in workflow["next_action"]["id"]
+
+
+def test_synthetic_c14_historical_blocked_run_and_empty_live_diff_remain_diagnostic(
+    projection_home,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _ = projection_home
+    fixture = _c14_review_authority_fixture(
+        pr,
+        tmp_path,
+        monkeypatch,
+        ticket_id="P99.7",
+    )
+    completion = _c14_persist_completion_record(pr, fixture)
+    completion["reviewed_candidate_reference"] = dict(completion["reviewed_candidate_reference"])
+    completion["reviewed_candidate_reference"]["files"] = []
+    completion = _c14_reseal_completion_record(pr, completion)
+    _write_json_authority_record(
+        pr.human_git_handoff_completion_record_path_for_ticket("P99.7"),
+        completion,
+    )
+    historical_failed = _c9_lifecycle_overlay(pr, "P99.7", "execution_failed")
+    historical_failed["historical_raw_run_status"] = "blocked"
+    historical_failed["candidate_changes_reference"] = {
+        "available": True,
+        "files_changed": 0,
+        "files": [],
+    }
+    _c14_install_successor_traversal_scenario(
+        pr,
+        monkeypatch,
+        fixture,
+        lifecycle_overlay=historical_failed,
+    )
+
+    workflow = pr.build_workflow_control_snapshot()
+
+    assert workflow["workflow_status"] == "completed"
+    assert workflow["closed_predecessor_ticket_id"] == "P99.7"
+    assert workflow["ticket_closed"] is True
+    assert workflow["recovery_state"] == "not_required"
+    assert workflow["human_git_handoff_completion_authority"][
+        "completion_record_SHA256"
+    ] == completion["completion_record_SHA256"]
+    assert "RECOVER" not in workflow["next_action"]["id"]
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "corrupt_digest",
+        "wrong_reviewed_run",
+        "wrong_reviewed_candidate",
+        "wrong_review_decision",
+        "wrong_ticket_lineage",
+    ],
+)
+def test_synthetic_c14_invalid_completion_records_fail_closed(
+    projection_home,
+    tmp_path,
+    monkeypatch,
+    mutation,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _ = projection_home
+    fixture = _c14_review_authority_fixture(
+        pr,
+        tmp_path,
+        monkeypatch,
+        ticket_id="P99.7",
+    )
+    completion = _c14_persist_completion_record(pr, fixture)
+    if mutation == "corrupt_digest":
+        completion["completion_record_SHA256"] = "f" * 64
+    elif mutation == "wrong_reviewed_run":
+        completion["reviewed_run_id"] = int(completion["reviewed_run_id"]) + 1
+        _c14_reseal_completion_record(pr, completion)
+    elif mutation == "wrong_reviewed_candidate":
+        completion["reviewed_candidate_SHA256"] = "e" * 64
+        completion["accepted_review_authority"]["reviewed_candidate_SHA256"] = "e" * 64
+        _c14_reseal_completion_record(pr, completion)
+    elif mutation == "wrong_review_decision":
+        completion["review_decision_SHA256"] = "d" * 64
+        completion["accepted_review_authority"]["review_decision_SHA256"] = "d" * 64
+        _c14_reseal_completion_record(pr, completion)
+    elif mutation == "wrong_ticket_lineage":
+        completion["ticket_id"] = "P99.70"
+        completion["closed_predecessor_ticket_id"] = "P99.70"
+        _c14_reseal_completion_record(pr, completion)
+    _write_json_authority_record(
+        pr.human_git_handoff_completion_record_path_for_ticket("P99.7"),
+        completion,
+    )
+    _c14_install_successor_traversal_scenario(
+        pr,
+        monkeypatch,
+        fixture,
+        lifecycle_overlay=_c9_lifecycle_overlay(pr, "P99.7", "execution_failed"),
+    )
+
+    workflow = pr.build_workflow_control_snapshot()
+
+    assert workflow["workflow_status"] == "blocked_invalid_human_git_handoff_completion_authority"
+    assert workflow["recovery_state"] == "blocked_invalid_human_git_handoff_completion_authority"
+    assert workflow["active_execution_count"] == 0
+    assert workflow.get("ticket_closed") is not True
+    assert "RECOVER" not in workflow["next_action"]["id"]
+    assert any(
+        blocker.get("status") == "blocked_by_invalid_human_git_handoff_completion_authority"
+        for blocker in workflow.get("remaining_blockers", [])
+    )
+    assert not any(
+        "WORKER-LIFECYCLE" in str(blocker.get("id"))
+        for blocker in workflow.get("remaining_blockers", [])
+    )
+    assert workflow["Git_mutation"] is False
+
+
+def test_synthetic_c14_completion_absent_preserves_recovery_reconstruction(
+    projection_home,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _ = projection_home
+    fixture = _c14_review_authority_fixture(
+        pr,
+        tmp_path,
+        monkeypatch,
+        ticket_id="P99.7",
+    )
+    _c14_install_successor_traversal_scenario(
+        pr,
+        monkeypatch,
+        fixture,
+        lifecycle_overlay=_c9_lifecycle_overlay(pr, "P99.7", "execution_failed"),
+    )
+
+    workflow = pr.build_workflow_control_snapshot()
+
+    assert workflow["current_ticket_id"] == "P99.7"
+    assert workflow["workflow_status"] == "execution_failed"
+    assert workflow["recovery_state"] == "recovery_required"
+    assert workflow["next_action"]["id"] == "RECOVER_P99_7_EXECUTION"
+    assert workflow["Git_mutation"] is False
 
 
 def test_review_required_p18_9_2_retry_reconstructs_to_governed_review_boundary(

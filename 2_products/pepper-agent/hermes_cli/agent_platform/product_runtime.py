@@ -1271,6 +1271,29 @@ def _projection_has_valid_durable_ticket_completion(
         return False
 
 
+def _human_git_handoff_completion_authority_blocker(
+    ticket_id: str,
+    exc: Exception,
+) -> dict[str, Any]:
+    return {
+        "id": f"{governed_ticket_lifecycle_hyphen_token(ticket_id)}-HUMAN-GIT-HANDOFF-COMPLETION-AUTHORITY",
+        "status": "blocked_by_invalid_human_git_handoff_completion_authority",
+        "evidence": _safe_text(exc, limit=300),
+    }
+
+
+def _current_ticket_human_git_handoff_completion_overlay_or_blocker(
+    projection: dict[str, Any],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    ticket_id = str(projection.get("ticket_id") or "").strip()
+    try:
+        return _current_ticket_human_git_handoff_completion_overlay(projection), None
+    except ProductRuntimeConflict as exc:
+        if ticket_id and human_git_handoff_completion_record_path_for_ticket(ticket_id).exists():
+            return None, _human_git_handoff_completion_authority_blocker(ticket_id, exc)
+        raise
+
+
 def _legacy_bootstrap_review_acceptance_completion(
     projection: dict[str, Any] | None,
 ) -> tuple[dict[str, Any], dict[str, Any]] | None:
@@ -2323,6 +2346,126 @@ def _completed_predecessor_successor_lifecycle_overlay(
     if successor_overlay is not None:
         overlay.update(successor_overlay)
     return overlay, successor_blocker
+
+
+def _workflow_append_unique_blocker(
+    remaining_blockers: list[dict[str, Any]],
+    blocker: dict[str, Any],
+) -> None:
+    if not any(item.get("id") == blocker.get("id") for item in remaining_blockers):
+        remaining_blockers.append(blocker)
+
+
+def _current_ticket_execution_lifecycle_blocker_ids(ticket_id: str) -> set[str]:
+    token = governed_ticket_lifecycle_hyphen_token(ticket_id)
+    return {
+        f"{token}-WORKER-LIFECYCLE",
+        f"{token}-RETRY-WORKER-LIFECYCLE",
+    }
+
+
+def _clear_current_ticket_execution_lifecycle_blockers(
+    remaining_blockers: list[dict[str, Any]],
+    ticket_id: str,
+) -> None:
+    blocker_ids = _current_ticket_execution_lifecycle_blocker_ids(ticket_id)
+    remaining_blockers[:] = [
+        blocker
+        for blocker in remaining_blockers
+        if blocker.get("id") not in blocker_ids
+    ]
+
+
+def _workflow_invalid_handoff_completion_authority_overlay(
+    *,
+    ticket_id: str,
+    ticket_title: str | None = None,
+) -> dict[str, Any]:
+    title = _safe_text(ticket_title or ticket_id, limit=200)
+    return {
+        "handoff_completion_present": False,
+        "ticket_closed": False,
+        "readiness": "blocked_invalid_human_git_handoff_completion_authority",
+        "workflow_status": "blocked_invalid_human_git_handoff_completion_authority",
+        "queue_state": "blocked_invalid_human_git_handoff_completion_authority",
+        "execution_state": "no_active_executions",
+        "active_execution_count": 0,
+        "validation_state": "blocked_invalid_human_git_handoff_completion_authority",
+        "review_state": "blocked_invalid_human_git_handoff_completion_authority",
+        "recovery_state": "blocked_invalid_human_git_handoff_completion_authority",
+        "ticket_execution_authorized": False,
+        "WorkPacket_execution_authorized": False,
+        "runtime_execution_authorized": False,
+        "worker_execution": False,
+        "Kanban_dispatch": False,
+        "Git_mutation": False,
+        "next_action": {
+            "id": (
+                f"{governed_ticket_lifecycle_action_token(ticket_id)}_"
+                "HUMAN_GIT_HANDOFF_COMPLETION_AUTHORITY_REPAIR_REQUIRED"
+            ),
+            "target_ticket_id": ticket_id,
+            "target_ticket_title": title,
+            "required_human_action": "repair_human_git_handoff_completion_authority",
+        },
+    }
+
+
+def _clear_stale_handoff_completion_projection_fields(snapshot: dict[str, Any]) -> None:
+    snapshot["handoff_completion_present"] = False
+    snapshot["ticket_closed"] = False
+    snapshot.pop("human_git_handoff_completion_authority", None)
+    snapshot.pop("current_ticket_human_git_handoff_completion", None)
+
+
+def _apply_current_ticket_durable_completion_precedence(
+    snapshot: dict[str, Any],
+    remaining_blockers: list[dict[str, Any]],
+) -> None:
+    ticket_id = str(snapshot.get("current_ticket_id") or "").strip()
+    if not ticket_id:
+        return
+    try:
+        from hermes_cli.agent_platform.workflow.work_packet_kanban_projection import (
+            load_kanban_projection_record,
+        )
+
+        projection = load_kanban_projection_record(ticket_id=ticket_id)
+    except Exception as exc:  # pragma: no cover - defensive live-state guard
+        if human_git_handoff_completion_record_path_for_ticket(ticket_id).exists():
+            _clear_stale_handoff_completion_projection_fields(snapshot)
+            snapshot.update(
+                _workflow_invalid_handoff_completion_authority_overlay(
+                    ticket_id=ticket_id,
+                    ticket_title=str(snapshot.get("current_ticket_title") or ""),
+                ),
+            )
+            _clear_current_ticket_execution_lifecycle_blockers(remaining_blockers, ticket_id)
+            _workflow_append_unique_blocker(
+                remaining_blockers,
+                _human_git_handoff_completion_authority_blocker(ticket_id, exc),
+            )
+        return
+    if projection is None:
+        return
+    completion_overlay, completion_blocker = (
+        _current_ticket_human_git_handoff_completion_overlay_or_blocker(projection)
+    )
+    if completion_blocker is not None:
+        _clear_stale_handoff_completion_projection_fields(snapshot)
+        snapshot.update(
+            _workflow_invalid_handoff_completion_authority_overlay(
+                ticket_id=ticket_id,
+                ticket_title=str(projection.get("ticket_title") or ""),
+            ),
+        )
+        _clear_current_ticket_execution_lifecycle_blockers(remaining_blockers, ticket_id)
+        _workflow_append_unique_blocker(remaining_blockers, completion_blocker)
+        return
+    if completion_overlay is None:
+        return
+    snapshot.update(completion_overlay)
+    _clear_current_ticket_execution_lifecycle_blockers(remaining_blockers, ticket_id)
 
 
 def _completed_predecessor_handoff_completion_overlay(
@@ -5257,6 +5400,48 @@ def validate_current_ticket_human_git_handoff_completion_record(
         )
     if record.get("completion_identity_SHA256") != _human_git_handoff_completion_identity_digest(record):
         raise ProductRuntimeConflict("human Git handoff completion identity mismatch")
+    if _human_git_handoff_explicit_prepare_required(binding):
+        pre_completion = record.get("pre_completion_invariants")
+        if not isinstance(pre_completion, dict):
+            raise ProductRuntimeConflict(
+                "human Git handoff completion pre-completion invariants missing"
+            )
+        pre_completion_expected = {
+            "project": binding.project_id,
+            "ticket": binding.ticket_id,
+            "next_action": _human_git_handoff_completion_action_id(binding.ticket_id),
+            "review_decision_SHA256": accepted_review["review_decision_SHA256"],
+            "reviewed_run_id": accepted_review["reviewed_run_id"],
+            "reviewed_candidate_SHA256": accepted_review["reviewed_candidate_SHA256"],
+            "active_execution_count": 0,
+            "execution_state": "no_active_executions",
+            "recovery_state": "not_required",
+            "validation_state": "review_accepted",
+            "review_state": "accepted",
+            "governed_workflow_state": "awaiting_human_git_handoff",
+        }
+        for key, value in pre_completion_expected.items():
+            observed = (
+                _int_or_none(pre_completion.get(key))
+                if key in {"reviewed_run_id", "active_execution_count"}
+                else pre_completion.get(key)
+            )
+            expected_value = (
+                _int_or_none(value)
+                if key in {"reviewed_run_id", "active_execution_count"}
+                else value
+            )
+            if observed != expected_value:
+                raise ProductRuntimeConflict(
+                    f"human Git handoff completion pre-completion {key} mismatch"
+                )
+        if pre_completion.get("git_handoff_state") not in {
+            "human_git_authority_preserved",
+            "human_git_handoff_prepared_pending_completion",
+        }:
+            raise ProductRuntimeConflict(
+                "human Git handoff completion pre-completion Git handoff state mismatch"
+            )
     commits = tuple(record.get("ordered_commit_SHAs") or ())
     if not commits or any(not isinstance(item, str) or not _SAFE_GIT_SHA.fullmatch(item) for item in commits):
         raise ProductRuntimeConflict("human Git handoff completion commits mismatch")
@@ -24525,6 +24710,7 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
             for blocker in remaining_blockers
         ):
             remaining_blockers.append(predecessor_blocker)
+    _apply_current_ticket_durable_completion_precedence(snapshot, remaining_blockers)
     snapshot["blocker_count"] = len(remaining_blockers)
     snapshot["next_action_label"] = _next_action_label(snapshot.get("next_action"))
     return snapshot
