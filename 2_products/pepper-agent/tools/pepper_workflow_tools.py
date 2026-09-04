@@ -168,12 +168,53 @@ def _validate_optional_current_approval_guards(args: dict[str, Any], context: di
     return approval_id
 
 
-def _validate_optional_current_ticket_digests(args: dict[str, Any], context: dict[str, Any]) -> None:
+def _pending_ticket_approval_item_for_id(
+    context: dict[str, Any],
+    approval_id: str,
+) -> dict[str, Any] | None:
+    for approval in _pending_ticket_approval_items(context):
+        if str(approval.get("id") or "").strip() == approval_id:
+            return approval
+    return None
+
+
+def _generated_ticket_authority_for_approval(
+    context: dict[str, Any],
+    approval_id: str,
+    *,
+    require_pending: bool,
+) -> dict[str, Any]:
+    workflow_control = _workflow_control_context(context)
+    if require_pending or _pending_ticket_approval_item_for_id(context, approval_id) is not None:
+        return _runtime().load_pending_ticket_approval_generated_authority(
+            approval_id,
+            workflow=workflow_control,
+        )
     authority = context.get("workflow_control", {}).get("generated_ticket_authority")
     if not isinstance(authority, dict):
         authority = context.get("generated_ticket_authority")
     if not isinstance(authority, dict):
         raise ValueError("current generated ticket authority is unavailable")
+    authority_ticket_id = str(authority.get("ticket_id") or "").strip()
+    if authority_ticket_id and authority_ticket_id != approval_id:
+        raise ValueError("generated ticket authority does not match selected approval")
+    return authority
+
+
+def _validate_optional_current_ticket_digests(
+    args: dict[str, Any],
+    context: dict[str, Any],
+    *,
+    approval_id: str | None = None,
+) -> None:
+    selected_approval_id = str(approval_id or _default_ticket_approval_id(context) or "").strip()
+    if not selected_approval_id:
+        raise ValueError("no current pending ticket approval is active")
+    authority = _generated_ticket_authority_for_approval(
+        context,
+        selected_approval_id,
+        require_pending=False,
+    )
     checks = (
         ("ticket_spec_sha256", "ticket_spec_SHA256", "TicketSpec digest"),
         ("work_packet_id", "work_packet_id", "WorkPacket ID"),
@@ -220,11 +261,11 @@ def _validate_pending_current_ticket_approval(
         raise ValueError("approval target is unavailable")
     if effective_ticket_id not in str(target.get("label") or ""):
         raise ValueError(f"approval target does not match {effective_ticket_id}")
-    authority = context.get("workflow_control", {}).get("generated_ticket_authority")
-    if not isinstance(authority, dict):
-        authority = context.get("generated_ticket_authority")
-    if not isinstance(authority, dict):
-        raise ValueError("current generated ticket authority is unavailable")
+    authority = _generated_ticket_authority_for_approval(
+        context,
+        effective_ticket_id,
+        require_pending=True,
+    )
     authority_ticket_id = str(authority.get("ticket_id") or "").strip()
     if authority_ticket_id and authority_ticket_id != effective_ticket_id:
         raise ValueError("generated ticket authority does not match pending approval")
@@ -706,7 +747,7 @@ def _decide_pending_approval(args: dict[str, Any], **_kwargs) -> str:
             human_decision_text=args.get("human_decision_text"),
             current_ticket_id=approval_id,
         )
-        _validate_optional_current_ticket_digests(args, context)
+        _validate_optional_current_ticket_digests(args, context, approval_id=approval_id)
         approvals = context.get("approvals", {}).get("items", [])
         if not isinstance(approvals, list):
             approvals = []
