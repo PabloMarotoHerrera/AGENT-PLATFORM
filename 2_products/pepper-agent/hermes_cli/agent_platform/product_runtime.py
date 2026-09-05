@@ -5179,6 +5179,11 @@ def _review_decision_has_basic_current_ticket_identity(
     if _int_or_none(record.get("reviewed_run_id")) is None:
         return False
     candidate_sha = record.get("reviewed_candidate_SHA256")
+    if candidate_sha is None:
+        return (
+            record.get("review_decision") == "changes_requested"
+            and record.get("review_source_authority_kind") == "review_prepare"
+        )
     return isinstance(candidate_sha, str) and bool(candidate_sha.strip())
 
 
@@ -5387,7 +5392,12 @@ def validate_current_ticket_review_decision_record(
         raise ProductRuntimeConflict("review-decision reviewer_id mismatch")
     if _int_or_none(record.get("reviewed_run_id")) is None:
         raise ProductRuntimeConflict("review-decision reviewed run is invalid")
-    if record.get("reviewed_candidate_SHA256") in {None, ""}:
+    null_candidate_changes_requested = (
+        record.get("reviewed_candidate_SHA256") is None
+        and decision == "changes_requested"
+        and record.get("review_source_authority_kind") == "review_prepare"
+    )
+    if record.get("reviewed_candidate_SHA256") in {None, ""} and not null_candidate_changes_requested:
         raise ProductRuntimeConflict("review-decision candidate digest is missing")
     feedback_sha = record.get("bounded_review_feedback_SHA256")
     if not isinstance(feedback_sha, str) or not _SAFE_SHA256.fullmatch(feedback_sha):
@@ -6096,6 +6106,8 @@ def _current_work_packet_scope_for_governed_autonomy(
 
 def _derive_current_governed_autonomy_authority_reference(
     projection: dict[str, Any],
+    *,
+    allow_completed_source_run: bool = False,
 ) -> dict[str, Any]:
     from hermes_cli.agent_platform.work_packet import (
         GOVERNED_AUTONOMY_POLICY_ID,
@@ -6122,6 +6134,7 @@ def _derive_current_governed_autonomy_authority_reference(
     if (
         source_status not in _GOVERNED_TICKET_FAILURE_OUTCOMES
         and source_outcome not in _GOVERNED_TICKET_FAILURE_OUTCOMES
+        and not allow_completed_source_run
     ):
         raise ProductRuntimeConflict(
             "governed-autonomy authority requires failed or blocked source run evidence"
@@ -8978,6 +8991,8 @@ def submit_current_ticket_review_decision(
         raise ProductRuntimeConflict(
             f"review decision targets run {target['reviewed_run_id']}, not {request.reviewed_run_id}"
         )
+    if request.decision == "accept" and target.get("candidate_SHA256") in {None, ""}:
+        raise ProductRuntimeConflict("review decision accept requires candidate changes evidence")
     if request.decision == "changes_requested":
         authority_blocker = _review_feedback_authority_blocker(
             request.feedback,
@@ -13350,8 +13365,12 @@ def _build_governed_autonomy_activation_record(
     request: CurrentTicketGovernedAutonomyActivationRequest,
     projection: dict[str, Any],
     workflow: dict[str, Any],
+    allow_completed_source_run: bool = False,
 ) -> dict[str, Any]:
-    authority_reference = _derive_current_governed_autonomy_authority_reference(projection)
+    authority_reference = _derive_current_governed_autonomy_authority_reference(
+        projection,
+        allow_completed_source_run=allow_completed_source_run,
+    )
     budget_reference = _validated_governed_autonomy_budget_reference(
         authority_reference["budget"]
     )
@@ -18871,7 +18890,10 @@ def _review_acceptance_workflow_blocker(
     next_action = workflow.get("next_action")
     if not isinstance(next_action, dict):
         return "PEPPER_REVIEW_ACCEPTANCE_ACTION_GAP", "next action is unavailable"
-    if next_action.get("id") != binding.review_acceptance_next_action_id:
+    if next_action.get("id") not in {
+        binding.review_acceptance_next_action_id,
+        _review_decision_request_action_id(binding.ticket_id),
+    }:
         return "PEPPER_REVIEW_ACCEPTANCE_ACTION_GAP", "next action is not review acceptance"
     if next_action.get("target_ticket_id") != binding.ticket_id:
         return "PEPPER_REVIEW_ACCEPTANCE_ACTION_GAP", f"next action does not target {binding.ticket_id}"
@@ -19109,9 +19131,12 @@ def _review_decision_target_from_prepared_review_or_governed_autonomy(
     if review_prepare is not None:
         completion = review_prepare["kanban_completion_result"]
         candidate_reference = completion.get("candidate_changes_reference")
-        if not _governed_autonomy_candidate_changes_available(candidate_reference):
-            raise ProductRuntimeConflict("review decision requires candidate changes evidence")
         reviewed_run_id = int(review_prepare["successful_run_id"])
+        candidate_sha = _review_candidate_reference_digest(
+            projection,
+            review_prepare,
+            candidate_reference,
+        )
         return {
             "authority_kind": "review_prepare",
             "review_prepare": review_prepare,
@@ -19126,22 +19151,14 @@ def _review_decision_target_from_prepared_review_or_governed_autonomy(
                 "terminal_run_status": review_prepare["successful_run_status"],
                 "terminal_run_outcome": review_prepare["successful_run_outcome"],
                 "candidate_changes_reference": candidate_reference,
-                "validated_candidate_review_required": True,
+                "validated_candidate_review_required": candidate_sha is not None,
                 "terminal_outcome_class": review_prepare["kanban_completion_result"].get(
                     "terminal_outcome_class"
                 ),
             },
             "reviewed_run_id": reviewed_run_id,
             "candidate_reference": candidate_reference,
-            "candidate_SHA256": _digest_payload(
-                "pepper-current-ticket-reviewed-candidate-reference-sha256-v1",
-                {
-                    "ticket_id": projection["ticket_id"],
-                    "work_packet_SHA256": projection["work_packet_SHA256"],
-                    "terminal_run_id": reviewed_run_id,
-                    "candidate_changes_reference": candidate_reference,
-                },
-            ),
+            "candidate_SHA256": candidate_sha,
         }
     return _review_decision_target_from_governed_autonomy(projection)
 
@@ -19365,6 +19382,7 @@ def _ensure_review_revision_governed_autonomy_activation(
         request=activation_request,
         projection=projection,
         workflow=workflow,
+        allow_completed_source_run=True,
     )
     review_prepare = target.get("review_prepare") if isinstance(target.get("review_prepare"), dict) else {}
     record.update({
@@ -22720,6 +22738,7 @@ def _build_review_prepare_record(
         },
         "human_smoke_marker": "PEPPER-REVIEW-PREPARE-ACTION-READY-FOR-HUMAN-SMOKE",
     }
+    record["next_action"] = _review_prepare_next_action(binding, record)
     record["review_prepare_action_SHA256"] = _review_prepare_record_digest(record)
     return record
 
@@ -23117,7 +23136,7 @@ def _blocked_current_review_prepare_result(
 
 
 def _review_prepare_routes_to_review_decision(record: dict[str, Any]) -> bool:
-    return bool(record.get("git_handoff_required"))
+    return record.get("review_prepare_status") == "prepared_pending_human_acceptance"
 
 
 def _review_prepare_next_action(
@@ -23125,11 +23144,15 @@ def _review_prepare_next_action(
     record: dict[str, Any],
 ) -> dict[str, Any]:
     if _review_prepare_routes_to_review_decision(record):
+        reviewable_candidate = bool(record.get("git_handoff_required"))
         return {
             "id": _review_decision_request_action_id(binding.ticket_id),
             "label": (
                 f"{binding.ticket_id} review package is prepared; submit an explicit "
                 "human review decision before any Git handoff."
+                if reviewable_candidate
+                else f"{binding.ticket_id} review package is prepared; submit an explicit "
+                "human review decision before closure or correction."
             ),
             "target_ticket_id": binding.ticket_id,
             "target_ticket_title": binding.ticket_title,

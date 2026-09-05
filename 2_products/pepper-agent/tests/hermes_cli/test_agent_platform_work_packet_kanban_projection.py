@@ -14481,7 +14481,7 @@ def test_prepare_current_ticket_review_binds_completed_run_to_acceptance_contrac
     assert result["human_smoke_marker"] == (
         "PEPPER-REVIEW-PREPARE-ACTION-READY-FOR-HUMAN-SMOKE"
     )
-    assert result["next_action"]["id"] == "AWAIT_HUMAN_P18_9_0_REVIEW_ACCEPTANCE"
+    assert result["next_action"]["id"] == "SUBMIT_P18_9_0_REVIEW_DECISION"
 
     record = pr.load_p18_9_0_review_prepare_record()
     assert record is not None
@@ -14493,7 +14493,7 @@ def test_prepare_current_ticket_review_binds_completed_run_to_acceptance_contrac
     assert prepared_workflow["validation_state"] == "review_prepared_pending_human_acceptance"
     assert prepared_workflow["review_state"] == "prepared_pending_human_acceptance"
     assert prepared_workflow["git_handoff_state"] == "not_required_for_ticket_result"
-    assert prepared_workflow["next_action"]["id"] == "AWAIT_HUMAN_P18_9_0_REVIEW_ACCEPTANCE"
+    assert prepared_workflow["next_action"]["id"] == "SUBMIT_P18_9_0_REVIEW_DECISION"
     assert prepared_workflow["blocker_count"] == 0
 
     replay = pr.prepare_current_ticket_review(
@@ -14505,6 +14505,96 @@ def test_prepare_current_ticket_review_binds_completed_run_to_acceptance_contrac
     assert replay["review_prepare_action_SHA256"] == result["review_prepare_action_SHA256"]
     assert replay["current_invocation_side_effects"]["dispatch_performed"] is False
     assert replay["current_invocation_side_effects"]["Git_mutation"] is False
+
+
+def test_prepared_review_without_candidate_accept_fails_but_changes_requested_records(
+    projection_home,
+    monkeypatch,
+) -> None:
+    _install_execution_profile(monkeypatch, projection_home)
+    _generation, projected, started, review = _prepare_completed_review_package(monkeypatch)
+
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    workflow = pr.build_workflow_control_snapshot()
+    assert workflow["workflow_status"] == "review_prepared_pending_human_acceptance"
+    assert workflow["review_decision_required"] is True
+    assert workflow["git_handoff_required"] is False
+    assert workflow["next_action"]["id"] == "SUBMIT_P18_9_0_REVIEW_DECISION"
+
+    with pytest.raises(
+        pr.ProductRuntimeConflict,
+        match="accept requires candidate changes evidence",
+    ):
+        pr.submit_current_ticket_review_decision(
+            decision="accept",
+            feedback="Human accepts the no-candidate P18.9.0 prepared review.",
+            reviewed_run_id=started["kanban_run_id"],
+            project_id="PEPPER",
+            ticket_id="P18.9.0",
+            next_action_id="SUBMIT_P18_9_0_REVIEW_DECISION",
+            spawn_fn=lambda *_args, **_kwargs: pytest.fail("accept must not spawn"),
+        )
+    assert not pr.review_decision_record_path_for_ticket("P18.9.0").exists()
+    assert not pr.governed_autonomy_activation_record_path_for_ticket("P18.9.0").exists()
+
+    monkeypatch.setattr(pr, "_executor_provider_readiness", _ready_executor_provider_payload)
+    changed = pr.submit_current_ticket_review_decision(
+        decision="changes_requested",
+        feedback="Human requests more bounded P18.9.0 review detail before closure.",
+        reviewed_run_id=started["kanban_run_id"],
+        project_id="PEPPER",
+        ticket_id="P18.9.0",
+        next_action_id="SUBMIT_P18_9_0_REVIEW_DECISION",
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("changes_requested must not spawn"),
+    )
+
+    assert changed["review_decision"] == "changes_requested"
+    assert changed["review_source_authority_kind"] == "review_prepare"
+    assert changed["review_prepare_action_SHA256"] == review["review_prepare_action_SHA256"]
+    assert changed["review_package_SHA256"] == review["review_package_SHA256"]
+    assert changed["reviewed_run_id"] == started["kanban_run_id"]
+    assert changed["reviewed_candidate_SHA256"] is None
+    assert changed["revision_attempt_started"] is False
+    assert changed["dispatch_performed"] is False
+    assert changed["execution_started"] is False
+    assert changed["worker_execution"] is False
+    assert changed["Kanban_dispatch"] is False
+    assert changed["Git_mutation"] is False
+    revision_request = changed["review_revision_request_reference"]
+    assert revision_request["reviewed_candidate_SHA256"] is None
+    assert revision_request["prior_terminal_run_id"] == started["kanban_run_id"]
+    assert revision_request["review_prepare_action_SHA256"] == review[
+        "review_prepare_action_SHA256"
+    ]
+    assert revision_request["reviewed_candidate_copied_to_revision_base"] is False
+
+    record = pr.load_current_ticket_review_decision_record(
+        projection_record=_projection_authority_record(projected),
+    )
+    assert record is not None
+    assert record["reviewed_candidate_SHA256"] is None
+    assert record["reviewed_candidate_reference"] is None
+
+    activation = pr.load_current_ticket_governed_autonomy_activation_record(
+        projection_record=_projection_authority_record(projected),
+    )
+    assert activation is not None
+    runtime = pr.load_current_ticket_governed_autonomy_runtime_state(
+        projection_record=_projection_authority_record(projected),
+        activation_record=activation,
+    )
+    assert runtime is not None
+    assert runtime["fresh_execution_request_reference"]["reviewed_candidate_SHA256"] is None
+    assert runtime["execution_started"] is False
+    assert runtime["Git_mutation"] is False
+    assert not pr.p18_9_0_review_acceptance_record_path().exists()
+
+    after = pr.build_workflow_control_snapshot()
+    assert after["review_decision_recorded"] is True
+    assert after["review_decision_required"] is False
+    assert after["workflow_status"] == "review_changes_requested_revision_pending_continuation"
+    assert after["next_action"]["id"] == "CONTINUE_P18_9_0_GOVERNED_AUTONOMY"
 
 
 def test_accept_current_ticket_review_closes_p18_9_0_and_exposes_next_ticket(
