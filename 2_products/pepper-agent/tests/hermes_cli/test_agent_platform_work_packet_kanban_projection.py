@@ -1059,6 +1059,58 @@ def _finish_projected_run_as_review_required_terminal(
         conn.close()
 
 
+def _mark_projected_run_done_for_review_revision_fixture(
+    kanban_db,
+    projected: dict,
+    run_id: int,
+    *,
+    summary: str,
+) -> None:
+    now = int(time.time())
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        task_cur = conn.execute(
+            "UPDATE tasks SET status = 'done', result = ?, completed_at = ?, "
+            "current_run_id = NULL, worker_pid = NULL, claim_lock = NULL, "
+            "claim_expires = NULL, last_failure_error = NULL, block_kind = NULL, "
+            "block_recurrences = 0 WHERE id = ?",
+            (summary, now, projected["kanban_task_id"]),
+        )
+        run_cur = conn.execute(
+            "UPDATE task_runs SET status = 'done', outcome = 'completed', "
+            "summary = ?, error = NULL, ended_at = ?, claim_lock = NULL, "
+            "claim_expires = NULL, worker_pid = NULL WHERE id = ?",
+            (summary, now, run_id),
+        )
+        assert task_cur.rowcount == 1
+        assert run_cur.rowcount == 1
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _mark_projected_task_done_preserving_review_run_fixture(
+    kanban_db,
+    projected: dict,
+    *,
+    summary: str,
+) -> None:
+    now = int(time.time())
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        task_cur = conn.execute(
+            "UPDATE tasks SET status = 'done', result = ?, completed_at = ?, "
+            "current_run_id = NULL, worker_pid = NULL, claim_lock = NULL, "
+            "claim_expires = NULL, last_failure_error = NULL, block_kind = NULL, "
+            "block_recurrences = 0 WHERE id = ?",
+            (summary, now, projected["kanban_task_id"]),
+        )
+        assert task_cur.rowcount == 1
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _write_synthetic_terminal_candidate_manifest(
     pr,
     tmp_path: Path,
@@ -14595,6 +14647,611 @@ def test_prepared_review_without_candidate_accept_fails_but_changes_requested_re
     assert after["review_decision_required"] is False
     assert after["workflow_status"] == "review_changes_requested_revision_pending_continuation"
     assert after["next_action"]["id"] == "CONTINUE_P18_9_0_GOVERNED_AUTONOMY"
+
+
+def _terminal_done_review_revision_pending_fixture(
+    projection_home,
+    monkeypatch,
+    *,
+    ticket_id: str,
+    first_pid: int,
+) -> SimpleNamespace:
+    from hermes_cli import kanban_db
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    if ticket_id == "P18.9.0":
+        _install_execution_profile(monkeypatch, projection_home)
+        _generation, projected, started, review = _prepare_completed_review_package(
+            monkeypatch,
+        )
+        prior_run_id = started["kanban_run_id"]
+        submit_next_action = "SUBMIT_P18_9_0_REVIEW_DECISION"
+        feedback = "Human requests bounded P18.9.0 correction from terminal done review."
+    elif ticket_id == "P18.9.2":
+        state, retry = _p18_9_2_review_ready_for_tool_test(
+            projection_home,
+            monkeypatch,
+            pid=first_pid,
+        )
+        projected = state.projected
+        prior_run_id = retry["kanban_run_id"]
+        review = pr.prepare_current_ticket_review(
+            project_id="PEPPER",
+            ticket_id="P18.9.2",
+            next_action_id="PREPARE_P18_9_2_REVIEW",
+        )
+        submit_next_action = "SUBMIT_P18_9_2_REVIEW_DECISION"
+        feedback = "Human requests bounded P18.9.2 correction from terminal done review."
+    else:  # pragma: no cover - guards parametrization edits
+        raise AssertionError(f"unsupported terminal done fixture ticket: {ticket_id}")
+
+    monkeypatch.setattr(pr, "_executor_provider_readiness", _ready_executor_provider_payload)
+    changed = pr.submit_current_ticket_review_decision(
+        decision="changes_requested",
+        feedback=feedback,
+        reviewed_run_id=prior_run_id,
+        project_id="PEPPER",
+        ticket_id=ticket_id,
+        next_action_id=submit_next_action,
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("pending review bridge must not spawn"),
+    )
+    authority = _projection_authority_record(projected)
+    activation = pr.load_current_ticket_governed_autonomy_activation_record(
+        projection_record=authority,
+    )
+    assert activation is not None
+    runtime = pr.load_current_ticket_governed_autonomy_runtime_state(
+        projection_record=authority,
+        activation_record=activation,
+    )
+    assert runtime is not None
+    assert runtime["governed_autonomy_runtime_status"] == (
+        "review_revision_request_recorded_pending_continuation"
+    )
+    assert changed["revision_attempt_started"] is False
+    assert changed["review_revision_request_reference"]["prior_terminal_run_id"] == prior_run_id
+    assert changed["review_revision_request_reference"]["revision_source_base"] == (
+        "current_canonical_source"
+    )
+    assert changed["review_revision_request_reference"][
+        "reviewed_candidate_copied_to_revision_base"
+    ] is False
+    if ticket_id == "P18.9.0":
+        assert changed["reviewed_candidate_SHA256"] is None
+        assert changed["review_revision_request_reference"]["reviewed_candidate_SHA256"] is None
+    else:
+        assert changed["reviewed_candidate_SHA256"] is not None
+        assert changed["review_revision_request_reference"]["reviewed_candidate_SHA256"] == (
+            changed["reviewed_candidate_SHA256"]
+        )
+        _mark_projected_task_done_preserving_review_run_fixture(
+            kanban_db,
+            projected,
+            summary=(
+                "P18.9.2 candidate-backed review revision awaits terminal done rearm "
+                "without canonical Git mutation."
+            ),
+        )
+
+    return SimpleNamespace(
+        pr=pr,
+        kanban_db=kanban_db,
+        projected=projected,
+        authority=authority,
+        activation=activation,
+        runtime=runtime,
+        review=review,
+        changed=changed,
+        revision_request=changed["review_revision_request_reference"],
+        prior_run_id=prior_run_id,
+        ticket_id=ticket_id,
+    )
+
+
+@pytest.mark.parametrize(
+    ("ticket_id", "first_pid", "revision_pid"),
+    (
+        ("P18.9.0", 7000, 7001),
+        ("P18.9.2", 7002, 7003),
+    ),
+)
+def test_review_changes_requested_rearms_terminal_done_task_for_fresh_run(
+    projection_home,
+    monkeypatch,
+    ticket_id,
+    first_pid,
+    revision_pid,
+) -> None:
+    fixture = _terminal_done_review_revision_pending_fixture(
+        projection_home,
+        monkeypatch,
+        ticket_id=ticket_id,
+        first_pid=first_pid,
+    )
+    pr = fixture.pr
+    kanban_db = fixture.kanban_db
+    _patch_synthetic_scratch_materialization(monkeypatch, pr)
+    monkeypatch.setattr(kanban_db, "_pid_alive", lambda pid: int(pid) == revision_pid)
+
+    conn = kanban_db.connect(board=fixture.projected["kanban_board_slug"])
+    try:
+        task_before = kanban_db.get_task(conn, fixture.projected["kanban_task_id"])
+        runs_before = kanban_db.list_runs(conn, fixture.projected["kanban_task_id"])
+        task_count_before = conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
+        prior_before = next(run for run in runs_before if run.id == fixture.prior_run_id)
+        prior_snapshot = {
+            "id": prior_before.id,
+            "status": prior_before.status,
+            "outcome": prior_before.outcome,
+            "summary": prior_before.summary,
+            "error": prior_before.error,
+            "ended_at": prior_before.ended_at,
+        }
+        assert task_before is not None
+        assert task_before.status == "done"
+        assert task_before.current_run_id is None
+    finally:
+        conn.close()
+
+    result = pr.continue_current_ticket_governed_autonomy(
+        runtime_goal=f"Start {ticket_id} from the recorded review-revision request.",
+        strategy="DIRECT",
+        resume_pending_fresh_execution_request_SHA256=fixture.revision_request[
+            "fresh_execution_request_SHA256"
+        ],
+        spawn_fn=lambda _task, _workspace, board=None, env_overlay=None: revision_pid,
+        project_id="PEPPER",
+        ticket_id=ticket_id,
+    )
+
+    assert result["runtime_decision"] == "DIRECT"
+    assert result["governed_autonomy_runtime_status"] == (
+        "direct_execution_continuation_started"
+    ), (
+        result.get("blocker_code"),
+        result.get("blocker_detail"),
+        result.get("latest_decision_evidence"),
+    )
+    assert result["fresh_execution_requested"] is True
+    assert result["fresh_execution_request_reference"] == fixture.revision_request
+    assert result["kanban_run_created"] is True
+    assert result["kanban_run_id"] == fixture.prior_run_id + 1
+    assert result["dispatch_performed"] is True
+    assert result["execution_started"] is True
+    assert result["worker_execution"] is True
+    assert result["Kanban_dispatch"] is True
+    assert result["legacy_human_recovery_retry_micro_gates_required"] is False
+    assert result["governed_autonomy_runtime"]["legacy_run_mutation_performed"] is False
+    assert result["auto_retry"] is False
+    assert result["auto_rollback"] is False
+    assert result["Git_mutation"] is False
+    request_ref = result["latest_decision_evidence"]["direct_execution_request_reference"]
+    assert request_ref["terminal_done_task_rearmed"] is True
+    assert request_ref["prior_terminal_run_preserved"] is True
+    assert request_ref["dispatcher_primitive"] == (
+        "kanban_task_terminal_review_revision_rearm+kanban_db.claim_task+"
+        "resolve_workspace+_default_spawn"
+    )
+    assert result["fresh_execution_request_reference"]["revision_source_base"] == (
+        "current_canonical_source"
+    )
+    if ticket_id == "P18.9.0":
+        assert result["fresh_execution_request_reference"]["reviewed_candidate_SHA256"] is None
+    else:
+        assert result["fresh_execution_request_reference"]["reviewed_candidate_SHA256"] == (
+            fixture.changed["reviewed_candidate_SHA256"]
+        )
+        assert result["fresh_execution_request_reference"][
+            "reviewed_candidate_copied_to_revision_base"
+        ] is False
+
+    conn = kanban_db.connect(board=fixture.projected["kanban_board_slug"])
+    try:
+        task_after = kanban_db.get_task(conn, fixture.projected["kanban_task_id"])
+        runs_after = kanban_db.list_runs(conn, fixture.projected["kanban_task_id"])
+        events = kanban_db.list_events(conn, fixture.projected["kanban_task_id"])
+        task_count_after = conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
+        prior_after = next(run for run in runs_after if run.id == fixture.prior_run_id)
+        assert task_count_after == task_count_before
+        assert task_after is not None
+        assert task_after.id == fixture.projected["kanban_task_id"]
+        assert task_after.status == "running"
+        assert task_after.current_run_id == fixture.prior_run_id + 1
+        assert task_after.worker_pid == revision_pid
+        body = json.loads(task_after.body or "{}")
+        assert body["fresh_execution_provenance"] == "human_review_changes_requested"
+        assert body["prior_terminal_run_id"] == fixture.prior_run_id
+        assert body["reviewed_run_id"] == fixture.prior_run_id
+        assert body["reviewed_candidate_SHA256"] == result[
+            "fresh_execution_request_reference"
+        ]["reviewed_candidate_SHA256"]
+        assert body["revision_source_base"] == "current_canonical_source"
+        assert body["fresh_execution_attempt_number"] == len(runs_before) + 1
+        assert [run.id for run in runs_after] == [
+            *(run.id for run in runs_before),
+            fixture.prior_run_id + 1,
+        ]
+        assert {
+            "id": prior_after.id,
+            "status": prior_after.status,
+            "outcome": prior_after.outcome,
+            "summary": prior_after.summary,
+            "error": prior_after.error,
+            "ended_at": prior_after.ended_at,
+        } == prior_snapshot
+        assert any(
+            event.kind == "governed_autonomy_terminal_review_revision_rearmed"
+            and event.run_id == fixture.prior_run_id
+            and event.payload.get("fresh_execution_request_SHA256")
+            == fixture.revision_request["fresh_execution_request_SHA256"]
+            for event in events
+        )
+    finally:
+        conn.close()
+
+    replay = pr.continue_current_ticket_governed_autonomy(
+        runtime_goal=f"Replay {ticket_id} review-revision request without a second run.",
+        strategy="DIRECT",
+        resume_pending_fresh_execution_request_SHA256=fixture.revision_request[
+            "fresh_execution_request_SHA256"
+        ],
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("duplicate must not spawn"),
+        project_id="PEPPER",
+        ticket_id=ticket_id,
+    )
+    assert replay["idempotent_replay"] is True
+    assert replay["fresh_execution_duplicate_suppressed"] is True
+    assert replay["kanban_run_id"] == fixture.prior_run_id + 1
+
+    conn = kanban_db.connect(board=fixture.projected["kanban_board_slug"])
+    try:
+        runs_after_replay = kanban_db.list_runs(conn, fixture.projected["kanban_task_id"])
+        assert [run.id for run in runs_after_replay] == [run.id for run in runs_after]
+        assert all(run.id != fixture.prior_run_id + 2 for run in runs_after_replay)
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize(
+    ("ticket_id", "first_pid", "mutation", "expected_blocker"),
+    (
+        (
+            "P18.9.0",
+            7010,
+            "ordinary_provenance",
+            "FRESH_EXECUTION_REVIEW_REVISION_AUTHORITY_GAP",
+        ),
+        (
+            "P18.9.0",
+            7011,
+            "authority_mismatch",
+            "FRESH_EXECUTION_REVIEW_REVISION_AUTHORITY_MISMATCH",
+        ),
+        (
+            "P18.9.2",
+            7012,
+            "candidate_identity_mismatch",
+            "FRESH_EXECUTION_REVIEW_REVISION_AUTHORITY_MISMATCH",
+        ),
+    ),
+)
+def test_terminal_done_rearm_requires_current_review_revision_authority(
+    projection_home,
+    monkeypatch,
+    ticket_id,
+    first_pid,
+    mutation,
+    expected_blocker,
+) -> None:
+    fixture = _terminal_done_review_revision_pending_fixture(
+        projection_home,
+        monkeypatch,
+        ticket_id=ticket_id,
+        first_pid=first_pid,
+    )
+    conn = fixture.kanban_db.connect(board=fixture.projected["kanban_board_slug"])
+    try:
+        runs_before = fixture.kanban_db.list_runs(
+            conn,
+            fixture.projected["kanban_task_id"],
+        )
+    finally:
+        conn.close()
+    request = dict(fixture.revision_request)
+    if mutation == "ordinary_provenance":
+        request["fresh_execution_provenance"] = "same_authority_fresh_execution_request"
+    elif mutation == "authority_mismatch":
+        request["fresh_execution_request_SHA256"] = "a" * 64
+    elif mutation == "candidate_identity_mismatch":
+        request["reviewed_candidate_SHA256"] = "a" * 64
+    else:  # pragma: no cover - guards parametrization edits
+        raise AssertionError(f"unknown mutation: {mutation}")
+
+    blocked = fixture.pr._prepare_current_ticket_governed_autonomy_task_for_dispatch(
+        projection=fixture.authority,
+        activation=fixture.activation,
+        envelope=SimpleNamespace(
+            envelope_SHA256=fixture.activation["governed_autonomy_envelope_SHA256"],
+        ),
+        fresh_execution_request=request,
+    )
+
+    assert blocked["task_prepare_status"] == "blocked"
+    assert blocked["blocker_code"] == expected_blocker
+    conn = fixture.kanban_db.connect(board=fixture.projected["kanban_board_slug"])
+    try:
+        task = fixture.kanban_db.get_task(conn, fixture.projected["kanban_task_id"])
+        runs = fixture.kanban_db.list_runs(conn, fixture.projected["kanban_task_id"])
+        assert task is not None
+        assert task.status == "done"
+        assert [run.id for run in runs] == [run.id for run in runs_before]
+    finally:
+        conn.close()
+
+
+def test_ordinary_terminal_done_without_review_revision_request_remains_blocked(
+    projection_home,
+    monkeypatch,
+) -> None:
+    _install_execution_profile(monkeypatch, projection_home)
+    _generation, projected, started, _review = _prepare_completed_review_package(monkeypatch)
+
+    from hermes_cli import kanban_db
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        task_before = kanban_db.get_task(conn, projected["kanban_task_id"])
+        runs_before = kanban_db.list_runs(conn, projected["kanban_task_id"])
+        assert task_before is not None
+        assert task_before.status == "done"
+        assert task_before.current_run_id is None
+        assert [run.id for run in runs_before] == [started["kanban_run_id"]]
+    finally:
+        conn.close()
+
+    blocked = pr._prepare_current_ticket_governed_autonomy_task_for_dispatch(
+        projection=_projection_authority_record(projected),
+        activation={
+            "activation_action_SHA256": "b" * 64,
+            "governed_autonomy_envelope_reference": {},
+        },
+        envelope=SimpleNamespace(envelope_SHA256="b" * 64),
+        fresh_execution_request=None,
+    )
+
+    assert blocked["task_prepare_status"] == "blocked"
+    assert blocked["blocker_code"] == "KANBAN_GOVERNED_AUTONOMY_SOURCE_GAP"
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        task_after = kanban_db.get_task(conn, projected["kanban_task_id"])
+        runs_after = kanban_db.list_runs(conn, projected["kanban_task_id"])
+        assert task_after is not None
+        assert task_after.status == "done"
+        assert task_after.current_run_id is None
+        assert task_after.worker_pid is None
+        assert [run.id for run in runs_after] == [run.id for run in runs_before]
+    finally:
+        conn.close()
+
+
+def test_terminal_done_rearm_blocks_unresolved_lifecycle_state(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _terminal_done_review_revision_pending_fixture(
+        projection_home,
+        monkeypatch,
+        ticket_id="P18.9.0",
+        first_pid=7020,
+    )
+    conn = fixture.kanban_db.connect(board=fixture.projected["kanban_board_slug"])
+    try:
+        conn.execute(
+            "UPDATE tasks SET current_run_id = ?, worker_pid = ? WHERE id = ?",
+            (fixture.prior_run_id, 7021, fixture.projected["kanban_task_id"]),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    blocked = fixture.pr._prepare_current_ticket_governed_autonomy_task_for_dispatch(
+        projection=fixture.authority,
+        activation=fixture.activation,
+        envelope=SimpleNamespace(
+            envelope_SHA256=fixture.activation["governed_autonomy_envelope_SHA256"],
+        ),
+        fresh_execution_request=fixture.revision_request,
+    )
+
+    assert blocked["task_prepare_status"] == "blocked"
+    assert blocked["blocker_code"] == "WORKER_LIFECYCLE_RECONCILIATION_REQUIRED"
+    conn = fixture.kanban_db.connect(board=fixture.projected["kanban_board_slug"])
+    try:
+        runs = fixture.kanban_db.list_runs(conn, fixture.projected["kanban_task_id"])
+        assert [run.id for run in runs] == [fixture.prior_run_id]
+    finally:
+        conn.close()
+
+
+def test_terminal_done_rearm_rolls_back_when_dispatch_guard_blocks(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _terminal_done_review_revision_pending_fixture(
+        projection_home,
+        monkeypatch,
+        ticket_id="P18.9.0",
+        first_pid=7022,
+    )
+    pr = fixture.pr
+    kanban_db = fixture.kanban_db
+    _patch_synthetic_scratch_materialization(monkeypatch, pr)
+
+    conn = kanban_db.connect(board=fixture.projected["kanban_board_slug"])
+    try:
+        kanban_db.add_comment(
+            conn,
+            fixture.projected["kanban_task_id"],
+            "synthetic-reviewer",
+            "Existing human handoff PR: https://github.com/example/repo/pull/123",
+        )
+        task_before = kanban_db.get_task(conn, fixture.projected["kanban_task_id"])
+        runs_before = kanban_db.list_runs(conn, fixture.projected["kanban_task_id"])
+        events_before = kanban_db.list_events(conn, fixture.projected["kanban_task_id"])
+        assert task_before is not None
+        task_body_before = task_before.body
+        assert task_before.status == "done"
+        assert task_before.current_run_id is None
+    finally:
+        conn.close()
+
+    blocked = pr.continue_current_ticket_governed_autonomy(
+        runtime_goal="Attempt guarded terminal done rearm with an active PR guard.",
+        strategy="DIRECT",
+        resume_pending_fresh_execution_request_SHA256=fixture.revision_request[
+            "fresh_execution_request_SHA256"
+        ],
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("guarded rearm must not spawn"),
+        project_id="PEPPER",
+        ticket_id=fixture.ticket_id,
+    )
+
+    assert blocked["runtime_decision"] == "DIRECT"
+    assert blocked["governed_autonomy_runtime_status"] == "blocked_stop_for_human"
+    assert blocked["blocker_code"] == "KANBAN_RESPAWN_GUARD"
+    assert blocked["blocker_detail"] == "active_pr"
+    assert blocked["dispatch_performed"] is False
+    assert blocked["execution_started"] is False
+    assert blocked["worker_execution"] is False
+    assert blocked["kanban_run_created"] is False
+    request_ref = blocked["latest_decision_evidence"]["direct_execution_request_reference"]
+    assert request_ref["terminal_done_task_rearm_pending"] is True
+    assert request_ref["terminal_done_task_rearmed"] is False
+
+    conn = kanban_db.connect(board=fixture.projected["kanban_board_slug"])
+    try:
+        task_after = kanban_db.get_task(conn, fixture.projected["kanban_task_id"])
+        runs_after = kanban_db.list_runs(conn, fixture.projected["kanban_task_id"])
+        events_after = kanban_db.list_events(conn, fixture.projected["kanban_task_id"])
+        assert task_after is not None
+        assert task_after.status == "done"
+        assert task_after.current_run_id is None
+        assert task_after.worker_pid is None
+        assert task_after.body == task_body_before
+        assert [run.id for run in runs_after] == [run.id for run in runs_before]
+        assert len(events_after) == len(events_before)
+        assert not any(
+            event.kind == "governed_autonomy_terminal_review_revision_rearmed"
+            and event.payload.get("fresh_execution_request_SHA256")
+            == fixture.revision_request["fresh_execution_request_SHA256"]
+            for event in events_after
+        )
+    finally:
+        conn.close()
+
+
+def test_stale_review_revision_request_cannot_rearm_terminal_done_task(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _terminal_done_review_revision_pending_fixture(
+        projection_home,
+        monkeypatch,
+        ticket_id="P18.9.0",
+        first_pid=7030,
+    )
+    kanban_db = fixture.kanban_db
+    conn = kanban_db.connect(board=fixture.projected["kanban_board_slug"])
+    try:
+        conn.execute(
+            "UPDATE tasks SET status = 'ready', completed_at = NULL WHERE id = ?",
+            (fixture.projected["kanban_task_id"],),
+        )
+        claimed = kanban_db.claim_task(
+            conn,
+            fixture.projected["kanban_task_id"],
+            claimer="synthetic-c17-later-attempt",
+        )
+        assert claimed is not None
+        later_run_id = int(claimed.current_run_id)
+        workspace = kanban_db.resolve_workspace(
+            claimed,
+            board=fixture.projected["kanban_board_slug"],
+        )
+        kanban_db.set_workspace_path(conn, claimed.id, str(workspace))
+        kanban_db._set_worker_pid(conn, claimed.id, 7031)
+        conn.commit()
+    finally:
+        conn.close()
+
+    later_request = dict(fixture.revision_request)
+    later_request["human_request_text_excerpt"] = "Synthetic later fresh request."
+    later_request["fresh_execution_request_SHA256"] = fixture.pr._digest_payload(
+        "synthetic-c17-later-fresh-request-v1",
+        {"ticket_id": fixture.ticket_id, "later_run_id": later_run_id},
+    )
+    continuation_request = fixture.pr.CurrentTicketGovernedAutonomyContinuationRequest(
+        runtime_goal="Synthetic later execution attempt supersedes the old pending request.",
+        strategy="DIRECT",
+        project_id="PEPPER",
+        ticket_id=fixture.ticket_id,
+    )
+    later_record = fixture.pr._governed_autonomy_runtime_base_record(
+        request=continuation_request,
+        projection=fixture.authority,
+        activation=fixture.activation,
+        previous=fixture.runtime,
+        runtime_decision="DIRECT",
+        runtime_status="direct_execution_continuation_started",
+        latest_decision_evidence={"decision": "DIRECT", "synthetic_later_attempt": True},
+        provider_readiness=_ready_executor_provider_payload(),
+        process_continuation_increment=1,
+        validation_failure_increment=0,
+        fresh_execution_request=later_request,
+    )
+    later_record = fixture.pr._with_governed_autonomy_dispatch_result(
+        later_record,
+        dispatch_result={
+            "start_status": "started",
+            "blocker_code": None,
+            "blocker_detail": None,
+            "dispatch_performed": True,
+            "execution_started": True,
+            "worker_execution": True,
+            "worker_process_started": True,
+            "worker_pid_recorded": True,
+            "Kanban_dispatch": True,
+            "kanban_task_status": "running",
+            "kanban_run_id": later_run_id,
+            "workspace_path": str(workspace),
+            "workspace_created": True,
+        },
+    )
+    fixture.pr._persist_governed_autonomy_runtime_state(later_record)
+
+    with pytest.raises(
+        fixture.pr.ProductRuntimeConflict,
+        match="pending fresh execution request SHA256 was not found",
+    ):
+        fixture.pr.continue_current_ticket_governed_autonomy(
+            runtime_goal="Do not consume stale review-revision request.",
+            strategy="DIRECT",
+            resume_pending_fresh_execution_request_SHA256=fixture.revision_request[
+                "fresh_execution_request_SHA256"
+            ],
+            spawn_fn=lambda *_args, **_kwargs: pytest.fail("stale request must not spawn"),
+            project_id="PEPPER",
+            ticket_id=fixture.ticket_id,
+        )
+
+    conn = kanban_db.connect(board=fixture.projected["kanban_board_slug"])
+    try:
+        runs = kanban_db.list_runs(conn, fixture.projected["kanban_task_id"])
+        assert [run.id for run in runs] == [fixture.prior_run_id, later_run_id]
+        assert all(run.id != later_run_id + 1 for run in runs)
+    finally:
+        conn.close()
 
 
 def test_accept_current_ticket_review_closes_p18_9_0_and_exposes_next_ticket(

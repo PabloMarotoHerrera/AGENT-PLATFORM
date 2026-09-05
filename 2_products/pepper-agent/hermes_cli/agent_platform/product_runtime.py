@@ -12997,6 +12997,7 @@ def _dispatch_exact_current_kanban_task(
     projection: dict[str, Any],
     *,
     spawn_fn: Any = None,
+    prepared_dispatch: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     from hermes_cli import kanban_db
 
@@ -13004,23 +13005,50 @@ def _dispatch_exact_current_kanban_task(
     task_id = str(projection["kanban_task_id"])
     conn = kanban_db.connect(board=board)
     claimed = None
+    terminal_done_claim_info: dict[str, Any] | None = None
     try:
-        blocker = _kanban_start_preflight_blocker(projection)
-        if blocker is not None:
-            code, detail = blocker
-            task = kanban_db.get_task(conn, task_id)
-            runs = kanban_db.list_runs(conn, task_id) if task is not None else []
-            return _dispatch_blocked_result(
-                code,
-                detail,
-                task=task,
-                runs=runs,
-            )
-        claimed = kanban_db.claim_task(
-            conn,
-            task_id,
-            claimer=f"{kanban_db._claimer_id()}:pepper-worker-start-action",
+        terminal_done_dispatch = bool(
+            prepared_dispatch
+            and prepared_dispatch.get("terminal_done_task_rearm_pending") is True
         )
+        if terminal_done_dispatch:
+            claimed, terminal_done_claim_info = _claim_terminal_done_review_revision_task(
+                conn,
+                projection=projection,
+                prepared_dispatch=prepared_dispatch or {},
+            )
+            if claimed is None:
+                task = kanban_db.get_task(conn, task_id)
+                runs = kanban_db.list_runs(conn, task_id) if task is not None else []
+                return _dispatch_blocked_result(
+                    str(
+                        (terminal_done_claim_info or {}).get("blocker_code")
+                        or "KANBAN_CLAIM_FAILED"
+                    ),
+                    str(
+                        (terminal_done_claim_info or {}).get("blocker_detail")
+                        or "projected terminal Kanban task could not be claimed"
+                    ),
+                    task=task,
+                    runs=runs,
+                )
+        else:
+            blocker = _kanban_start_preflight_blocker(projection)
+            if blocker is not None:
+                code, detail = blocker
+                task = kanban_db.get_task(conn, task_id)
+                runs = kanban_db.list_runs(conn, task_id) if task is not None else []
+                return _dispatch_blocked_result(
+                    code,
+                    detail,
+                    task=task,
+                    runs=runs,
+                )
+            claimed = kanban_db.claim_task(
+                conn,
+                task_id,
+                claimer=f"{kanban_db._claimer_id()}:pepper-worker-start-action",
+            )
         if claimed is None:
             task = kanban_db.get_task(conn, task_id)
             runs = kanban_db.list_runs(conn, task_id) if task is not None else []
@@ -13147,6 +13175,17 @@ def _dispatch_exact_current_kanban_task(
             "source_materialized": source_materialization is not None,
             "source_materialization": source_materialization,
             "runs": [_run_dict(run) for run in runs],
+            "terminal_done_task_rearmed": bool(
+                terminal_done_claim_info
+                and terminal_done_claim_info.get("terminal_done_task_rearmed")
+            ),
+            "prior_terminal_run_preserved": bool(
+                terminal_done_claim_info
+                and terminal_done_claim_info.get("prior_terminal_run_preserved")
+            ),
+            "dispatcher_primitive": (terminal_done_claim_info or {}).get(
+                "dispatcher_primitive"
+            ),
         }
     finally:
         conn.close()
@@ -15544,6 +15583,484 @@ def _governed_autonomy_fresh_execution_request_already_consumed(
     return _governed_autonomy_fresh_execution_request_created_attempt(previous)
 
 
+def _human_review_revision_fresh_execution_request_blocker(
+    *,
+    projection: dict[str, Any],
+    fresh_execution_request: dict[str, Any],
+) -> tuple[str, str] | None:
+    expected = {
+        "fresh_execution_requested": True,
+        "fresh_execution_provenance": "human_review_changes_requested",
+        "transition_classification": "HUMAN_REVIEW_CHANGES_REQUESTED_REVISION",
+        "execution_attempt_reason": PEPPER_GOVERNED_AUTONOMY_FRESH_EXECUTION_REASON,
+        "same_ticket": True,
+        "same_work_packet_authority": True,
+        "same_kanban_task": True,
+        "same_authority_envelope": True,
+        "new_scratch_required": True,
+        "revision_source_base": "current_canonical_source",
+        "reviewed_candidate_copied_to_revision_base": False,
+        "canonical_mutation_performed": False,
+    }
+    for key, value in expected.items():
+        if fresh_execution_request.get(key) != value:
+            return (
+                "FRESH_EXECUTION_REVIEW_REVISION_AUTHORITY_GAP",
+                "terminal done task rearm requires a current human changes_requested "
+                f"review-revision request with {key}={value!r}",
+            )
+    fresh_request_sha = fresh_execution_request.get("fresh_execution_request_SHA256")
+    if not isinstance(fresh_request_sha, str) or not _SAFE_SHA256.fullmatch(fresh_request_sha):
+        return (
+            "FRESH_EXECUTION_REVIEW_REVISION_AUTHORITY_GAP",
+            "terminal done task rearm requires a valid review-revision request digest",
+        )
+    prior_terminal_run_id = _int_or_none(
+        fresh_execution_request.get("prior_terminal_run_id")
+    )
+    reviewed_run_id = _int_or_none(fresh_execution_request.get("reviewed_run_id"))
+    if prior_terminal_run_id is None or reviewed_run_id != prior_terminal_run_id:
+        return (
+            "FRESH_EXECUTION_REVIEW_REVISION_AUTHORITY_GAP",
+            "terminal done task rearm requires a bounded prior reviewed terminal run",
+        )
+    try:
+        review_decision = load_current_ticket_review_decision_record(
+            projection_record=projection,
+        )
+    except ProductRuntimeConflict as exc:
+        return (
+            "FRESH_EXECUTION_REVIEW_REVISION_AUTHORITY_MISMATCH",
+            "current review-decision authority is invalid for terminal done task rearm: "
+            f"{_safe_text(exc, limit=220)}",
+        )
+    if review_decision is None or review_decision.get("review_decision") != "changes_requested":
+        return (
+            "FRESH_EXECUTION_REVIEW_REVISION_AUTHORITY_GAP",
+            "terminal done task rearm requires current persisted changes_requested review authority",
+        )
+    review_revision_request = review_decision.get("review_revision_request_reference")
+    if not isinstance(review_revision_request, dict):
+        return (
+            "FRESH_EXECUTION_REVIEW_REVISION_AUTHORITY_GAP",
+            "terminal done task rearm requires a persisted review-revision request",
+        )
+    if review_revision_request != fresh_execution_request:
+        return (
+            "FRESH_EXECUTION_REVIEW_REVISION_AUTHORITY_MISMATCH",
+            "fresh execution request does not match the current review-decision revision authority",
+        )
+    if _int_or_none(review_decision.get("reviewed_run_id")) != prior_terminal_run_id:
+        return (
+            "FRESH_EXECUTION_REVIEW_REVISION_AUTHORITY_MISMATCH",
+            "fresh execution request prior run does not match the current review decision",
+        )
+    return None
+
+
+def _terminal_done_task_rearm_blocker(
+    *,
+    task: Any,
+    runs: list[Any],
+    fresh_execution_request: dict[str, Any],
+) -> tuple[str, str] | None:
+    if task.claim_lock or task.worker_pid or task.current_run_id is not None:
+        return (
+            "WORKER_LIFECYCLE_RECONCILIATION_REQUIRED",
+            "projected Kanban task has unresolved current lifecycle state",
+        )
+    active_runs = [run for run in runs if _execution_is_active(_run_dict(run))]
+    if active_runs:
+        return (
+            "EXECUTION_ALREADY_ACTIVE",
+            "projected Kanban task still has active execution state",
+        )
+    prior_terminal_run_id = _int_or_none(
+        fresh_execution_request.get("prior_terminal_run_id")
+    )
+    if prior_terminal_run_id is None:
+        return (
+            "FRESH_EXECUTION_TERMINAL_SOURCE_REQUIRED",
+            "fresh review-revision execution requires prior terminal run evidence",
+        )
+    if not runs:
+        return (
+            "KANBAN_RUN_GAP",
+            "projected Kanban task has no terminal run evidence",
+        )
+    latest_run = runs[-1]
+    if int(latest_run.id) != prior_terminal_run_id:
+        return (
+            "FRESH_EXECUTION_TERMINAL_SOURCE_MISMATCH",
+            "fresh review-revision request does not target the latest terminal run",
+        )
+    run_status = str(getattr(latest_run, "status", "") or "").strip().lower()
+    run_outcome = str(getattr(latest_run, "outcome", "") or "").strip().lower()
+    terminal = (
+        run_status in _TERMINAL_EXECUTION_STATUSES
+        or run_outcome in _TERMINAL_EXECUTION_STATUSES
+    )
+    if not terminal or getattr(latest_run, "ended_at", None) is None:
+        return (
+            "FRESH_EXECUTION_TERMINAL_SOURCE_MISMATCH",
+            "terminal done task rearm requires an ended prior terminal run",
+        )
+    return None
+
+
+class _KanbanDispatchPreparationBlocked(Exception):
+    def __init__(self, code: str, detail: str) -> None:
+        super().__init__(detail)
+        self.code = code
+        self.detail = detail
+
+
+def _governed_autonomy_dispatch_task_body(
+    *,
+    raw_body: str | None,
+    projection: dict[str, Any],
+    activation_action_sha256: object,
+    authority_sha256: object,
+    source_run_id: object,
+    fresh_execution_request: dict[str, Any] | None,
+    run_count: int,
+    board: str,
+    kanban_db: Any,
+) -> tuple[dict[str, Any], str | None]:
+    task_id = str(projection["kanban_task_id"])
+    try:
+        body = json.loads(raw_body or "{}")
+    except json.JSONDecodeError:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    body.update({
+        "task_skills": [],
+        "governed_autonomy_continuation_authorized": True,
+        "governed_autonomy_continuation_reason": (
+            PEPPER_GOVERNED_AUTONOMY_INTERNAL_CONTINUATION_REASON
+        ),
+        "governed_autonomy_activation_action_SHA256": activation_action_sha256,
+        "governed_autonomy_authority_SHA256": authority_sha256,
+        "governed_autonomy_source_run_id": source_run_id,
+    })
+    if fresh_execution_request is None:
+        return body, None
+    next_attempt_number = run_count + 1
+    fresh_workspace_path = (
+        kanban_db.workspaces_root(board=board) / f"{task_id}-attempt-{next_attempt_number}"
+    )
+    body.update({
+        "fresh_execution_requested": True,
+        "fresh_execution_request_SHA256": fresh_execution_request[
+            "fresh_execution_request_SHA256"
+        ],
+        "execution_attempt_reason": PEPPER_GOVERNED_AUTONOMY_FRESH_EXECUTION_REASON,
+        "prior_terminal_run_id": fresh_execution_request.get("prior_terminal_run_id"),
+        "fresh_execution_attempt_number": next_attempt_number,
+        "fresh_execution_workspace_path": str(fresh_workspace_path),
+        "fresh_execution_provenance": fresh_execution_request.get(
+            "fresh_execution_provenance"
+        ),
+        "review_decision_SHA256": fresh_execution_request.get("review_decision_SHA256"),
+        "reviewed_run_id": fresh_execution_request.get("reviewed_run_id"),
+        "reviewed_candidate_SHA256": fresh_execution_request.get(
+            "reviewed_candidate_SHA256"
+        ),
+        "revision_source_base": fresh_execution_request.get("revision_source_base"),
+    })
+    return body, str(fresh_workspace_path)
+
+
+def _governed_autonomy_continuation_prepared_event_payload(
+    *,
+    activation_action_sha256: object,
+    authority_sha256: object,
+    source_run_id: object,
+    task_triage_specified: bool,
+    terminal_done_task_rearmed: bool,
+    fresh_execution_request: dict[str, Any] | None,
+    fresh_workspace_path: str | None,
+) -> dict[str, Any]:
+    return {
+        "source": PEPPER_GOVERNED_AUTONOMY_RUNTIME_SOURCE_SYSTEM,
+        "reason": PEPPER_GOVERNED_AUTONOMY_INTERNAL_CONTINUATION_REASON,
+        "activation_action_SHA256": activation_action_sha256,
+        "backend_derived_live_authority_SHA256": authority_sha256,
+        "source_run_id": source_run_id,
+        "future_task_skills": [],
+        "task_triage_specified": task_triage_specified,
+        "terminal_done_task_rearmed": terminal_done_task_rearmed,
+        "fresh_execution_request_reference": fresh_execution_request,
+        "fresh_execution_workspace_path": fresh_workspace_path,
+        "fresh_execution_provenance": fresh_execution_request.get(
+            "fresh_execution_provenance"
+        )
+        if fresh_execution_request is not None
+        else None,
+        "review_decision_SHA256": fresh_execution_request.get("review_decision_SHA256")
+        if fresh_execution_request is not None
+        else None,
+        "reviewed_run_id": fresh_execution_request.get("reviewed_run_id")
+        if fresh_execution_request is not None
+        else None,
+        "revision_source_base": fresh_execution_request.get("revision_source_base")
+        if fresh_execution_request is not None
+        else None,
+    }
+
+
+def _claim_terminal_done_review_revision_task(
+    conn: Any,
+    *,
+    projection: dict[str, Any],
+    prepared_dispatch: dict[str, Any],
+) -> tuple[Any | None, dict[str, Any]]:
+    from hermes_cli import kanban_db
+
+    board = _normalize_board(str(projection["kanban_board_slug"]))
+    task_id = str(projection["kanban_task_id"])
+    fresh_execution_request = prepared_dispatch.get("fresh_execution_request_reference")
+    if not isinstance(fresh_execution_request, dict):
+        return None, {
+            "blocker_code": "FRESH_EXECUTION_REVIEW_REVISION_AUTHORITY_GAP",
+            "blocker_detail": "terminal done rearm requires a review-revision request",
+        }
+    authority_blocker = _human_review_revision_fresh_execution_request_blocker(
+        projection=projection,
+        fresh_execution_request=fresh_execution_request,
+    )
+    if authority_blocker is not None:
+        code, detail = authority_blocker
+        return None, {"blocker_code": code, "blocker_detail": detail}
+    activation_action_sha256 = prepared_dispatch.get("activation_action_SHA256")
+    authority_sha256 = prepared_dispatch.get("backend_derived_live_authority_SHA256")
+    source_run_id = prepared_dispatch.get("source_run_id")
+    now = int(time.time())
+    lock = f"{kanban_db._claimer_id()}:pepper-worker-start-action"
+    expires = now + kanban_db._resolve_claim_ttl_seconds(None)
+    claimed = None
+    run_id = None
+    try:
+        with kanban_db.write_txn(conn):
+            task = kanban_db.get_task(conn, task_id)
+            if task is None:
+                raise _KanbanDispatchPreparationBlocked(
+                    "KANBAN_TASK_GAP",
+                    "projected Kanban task is missing",
+                )
+            runs = kanban_db.list_runs(conn, task_id)
+            rearm_blocker = _terminal_done_task_rearm_blocker(
+                task=task,
+                runs=runs,
+                fresh_execution_request=fresh_execution_request,
+            )
+            if rearm_blocker is not None:
+                raise _KanbanDispatchPreparationBlocked(*rearm_blocker)
+            if task.assignee != projection["assignee_profile"]:
+                raise _KanbanDispatchPreparationBlocked(
+                    "KANBAN_TASK_GAP",
+                    "projected Kanban task assignee mismatch",
+                )
+            if task.workspace_kind != "scratch":
+                binding = resolve_current_ticket_lifecycle_binding(
+                    projection_record=projection,
+                )
+                raise _KanbanDispatchPreparationBlocked(
+                    "WORKSPACE_POLICY_GAP",
+                    f"{binding.ticket_id} start only authorizes scratch workspace dispatch",
+                )
+            if task.max_retries != 1:
+                raise _KanbanDispatchPreparationBlocked(
+                    "KANBAN_TASK_GAP",
+                    "projected Kanban task retry policy mismatch",
+                )
+            if task.skills:
+                requested = ", ".join(str(item) for item in task.skills)
+                raise _KanbanDispatchPreparationBlocked(
+                    "TASK_SKILL_EXECUTOR_CAPABILITY_MISMATCH",
+                    "projected Kanban task carries Hermes task skill(s) "
+                    f"{requested}; Pepper codebase inspection resolves through "
+                    "the bounded pepper_repository profile toolset",
+                )
+            running_for_profile = conn.execute(
+                "SELECT COUNT(*) FROM tasks WHERE status = 'running' AND assignee = ?",
+                (task.assignee,),
+            ).fetchone()[0]
+            if int(running_for_profile or 0) > 0:
+                raise _KanbanDispatchPreparationBlocked(
+                    "EXECUTOR_CONCURRENCY_CAP",
+                    "executor profile already has a running task",
+                )
+            running_total = conn.execute(
+                "SELECT COUNT(*) FROM tasks WHERE status = 'running'",
+            ).fetchone()[0]
+            if int(running_total or 0) > 0:
+                raise _KanbanDispatchPreparationBlocked(
+                    "EXECUTION_CONCURRENCY_CAP",
+                    "another Kanban execution is already running",
+                )
+            body, fresh_workspace_path = _governed_autonomy_dispatch_task_body(
+                raw_body=task.body,
+                projection=projection,
+                activation_action_sha256=activation_action_sha256,
+                authority_sha256=authority_sha256,
+                source_run_id=source_run_id,
+                fresh_execution_request=fresh_execution_request,
+                run_count=len(runs),
+                board=board,
+                kanban_db=kanban_db,
+            )
+            prior_terminal_run_id = _int_or_none(
+                fresh_execution_request.get("prior_terminal_run_id")
+            )
+            cur = conn.execute(
+                "UPDATE tasks SET status = 'ready', result = NULL, completed_at = NULL, "
+                "current_run_id = NULL, claim_lock = NULL, claim_expires = NULL, "
+                "worker_pid = NULL, consecutive_failures = 0, last_failure_error = NULL, "
+                "skills = ?, body = ?, workspace_path = ? "
+                "WHERE id = ? AND status = 'done' AND current_run_id IS NULL "
+                "AND claim_lock IS NULL AND worker_pid IS NULL",
+                (
+                    json.dumps([]),
+                    json.dumps(body, sort_keys=True),
+                    fresh_workspace_path,
+                    task_id,
+                ),
+            )
+            if cur.rowcount != 1:
+                raise _KanbanDispatchPreparationBlocked(
+                    "KANBAN_TERMINAL_REARM_FAILED",
+                    "terminal done Kanban task could not be rearmed for review revision",
+                )
+            kanban_db._append_event(
+                conn,
+                task_id,
+                "status",
+                {
+                    "from": "done",
+                    "to": "ready",
+                    "reason": "human_review_changes_requested_revision",
+                    "fresh_execution_request_SHA256": fresh_execution_request[
+                        "fresh_execution_request_SHA256"
+                    ],
+                },
+                run_id=prior_terminal_run_id,
+            )
+            kanban_db._append_event(
+                conn,
+                task_id,
+                "governed_autonomy_terminal_review_revision_rearmed",
+                {
+                    "source": PEPPER_GOVERNED_AUTONOMY_RUNTIME_SOURCE_SYSTEM,
+                    "fresh_execution_request_SHA256": fresh_execution_request[
+                        "fresh_execution_request_SHA256"
+                    ],
+                    "prior_terminal_run_id": prior_terminal_run_id,
+                    "prior_terminal_run_preserved": True,
+                    "revision_source_base": fresh_execution_request.get(
+                        "revision_source_base"
+                    ),
+                },
+                run_id=prior_terminal_run_id,
+            )
+            guard = kanban_db.check_respawn_guard(conn, task_id)
+            if guard is not None:
+                raise _KanbanDispatchPreparationBlocked("KANBAN_RESPAWN_GUARD", guard)
+            undone = conn.execute(
+                "SELECT 1 FROM task_links l "
+                "JOIN tasks p ON p.id = l.parent_id "
+                "WHERE l.child_id = ? AND p.status NOT IN ('done', 'archived') LIMIT 1",
+                (task_id,),
+            ).fetchone()
+            if undone:
+                raise _KanbanDispatchPreparationBlocked(
+                    "KANBAN_CLAIM_FAILED",
+                    "projected Kanban task has unfinished dependencies",
+                )
+            cur = conn.execute(
+                """
+                UPDATE tasks
+                   SET status        = 'running',
+                       claim_lock    = ?,
+                       claim_expires = ?,
+                       started_at    = COALESCE(started_at, ?)
+                 WHERE id = ?
+                   AND status = 'ready'
+                   AND claim_lock IS NULL
+                """,
+                (lock, expires, now, task_id),
+            )
+            if cur.rowcount != 1:
+                raise _KanbanDispatchPreparationBlocked(
+                    "KANBAN_CLAIM_FAILED",
+                    "projected Kanban task could not be claimed",
+                )
+            run_cur = conn.execute(
+                """
+                INSERT INTO task_runs (
+                    task_id, profile, step_key, status,
+                    claim_lock, claim_expires, max_runtime_seconds,
+                    started_at
+                ) VALUES (?, ?, ?, 'running', ?, ?, ?, ?)
+                """,
+                (
+                    task_id,
+                    task.assignee,
+                    task.current_step_key,
+                    lock,
+                    expires,
+                    task.max_runtime_seconds,
+                    now,
+                ),
+            )
+            run_id = int(run_cur.lastrowid)
+            conn.execute(
+                "UPDATE tasks SET current_run_id = ? WHERE id = ?",
+                (run_id, task_id),
+            )
+            kanban_db._append_event(
+                conn,
+                task_id,
+                "governed_autonomy_continuation_prepared",
+                _governed_autonomy_continuation_prepared_event_payload(
+                    activation_action_sha256=activation_action_sha256,
+                    authority_sha256=authority_sha256,
+                    source_run_id=source_run_id,
+                    task_triage_specified=False,
+                    terminal_done_task_rearmed=True,
+                    fresh_execution_request=fresh_execution_request,
+                    fresh_workspace_path=fresh_workspace_path,
+                ),
+            )
+            kanban_db._append_event(
+                conn,
+                task_id,
+                "claimed",
+                {"lock": lock, "expires": expires, "run_id": run_id},
+                run_id=run_id,
+            )
+            claimed = kanban_db.get_task(conn, task_id)
+    except _KanbanDispatchPreparationBlocked as exc:
+        return None, {"blocker_code": exc.code, "blocker_detail": exc.detail}
+    if claimed is not None:
+        kanban_db._fire_kanban_lifecycle_hook(
+            "kanban_task_claimed",
+            task_id,
+            board=board,
+            assignee=claimed.assignee,
+            run_id=run_id,
+        )
+    return claimed, {
+        "terminal_done_task_rearmed": True,
+        "prior_terminal_run_preserved": True,
+        "dispatcher_primitive": (
+            "kanban_task_terminal_review_revision_rearm+kanban_db.claim_task+"
+            "resolve_workspace+_default_spawn"
+        ),
+    }
+
+
 def _governed_autonomy_runtime_history_record_from_entry(
     value: object,
 ) -> dict[str, Any] | None:
@@ -16049,6 +16566,7 @@ def _prepare_current_ticket_governed_autonomy_task_for_dispatch(
             }
         task_unblocked = False
         task_triage_specified = False
+        terminal_done_task_rearm_pending = False
         if task.status == "triage" and fresh_execution_request is not None:
             if task.claim_lock or task.worker_pid or task.current_run_id is not None:
                 return {
@@ -16075,77 +16593,101 @@ def _prepare_current_ticket_governed_autonomy_task_for_dispatch(
                     "blocker_code": "KANBAN_TASK_GAP",
                     "blocker_detail": "projected Kanban task is missing after triage specification",
                 }
-        if task.status not in {"blocked", "ready"}:
-            return {
-                "task_prepare_status": "blocked",
-                "blocker_code": "KANBAN_GOVERNED_AUTONOMY_SOURCE_GAP",
-                "blocker_detail": f"projected Kanban task status is {task.status}",
-            }
-        if task.status == "blocked":
-            if not kanban_db.unblock_task(conn, task_id):
+        if task.status == "done" and fresh_execution_request is not None:
+            runs = kanban_db.list_runs(conn, task_id)
+            rearm_blocker = _terminal_done_task_rearm_blocker(
+                task=task,
+                runs=runs,
+                fresh_execution_request=fresh_execution_request,
+            )
+            if rearm_blocker is not None:
+                code, detail = rearm_blocker
                 return {
                     "task_prepare_status": "blocked",
-                    "blocker_code": "KANBAN_UNBLOCK_FAILED",
-                    "blocker_detail": "projected Kanban task could not be unblocked for governed autonomy",
+                    "blocker_code": code,
+                    "blocker_detail": detail,
                 }
-            task_unblocked = True
-        task = kanban_db.get_task(conn, task_id)
-        if task is None or task.status != "ready":
-            return {
-                "task_prepare_status": "blocked",
-                "blocker_code": "KANBAN_TASK_NOT_READY",
-                "blocker_detail": "projected Kanban task did not become ready for governed autonomy",
-            }
-        if task.claim_lock or task.worker_pid or task.current_run_id is not None:
-            return {
-                "task_prepare_status": "blocked",
-                "blocker_code": "WORKER_LIFECYCLE_RECONCILIATION_REQUIRED",
-                "blocker_detail": "projected Kanban task has unresolved current lifecycle state",
-            }
-        try:
-            body = json.loads(task.body or "{}")
-        except json.JSONDecodeError:
-            body = {}
-        if not isinstance(body, dict):
-            body = {}
+            authority_blocker = _human_review_revision_fresh_execution_request_blocker(
+                projection=projection,
+                fresh_execution_request=fresh_execution_request,
+            )
+            if authority_blocker is not None:
+                code, detail = authority_blocker
+                return {
+                    "task_prepare_status": "blocked",
+                    "blocker_code": code,
+                    "blocker_detail": detail,
+                }
+            terminal_done_task_rearm_pending = True
+        if task.status not in {"blocked", "ready"}:
+            if not terminal_done_task_rearm_pending:
+                return {
+                    "task_prepare_status": "blocked",
+                    "blocker_code": "KANBAN_GOVERNED_AUTONOMY_SOURCE_GAP",
+                    "blocker_detail": f"projected Kanban task status is {task.status}",
+                }
+        if not terminal_done_task_rearm_pending:
+            if task.status == "blocked":
+                if not kanban_db.unblock_task(conn, task_id):
+                    return {
+                        "task_prepare_status": "blocked",
+                        "blocker_code": "KANBAN_UNBLOCK_FAILED",
+                        "blocker_detail": "projected Kanban task could not be unblocked for governed autonomy",
+                    }
+                task_unblocked = True
+            task = kanban_db.get_task(conn, task_id)
+            if task is None or task.status != "ready":
+                return {
+                    "task_prepare_status": "blocked",
+                    "blocker_code": "KANBAN_TASK_NOT_READY",
+                    "blocker_detail": "projected Kanban task did not become ready for governed autonomy",
+                }
+            if task.claim_lock or task.worker_pid or task.current_run_id is not None:
+                return {
+                    "task_prepare_status": "blocked",
+                    "blocker_code": "WORKER_LIFECYCLE_RECONCILIATION_REQUIRED",
+                    "blocker_detail": "projected Kanban task has unresolved current lifecycle state",
+                }
         source_reference = activation.get("governed_autonomy_envelope_reference")
         source_run_id = source_reference.get("source_run_id") if isinstance(source_reference, dict) else None
-        body.update({
-            "task_skills": [],
-            "governed_autonomy_continuation_authorized": True,
-            "governed_autonomy_continuation_reason": (
-                PEPPER_GOVERNED_AUTONOMY_INTERNAL_CONTINUATION_REASON
-            ),
-            "governed_autonomy_activation_action_SHA256": activation["activation_action_SHA256"],
-            "governed_autonomy_authority_SHA256": envelope.envelope_SHA256,
-            "governed_autonomy_source_run_id": source_run_id,
-        })
-        if fresh_execution_request is not None:
-            next_attempt_number = len(kanban_db.list_runs(conn, task_id)) + 1
-            fresh_workspace_path = (
-                kanban_db.workspaces_root(board=board)
-                / f"{task_id}-attempt-{next_attempt_number}"
-            )
-            body.update({
-                "fresh_execution_requested": True,
-                "fresh_execution_request_SHA256": fresh_execution_request[
-                    "fresh_execution_request_SHA256"
-                ],
-                "execution_attempt_reason": PEPPER_GOVERNED_AUTONOMY_FRESH_EXECUTION_REASON,
-                "prior_terminal_run_id": fresh_execution_request.get("prior_terminal_run_id"),
-                "fresh_execution_attempt_number": next_attempt_number,
-                "fresh_execution_workspace_path": str(fresh_workspace_path),
-                "fresh_execution_provenance": fresh_execution_request.get(
-                    "fresh_execution_provenance"
+        body, fresh_workspace_path = _governed_autonomy_dispatch_task_body(
+            raw_body=task.body,
+            projection=projection,
+            activation_action_sha256=activation["activation_action_SHA256"],
+            authority_sha256=envelope.envelope_SHA256,
+            source_run_id=source_run_id,
+            fresh_execution_request=fresh_execution_request,
+            run_count=len(kanban_db.list_runs(conn, task_id)),
+            board=board,
+            kanban_db=kanban_db,
+        )
+        if terminal_done_task_rearm_pending:
+            return {
+                "task_prepare_status": "prepared",
+                "blocker_code": None,
+                "blocker_detail": None,
+                "task_unblocked": task_unblocked,
+                "task_triage_specified": task_triage_specified,
+                "terminal_done_task_rearm_pending": True,
+                "terminal_done_task_rearmed": False,
+                "prior_terminal_run_preserved": False,
+                "task_skills_corrected": False,
+                "task_skills_correction_pending": True,
+                "governed_autonomy_continuation_reason": (
+                    PEPPER_GOVERNED_AUTONOMY_INTERNAL_CONTINUATION_REASON
                 ),
-                "review_decision_SHA256": fresh_execution_request.get(
-                    "review_decision_SHA256"
+                "dispatcher_primitive": (
+                    "kanban_task_terminal_review_revision_rearm+kanban_db.claim_task+"
+                    "resolve_workspace+_default_spawn"
                 ),
-                "reviewed_run_id": fresh_execution_request.get("reviewed_run_id"),
-                "revision_source_base": fresh_execution_request.get("revision_source_base"),
-            })
-        else:
-            fresh_workspace_path = None
+                "kanban_task_status_after_prepare": task.status,
+                "kanban_task_skills_after_prepare": list(task.skills or []),
+                "source_run_id": source_run_id,
+                "activation_action_SHA256": activation["activation_action_SHA256"],
+                "backend_derived_live_authority_SHA256": envelope.envelope_SHA256,
+                "fresh_execution_request_reference": fresh_execution_request,
+                "fresh_execution_workspace_path": fresh_workspace_path,
+            }
         conn.execute(
             "UPDATE tasks SET skills = ?, body = ?, claim_lock = NULL, "
             "claim_expires = NULL, worker_pid = NULL, workspace_path = ? "
@@ -16153,7 +16695,7 @@ def _prepare_current_ticket_governed_autonomy_task_for_dispatch(
             (
                 json.dumps([]),
                 json.dumps(body, sort_keys=True),
-                str(fresh_workspace_path) if fresh_workspace_path is not None else task.workspace_path,
+                fresh_workspace_path if fresh_workspace_path is not None else task.workspace_path,
                 task_id,
             ),
         )
@@ -16161,35 +16703,15 @@ def _prepare_current_ticket_governed_autonomy_task_for_dispatch(
             conn,
             task_id,
             "governed_autonomy_continuation_prepared",
-            {
-                "source": PEPPER_GOVERNED_AUTONOMY_RUNTIME_SOURCE_SYSTEM,
-                "reason": PEPPER_GOVERNED_AUTONOMY_INTERNAL_CONTINUATION_REASON,
-                "activation_action_SHA256": activation["activation_action_SHA256"],
-                "backend_derived_live_authority_SHA256": envelope.envelope_SHA256,
-                "source_run_id": source_run_id,
-                "future_task_skills": [],
-                "task_triage_specified": task_triage_specified,
-                "fresh_execution_request_reference": fresh_execution_request,
-                "fresh_execution_workspace_path": str(fresh_workspace_path)
-                if fresh_workspace_path is not None
-                else None,
-                "fresh_execution_provenance": fresh_execution_request.get(
-                    "fresh_execution_provenance"
-                )
-                if fresh_execution_request is not None
-                else None,
-                "review_decision_SHA256": fresh_execution_request.get(
-                    "review_decision_SHA256"
-                )
-                if fresh_execution_request is not None
-                else None,
-                "reviewed_run_id": fresh_execution_request.get("reviewed_run_id")
-                if fresh_execution_request is not None
-                else None,
-                "revision_source_base": fresh_execution_request.get("revision_source_base")
-                if fresh_execution_request is not None
-                else None,
-            },
+            _governed_autonomy_continuation_prepared_event_payload(
+                activation_action_sha256=activation["activation_action_SHA256"],
+                authority_sha256=envelope.envelope_SHA256,
+                source_run_id=source_run_id,
+                task_triage_specified=task_triage_specified,
+                terminal_done_task_rearmed=False,
+                fresh_execution_request=fresh_execution_request,
+                fresh_workspace_path=fresh_workspace_path,
+            ),
         )
         conn.commit()
         task = kanban_db.get_task(conn, task_id)
@@ -16199,6 +16721,9 @@ def _prepare_current_ticket_governed_autonomy_task_for_dispatch(
             "blocker_detail": None,
             "task_unblocked": task_unblocked,
             "task_triage_specified": task_triage_specified,
+            "terminal_done_task_rearm_pending": False,
+            "terminal_done_task_rearmed": False,
+            "prior_terminal_run_preserved": False,
             "task_skills_corrected": True,
             "governed_autonomy_continuation_reason": (
                 PEPPER_GOVERNED_AUTONOMY_INTERNAL_CONTINUATION_REASON
@@ -16288,7 +16813,10 @@ def _with_governed_autonomy_dispatch_result(
     updated["governed_autonomy_continuation_reason"] = (
         PEPPER_GOVERNED_AUTONOMY_INTERNAL_CONTINUATION_REASON
     )
-    updated["dispatcher_primitive"] = "kanban_db.unblock_task+kanban_db.claim_task+resolve_workspace+_default_spawn"
+    updated["dispatcher_primitive"] = str(
+        dispatch_result.get("dispatcher_primitive")
+        or "kanban_db.unblock_task+kanban_db.claim_task+resolve_workspace+_default_spawn"
+    )
     if bool(dispatch_result.get("execution_started")):
         updated["live_autonomous_continuation_marker"] = (
             PEPPER_GOVERNED_AUTONOMY_LIVE_CONTINUATION_MARKER
@@ -16368,7 +16896,23 @@ def _build_governed_autonomy_direct_runtime_record(
     dispatch_result = _dispatch_exact_current_kanban_task(
         projection,
         spawn_fn=spawn_fn,
+        prepared_dispatch=prep_result,
     )
+    direct_request_reference = dict(prep_result)
+    if prep_result.get("terminal_done_task_rearm_pending") is True:
+        terminal_rearmed = bool(dispatch_result.get("terminal_done_task_rearmed"))
+        direct_request_reference.update({
+            "terminal_done_task_rearmed": terminal_rearmed,
+            "prior_terminal_run_preserved": bool(
+                dispatch_result.get("prior_terminal_run_preserved")
+            ),
+            "task_skills_corrected": terminal_rearmed,
+            "task_skills_correction_pending": not terminal_rearmed,
+        })
+        if terminal_rearmed:
+            direct_request_reference["kanban_task_status_after_prepare"] = dispatch_result.get(
+                "kanban_task_status"
+            )
     dispatch_consumed = bool(dispatch_result.get("dispatch_performed"))
     execution_started = bool(dispatch_result.get("execution_started"))
     fresh_execution_request_consumed = bool(
@@ -16401,7 +16945,7 @@ def _build_governed_autonomy_direct_runtime_record(
         latest_decision_evidence={
             "decision": "DIRECT",
             "rationale": "active authority revalidated; same-authority Kanban dispatch uses the canonical worker lifecycle",
-            "direct_execution_request_reference": prep_result,
+            "direct_execution_request_reference": direct_request_reference,
             "fresh_execution_request_reference": fresh_execution_request,
             **(fresh_execution_request_resolution_evidence or {}),
             "direct_execution_result_reference": _governed_autonomy_dispatch_result_reference(
