@@ -5083,7 +5083,11 @@ def _review_prepare_superseded_by_current_round(
     current_run = _int_or_none(completion.get("run_id"))
     if recorded_run is None or current_run is None or recorded_run >= current_run:
         return False
-    if not _review_prepare_human_git_handoff_required(completion):
+    try:
+        acceptance_contract = _acceptance_contract_for_review_projection(projection)
+    except Exception:
+        acceptance_contract = None
+    if not _review_prepare_reviewable_result(completion, acceptance_contract):
         return False
     return binding.ticket_id == record.get("ticket_id")
 
@@ -5156,9 +5160,10 @@ def _review_prepare_durable_completion_for_validation(
         raise ProductRuntimeConflict(
             "review-preparation durable completion result authority mismatch"
         )
-    if not _review_prepare_human_git_handoff_required(durable_completion):
+    acceptance_contract = record.get("acceptance_contract")
+    if not _review_prepare_reviewable_result(durable_completion, acceptance_contract):
         raise ProductRuntimeConflict(
-            "review-preparation durable completion result is not review-required candidate evidence"
+            "review-preparation durable completion result is not reviewable terminal evidence"
         )
     return durable_completion
 
@@ -5191,6 +5196,7 @@ def _review_decision_revision_request_consumed_by_runtime(
     record: dict[str, Any],
     *,
     projection: dict[str, Any],
+    current_run_id: int,
 ) -> bool:
     if record.get("review_decision") != "changes_requested":
         return False
@@ -5199,6 +5205,17 @@ def _review_decision_revision_request_consumed_by_runtime(
         return False
     revision_sha = revision_request.get("fresh_execution_request_SHA256")
     if not isinstance(revision_sha, str) or not _SAFE_SHA256.fullmatch(revision_sha):
+        return False
+    reviewed_run_id = _int_or_none(record.get("reviewed_run_id"))
+    if reviewed_run_id is None:
+        return False
+    if _int_or_none(revision_request.get("prior_terminal_run_id")) != reviewed_run_id:
+        return False
+    if _int_or_none(revision_request.get("reviewed_run_id")) != reviewed_run_id:
+        return False
+    if revision_request.get("review_decision_SHA256") != record.get(
+        "review_decision_identity_SHA256"
+    ):
         return False
     try:
         activation = load_current_ticket_governed_autonomy_activation_record(
@@ -5210,20 +5227,41 @@ def _review_decision_revision_request_consumed_by_runtime(
             projection_record=projection,
             activation_record=activation,
         )
+        if runtime is None:
+            return False
+        effective_authority = _resolve_effective_current_governed_autonomy_authority(
+            projection=projection,
+            activation=activation,
+            previous=runtime,
+        )
+        _require_current_governed_autonomy_authority_match(
+            projection=projection,
+            activation=activation,
+            previous=runtime,
+            effective_authority=effective_authority,
+        )
+        terminal = _governed_autonomy_runtime_terminal_reconciliation(
+            runtime,
+            effective_authority=effective_authority,
+        )
     except ProductRuntimeConflict:
         return False
-    for item in _governed_autonomy_runtime_lineage_records_newest_first(
-        runtime,
-        ticket_id=str(projection["ticket_id"]),
-    ):
-        runtime_record = item.get("record")
-        if not isinstance(runtime_record, dict):
-            continue
-        if runtime_record.get("fresh_execution_request_SHA256") != revision_sha:
-            continue
-        if _governed_autonomy_fresh_execution_request_created_attempt(runtime_record):
-            return True
-    return False
+    if terminal is None:
+        return False
+    if _int_or_none(terminal.get("terminal_run_id")) != current_run_id:
+        return False
+    if _int_or_none(runtime.get("kanban_run_id")) != current_run_id:
+        return False
+    if runtime.get("fresh_execution_request_SHA256") != revision_sha:
+        return False
+    if not _governed_autonomy_fresh_execution_request_created_attempt(runtime):
+        return False
+    if _int_or_none(runtime.get("prior_terminal_run_id")) != reviewed_run_id:
+        return False
+    runtime_request = runtime.get("fresh_execution_request_reference")
+    if not isinstance(runtime_request, dict):
+        return False
+    return runtime_request == revision_request
 
 
 def _review_decision_superseded_by_current_round(
@@ -5233,8 +5271,6 @@ def _review_decision_superseded_by_current_round(
 ) -> bool:
     if not _review_decision_has_basic_current_ticket_identity(record, projection=projection):
         return False
-    if _review_decision_revision_request_consumed_by_runtime(record, projection=projection):
-        return True
     completion = _current_review_round_completion_source(projection)
     if completion.get("blocker_code"):
         return False
@@ -5242,10 +5278,18 @@ def _review_decision_superseded_by_current_round(
     reviewed_run = _int_or_none(record.get("reviewed_run_id"))
     if current_run is None or reviewed_run is None or reviewed_run >= current_run:
         return False
-    if not _review_prepare_human_git_handoff_required(completion):
+    try:
+        acceptance_contract = _acceptance_contract_for_review_projection(projection)
+    except Exception:
+        acceptance_contract = None
+    if not _review_prepare_reviewable_result(completion, acceptance_contract):
         return False
     if record.get("review_decision") == "changes_requested":
-        return False
+        return _review_decision_revision_request_consumed_by_runtime(
+            record,
+            projection=projection,
+            current_run_id=current_run,
+        )
     return True
 
 
@@ -5392,12 +5436,20 @@ def validate_current_ticket_review_decision_record(
         raise ProductRuntimeConflict("review-decision reviewer_id mismatch")
     if _int_or_none(record.get("reviewed_run_id")) is None:
         raise ProductRuntimeConflict("review-decision reviewed run is invalid")
+    source_kind = record.get("review_source_authority_kind")
     null_candidate_changes_requested = (
         record.get("reviewed_candidate_SHA256") is None
         and decision == "changes_requested"
-        and record.get("review_source_authority_kind") == "review_prepare"
+        and source_kind == "review_prepare"
     )
-    if record.get("reviewed_candidate_SHA256") in {None, ""} and not null_candidate_changes_requested:
+    null_candidate_noop_accept = (
+        record.get("reviewed_candidate_SHA256") is None
+        and decision == "accept"
+        and source_kind == "review_prepare"
+    )
+    if record.get("reviewed_candidate_SHA256") in {None, ""} and not (
+        null_candidate_changes_requested or null_candidate_noop_accept
+    ):
         raise ProductRuntimeConflict("review-decision candidate digest is missing")
     feedback_sha = record.get("bounded_review_feedback_SHA256")
     if not isinstance(feedback_sha, str) or not _SAFE_SHA256.fullmatch(feedback_sha):
@@ -5407,7 +5459,6 @@ def validate_current_ticket_review_decision_record(
     authority_identity = record.get("current_authority_identity")
     if not isinstance(authority_identity, dict):
         raise ProductRuntimeConflict("review-decision authority identity is invalid")
-    source_kind = record.get("review_source_authority_kind")
     if source_kind is not None:
         if source_kind not in {"governed_autonomy", "review_prepare"}:
             raise ProductRuntimeConflict("review-decision source authority kind is invalid")
@@ -5486,6 +5537,13 @@ def validate_current_ticket_review_decision_record(
             review_prepare.get("successful_run_id")
         ):
             raise ProductRuntimeConflict("review-decision prepared run mismatch")
+        if null_candidate_noop_accept and not _review_completion_validated_noop_result(
+            review_prepare.get("kanban_completion_result"),
+            review_prepare.get("acceptance_contract"),
+        ):
+            raise ProductRuntimeConflict(
+                "review-decision null-candidate accept requires validated no-op prepared review"
+            )
         if decision == "changes_requested":
             revision_request = record["review_revision_request_reference"]
             for key, value in expected_prepare.items():
@@ -8297,10 +8355,22 @@ def validate_p18_9_0_review_prepare_record(
     run_status = str(completion.get("run_status") or "done")
     run_outcome = str(completion.get("run_outcome") or "completed")
     git_handoff_required = _review_prepare_human_git_handoff_required(completion)
+    if not _review_prepare_reviewable_result(completion, contract):
+        raise ProductRuntimeConflict(
+            "review-preparation completion result is not reviewable terminal evidence"
+        )
     git_handoff_state = (
         "human_git_authority_preserved"
         if git_handoff_required
         else "not_required_for_ticket_result"
+    )
+    zero_change_result = _review_completion_zero_change_result(completion)
+    validation_contract_satisfied = _review_completion_validation_contract_satisfied(
+        completion,
+        contract,
+    )
+    candidate_changes_available = _governed_autonomy_candidate_changes_available(
+        completion.get("candidate_changes_reference"),
     )
     binding, identity = _current_ticket_identity_fields(projection)
     expected = {
@@ -8327,6 +8397,12 @@ def validate_p18_9_0_review_prepare_record(
         "review_prepare_status": "prepared_pending_human_acceptance",
         "validation_state": "review_prepared_pending_human_acceptance",
         "review_state": "prepared_pending_human_acceptance",
+        "zero_change_result": zero_change_result,
+        "validation_contract_satisfied": validation_contract_satisfied,
+        "reviewable_result": True,
+        "candidate_changes_available": candidate_changes_available,
+        "validated_noop_result": zero_change_result and validation_contract_satisfied,
+        "human_git_handoff_required": git_handoff_required,
         "human_acceptance_required": True,
         "human_acceptance_recorded": False,
         "git_handoff_required": git_handoff_required,
@@ -8652,6 +8728,15 @@ def prepare_current_ticket_review(
             completion_source=completion,
         )
     acceptance_contract = _acceptance_contract_for_review_projection(projection)
+    if not _review_prepare_reviewable_result(completion, acceptance_contract):
+        return _blocked_current_review_prepare_result(
+            projection,
+            request=request,
+            blocker_code="KANBAN_COMPLETION_RESULT_NOT_REVIEWABLE",
+            blocker_detail="completion result lacks candidate changes or contract-bound validated no-op evidence",
+            completion_source=completion,
+            acceptance_contract=acceptance_contract,
+        )
     record = _build_review_prepare_record(
         request=request,
         projection=projection,
@@ -8991,7 +9076,11 @@ def submit_current_ticket_review_decision(
         raise ProductRuntimeConflict(
             f"review decision targets run {target['reviewed_run_id']}, not {request.reviewed_run_id}"
         )
-    if request.decision == "accept" and target.get("candidate_SHA256") in {None, ""}:
+    if (
+        request.decision == "accept"
+        and target.get("candidate_SHA256") in {None, ""}
+        and not _review_decision_target_validated_noop(target)
+    ):
         raise ProductRuntimeConflict("review decision accept requires candidate changes evidence")
     if request.decision == "changes_requested":
         authority_blocker = _review_feedback_authority_blocker(
@@ -19703,6 +19792,18 @@ def _review_decision_target_from_prepared_review_or_governed_autonomy(
             "reviewed_run_id": reviewed_run_id,
             "candidate_reference": candidate_reference,
             "candidate_SHA256": candidate_sha,
+            "reviewable_result": _review_prepare_reviewable_result(
+                completion,
+                review_prepare.get("acceptance_contract"),
+            ),
+            "candidate_changes_available": candidate_sha is not None,
+            "validated_noop_result": _review_completion_validated_noop_result(
+                completion,
+                review_prepare.get("acceptance_contract"),
+            ),
+            "human_git_handoff_required": _review_prepare_human_git_handoff_required(
+                completion,
+            ),
         }
     return _review_decision_target_from_governed_autonomy(projection)
 
@@ -19751,6 +19852,10 @@ def _review_decision_target_from_governed_autonomy(
         "terminal_reconciliation": terminal_reconciliation,
         "reviewed_run_id": terminal_reconciliation["terminal_run_id"],
         "candidate_reference": candidate_reference,
+        "reviewable_result": True,
+        "candidate_changes_available": True,
+        "validated_noop_result": False,
+        "human_git_handoff_required": True,
         "candidate_SHA256": _digest_payload(
             "pepper-current-ticket-reviewed-candidate-reference-sha256-v1",
             {
@@ -19763,12 +19868,39 @@ def _review_decision_target_from_governed_autonomy(
     }
 
 
+def _review_decision_target_validated_noop(target: dict[str, Any] | None) -> bool:
+    if not isinstance(target, dict):
+        return False
+    if target.get("authority_kind") != "review_prepare":
+        return False
+    if target.get("candidate_SHA256") not in {None, ""}:
+        return False
+    review_prepare = target.get("review_prepare")
+    if not isinstance(review_prepare, dict):
+        return False
+    completion = review_prepare.get("kanban_completion_result")
+    return _review_completion_validated_noop_result(
+        completion,
+        review_prepare.get("acceptance_contract"),
+    )
+
+
 def _review_decision_states(
     decision: str,
     *,
     revision_result: dict[str, Any] | None = None,
+    target: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     if decision == "accept":
+        if _review_decision_target_validated_noop(target):
+            return {
+                "review_validation_decision": "accept",
+                "review_validation_state": "completed",
+                "validation_state": "review_accepted",
+                "review_state": "accepted",
+                "workflow_status": "completed",
+                "governed_workflow_state": "completed",
+            }
         return {
             "review_validation_decision": "accept",
             "review_validation_state": "completed",
@@ -20052,6 +20184,7 @@ def _build_current_ticket_review_decision_record(
     states = _review_decision_states(
         request.decision,
         revision_result=revision_result,
+        target=target,
     )
     review_prepare = target.get("review_prepare") if isinstance(target.get("review_prepare"), dict) else None
     revision_request_sha = (
@@ -20059,6 +20192,31 @@ def _build_current_ticket_review_decision_record(
         if revision_request is not None
         else None
     )
+    validated_noop_acceptance = (
+        request.decision == "accept" and _review_decision_target_validated_noop(target)
+    )
+    successor_authority = (
+        _human_git_handoff_completion_successor_authority(binding)
+        if validated_noop_acceptance
+        else None
+    )
+    candidate_changes_available = bool(target.get("candidate_changes_available"))
+    human_git_handoff_required = bool(
+        target.get("human_git_handoff_required")
+    ) and request.decision in {"accept", "changes_requested"}
+    revision_started = bool(revision_result and revision_result.get("execution_started"))
+    if validated_noop_acceptance:
+        workflow_state = f"{binding.ticket_id}-COMPLETED"
+    elif request.decision == "accept":
+        workflow_state = f"{binding.ticket_id}-REVIEW-ACCEPTED-AWAITING-HUMAN-GIT-HANDOFF"
+    elif request.decision == "changes_requested":
+        workflow_state = (
+            f"{binding.ticket_id}-REVIEW-CHANGES-REQUESTED-REVISION-STARTED"
+            if revision_started
+            else f"{binding.ticket_id}-REVIEW-CHANGES-REQUESTED-REVISION-PENDING-CONTINUATION"
+        )
+    else:
+        workflow_state = f"{binding.ticket_id}-REVIEW-REJECTED-NO-EXECUTION"
     identity = {
         "project_id": binding.project_id,
         "ticket_id": binding.ticket_id,
@@ -20151,10 +20309,38 @@ def _build_current_ticket_review_decision_record(
         "same_authority_revision": True,
         "capability_not_authority": True,
         "human_review_input_authority_expansion": False,
+        "reviewable_result": bool(target.get("reviewable_result")),
+        "candidate_changes_available": candidate_changes_available,
+        "validated_noop_result": bool(target.get("validated_noop_result")),
+        "human_git_handoff_required": human_git_handoff_required,
+        "human_git_handoff_transition_required": human_git_handoff_required,
+        "git_handoff_required": human_git_handoff_required,
+        "git_handoff_state": (
+            "human_git_authority_preserved"
+            if human_git_handoff_required
+            else "not_required_for_ticket_result"
+        ),
+        "ticket_closed": validated_noop_acceptance,
+        "closed_predecessor_ticket_id": binding.ticket_id
+        if validated_noop_acceptance
+        else None,
+        "next_ticket_ready": validated_noop_acceptance,
+        "next_ticket_generated": False,
+        "next_ticket_authority": successor_authority,
+        "next_ticket_id": successor_authority.get("ticket_id")
+        if successor_authority
+        else None,
+        "next_ticket_title": successor_authority.get("ticket_title")
+        if successor_authority
+        else None,
+        "next_ticket_authority_path": successor_authority.get("roadmap_authority_path")
+        if successor_authority
+        else None,
         "review_validation_decision": states["review_validation_decision"],
         "review_validation_state": states["review_validation_state"],
         "validation_state": states["validation_state"],
         "review_state": states["review_state"],
+        "workflow_state": workflow_state,
         "workflow_status": states["workflow_status"],
         "governed_workflow_state": states["governed_workflow_state"],
         "revision_attempt_result": revision_result,
@@ -20181,6 +20367,8 @@ def _build_current_ticket_review_decision_record(
             request.decision,
             revision_result=revision_result,
             revision_request=revision_request,
+            target=target,
+            successor_authority=successor_authority,
         ),
     }
     record["review_decision_SHA256"] = _review_decision_record_digest(record)
@@ -20193,8 +20381,26 @@ def _review_decision_next_action(
     *,
     revision_result: dict[str, Any] | None = None,
     revision_request: dict[str, Any] | None = None,
+    target: dict[str, Any] | None = None,
+    successor_authority: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     if decision == "accept":
+        if _review_decision_target_validated_noop(target):
+            if successor_authority is None:
+                successor_authority = _human_git_handoff_completion_successor_authority(
+                    binding,
+                )
+            return {
+                "id": successor_authority["next_action_id"],
+                "label": (
+                    f"{binding.ticket_id} validated no-op review is accepted and closed; "
+                    f"{successor_authority['ticket_id']} {successor_authority['ticket_title']} "
+                    "may be generated only by a separate governed action."
+                ),
+                "target_ticket_id": successor_authority["ticket_id"],
+                "target_ticket_title": successor_authority["ticket_title"],
+                "required_human_action": "separate_next_ticket_generation",
+            }
         return {
             "id": f"PREPARE_{binding.ticket_action_token}_HUMAN_GIT_HANDOFF",
             "label": f"Prepare {binding.ticket_id} human Git handoff from accepted review.",
@@ -20266,8 +20472,22 @@ def _review_decision_operational_result(
         "review_validation_state": record["review_validation_state"],
         "validation_state": record["validation_state"],
         "review_state": record["review_state"],
+        "workflow_state": record.get("workflow_state"),
         "workflow_status": record["workflow_status"],
         "governed_workflow_state": record["governed_workflow_state"],
+        "reviewable_result": bool(record.get("reviewable_result")),
+        "candidate_changes_available": bool(record.get("candidate_changes_available")),
+        "validated_noop_result": bool(record.get("validated_noop_result")),
+        "human_git_handoff_required": bool(record.get("human_git_handoff_required")),
+        "git_handoff_required": bool(record.get("git_handoff_required")),
+        "git_handoff_state": record.get("git_handoff_state"),
+        "ticket_closed": bool(record.get("ticket_closed")),
+        "closed_predecessor_ticket_id": record.get("closed_predecessor_ticket_id"),
+        "next_ticket_ready": bool(record.get("next_ticket_ready")),
+        "next_ticket_generated": bool(record.get("next_ticket_generated")),
+        "next_ticket_authority": record.get("next_ticket_authority"),
+        "next_ticket_id": record.get("next_ticket_id"),
+        "next_ticket_title": record.get("next_ticket_title"),
         "review_revision_request_reference": record.get("review_revision_request_reference"),
         "revision_source_base": record.get("revision_source_base"),
         "reviewed_candidate_copied_to_revision_base": record.get(
@@ -22915,6 +23135,321 @@ def _metadata_bool(metadata: Any, *keys: str) -> bool | None:
     return None
 
 
+def _strict_bool_metadata_value(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().casefold()
+        if normalized in {"true", "yes", "1", "passed", "pass"}:
+            return True
+        if normalized in {"false", "no", "0", "failed", "fail"}:
+            return False
+    return None
+
+
+def _metadata_strict_bool(metadata: Any, *keys: str) -> bool | None:
+    if not isinstance(metadata, dict):
+        return None
+    for key in keys:
+        if key in metadata:
+            return _strict_bool_metadata_value(metadata.get(key))
+    return None
+
+
+def _normalized_validation_command(value: Any) -> str:
+    return " ".join(str(value or "").strip().split())
+
+
+def _review_acceptance_contract_validation_requirements(
+    acceptance_contract: dict[str, Any] | None,
+) -> tuple[dict[str, Any], ...]:
+    if not isinstance(acceptance_contract, dict):
+        return ()
+    requirements: list[dict[str, Any]] = []
+    seen: set[tuple[str | None, str]] = set()
+    for source_key in ("work_packet_validation_steps", "validation_steps"):
+        steps = acceptance_contract.get(source_key)
+        if not isinstance(steps, list):
+            continue
+        for index, step in enumerate(steps, start=1):
+            requirement = _review_validation_requirement_from_step(
+                step,
+                source_key=source_key,
+                index=index,
+            )
+            if requirement is None:
+                continue
+            key = (
+                requirement.get("validation_id"),
+                requirement["source_command"],
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            requirements.append(requirement)
+    return tuple(requirements)
+
+
+def _review_validation_requirement_from_step(
+    step: Any,
+    *,
+    source_key: str,
+    index: int,
+) -> dict[str, Any] | None:
+    validation_id = None
+    command = None
+    expected_exit_codes: tuple[int, ...] = (0,)
+    not_applicable = False
+    if isinstance(step, dict):
+        optional = _strict_bool_metadata_value(step.get("optional"))
+        if optional is True:
+            return None
+        validation_id = str(
+            step.get("validation_id") or step.get("id") or f"{source_key}:{index}"
+        ).strip()
+        command = (
+            step.get("command")
+            or step.get("validation_command")
+            or step.get("source_command")
+        )
+        applicability = str(
+            step.get("applicability") or step.get("disposition") or ""
+        ).strip().casefold().replace("-", "_").replace(" ", "_")
+        not_applicable = applicability == "not_applicable"
+        expected_values = step.get("expected_exit_codes") or step.get("expected_exit_code")
+        if isinstance(expected_values, (list, tuple)):
+            parsed = tuple(
+                value for value in (_int_or_none(item) for item in expected_values) if value is not None
+            )
+            if parsed:
+                expected_exit_codes = parsed
+        else:
+            parsed = _int_or_none(expected_values)
+            if parsed is not None:
+                expected_exit_codes = (parsed,)
+    elif isinstance(step, str):
+        validation_id = f"{source_key}:{index}"
+        command = step
+    else:
+        return None
+    source_command = _normalized_validation_command(command)
+    if not source_command:
+        return None
+    if source_command.casefold().replace("-", "_").replace(" ", "_") == "not_applicable":
+        not_applicable = True
+    return {
+        "validation_id": validation_id or None,
+        "source_command": source_command,
+        "expected_exit_codes": expected_exit_codes,
+        "not_applicable": not_applicable,
+        "source_key": source_key,
+    }
+
+
+def _review_completion_validation_result_records(
+    completion: dict[str, Any],
+) -> tuple[dict[str, Any], ...]:
+    records: list[dict[str, Any]] = []
+    containers = [completion]
+    metadata = completion.get("run_metadata")
+    if isinstance(metadata, dict):
+        containers.append(metadata)
+        nested = metadata.get("workpacket_validation")
+        if isinstance(nested, dict):
+            containers.append(nested)
+    for container in containers:
+        for key in (
+            "workpacket_validation_results",
+            "validation_command_results",
+            "validation_results",
+            "command_results",
+            "results",
+        ):
+            value = container.get(key) if isinstance(container, dict) else None
+            if isinstance(value, list):
+                records.extend(item for item in value if isinstance(item, dict))
+    return tuple(records)
+
+
+def _review_validation_result_matches_requirement(
+    result: dict[str, Any],
+    requirement: dict[str, Any],
+    *,
+    acceptance_contract: dict[str, Any],
+) -> bool:
+    command = result.get("command") if isinstance(result.get("command"), dict) else {}
+    result_command = _normalized_validation_command(
+        command.get("source_command")
+        or result.get("source_command")
+        or result.get("command")
+    )
+    if result_command != requirement["source_command"]:
+        return False
+    expected_validation_id = requirement.get("validation_id")
+    observed_validation_id = command.get("validation_id") or result.get("validation_id")
+    if expected_validation_id and observed_validation_id not in {None, expected_validation_id}:
+        return False
+    for key in ("ticket_id", "work_packet_id", "work_packet_SHA256"):
+        expected = acceptance_contract.get(key)
+        if expected is not None and result.get(key) != expected:
+            return False
+    disposition = str(result.get("disposition") or "").strip().casefold()
+    success = _strict_bool_metadata_value(result.get("success"))
+    if requirement.get("not_applicable"):
+        return disposition in {"not_applicable", "not-applicable", "skipped"} and success is not False
+    if success is not True or disposition != "passed":
+        return False
+    if _strict_bool_metadata_value(result.get("process_started")) is not True:
+        return False
+    exit_code = _int_or_none(result.get("exit_code"))
+    expected_exit_codes = tuple(requirement.get("expected_exit_codes") or (0,))
+    return exit_code in expected_exit_codes
+
+
+def _review_completion_validation_contract_satisfied(
+    completion: dict[str, Any],
+    acceptance_contract: dict[str, Any] | None,
+) -> bool:
+    if not isinstance(completion, dict) or not isinstance(acceptance_contract, dict):
+        return False
+    metadata = completion.get("run_metadata")
+    observation = completion.get("validation_observation_reference")
+    if _metadata_strict_bool(metadata, "validation_infrastructure_failure") is True:
+        return False
+    if isinstance(observation, dict) and _metadata_strict_bool(
+        observation,
+        "infrastructure_failure",
+        "validation_infrastructure_failure",
+    ) is True:
+        return False
+    for container in (metadata, observation):
+        validation_passed = _metadata_strict_bool(
+            container,
+            "validation_passed",
+            "execution_validation_passed",
+        )
+        if validation_passed is False:
+            return False
+    for container in (metadata, completion):
+        closure_complete = _metadata_strict_bool(
+            container,
+            "validation_complete",
+            "validation_closed",
+            "validation_closure_complete",
+        )
+        if closure_complete is False:
+            return False
+    requirements = _review_acceptance_contract_validation_requirements(
+        acceptance_contract,
+    )
+    if not requirements:
+        return any(
+            _metadata_strict_bool(
+                container,
+                "validation_passed",
+                "execution_validation_passed",
+            )
+            is True
+            for container in (metadata, observation, completion)
+        )
+    results = _review_completion_validation_result_records(completion)
+    if not results:
+        return False
+    return all(
+        any(
+            _review_validation_result_matches_requirement(
+                result,
+                requirement,
+                acceptance_contract=acceptance_contract,
+            )
+            for result in results
+        )
+        for requirement in requirements
+    )
+
+
+def _review_completion_text(completion: dict[str, Any]) -> str:
+    parts = [
+        str(completion.get("run_summary") or ""),
+        str(completion.get("task_result") or ""),
+    ]
+    metadata = completion.get("run_metadata")
+    if isinstance(metadata, dict):
+        parts.extend(
+            str(value)
+            for value in metadata.values()
+            if isinstance(value, (str, int, float, bool))
+        )
+    return " ".join(parts).casefold().replace("_", " ").replace("-", " ")
+
+
+def _review_completion_has_explicit_zero_change_evidence(
+    completion: dict[str, Any],
+) -> bool:
+    candidate_reference = completion.get("candidate_changes_reference")
+    if isinstance(candidate_reference, dict) and candidate_reference.get("available") is True:
+        files_changed = _int_or_none(candidate_reference.get("files_changed"))
+        if files_changed == 0 and not candidate_reference.get("files"):
+            return True
+    metadata = completion.get("run_metadata")
+    if isinstance(metadata, dict):
+        for key in ("files_modified", "modified_files", "changed_files", "changes"):
+            if key not in metadata:
+                continue
+            value = metadata.get(key)
+            if isinstance(value, (list, tuple)) and not any(
+                str(item or "").strip() for item in value
+            ):
+                return _metadata_bool(metadata, "Git_mutation", "git_mutation") is False
+    return False
+
+
+def _review_completion_zero_change_result(completion: dict[str, Any]) -> bool:
+    if not isinstance(completion, dict):
+        return False
+    if completion.get("blocker_code"):
+        return False
+    if _governed_autonomy_candidate_changes_available(
+        completion.get("candidate_changes_reference"),
+    ):
+        return False
+    if completion.get("terminal_outcome_class") == "validated_review_required":
+        return False
+    run_status = str(completion.get("run_status") or "").strip().lower()
+    run_outcome = str(completion.get("run_outcome") or "").strip().lower()
+    if run_status not in {"done", "completed"} and run_outcome != "completed":
+        return False
+    reported_files = completion.get("reported_files_modified")
+    if not isinstance(reported_files, list) or any(
+        str(item or "").strip() for item in reported_files
+    ):
+        return False
+    if completion.get("reported_git_mutation") is not False:
+        return False
+    return _review_completion_has_explicit_zero_change_evidence(completion)
+
+
+def _review_completion_validated_noop_result(
+    completion: dict[str, Any],
+    acceptance_contract: dict[str, Any] | None,
+) -> bool:
+    return _review_completion_zero_change_result(
+        completion,
+    ) and _review_completion_validation_contract_satisfied(
+        completion,
+        acceptance_contract,
+    )
+
+
+def _review_prepare_reviewable_result(
+    completion: dict[str, Any],
+    acceptance_contract: dict[str, Any] | None = None,
+) -> bool:
+    return _review_prepare_human_git_handoff_required(
+        completion,
+    ) or _review_completion_validated_noop_result(completion, acceptance_contract)
+
+
 def _review_prepare_human_git_handoff_required(completion: dict[str, Any]) -> bool:
     return (
         completion.get("terminal_outcome_class") == "validated_review_required"
@@ -23183,6 +23718,18 @@ def _build_review_prepare_record(
     run_status = str(completion.get("run_status") or "done")
     run_outcome = str(completion.get("run_outcome") or "completed")
     git_handoff_required = _review_prepare_human_git_handoff_required(completion)
+    zero_change_result = _review_completion_zero_change_result(completion)
+    validation_contract_satisfied = _review_completion_validation_contract_satisfied(
+        completion,
+        acceptance_contract,
+    )
+    reviewable_result = _review_prepare_reviewable_result(
+        completion,
+        acceptance_contract,
+    )
+    candidate_changes_available = _governed_autonomy_candidate_changes_available(
+        completion.get("candidate_changes_reference"),
+    )
     git_handoff_state = (
         "human_git_authority_preserved"
         if git_handoff_required
@@ -23240,6 +23787,12 @@ def _build_review_prepare_record(
         "review_prepare_status": "prepared_pending_human_acceptance",
         "validation_state": "review_prepared_pending_human_acceptance",
         "review_state": "prepared_pending_human_acceptance",
+        "zero_change_result": zero_change_result,
+        "validation_contract_satisfied": validation_contract_satisfied,
+        "reviewable_result": reviewable_result,
+        "candidate_changes_available": candidate_changes_available,
+        "validated_noop_result": zero_change_result and validation_contract_satisfied,
+        "human_git_handoff_required": git_handoff_required,
         "review_validation_vocabulary": {
             "decisions": [item.value for item in ReviewValidationLoopDecision],
             "states": [item.value for item in ReviewValidationLoopState],
@@ -23484,6 +24037,7 @@ def _review_prepare_operational_result(
     *,
     idempotent_replay: bool,
 ) -> dict[str, Any]:
+    completion = record["kanban_completion_result"]
     current_invocation_side_effects = {
         "dispatch_performed": False,
         "Kanban_dispatch": False,
@@ -23520,6 +24074,19 @@ def _review_prepare_operational_result(
         "successful_run_outcome": record["successful_run_outcome"],
         "validation_state": record["validation_state"],
         "review_state": record["review_state"],
+        "zero_change_result": bool(record.get("zero_change_result")),
+        "validation_contract_satisfied": bool(
+            record.get("validation_contract_satisfied")
+        ),
+        "reviewable_result": _review_prepare_reviewable_result(
+            completion,
+            record.get("acceptance_contract"),
+        ),
+        "validated_noop_result": bool(record.get("validated_noop_result")),
+        "candidate_changes_available": _governed_autonomy_candidate_changes_available(
+            completion.get("candidate_changes_reference"),
+        ),
+        "human_git_handoff_required": bool(record.get("git_handoff_required")),
         "human_acceptance_required": True,
         "human_acceptance_recorded": False,
         "git_handoff_required": bool(record.get("git_handoff_required")),
@@ -23640,8 +24207,9 @@ def _blocked_current_review_prepare_result(
     blocker_code: str,
     blocker_detail: str,
     completion_source: dict[str, Any] | None = None,
+    acceptance_contract: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    result = {
         "source_system": PEPPER_REVIEW_PREPARE_ACTION_SOURCE_SYSTEM,
         "schema_version": PEPPER_REVIEW_PREPARE_ACTION_SCHEMA_VERSION,
         "policy_id": PEPPER_REVIEW_PREPARE_ACTION_POLICY_ID,
@@ -23677,6 +24245,27 @@ def _blocked_current_review_prepare_result(
         "auto_retry": False,
         "auto_rollback": False,
     }
+    if isinstance(completion_source, dict):
+        result.update({
+            "zero_change_result": _review_completion_zero_change_result(
+                completion_source,
+            ),
+            "validation_contract_satisfied": _review_completion_validation_contract_satisfied(
+                completion_source,
+                acceptance_contract,
+            ),
+            "reviewable_result": _review_prepare_reviewable_result(
+                completion_source,
+                acceptance_contract,
+            ),
+            "candidate_changes_available": _governed_autonomy_candidate_changes_available(
+                completion_source.get("candidate_changes_reference"),
+            ),
+            "human_git_handoff_required": _review_prepare_human_git_handoff_required(
+                completion_source,
+            ),
+        })
+    return result
 
 
 def _review_prepare_routes_to_review_decision(record: dict[str, Any]) -> bool:
@@ -24883,6 +25472,36 @@ def _current_ticket_review_decision_overlay(
         ),
     }
     if record["review_decision"] == "accept":
+        if record.get("workflow_status") == "completed" and record.get("git_handoff_required") is False:
+            next_ticket = record.get("next_ticket_authority")
+            if not isinstance(next_ticket, dict):
+                next_ticket = _human_git_handoff_completion_successor_authority(binding)
+            overlay.update({
+                "current_ticket_id": None,
+                "current_ticket_title": None,
+                "closed_predecessor_ticket_id": binding.ticket_id,
+                "next_ticket_id": next_ticket["ticket_id"],
+                "next_ticket_title": next_ticket["ticket_title"],
+                "canonical_next_ticket_authority": next_ticket,
+                "readiness": "review_accepted_noop_completed_next_ticket_ready",
+                "workflow_state": record["workflow_state"],
+                "workflow_status": "completed",
+                "queue_state": "current_ticket_closed_next_ticket_ready",
+                "execution_state": "no_active_executions",
+                "active_execution_count": 0,
+                "validation_state": "review_accepted",
+                "review_state": "accepted",
+                "recovery_state": "not_required",
+                "governed_workflow_state": "completed",
+                "human_acceptance_recorded": True,
+                "git_handoff_required": False,
+                "git_handoff_state": "not_required_for_ticket_result",
+                "ticket_closed": True,
+                "next_ticket_ready": True,
+                "next_ticket_generated": False,
+                "next_action": record["next_action"],
+            })
+            return overlay
         overlay.update({
             "readiness": "review_accepted_pending_human_git_handoff",
             "workflow_state": f"{binding.ticket_id}-REVIEW-ACCEPTED-AWAITING-HUMAN-GIT-HANDOFF",
@@ -24897,6 +25516,7 @@ def _current_ticket_review_decision_overlay(
         })
     elif record["review_decision"] == "changes_requested":
         revision_started = bool(record.get("revision_attempt_started"))
+        git_handoff_required = bool(record.get("git_handoff_required", True))
         readiness = (
             "review_changes_requested_revision_started"
             if revision_started
@@ -24915,8 +25535,12 @@ def _current_ticket_review_decision_overlay(
             "review_state": record["review_state"],
             "recovery_state": "not_required",
             "governed_workflow_state": "awaiting_correction",
-            "git_handoff_required": True,
-            "git_handoff_state": "human_git_authority_preserved",
+            "git_handoff_required": git_handoff_required,
+            "git_handoff_state": (
+                "human_git_authority_preserved"
+                if git_handoff_required
+                else "not_required_for_ticket_result"
+            ),
             "review_revision_request_reference": record.get(
                 "review_revision_request_reference"
             ),
