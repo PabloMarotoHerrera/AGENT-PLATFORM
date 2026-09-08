@@ -543,6 +543,16 @@ def _review_acceptance_text_from_args_or_user_task(
     return kwargs.get("user_task")
 
 
+def _zero_change_attestation_text_from_args_or_user_task(
+    args: dict[str, Any],
+    kwargs: dict[str, Any],
+) -> object:
+    value = args.get("human_attestation_text")
+    if isinstance(value, str) and value:
+        return value
+    return kwargs.get("user_task")
+
+
 def _generation_request_text_from_args_or_user_task(
     args: dict[str, Any],
     kwargs: dict[str, Any],
@@ -633,6 +643,12 @@ def _get_workflow_control(args: dict[str, Any], **_kwargs) -> str:
         "validation_state": ctx["validation_state"],
         "review_state": ctx["review_state"],
         "review_prepare_authority": ctx.get("review_prepare_authority"),
+        "zero_change_result": ctx.get("zero_change_result"),
+        "zero_change_authority_kind": ctx.get("zero_change_authority_kind"),
+        "zero_change_authority_SHA256": ctx.get("zero_change_authority_SHA256"),
+        "human_zero_change_attestation_required": ctx.get(
+            "human_zero_change_attestation_required"
+        ),
         "review_decision_recorded": ctx.get("review_decision_recorded"),
         "review_decision_required": ctx.get("review_decision_required"),
         "human_acceptance_required": ctx.get("human_acceptance_required"),
@@ -843,6 +859,12 @@ def _get_review_status(args: dict[str, Any], **_kwargs) -> str:
         "failure_category": ctx.get("failure_category"),
         "failure_summary": ctx.get("failure_summary"),
         "review_prepare_authority": ctx.get("review_prepare_authority"),
+        "zero_change_result": ctx.get("zero_change_result"),
+        "zero_change_authority_kind": ctx.get("zero_change_authority_kind"),
+        "zero_change_authority_SHA256": ctx.get("zero_change_authority_SHA256"),
+        "human_zero_change_attestation_required": ctx.get(
+            "human_zero_change_attestation_required"
+        ),
         "review_decision_recorded": ctx.get("review_decision_recorded"),
         "review_decision_required": ctx.get("review_decision_required"),
         "human_acceptance_required": ctx.get("human_acceptance_required"),
@@ -874,6 +896,11 @@ def _get_next_action(args: dict[str, Any], **_kwargs) -> str:
         "failure_category": ctx.get("failure_category"),
         "failure_summary": ctx.get("failure_summary"),
         "review_decision_required": ctx.get("review_decision_required"),
+        "zero_change_result": ctx.get("zero_change_result"),
+        "zero_change_authority_kind": ctx.get("zero_change_authority_kind"),
+        "human_zero_change_attestation_required": ctx.get(
+            "human_zero_change_attestation_required"
+        ),
         "human_acceptance_required": ctx.get("human_acceptance_required"),
         "human_acceptance_recorded": ctx.get("human_acceptance_recorded"),
         "next_action": ctx["next_action"],
@@ -1327,6 +1354,30 @@ def _prepare_current_ticket_review(args: dict[str, Any], **_kwargs) -> str:
         "Git_mutation": False,
         "auto_retry": False,
         "auto_rollback": False,
+    })
+
+
+def _attest_current_ticket_zero_change_for_review_prepare(
+    args: dict[str, Any],
+    **_kwargs,
+) -> str:
+    pr = _runtime()
+    try:
+        result = pr.attest_current_ticket_zero_change_for_review_prepare(
+            human_attestation_text=_zero_change_attestation_text_from_args_or_user_task(
+                args,
+                _kwargs,
+            ),
+            project_id=str(args.get("project_id") or "").strip(),
+            ticket_id=str(args.get("ticket_id") or "").strip(),
+            next_action_id=str(args.get("next_action_id") or "").strip(),
+            reviewer_id=str(args.get("reviewer_id") or "pepper-chat-human").strip(),
+        )
+    except Exception as exc:
+        return tool_error(str(exc) or "current ticket zero-change attestation failed", success=False)
+    return _result({
+        "source_tool": "attest_current_ticket_zero_change_for_review_prepare",
+        **result,
     })
 
 
@@ -1997,6 +2048,43 @@ _PREPARE_CURRENT_TICKET_REVIEW_SCHEMA = {
 }
 
 
+_ATTEST_CURRENT_TICKET_ZERO_CHANGE_FOR_REVIEW_PREPARE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "project_id": {
+            "type": "string",
+            "description": "Governed project guard. Must equal the current governed project.",
+        },
+        "ticket_id": {
+            "type": "string",
+            "description": "Governed ticket guard. Must equal the current governed ticket.",
+        },
+        "next_action_id": {
+            "type": "string",
+            "description": "Next-action guard. Must be ATTEST_<current-ticket>_ZERO_CHANGE_FOR_REVIEW_PREPARE.",
+        },
+        "human_attestation_text": {
+            "type": "string",
+            "description": (
+                "Exact canonical human attestation text from the current workflow next_action; "
+                "do not paraphrase, summarize, or convert generic confirmations into this value."
+            ),
+        },
+        "reviewer_id": {
+            "type": "string",
+            "description": "Optional reviewer identity consumed by canonical product-runtime attestation authority.",
+        },
+    },
+    "required": [
+        "project_id",
+        "ticket_id",
+        "next_action_id",
+        "human_attestation_text",
+    ],
+    "additionalProperties": False,
+}
+
+
 _INSPECT_CURRENT_TICKET_REVIEW_CANDIDATE_SCHEMA = {
     "type": "object",
     "properties": {
@@ -2493,6 +2581,25 @@ registry.register(
     },
     handler=_prepare_current_ticket_review,
     emoji="P",
+    max_result_size_chars=24000,
+)
+
+
+registry.register(
+    name="attest_current_ticket_zero_change_for_review_prepare",
+    toolset=TOOLSET,
+    schema={
+        "name": "attest_current_ticket_zero_change_for_review_prepare",
+        "description": (
+            "Record exact human zero-change attestation for an ambiguous current Pepper "
+            "terminal result before review preparation. Calls canonical product-runtime "
+            "authority only; does not prepare review validation, accept review, execute, "
+            "continue autonomy, mutate completion evidence, mutate Git, invoke Docker, or invoke Graphify."
+        ),
+        "parameters": _ATTEST_CURRENT_TICKET_ZERO_CHANGE_FOR_REVIEW_PREPARE_SCHEMA,
+    },
+    handler=_attest_current_ticket_zero_change_for_review_prepare,
+    emoji="Z",
     max_result_size_chars=24000,
 )
 

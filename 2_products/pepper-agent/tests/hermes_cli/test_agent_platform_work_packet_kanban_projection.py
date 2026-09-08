@@ -1757,9 +1757,9 @@ def _c18_v2_acceptance_contract(pr, projection_record: dict[str, object]) -> dic
         },
         {
             "validation_id": "V4",
-            "command": "not_applicable",
-            "expected_exit_codes": [0],
-            "applicability": "not_applicable",
+            "kind": "manual",
+            "description": "Human review confirms no backend production validation applies.",
+            "expected_result": "No backend production files changed.",
         },
     ]
     contract["criteria_revision_SHA256"] = pr._criteria_revision_digest(contract)
@@ -1975,8 +1975,16 @@ def _c18_validated_noop_review_round_completion(
         "run_summary": "Synthetic validated no-op result with no changes required.",
         "run_metadata": {
             "files_modified": [],
+            "files_inspected": ["2_products/pepper-agent/hermes_cli/agent_platform/product_runtime.py"],
             "changes": [],
             "Git_mutation": False,
+            "zero_change_evidence": {
+                "disposition": "no_source_changes",
+                "files_modified": [],
+                "Git_mutation": False,
+                "authority": "synthetic_exact_validation_noop_fixture",
+            },
+            "completion_verdict": "completed_without_source_changes",
             "validation_passed": True,
             "validation_command_results": _successful_contract_validation_results(contract),
         },
@@ -1999,6 +2007,7 @@ def _c18_v2_synthetic_noop_review_ready_fixture(
     *,
     ticket_id: str = "P99.70",
     completion_mutator=None,
+    install_current_run_authority: bool = True,
 ) -> SimpleNamespace:
     from hermes_cli import kanban_db
     from hermes_cli.agent_platform import product_runtime as pr
@@ -2046,6 +2055,8 @@ def _c18_v2_synthetic_noop_review_ready_fixture(
     completion["kanban_completion_result_SHA256"] = pr._kanban_completion_result_digest(
         completion,
     )
+    if install_current_run_authority:
+        _install_c19_current_terminal_run_authority(projection_record, completion)
     monkeypatch.setattr(pr, "_kanban_completion_result_source", lambda _projection: completion)
     monkeypatch.setattr(
         pr,
@@ -2058,6 +2069,273 @@ def _c18_v2_synthetic_noop_review_ready_fixture(
         contract=contract,
         completion=completion,
         ticket_id=ticket_id,
+    )
+
+
+def _c19_legacy_semantic_noop_metadata() -> dict[str, object]:
+    return {
+        "changed_files": [],
+        "git_mutation": False,
+        "completion_verdict": "completed_without_source_changes",
+    }
+
+
+def _c19_legacy_semantic_noop_mutator(completion: dict, _contract: dict) -> None:
+    workspace_root = Path(__file__).resolve().parents[4]
+    completion.update({
+        "kanban_task_workspace_path": str(workspace_root),
+        "candidate_changes_reference": None,
+        "candidate_changes_available": False,
+        "reported_files_modified": [],
+        "reported_git_mutation": False,
+    })
+    completion["run_metadata"] = _c19_legacy_semantic_noop_metadata()
+
+
+def _install_c19_current_terminal_run_authority(
+    projection_record: dict[str, object],
+    completion: dict[str, object],
+    *,
+    task_status: str | None = None,
+    task_current_run_id: int | None = None,
+    runs: tuple[dict[str, object], ...] | None = None,
+) -> None:
+    from hermes_cli import kanban_db
+
+    board = str(projection_record["kanban_board_slug"])
+    task_id = str(projection_record["kanban_task_id"])
+    run_id = int(completion["run_id"])
+    now = int(time.time())
+    if runs is None:
+        runs = ({
+            "id": run_id,
+            "status": str(completion.get("run_status") or "done"),
+            "outcome": str(completion.get("run_outcome") or "completed"),
+            "started_at": int(completion.get("run_started_at") or now - 60),
+            "ended_at": int(completion.get("run_ended_at") or now),
+            "summary": str(completion.get("run_summary") or "synthetic terminal run"),
+            "metadata": completion.get("run_metadata") if isinstance(completion.get("run_metadata"), dict) else {},
+        },)
+    kanban_db.create_board(board)
+    conn = kanban_db.connect(board=board)
+    try:
+        conn.execute("DELETE FROM task_runs WHERE task_id = ?", (task_id,))
+        conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+        conn.execute(
+            """
+            INSERT INTO tasks (
+                id, title, assignee, status, created_at, completed_at,
+                workspace_kind, workspace_path, current_run_id
+            ) VALUES (?, ?, ?, ?, ?, ?, 'dir', ?, ?)
+            """,
+            (
+                task_id,
+                str(projection_record.get("ticket_title") or "Synthetic current run"),
+                "implementation_product",
+                task_status or str(completion.get("kanban_task_status") or "done"),
+                now - 120,
+                now if (task_status or completion.get("kanban_task_status")) == "done" else None,
+                str(completion.get("kanban_task_workspace_path") or "."),
+                task_current_run_id,
+            ),
+        )
+        for run in runs:
+            metadata = run.get("metadata")
+            conn.execute(
+                """
+                INSERT INTO task_runs (
+                    id, task_id, profile, step_key, status, started_at, ended_at,
+                    outcome, summary, metadata
+                ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    int(run["id"]),
+                    task_id,
+                    "implementation_product",
+                    str(run.get("status") or "done"),
+                    int(run.get("started_at") or now - 60),
+                    run.get("ended_at"),
+                    run.get("outcome"),
+                    run.get("summary"),
+                    json.dumps(metadata) if isinstance(metadata, dict) else None,
+                ),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _record_c19_zero_change_attestation(fixture: SimpleNamespace) -> dict[str, object]:
+    pr = fixture.pr
+    action = pr.governed_ticket_lifecycle_action_ids(fixture.ticket_id)[
+        "zero_change_attestation"
+    ]
+    return pr.attest_current_ticket_zero_change_for_review_prepare(
+        human_attestation_text=pr.governed_ticket_zero_change_attestation_text(
+            fixture.ticket_id,
+        ),
+        project_id="PEPPER",
+        ticket_id=fixture.ticket_id,
+        next_action_id=action,
+    )
+
+
+def _install_c19_review_prepare_validation_tool_stub(
+    monkeypatch,
+    pr,
+    contract: dict,
+    *,
+    observed_commands: list[str],
+    failing_validation_id: str | None = None,
+    omitted_validation_ids: set[str] | None = None,
+    command_mismatch_validation_id: str | None = None,
+    identity_mismatch_validation_id: str | None = None,
+) -> None:
+    from tools import workpacket_validation_tool as validation_tool
+
+    omitted = omitted_validation_ids or set()
+
+    monkeypatch.setattr(
+        pr,
+        "_pepper_governed_worker_env_overlay",
+        lambda projection: {
+            "HERMES_AGENT_PLATFORM_GOVERNED_WORKER": "pepper-kanban-worker",
+            "HERMES_AGENT_PLATFORM_WORKPACKET_ID": str(projection["work_packet_id"]),
+            "HERMES_AGENT_PLATFORM_WORKPACKET_SHA256": str(projection["work_packet_SHA256"]),
+            "HERMES_AGENT_PLATFORM_TICKET_SPEC_SHA256": str(projection["ticket_spec_SHA256"]),
+            "HERMES_AGENT_PLATFORM_KANBAN_PROJECTION_SHA256": str(projection["projection_SHA256"]),
+            "HERMES_AGENT_PLATFORM_GENERATION_RECORD_PATH": "/tmp/c19-generation.json",
+            "HERMES_AGENT_PLATFORM_APPROVAL_DECISION_RECORD_PATH": "/tmp/c19-approval.json",
+            "HERMES_AGENT_PLATFORM_KANBAN_PROJECTION_RECORD_PATH": "/tmp/c19-projection.json",
+        },
+    )
+
+    def run_review_prepare_validation_commands(
+        *,
+        projection,
+        completion,
+        acceptance_contract,
+        worker_env,
+        requirements,
+        requested_project_id=None,
+        requested_ticket_id=None,
+        requested_next_action_id=None,
+    ):
+        assert acceptance_contract == contract
+        assert worker_env["HERMES_AGENT_PLATFORM_WORKPACKET_ID"] == contract["work_packet_id"]
+        normalized_requirements = tuple(dict(requirement) for requirement in requirements)
+        authority_record = validation_tool.build_review_prepare_validation_authority_record(
+            projection=projection,
+            completion=completion,
+            acceptance_contract=acceptance_contract,
+            requirements=normalized_requirements,
+            requested_project_id=requested_project_id,
+            requested_ticket_id=requested_ticket_id,
+            requested_next_action_id=requested_next_action_id,
+        )
+        missing = [
+            requirement
+            for requirement in normalized_requirements
+            if str(requirement.get("validation_id")) in omitted
+        ]
+        if missing:
+            return {
+                "validation_executed": False,
+                "validation_complete": False,
+                "validation_passed": None,
+                "validation_command_results": [],
+                "review_prepare_validation_authority": authority_record,
+                "review_prepare_validation_authority_SHA256": authority_record[
+                    "review_prepare_validation_authority_SHA256"
+                ],
+                "missing_requirements": [
+                    validation_tool.review_prepare_validation_requirement_public(item)
+                    for item in missing
+                ],
+                "failure_detail": (
+                    "missing governed validation command specs for acceptance-contract requirements"
+                ),
+            }
+        results = []
+        validation_passed = True
+        failure_detail = None
+        for index, requirement in enumerate(normalized_requirements, start=1):
+            validation_id = str(requirement["validation_id"])
+            source = str(requirement["source_command"])
+            observed_commands.append(source)
+            failed = validation_id == failing_validation_id
+            expected_exit_codes = list(requirement.get("expected_exit_codes") or (0,))
+            source_command = (
+                source + " --mismatched"
+                if validation_id == command_mismatch_validation_id
+                else source
+            )
+            ticket_id = (
+                "P99.WRONG"
+                if validation_id == identity_mismatch_validation_id
+                else contract["ticket_id"]
+            )
+            result = {
+                "success": not failed,
+                "policy_id": validation_tool.GOVERNED_VALIDATION_POLICY_ID,
+                "work_packet_id": contract["work_packet_id"],
+                "work_packet_SHA256": contract["work_packet_SHA256"],
+                "ticket_id": ticket_id,
+                "command": {
+                    "command_id": f"GVCMD-{index:03d}",
+                    "validation_id": validation_id,
+                    "source": "stubbed-workpacket-validation-tool",
+                    "source_command": source_command,
+                    "working_directory": "/tmp/synthetic-workspace",
+                    "timeout_seconds": 120,
+                    "expected_exit_codes": expected_exit_codes,
+                    "runtime_available": True,
+                    "runtime_unavailable_reason": None,
+                },
+                "disposition": "failed" if failed else "passed",
+                "failure_reason": "nonzero_exit" if failed else "none",
+                "exit_code": 1 if failed else expected_exit_codes[0],
+                "process_started": True,
+                "terminate_requested": False,
+                "kill_requested": False,
+            }
+            record = validation_tool.review_prepare_validation_result_record(
+                result,
+                requirement=requirement,
+                authority_record=authority_record,
+            )
+            results.append(record)
+            if not validation_tool.review_prepare_validation_result_matches_requirement(
+                record,
+                requirement,
+                acceptance_contract=acceptance_contract,
+            ):
+                validation_passed = False
+                failure_detail = str(
+                    record.get("error")
+                    or record.get("failure_reason")
+                    or record.get("disposition")
+                    or "validation command did not satisfy requirement"
+                )[:300]
+                break
+        return {
+            "validation_executed": bool(results),
+            "validation_complete": len(results) == len(normalized_requirements),
+            "validation_passed": validation_passed
+            and len(results) == len(normalized_requirements),
+            "validation_command_results": results,
+            "review_prepare_validation_authority": authority_record,
+            "review_prepare_validation_authority_SHA256": authority_record[
+                "review_prepare_validation_authority_SHA256"
+            ],
+            "missing_requirements": [],
+            "failure_detail": failure_detail,
+        }
+
+    monkeypatch.setattr(
+        validation_tool,
+        "run_review_prepare_validation_commands",
+        run_review_prepare_validation_commands,
     )
 
 
@@ -3760,6 +4038,7 @@ def _p18_9_2_handoff_git_snapshot(
 
 
 def _write_json_authority_record(path: Path, record: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -5371,6 +5650,13 @@ def _prepare_completed_review_package(monkeypatch):
                 "files_modified": [],
                 "tests_run": [],
                 "Git_mutation": False,
+                "completion_verdict": "completed_without_source_changes",
+                "zero_change_evidence": {
+                    "disposition": "no_source_changes",
+                    "files_modified": [],
+                    "Git_mutation": False,
+                    "authority": "synthetic_exact_validation_noop_fixture",
+                },
                 "validation_passed": True,
                 "validation_command_results": _successful_contract_validation_results(contract),
             },
@@ -5385,6 +5671,76 @@ def _prepare_completed_review_package(monkeypatch):
         next_action_id="PREPARE_P18_9_0_REVIEW",
     )
     return generation, projected, started, review
+
+
+def _prepare_human_attested_completed_review_package(monkeypatch):
+    generation, _decision = _approve_current_ticket()
+    projected = _project_via_runtime()
+
+    from hermes_cli import kanban_db
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    monkeypatch.setattr(pr, "_executor_provider_readiness", _ready_executor_provider_payload)
+    monkeypatch.setattr(
+        pr,
+        "_preflight_pepper_governed_worker_credentials",
+        lambda projection, enabled=True: _ready_worker_credential_probe(),
+    )
+    started = pr.start_current_ticket_execution(
+        human_authorization_text="Start P18.9.0 execution now",
+        project_id="PEPPER",
+        ticket_id="P18.9.0",
+        next_action_id="START_P18_9_0_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION",
+        spawn_fn=lambda _task, _workspace, board=None: 4321,
+    )
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        ok = kanban_db.complete_task(
+            conn,
+            projected["kanban_task_id"],
+            summary=(
+                "Summary\nP18.9.0 inventory, IA decision, and acceptance contract "
+                "prepared without source changes.\nFiles inspected\n- bounded Pepper "
+                "authorities\nFiles modified\n- none\nTests/commands run\n- none\n"
+                "Decisions made\n- read-only handoff\nLimitations\n- awaits human "
+                "zero-change attestation"
+            ),
+            metadata=_c19_legacy_semantic_noop_metadata(),
+            expected_run_id=started["kanban_run_id"],
+        )
+        assert ok is True
+    finally:
+        conn.close()
+    attested = pr.attest_current_ticket_zero_change_for_review_prepare(
+        human_attestation_text=pr.governed_ticket_zero_change_attestation_text("P18.9.0"),
+        project_id="PEPPER",
+        ticket_id="P18.9.0",
+        next_action_id="ATTEST_P18_9_0_ZERO_CHANGE_FOR_REVIEW_PREPARE",
+    )
+    assert attested["zero_change_attestation_status"] == "attested"
+    contract = _c18_v2_acceptance_contract(pr, projected)
+    monkeypatch.setattr(
+        pr,
+        "_acceptance_contract_for_review_projection",
+        lambda _projection: contract,
+    )
+    observed_commands: list[str] = []
+    _install_c19_review_prepare_validation_tool_stub(
+        monkeypatch,
+        pr,
+        contract,
+        observed_commands=observed_commands,
+    )
+    review = pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id="P18.9.0",
+        next_action_id="PREPARE_P18_9_0_REVIEW",
+    )
+    assert review["review_prepare_status"] == "prepared_pending_human_acceptance", (
+        review.get("blocker_code"),
+        review.get("blocker_detail"),
+    )
+    return generation, projected, started, attested, contract, observed_commands, review
 
 
 def _drifted_acceptance_contract(pr, contract: dict) -> dict:
@@ -7605,6 +7961,7 @@ def test_synthetic_c18_newer_validated_noop_supersedes_stale_review_round(
         raw_decision,
         projection=projection_record,
     ) is True
+    _install_c19_current_terminal_run_authority(projection_record, new_completion)
 
     before = pr.build_workflow_control_snapshot()
     assert before["current_ticket_id"] == ticket_id
@@ -12104,18 +12461,13 @@ def test_p18_9_2_active_corrective_run_blocks_review_prepare_without_rotation(
     assert current_prepare["review_prepare_action_SHA256"] == fixture.prepared_13[
         "review_prepare_action_SHA256"
     ]
-    assert not pr.review_decision_record_path_for_ticket("P18.9.2").exists()
-    decision_history = [
-        json.loads(line)["record"]
-        for line in pr.review_decision_history_path_for_ticket("P18.9.2").read_text(
-            encoding="utf-8"
-        ).splitlines()
-        if line.strip()
-    ]
-    assert any(
-        item["review_decision_SHA256"] == fixture.changed_13["review_decision_SHA256"]
-        for item in decision_history
+    current_decision = json.loads(
+        pr.review_decision_record_path_for_ticket("P18.9.2").read_text(encoding="utf-8")
     )
+    assert current_decision["review_decision_SHA256"] == fixture.changed_13[
+        "review_decision_SHA256"
+    ]
+    assert not pr.review_decision_history_path_for_ticket("P18.9.2").exists()
     workflow = pr.build_workflow_control_snapshot()
     assert workflow["workflow_status"] == "executing"
     assert workflow["active_execution_count"] == 1
@@ -14910,6 +15262,12 @@ def test_prepare_current_ticket_review_binds_completed_run_to_acceptance_contrac
                 "files_modified": [],
                 "tests_run": [],
                 "Git_mutation": False,
+                "zero_change_evidence": {
+                    "disposition": "no_source_changes",
+                    "files_modified": [],
+                    "Git_mutation": False,
+                    "authority": "synthetic_exact_validation_noop_fixture",
+                },
                 "validation_passed": True,
                 "validation_command_results": _successful_contract_validation_results(contract),
             },
@@ -15271,9 +15629,13 @@ def test_validated_noop_prepare_requires_exact_contract_validation_evidence(
     )
 
     assert result["review_prepare_status"] == "blocked"
-    assert result["blocker_code"] == "KANBAN_COMPLETION_RESULT_NOT_REVIEWABLE"
+    assert result["blocker_code"] in {
+        "REVIEW_PREPARE_VALIDATION_FAILED",
+        "REVIEW_PREPARE_VALIDATION_INCOMPLETE",
+    }
     assert result["zero_change_result"] is True
     assert result["validation_contract_satisfied"] is False
+    assert result["review_prepare_eligible_result"] is True
     assert result["reviewable_result"] is False
     assert result["candidate_changes_available"] is False
     assert result["human_git_handoff_required"] is False
@@ -15307,10 +15669,7 @@ def test_validated_noop_prepare_accepts_all_contract_validation_evidence(
             "validation_command_results"
         ]
     ]
-    assert result_ids == ["V1", "V2", "V3", "V4"]
-    assert result["kanban_completion_result"]["run_metadata"][
-        "validation_command_results"
-    ][-1]["disposition"] == "not_applicable"
+    assert result_ids == ["V1", "V2", "V3"]
 
     record = pr.load_current_ticket_review_prepare_record(
         projection_record=fixture.projection_record,
@@ -15322,6 +15681,1281 @@ def test_validated_noop_prepare_accepts_all_contract_validation_evidence(
     assert record["candidate_changes_available"] is False
     assert record["validated_noop_result"] is True
     assert record["human_git_handoff_required"] is False
+
+
+def test_c19_legacy_semantic_noop_requires_human_attestation_before_validation(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _c18_v2_synthetic_noop_review_ready_fixture(
+        monkeypatch,
+        ticket_id="P99.71",
+        completion_mutator=_c19_legacy_semantic_noop_mutator,
+    )
+    pr = fixture.pr
+    action = pr.governed_ticket_lifecycle_action_ids(fixture.ticket_id)[
+        "zero_change_attestation"
+    ]
+
+    assert pr._review_completion_zero_change_result(fixture.completion) is False
+    assert pr._review_completion_validation_contract_satisfied(
+        fixture.completion,
+        fixture.contract,
+    ) is False
+    authority = pr.resolve_zero_change_authority(
+        fixture.projection_record,
+        fixture.completion,
+    )
+    assert authority["zero_change_result"] is False
+    assert authority["human_zero_change_attestation_required"] is True
+    assert pr._review_prepare_eligible_result(fixture.completion, fixture.contract) is False
+    assert pr._review_prepare_reviewable_result(fixture.completion, fixture.contract) is False
+    workflow = pr.build_workflow_control_snapshot()
+    assert workflow["workflow_status"] == "execution_completed_pending_zero_change_attestation"
+    assert workflow["review_prepare_eligible_result"] is False
+    assert workflow["human_zero_change_attestation_required"] is True
+    assert workflow["next_action"]["id"] == action
+    assert workflow["next_action"]["required_human_attestation_text"] == (
+        pr.governed_ticket_zero_change_attestation_text(fixture.ticket_id)
+    )
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    (
+        {"files_modified": [], "Git_mutation": False},
+        {"changed_files": [], "completion_verdict": "completed_without_source_changes"},
+        {"changed_files": [], "git_mutation": False, "completion_verdict": "ready_for_review"},
+        {
+            "changed_files": [],
+            "git_mutation": False,
+            "evidence_comment_id": "comment-c19-zero-change",
+            "tests_run": ["deferred to review-preparation validation"],
+            "worker_session_id": "worker-session-c19-zero-change",
+        },
+    ),
+)
+def test_c19_empty_files_without_structured_authority_is_not_zero_change(
+    projection_home,
+    monkeypatch,
+    metadata,
+) -> None:
+    fixture = _c18_v2_synthetic_noop_review_ready_fixture(
+        monkeypatch,
+        ticket_id="P99.72",
+        completion_mutator=lambda completion, _contract: completion.update({
+            "run_metadata": dict(metadata),
+            "reported_files_modified": [],
+            "reported_git_mutation": False,
+            "candidate_changes_reference": None,
+            "candidate_changes_available": False,
+        }),
+    )
+    pr = fixture.pr
+
+    assert pr._review_completion_zero_change_result(fixture.completion) is False
+    assert pr._review_prepare_eligible_result(fixture.completion, fixture.contract) is False
+    assert pr._review_prepare_reviewable_result(fixture.completion, fixture.contract) is False
+
+
+def test_c19_v6_prepare_without_attestation_is_denied_before_validation(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _c18_v2_synthetic_noop_review_ready_fixture(
+        monkeypatch,
+        ticket_id="P99.173",
+        completion_mutator=_c19_legacy_semantic_noop_mutator,
+    )
+    pr = fixture.pr
+    monkeypatch.setattr(
+        pr,
+        "_review_prepare_validate_completion_if_required",
+        lambda **_kwargs: pytest.fail("validation must not run before attestation"),
+    )
+
+    result = pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id=fixture.ticket_id,
+        next_action_id=pr.governed_ticket_lifecycle_action_ids(fixture.ticket_id)[
+            "review_prepare"
+        ],
+    )
+
+    assert result["review_prepare_status"] == "blocked"
+    assert result["blocker_code"] == "ZERO_CHANGE_ATTESTATION_REQUIRED"
+    assert result["review_preparation_recorded"] is False
+    assert not pr.review_prepare_record_path_for_ticket(fixture.ticket_id).exists()
+
+
+def test_c19_v6_valid_attestation_routes_workflow_to_prepare(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _c18_v2_synthetic_noop_review_ready_fixture(
+        monkeypatch,
+        ticket_id="P99.174",
+        completion_mutator=_c19_legacy_semantic_noop_mutator,
+    )
+    pr = fixture.pr
+    attest_result = _record_c19_zero_change_attestation(fixture)
+
+    workflow = pr.build_workflow_control_snapshot()
+    record = pr.load_current_ticket_zero_change_attestation_record(
+        projection_record=fixture.projection_record,
+        completion=fixture.completion,
+    )
+
+    assert attest_result["zero_change_attestation_status"] == "attested"
+    assert record is not None
+    assert record["zero_change_attestation_SHA256"] == attest_result[
+        "zero_change_attestation_SHA256"
+    ]
+    assert workflow["workflow_status"] == "execution_completed"
+    assert workflow["review_prepare_eligible_result"] is True
+    assert workflow["zero_change_authority_kind"] == "human_zero_change_attestation"
+    assert workflow["zero_change_authority_SHA256"] == attest_result[
+        "zero_change_attestation_SHA256"
+    ]
+    assert workflow["next_action"]["id"] == pr.governed_ticket_lifecycle_action_ids(
+        fixture.ticket_id,
+    )["review_prepare"]
+
+
+def test_c19_v7_chat_tool_attestation_stops_before_separate_prepare(
+    projection_home,
+    monkeypatch,
+) -> None:
+    import tools.pepper_workflow_tools  # noqa: F401
+    from model_tools import handle_function_call
+
+    fixture = _c18_v2_synthetic_noop_review_ready_fixture(
+        monkeypatch,
+        ticket_id="P99.178",
+        completion_mutator=_c19_legacy_semantic_noop_mutator,
+    )
+    pr = fixture.pr
+    prepare_calls: list[dict[str, object]] = []
+    original_prepare = pr.prepare_current_ticket_review
+
+    def counted_prepare(**kwargs):
+        prepare_calls.append(dict(kwargs))
+        return original_prepare(**kwargs)
+
+    monkeypatch.setattr(pr, "prepare_current_ticket_review", counted_prepare)
+    monkeypatch.setattr(
+        pr,
+        "submit_current_ticket_review_decision",
+        lambda **_kwargs: pytest.fail("attestation must not submit review decision"),
+    )
+    monkeypatch.setattr(
+        pr,
+        "start_current_ticket_execution",
+        lambda **_kwargs: pytest.fail("attestation must not start execution"),
+    )
+    monkeypatch.setattr(
+        pr,
+        "continue_current_ticket_governed_autonomy",
+        lambda **_kwargs: pytest.fail("attestation must not continue autonomy"),
+    )
+
+    result = json.loads(handle_function_call(
+        "attest_current_ticket_zero_change_for_review_prepare",
+        {
+            "human_attestation_text": pr.governed_ticket_zero_change_attestation_text(
+                fixture.ticket_id,
+            ),
+            "project_id": "PEPPER",
+            "ticket_id": fixture.ticket_id,
+            "next_action_id": pr.governed_ticket_lifecycle_action_ids(fixture.ticket_id)[
+                "zero_change_attestation"
+            ],
+        },
+    ))
+    workflow = pr.build_workflow_control_snapshot()
+    record = pr.load_current_ticket_zero_change_attestation_record(
+        projection_record=fixture.projection_record,
+        completion=fixture.completion,
+    )
+
+    assert result["success"] is True
+    assert result["zero_change_attestation_status"] == "attested"
+    assert result["validation_contract_satisfied"] is False
+    assert result["review_prepare_eligible_result"] is True
+    assert result["reviewable_result"] is False
+    assert result["next_action"]["id"] == pr.governed_ticket_lifecycle_action_ids(
+        fixture.ticket_id,
+    )["review_prepare"]
+    assert record is not None
+    assert prepare_calls == []
+    assert not pr.review_prepare_record_path_for_ticket(fixture.ticket_id).exists()
+    assert workflow["next_action"]["id"] == pr.governed_ticket_lifecycle_action_ids(
+        fixture.ticket_id,
+    )["review_prepare"]
+
+    observed_commands: list[str] = []
+    _install_c19_review_prepare_validation_tool_stub(
+        monkeypatch,
+        pr,
+        fixture.contract,
+        observed_commands=observed_commands,
+    )
+    prepared = original_prepare(
+        project_id="PEPPER",
+        ticket_id=fixture.ticket_id,
+        next_action_id=pr.governed_ticket_lifecycle_action_ids(fixture.ticket_id)[
+            "review_prepare"
+        ],
+    )
+
+    assert prepare_calls == []
+    assert prepared["review_prepare_status"] == "prepared_pending_human_acceptance"
+    assert [
+        item["command"]["validation_id"]
+        for item in prepared["kanban_completion_result"]["run_metadata"][
+            "validation_command_results"
+        ]
+    ] == ["V1", "V2", "V3"]
+    assert observed_commands == [
+        step["command"] for step in fixture.contract["work_packet_validation_steps"][:3]
+    ]
+
+
+def test_c19_v7_chat_tool_inexact_attestation_fails_canonical_runtime(
+    projection_home,
+    monkeypatch,
+) -> None:
+    import tools.pepper_workflow_tools  # noqa: F401
+    from model_tools import handle_function_call
+
+    fixture = _c18_v2_synthetic_noop_review_ready_fixture(
+        monkeypatch,
+        ticket_id="P99.179",
+        completion_mutator=_c19_legacy_semantic_noop_mutator,
+    )
+    pr = fixture.pr
+    result = json.loads(handle_function_call(
+        "attest_current_ticket_zero_change_for_review_prepare",
+        {
+            "human_attestation_text": "continue",
+            "project_id": "PEPPER",
+            "ticket_id": fixture.ticket_id,
+            "next_action_id": pr.governed_ticket_lifecycle_action_ids(fixture.ticket_id)[
+                "zero_change_attestation"
+            ],
+        },
+    ))
+
+    assert result["success"] is False
+    assert "zero-change attestation text mismatch" in result["error"]
+    assert not pr.zero_change_attestation_record_path_for_ticket(fixture.ticket_id).exists()
+    assert not pr.review_prepare_record_path_for_ticket(fixture.ticket_id).exists()
+
+
+def test_c19_v8_human_attested_noop_accept_closes_without_git_handoff(
+    projection_home,
+    monkeypatch,
+) -> None:
+    _install_execution_profile(monkeypatch, projection_home)
+    _generation, projected, started, attested, contract, observed_commands, prepared = (
+        _prepare_human_attested_completed_review_package(monkeypatch)
+    )
+
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    accepted = pr.submit_current_ticket_review_decision(
+        decision="accept",
+        feedback="Human accepts the human-attested validated no-op prepared review.",
+        reviewed_run_id=started["kanban_run_id"],
+        project_id="PEPPER",
+        ticket_id="P18.9.0",
+        next_action_id="SUBMIT_P18_9_0_REVIEW_DECISION",
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("no-op accept must not spawn"),
+    )
+
+    assert attested["zero_change_authority_kind"] == "human_zero_change_attestation"
+    assert prepared["zero_change_result"] is True
+    assert prepared["zero_change_authority_kind"] == "human_zero_change_attestation"
+    assert prepared["zero_change_authority_SHA256"] == attested[
+        "zero_change_attestation_SHA256"
+    ]
+    assert prepared["human_zero_change_attestation_SHA256"] == attested[
+        "zero_change_attestation_SHA256"
+    ]
+    assert prepared["validation_contract_satisfied"] is True
+    assert prepared["review_prepare_eligible_result"] is True
+    assert prepared["reviewable_result"] is True
+    assert prepared["validated_noop_result"] is True
+    assert prepared["candidate_changes_available"] is False
+    assert prepared["human_git_handoff_required"] is False
+    assert observed_commands == [
+        step["command"] for step in contract["work_packet_validation_steps"][:3]
+    ]
+    assert accepted["review_decision"] == "accept"
+    assert accepted["review_source_authority_kind"] == "review_prepare"
+    assert accepted["review_prepare_action_SHA256"] == prepared[
+        "review_prepare_action_SHA256"
+    ]
+    assert accepted["reviewable_result"] is True
+    assert accepted["review_prepare_eligible_result"] is True
+    assert accepted["validated_noop_result"] is True
+    assert accepted["candidate_changes_available"] is False
+    assert accepted["human_git_handoff_required"] is False
+    assert accepted["git_handoff_required"] is False
+    assert accepted["ticket_closed"] is True
+    assert accepted["workflow_status"] == "completed"
+    assert accepted["governed_workflow_state"] == "completed"
+    assert accepted["closed_predecessor_ticket_id"] == "P18.9.0"
+    assert accepted["next_ticket_id"] == "P18.9.1"
+    assert accepted["next_action"]["id"] == (
+        "GENERATE_P18_9_1_REQUIRES_SEPARATE_HUMAN_ACTION"
+    )
+    assert "HUMAN_GIT_HANDOFF" not in accepted["next_action"]["id"]
+    assert not pr.human_git_handoff_prepare_record_path_for_ticket("P18.9.0").exists()
+    record = pr.load_current_ticket_review_decision_record(
+        projection_record=_projection_authority_record(projected),
+    )
+    assert record["review_prepare_action_SHA256"] == prepared[
+        "review_prepare_action_SHA256"
+    ]
+
+
+def test_c19_v8_human_attested_noop_changes_requested_preserves_review_authority(
+    projection_home,
+    monkeypatch,
+) -> None:
+    _install_execution_profile(monkeypatch, projection_home)
+    _generation, projected, started, attested, _contract, _observed, prepared = (
+        _prepare_human_attested_completed_review_package(monkeypatch)
+    )
+
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    changed = pr.submit_current_ticket_review_decision(
+        decision="changes_requested",
+        feedback="Human requests bounded no-op correction notes without adding candidate scope.",
+        reviewed_run_id=started["kanban_run_id"],
+        project_id="PEPPER",
+        ticket_id="P18.9.0",
+        next_action_id="SUBMIT_P18_9_0_REVIEW_DECISION",
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("changes_requested must not spawn"),
+    )
+    revision_request = changed["review_revision_request_reference"]
+
+    assert prepared["zero_change_authority_kind"] == "human_zero_change_attestation"
+    assert prepared["human_zero_change_attestation_SHA256"] == attested[
+        "zero_change_attestation_SHA256"
+    ]
+    assert changed["review_decision"] == "changes_requested"
+    assert changed["review_source_authority_kind"] == "review_prepare"
+    assert changed["review_prepare_action_SHA256"] == prepared[
+        "review_prepare_action_SHA256"
+    ]
+    assert changed["reviewed_candidate_SHA256"] is None
+    assert changed["candidate_changes_available"] is False
+    assert changed["validated_noop_result"] is True
+    assert changed["human_git_handoff_required"] is False
+    assert changed["git_handoff_required"] is False
+    assert changed["workflow_status"] == (
+        "review_changes_requested_revision_pending_continuation"
+    )
+    assert changed["revision_attempt_started"] is False
+    assert revision_request["reviewed_candidate_SHA256"] is None
+    assert revision_request["prior_terminal_run_id"] == started["kanban_run_id"]
+    assert revision_request["review_prepare_action_SHA256"] == prepared[
+        "review_prepare_action_SHA256"
+    ]
+    assert revision_request["fresh_execution_provenance"] == (
+        "human_review_changes_requested"
+    )
+    assert revision_request["reviewed_candidate_copied_to_revision_base"] is False
+    record = pr.load_current_ticket_review_decision_record(
+        projection_record=_projection_authority_record(projected),
+    )
+    assert record["review_prepare_action_SHA256"] == prepared[
+        "review_prepare_action_SHA256"
+    ]
+    assert record["reviewed_candidate_SHA256"] is None
+
+
+def test_c19_v8_exact_attestation_replay_is_idempotent_without_chaining(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _c18_v2_synthetic_noop_review_ready_fixture(
+        monkeypatch,
+        ticket_id="P99.182",
+        completion_mutator=_c19_legacy_semantic_noop_mutator,
+    )
+    pr = fixture.pr
+    first = _record_c19_zero_change_attestation(fixture)
+    second = _record_c19_zero_change_attestation(fixture)
+
+    assert first["idempotent_replay"] is False
+    assert second["idempotent_replay"] is True
+    assert second["zero_change_attestation_SHA256"] == first[
+        "zero_change_attestation_SHA256"
+    ]
+    assert not pr.zero_change_attestation_history_path_for_ticket(
+        fixture.ticket_id,
+    ).exists()
+    assert not pr.review_prepare_record_path_for_ticket(fixture.ticket_id).exists()
+    assert not pr.review_decision_record_path_for_ticket(fixture.ticket_id).exists()
+    workflow = pr.build_workflow_control_snapshot()
+    assert workflow["next_action"]["id"] == pr.governed_ticket_lifecycle_action_ids(
+        fixture.ticket_id,
+    )["review_prepare"]
+
+
+def test_c19_v8_intrinsic_zero_change_rejects_manual_human_reattestation(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _c18_v2_synthetic_noop_review_ready_fixture(
+        monkeypatch,
+        ticket_id="P99.183",
+    )
+    pr = fixture.pr
+    result = _record_c19_zero_change_attestation(fixture)
+
+    assert result["zero_change_attestation_status"] == "blocked"
+    assert result["zero_change_attestation_recorded"] is False
+    assert result["blocker_code"] == "ZERO_CHANGE_ATTESTATION_ACTION_GAP"
+    assert not pr.zero_change_attestation_record_path_for_ticket(fixture.ticket_id).exists()
+    assert pr.build_workflow_control_snapshot()["next_action"]["id"] == (
+        pr.governed_ticket_lifecycle_action_ids(fixture.ticket_id)["review_prepare"]
+    )
+
+
+def test_c19_v8_candidate_result_rejects_manual_zero_change_attestation(
+    projection_home,
+    monkeypatch,
+) -> None:
+    def candidate_mutator(completion: dict, _contract: dict) -> None:
+        candidate = _c11_candidate_reference("c19-v8-candidate")
+        completion.update({
+            "kanban_task_status": "blocked",
+            "run_status": "blocked",
+            "run_outcome": "blocked",
+            "run_summary": "Synthetic candidate-backed result requires review.",
+            "candidate_changes_reference": candidate,
+            "candidate_changes_available": True,
+            "terminal_outcome_class": "validated_review_required",
+            "review_required": True,
+        })
+
+    fixture = _c18_v2_synthetic_noop_review_ready_fixture(
+        monkeypatch,
+        ticket_id="P99.184",
+        completion_mutator=candidate_mutator,
+    )
+    pr = fixture.pr
+    result = _record_c19_zero_change_attestation(fixture)
+
+    assert result["zero_change_attestation_status"] == "blocked"
+    assert result["zero_change_attestation_recorded"] is False
+    assert result["blocker_code"] == "ZERO_CHANGE_ATTESTATION_MUTATION_EVIDENCE_PRESENT"
+    assert result["candidate_changes_available"] is True
+    assert not pr.zero_change_attestation_record_path_for_ticket(fixture.ticket_id).exists()
+
+
+@pytest.mark.parametrize(
+    ("case", "expected_code"),
+    (
+        ("prepare_next_action", "ZERO_CHANGE_ATTESTATION_ACTION_GAP"),
+        ("wrong_required_human_action", "ZERO_CHANGE_ATTESTATION_ACTION_GAP"),
+        ("wrong_required_human_attestation_text", "ZERO_CHANGE_ATTESTATION_ACTION_GAP"),
+        ("active_execution", "EXECUTION_ALREADY_ACTIVE"),
+        ("recovery_required", "ZERO_CHANGE_ATTESTATION_ACTION_GAP"),
+    ),
+)
+def test_c19_v8_new_attestation_requires_current_workflow_authority(
+    projection_home,
+    monkeypatch,
+    case,
+    expected_code,
+) -> None:
+    fixture = _c18_v2_synthetic_noop_review_ready_fixture(
+        monkeypatch,
+        ticket_id="P99.185",
+        completion_mutator=_c19_legacy_semantic_noop_mutator,
+    )
+    pr = fixture.pr
+    workflow = pr.build_workflow_control_snapshot()
+    assert workflow["next_action"]["id"] == pr.governed_ticket_lifecycle_action_ids(
+        fixture.ticket_id,
+    )["zero_change_attestation"]
+    workflow = {**workflow, "next_action": dict(workflow["next_action"])}
+    if case == "prepare_next_action":
+        workflow.update({
+            "workflow_status": "execution_completed",
+            "human_zero_change_attestation_required": False,
+            "next_action": {
+                "id": pr.governed_ticket_lifecycle_action_ids(fixture.ticket_id)[
+                    "review_prepare"
+                ],
+                "target_ticket_id": fixture.ticket_id,
+                "required_human_action": "review_validation_preparation_and_human_git_handoff",
+            },
+        })
+    elif case == "wrong_required_human_action":
+        workflow["next_action"]["required_human_action"] = "review_validation_preparation"
+    elif case == "wrong_required_human_attestation_text":
+        workflow["next_action"]["required_human_attestation_text"] = "wrong attestation text"
+    elif case == "active_execution":
+        workflow["active_execution_count"] = 1
+    elif case == "recovery_required":
+        workflow["recovery_state"] = "recovery_required"
+    monkeypatch.setattr(pr, "build_workflow_control_snapshot", lambda: workflow)
+
+    result = _record_c19_zero_change_attestation(fixture)
+
+    assert result["zero_change_attestation_status"] == "blocked"
+    assert result["zero_change_attestation_recorded"] is False
+    assert result["blocker_code"] == expected_code
+    assert not pr.zero_change_attestation_record_path_for_ticket(fixture.ticket_id).exists()
+
+
+@pytest.mark.parametrize(
+    ("case", "expected_status", "expected_code"),
+    (
+        (
+            "connect_failure",
+            "blocked",
+            "ZERO_CHANGE_ATTESTATION_CURRENT_RUN_AUTHORITY_UNAVAILABLE",
+        ),
+        (
+            "task_absent",
+            "blocked",
+            "ZERO_CHANGE_ATTESTATION_CURRENT_RUN_AUTHORITY_UNAVAILABLE",
+        ),
+        (
+            "no_runs",
+            "blocked",
+            "ZERO_CHANGE_ATTESTATION_CURRENT_RUN_AUTHORITY_UNAVAILABLE",
+        ),
+        (
+            "stale_completion",
+            "blocked",
+            "ZERO_CHANGE_ATTESTATION_CURRENT_RUN_MISMATCH",
+        ),
+        (
+            "active_current_run",
+            "blocked",
+            "ZERO_CHANGE_ATTESTATION_CURRENT_RUN_MISMATCH",
+        ),
+        ("exact_current_run", "attested", None),
+    ),
+)
+def test_c19_v8_attestation_current_run_authority_matrix(
+    projection_home,
+    monkeypatch,
+    case,
+    expected_status,
+    expected_code,
+) -> None:
+    from hermes_cli import kanban_db
+
+    fixture = _c18_v2_synthetic_noop_review_ready_fixture(
+        monkeypatch,
+        ticket_id="P99.186",
+        completion_mutator=_c19_legacy_semantic_noop_mutator,
+        install_current_run_authority=False,
+    )
+    pr = fixture.pr
+    run_id = int(fixture.completion["run_id"])
+    if case == "connect_failure":
+        monkeypatch.setattr(
+            kanban_db,
+            "connect",
+            lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("db unavailable")),
+        )
+    elif case == "no_runs":
+        _install_c19_current_terminal_run_authority(
+            fixture.projection_record,
+            fixture.completion,
+            runs=(),
+        )
+    elif case == "stale_completion":
+        now = int(time.time())
+        _install_c19_current_terminal_run_authority(
+            fixture.projection_record,
+            fixture.completion,
+            runs=(
+                {
+                    "id": run_id,
+                    "status": "done",
+                    "outcome": "completed",
+                    "started_at": now - 60,
+                    "ended_at": now - 30,
+                    "summary": "stale terminal completion",
+                    "metadata": {},
+                },
+                {
+                    "id": run_id + 1,
+                    "status": "done",
+                    "outcome": "completed",
+                    "started_at": now - 20,
+                    "ended_at": now - 10,
+                    "summary": "latest terminal completion",
+                    "metadata": {},
+                },
+            ),
+        )
+    elif case == "active_current_run":
+        now = int(time.time())
+        _install_c19_current_terminal_run_authority(
+            fixture.projection_record,
+            fixture.completion,
+            task_status="running",
+            task_current_run_id=run_id,
+            runs=(
+                {
+                    "id": run_id,
+                    "status": "running",
+                    "outcome": None,
+                    "started_at": now - 60,
+                    "ended_at": None,
+                    "summary": "active run",
+                    "metadata": {},
+                },
+            ),
+        )
+    elif case == "exact_current_run":
+        _install_c19_current_terminal_run_authority(
+            fixture.projection_record,
+            fixture.completion,
+        )
+
+    result = _record_c19_zero_change_attestation(fixture)
+
+    assert result["zero_change_attestation_status"] == expected_status
+    if expected_code is None:
+        assert result["zero_change_attestation_recorded"] is True
+        assert pr.zero_change_attestation_record_path_for_ticket(
+            fixture.ticket_id,
+        ).exists()
+    else:
+        assert result["zero_change_attestation_recorded"] is False
+        assert result["blocker_code"] == expected_code
+        assert not pr.zero_change_attestation_record_path_for_ticket(
+            fixture.ticket_id,
+        ).exists()
+
+
+@pytest.mark.parametrize(
+    ("case", "expected_status", "expected_code"),
+    (
+        (
+            "connect_failure",
+            "blocked",
+            "KANBAN_COMPLETION_CURRENT_RUN_AUTHORITY_UNAVAILABLE",
+        ),
+        ("task_absent", "blocked", "KANBAN_COMPLETION_CURRENT_RUN_AUTHORITY_UNAVAILABLE"),
+        ("no_runs", "blocked", "KANBAN_COMPLETION_CURRENT_RUN_AUTHORITY_UNAVAILABLE"),
+        ("stale_completion", "blocked", "KANBAN_COMPLETION_CURRENT_RUN_MISMATCH"),
+        ("active_current_run", "blocked", "KANBAN_COMPLETION_CURRENT_RUN_MISMATCH"),
+        ("exact_current_run", "prepared_pending_human_acceptance", None),
+    ),
+)
+def test_c19_v8_prepare_current_run_authority_matrix(
+    projection_home,
+    monkeypatch,
+    case,
+    expected_status,
+    expected_code,
+) -> None:
+    from hermes_cli import kanban_db
+
+    fixture = _c18_v2_synthetic_noop_review_ready_fixture(
+        monkeypatch,
+        ticket_id="P99.187",
+        completion_mutator=_c19_legacy_semantic_noop_mutator,
+    )
+    pr = fixture.pr
+    attested = _record_c19_zero_change_attestation(fixture)
+    assert attested["zero_change_attestation_status"] == "attested"
+    run_id = int(fixture.completion["run_id"])
+    board = str(fixture.projection_record["kanban_board_slug"])
+    task_id = str(fixture.projection_record["kanban_task_id"])
+    if case == "connect_failure":
+        monkeypatch.setattr(
+            kanban_db,
+            "connect",
+            lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("db unavailable")),
+        )
+    elif case == "task_absent":
+        conn = kanban_db.connect(board=board)
+        try:
+            conn.execute("DELETE FROM task_runs WHERE task_id = ?", (task_id,))
+            conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+            conn.commit()
+        finally:
+            conn.close()
+    elif case == "no_runs":
+        conn = kanban_db.connect(board=board)
+        try:
+            conn.execute("DELETE FROM task_runs WHERE task_id = ?", (task_id,))
+            conn.commit()
+        finally:
+            conn.close()
+    elif case == "stale_completion":
+        now = int(time.time())
+        _install_c19_current_terminal_run_authority(
+            fixture.projection_record,
+            fixture.completion,
+            runs=(
+                {
+                    "id": run_id,
+                    "status": "done",
+                    "outcome": "completed",
+                    "started_at": now - 60,
+                    "ended_at": now - 30,
+                    "summary": "stale terminal completion",
+                    "metadata": {},
+                },
+                {
+                    "id": run_id + 1,
+                    "status": "done",
+                    "outcome": "completed",
+                    "started_at": now - 20,
+                    "ended_at": now - 10,
+                    "summary": "latest terminal completion",
+                    "metadata": {},
+                },
+            ),
+        )
+    elif case == "active_current_run":
+        now = int(time.time())
+        _install_c19_current_terminal_run_authority(
+            fixture.projection_record,
+            fixture.completion,
+            task_status="running",
+            task_current_run_id=run_id,
+            runs=(
+                {
+                    "id": run_id,
+                    "status": "running",
+                    "outcome": None,
+                    "started_at": now - 60,
+                    "ended_at": None,
+                    "summary": "active run",
+                    "metadata": {},
+                },
+            ),
+        )
+    observed_commands: list[str] = []
+    _install_c19_review_prepare_validation_tool_stub(
+        monkeypatch,
+        pr,
+        fixture.contract,
+        observed_commands=observed_commands,
+    )
+
+    result = pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id=fixture.ticket_id,
+        next_action_id=pr.governed_ticket_lifecycle_action_ids(fixture.ticket_id)[
+            "review_prepare"
+        ],
+    )
+
+    assert result["review_prepare_status"] == expected_status
+    if expected_code is None:
+        assert result["zero_change_authority_kind"] == "human_zero_change_attestation"
+        assert result["human_zero_change_attestation_SHA256"] == attested[
+            "zero_change_attestation_SHA256"
+        ]
+        assert result["validated_noop_result"] is True
+        assert observed_commands == [
+            step["command"] for step in fixture.contract["work_packet_validation_steps"][:3]
+        ]
+        assert pr.review_prepare_record_path_for_ticket(fixture.ticket_id).exists()
+    else:
+        assert result.get("review_prepare_recorded") is not True
+        assert result["blocker_code"] == expected_code
+        assert observed_commands == []
+        assert not pr.review_prepare_record_path_for_ticket(fixture.ticket_id).exists()
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("human_attestation_text", "I attest loosely."),
+        ("project_id", "WRONG"),
+        ("ticket_id", "P99.999"),
+        ("next_action_id", "ATTEST_P99_999_ZERO_CHANGE_FOR_REVIEW_PREPARE"),
+    ),
+)
+def test_c19_v6_attestation_exact_request_guards_raise(
+    projection_home,
+    monkeypatch,
+    field,
+    value,
+) -> None:
+    fixture = _c18_v2_synthetic_noop_review_ready_fixture(
+        monkeypatch,
+        ticket_id="P99.175",
+        completion_mutator=_c19_legacy_semantic_noop_mutator,
+    )
+    pr = fixture.pr
+    args = {
+        "human_attestation_text": pr.governed_ticket_zero_change_attestation_text(
+            fixture.ticket_id,
+        ),
+        "project_id": "PEPPER",
+        "ticket_id": fixture.ticket_id,
+        "next_action_id": pr.governed_ticket_lifecycle_action_ids(fixture.ticket_id)[
+            "zero_change_attestation"
+        ],
+    }
+    args[field] = value
+
+    with pytest.raises(pr.ProductRuntimeConflict):
+        pr.attest_current_ticket_zero_change_for_review_prepare(**args)
+
+    assert not pr.zero_change_attestation_record_path_for_ticket(fixture.ticket_id).exists()
+
+
+def test_c19_v6_attestation_denies_current_run_mismatch(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _c18_v2_synthetic_noop_review_ready_fixture(
+        monkeypatch,
+        ticket_id="P99.176",
+        completion_mutator=_c19_legacy_semantic_noop_mutator,
+    )
+    pr = fixture.pr
+    monkeypatch.setattr(
+        pr,
+        "_current_kanban_terminal_run_identity",
+        lambda _projection: {
+            "kanban_board_slug": fixture.projection_record["kanban_board_slug"],
+            "kanban_task_id": fixture.projection_record["kanban_task_id"],
+            "task_status": "done",
+            "task_current_run_id": None,
+            "active_run_ids": [],
+            "terminal_run_id": int(fixture.completion["run_id"]) + 1,
+            "terminal_run_status": "done",
+            "terminal_run_outcome": "completed",
+            "terminal_run_ended_at": 123,
+        },
+    )
+
+    result = _record_c19_zero_change_attestation(fixture)
+
+    assert result["zero_change_attestation_status"] == "blocked"
+    assert result["blocker_code"] == "ZERO_CHANGE_ATTESTATION_CURRENT_RUN_MISMATCH"
+    assert not pr.zero_change_attestation_record_path_for_ticket(fixture.ticket_id).exists()
+
+
+def test_c19_v6_attestation_denies_candidate_mutation_evidence(
+    projection_home,
+    monkeypatch,
+) -> None:
+    def mutate(completion: dict, _contract: dict) -> None:
+        _c19_legacy_semantic_noop_mutator(completion, _contract)
+        completion["candidate_changes_reference"] = {
+            "available": True,
+            "files_changed": 1,
+            "files": [{"path": "synthetic/current.ts"}],
+        }
+        completion["candidate_changes_available"] = True
+
+    fixture = _c18_v2_synthetic_noop_review_ready_fixture(
+        monkeypatch,
+        ticket_id="P99.177",
+        completion_mutator=mutate,
+    )
+    pr = fixture.pr
+
+    result = _record_c19_zero_change_attestation(fixture)
+
+    assert result["zero_change_attestation_status"] == "blocked"
+    assert result["blocker_code"] == "ZERO_CHANGE_ATTESTATION_MUTATION_EVIDENCE_PRESENT"
+    assert not pr.zero_change_attestation_record_path_for_ticket(fixture.ticket_id).exists()
+
+
+def test_c19_prepare_runs_exact_v1_v2_v3_validation_for_legacy_semantic_noop(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _c18_v2_synthetic_noop_review_ready_fixture(
+        monkeypatch,
+        ticket_id="P99.73",
+        completion_mutator=_c19_legacy_semantic_noop_mutator,
+    )
+    pr = fixture.pr
+    observed_commands: list[str] = []
+    attestation = _record_c19_zero_change_attestation(fixture)
+    assert attestation["zero_change_attestation_status"] == "attested"
+    _install_c19_review_prepare_validation_tool_stub(
+        monkeypatch,
+        pr,
+        fixture.contract,
+        observed_commands=observed_commands,
+    )
+
+    result = pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id=fixture.ticket_id,
+        next_action_id=pr.governed_ticket_lifecycle_action_ids(fixture.ticket_id)[
+            "review_prepare"
+        ],
+    )
+
+    assert observed_commands == [
+        step["command"] for step in fixture.contract["work_packet_validation_steps"][:3]
+    ]
+    assert result["review_prepare_status"] == "prepared_pending_human_acceptance"
+    assert result["zero_change_result"] is True
+    assert result["zero_change_authority_kind"] == "human_zero_change_attestation"
+    assert result["human_zero_change_attestation_SHA256"] == attestation[
+        "zero_change_attestation_SHA256"
+    ]
+    assert result["validation_contract_satisfied"] is True
+    assert result["review_prepare_eligible_result"] is True
+    assert result["reviewable_result"] is True
+    assert result["validated_noop_result"] is True
+    assert result["candidate_changes_available"] is False
+    assert result["human_git_handoff_required"] is False
+    metadata = result["kanban_completion_result"]["run_metadata"]
+    assert metadata["review_prepare_pre_validation_completion_SHA256"] == attestation[
+        "kanban_completion_result_SHA256"
+    ]
+    assert metadata["validation_passed"] is True
+    assert metadata["validation_complete"] is True
+    assert metadata["review_prepare_validation_executed"] is True
+    assert metadata["review_prepare_validation_authority"]["command_execution_authorized"] is True
+    assert metadata["review_prepare_validation_authority"]["command_execution_authority"] == (
+        "explicit_human_review_preparation_action"
+    )
+    assert [
+        item["command"]["validation_id"]
+        for item in metadata["validation_command_results"]
+    ] == ["V1", "V2", "V3"]
+    assert all("validation_result_SHA256" in item for item in metadata["validation_command_results"])
+
+
+@pytest.mark.parametrize(
+    ("case", "stub_kwargs", "expected_code", "expected_observed"),
+    (
+        (
+            "validation_failure",
+            {"failing_validation_id": "V1"},
+            "REVIEW_PREPARE_VALIDATION_FAILED",
+            1,
+        ),
+        (
+            "partial_validation",
+            {"omitted_validation_ids": {"V2"}},
+            "REVIEW_PREPARE_VALIDATION_INCOMPLETE",
+            0,
+        ),
+        (
+            "command_identity_mismatch",
+            {"command_mismatch_validation_id": "V2"},
+            "REVIEW_PREPARE_VALIDATION_FAILED",
+            2,
+        ),
+        (
+            "ticket_identity_mismatch",
+            {"identity_mismatch_validation_id": "V3"},
+            "REVIEW_PREPARE_VALIDATION_FAILED",
+            3,
+        ),
+    ),
+)
+def test_c19_prepare_validation_failures_do_not_create_review_package(
+    projection_home,
+    monkeypatch,
+    case,
+    stub_kwargs,
+    expected_code,
+    expected_observed,
+) -> None:
+    fixture = _c18_v2_synthetic_noop_review_ready_fixture(
+        monkeypatch,
+        ticket_id=f"P99.{74 + ['validation_failure', 'partial_validation', 'command_identity_mismatch', 'ticket_identity_mismatch'].index(case)}",
+        completion_mutator=_c19_legacy_semantic_noop_mutator,
+    )
+    pr = fixture.pr
+    observed_commands: list[str] = []
+    _record_c19_zero_change_attestation(fixture)
+    _install_c19_review_prepare_validation_tool_stub(
+        monkeypatch,
+        pr,
+        fixture.contract,
+        observed_commands=observed_commands,
+        **stub_kwargs,
+    )
+
+    result = pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id=fixture.ticket_id,
+        next_action_id=pr.governed_ticket_lifecycle_action_ids(fixture.ticket_id)[
+            "review_prepare"
+        ],
+    )
+
+    assert result["review_prepare_status"] == "blocked"
+    assert result["blocker_code"] == expected_code
+    assert result["zero_change_result"] is True
+    assert result["zero_change_authority_kind"] == "human_zero_change_attestation"
+    assert result["review_prepare_eligible_result"] is True
+    assert result["validation_contract_satisfied"] is False
+    assert result["reviewable_result"] is False
+    assert result["validated_noop_result"] is False
+    assert len(observed_commands) == expected_observed
+    assert not pr.review_prepare_record_path_for_ticket(fixture.ticket_id).exists()
+
+
+def test_c19_acceptance_only_validation_requirement_creates_no_review_authority(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _c18_v2_synthetic_noop_review_ready_fixture(
+        monkeypatch,
+        ticket_id="P99.78",
+        completion_mutator=_c19_legacy_semantic_noop_mutator,
+    )
+    pr = fixture.pr
+    fixture.contract["validation_steps"] = [
+        {
+            "validation_id": "ACCEPTANCE_ONLY",
+            "command": "cd 2_products/pepper-agent/web && npm run test -- src/unauthorized.test.ts",
+            "expected_exit_codes": [0],
+        }
+    ]
+    fixture.contract["criteria_revision_SHA256"] = pr._criteria_revision_digest(
+        fixture.contract,
+    )
+    fixture.contract["acceptance_contract_SHA256"] = pr._acceptance_contract_digest(
+        fixture.contract,
+    )
+    observed_commands: list[str] = []
+    _record_c19_zero_change_attestation(fixture)
+    _install_c19_review_prepare_validation_tool_stub(
+        monkeypatch,
+        pr,
+        fixture.contract,
+        observed_commands=observed_commands,
+        omitted_validation_ids={"ACCEPTANCE_ONLY"},
+    )
+
+    result = pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id=fixture.ticket_id,
+        next_action_id=pr.governed_ticket_lifecycle_action_ids(fixture.ticket_id)[
+            "review_prepare"
+        ],
+    )
+
+    assert result["review_prepare_status"] == "blocked"
+    assert result["blocker_code"] == "REVIEW_PREPARE_VALIDATION_INCOMPLETE"
+    assert result["validation_contract_satisfied"] is False
+    assert observed_commands == []
+    assert not pr.review_prepare_record_path_for_ticket(fixture.ticket_id).exists()
+
+
+def test_c19_same_ticket_superseded_prepare_record_does_not_block_new_eligible_round(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _c18_v2_synthetic_noop_review_ready_fixture(
+        monkeypatch,
+        ticket_id="P99.82",
+    )
+    pr = fixture.pr
+    action = pr.governed_ticket_lifecycle_action_ids(fixture.ticket_id)["review_prepare"]
+    first = pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id=fixture.ticket_id,
+        next_action_id=action,
+    )
+    assert first["review_prepare_status"] == "prepared_pending_human_acceptance"
+
+    newer_completion = _c18_validated_noop_review_round_completion(
+        pr,
+        fixture.projection_record,
+        run_id=int(first["successful_run_id"]) + 1,
+        acceptance_contract=fixture.contract,
+    )
+    _c19_legacy_semantic_noop_mutator(newer_completion, fixture.contract)
+    newer_completion["kanban_completion_result_SHA256"] = pr._kanban_completion_result_digest(
+        newer_completion,
+    )
+    monkeypatch.setattr(
+        pr,
+        "_current_review_round_completion_source",
+        lambda _projection: newer_completion,
+    )
+    _record_c19_zero_change_attestation(fixture)
+
+    loaded = pr.load_current_ticket_review_prepare_record(
+        projection_record=fixture.projection_record,
+        allow_historical_mismatch=True,
+    )
+    workflow = pr.build_workflow_control_snapshot()
+
+    assert loaded is None
+    assert workflow["workflow_status"] == "execution_completed"
+    assert workflow["next_action"]["id"] == action
+    assert all(
+        blocker.get("id") != pr._review_prepare_authority_blocker_id(fixture.ticket_id)
+        for blocker in workflow["remaining_blockers"]
+    )
+
+
+def test_c19_review_prepare_overlay_skips_non_current_invalid_authority(
+    projection_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    historical_ticket = "P99.83"
+    current_ticket = "P99.84"
+    current_projection = _c9_projection_record(current_ticket)
+    monkeypatch.setattr(
+        pr,
+        "_current_projected_ticket_id_from_records",
+        lambda: current_ticket,
+    )
+    monkeypatch.setattr(pr, "_load_current_projection_record", lambda: current_projection)
+    completed_overlay = {"workflow_status": "execution_completed"}
+
+    _write_json_authority_record(
+        pr.review_prepare_record_path_for_ticket(historical_ticket),
+        {"ticket_id": historical_ticket, "review_prepare_status": "invalid_historical"},
+    )
+    overlay, blocker = pr._p18_9_0_review_prepare_overlay(
+        _c9_projection_record(historical_ticket),
+        completed_overlay=completed_overlay,
+    )
+
+    assert overlay is None
+    assert blocker is None
+
+    _write_json_authority_record(
+        pr.review_prepare_record_path_for_ticket(current_ticket),
+        {"ticket_id": current_ticket, "review_prepare_status": "invalid_current"},
+    )
+    overlay, blocker = pr._p18_9_0_review_prepare_overlay(
+        _c9_projection_record(current_ticket),
+        completed_overlay=completed_overlay,
+    )
+
+    assert overlay is None
+    assert blocker is not None
+    assert blocker["id"] == pr._review_prepare_authority_blocker_id(current_ticket)
+
+
+def test_c19_cross_ticket_historical_review_prepare_blocker_does_not_leak(
+    projection_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    historical_ticket = "P99.80"
+    current_ticket = "P99.81"
+    current_projection = _c9_projection_record(current_ticket)
+    lifecycle_overlay = _c9_lifecycle_overlay(pr, current_ticket, "validated_review_ready")
+    assert lifecycle_overlay is not None
+    lifecycle_overlay.update({
+        "project_id": current_projection["project_id"],
+        "macroproject_id": current_projection["macroproject_id"],
+        "macroproject_title": current_projection["macroproject_title"],
+    })
+    _patch_c9_synthetic_authority(
+        monkeypatch,
+        pr,
+        current_ticket_id=current_ticket,
+        lifecycle_overlay=lifecycle_overlay,
+        completed_ticket_ids=(historical_ticket,),
+        authority_ticket_ids=(historical_ticket, current_ticket),
+        bootstrap_completed_ticket_id=historical_ticket,
+        predecessor_overrides={current_ticket: historical_ticket},
+    )
+    historical_path = pr.review_prepare_record_path_for_ticket(historical_ticket)
+    _write_json_authority_record(
+        historical_path,
+        {"ticket_id": historical_ticket, "review_prepare_status": "invalid_historical"},
+    )
+    stale_blocker_id = pr._review_prepare_authority_blocker_id(historical_ticket)
+
+    def bootstrap_generation_overlay():
+        overlay = {
+            "current_ticket_id": historical_ticket,
+            "current_ticket_title": _c9_ticket_title(historical_ticket),
+            "workflow_status": "execution_completed",
+            "remaining_blockers": [],
+        }
+        _review_overlay, review_blocker = pr._p18_9_0_review_prepare_overlay(
+            _c9_projection_record(historical_ticket),
+            completed_overlay=overlay,
+        )
+        return overlay, review_blocker
+
+    monkeypatch.setattr(
+        pr,
+        "_p18_9_0_generation_overlay",
+        bootstrap_generation_overlay,
+    )
+    monkeypatch.setattr(pr, "_load_current_projection_record", lambda: current_projection)
+    monkeypatch.setattr(pr, "_current_projection_record_for_binding", lambda: current_projection)
+    monkeypatch.setattr(pr, "_current_projected_ticket_id_from_records", lambda: current_ticket)
+    monkeypatch.setattr(pr, "_validate_execution_start_authority", lambda _projection: None)
+
+    workflow = pr.build_workflow_control_snapshot()
+
+    assert historical_path.exists()
+    assert workflow["current_ticket_id"] == current_ticket
+    assert workflow["workflow_status"] == "execution_completed"
+    assert workflow["blocker_count"] == 0, workflow["remaining_blockers"]
+    assert all(
+        blocker.get("id") != stale_blocker_id
+        for blocker in workflow["remaining_blockers"]
+    )
+    assert workflow["next_action"]["id"] == pr.governed_ticket_lifecycle_action_ids(
+        current_ticket,
+    )["review_prepare"]
+
+
+def test_c19_historical_revision_equal_digests_reports_package_not_contract_mismatch(
+    projection_home,
+    monkeypatch,
+) -> None:
+    _install_execution_profile(monkeypatch, projection_home)
+    _generation, projected, started, review = _prepare_completed_review_package(monkeypatch)
+
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    authority = _projection_authority_record(projected)
+    record = pr.load_current_ticket_review_prepare_record(projection_record=authority)
+    assert record is not None
+    contract = dict(record["acceptance_contract"])
+    newer_completion = _c18_validated_noop_review_round_completion(
+        pr,
+        authority,
+        run_id=started["kanban_run_id"] + 1,
+        acceptance_contract=contract,
+    )
+    monkeypatch.setattr(
+        pr,
+        "_current_review_round_completion_source",
+        lambda _projection: newer_completion,
+    )
+
+    with pytest.raises(pr.ProductRuntimeConflict) as excinfo:
+        pr.validate_p18_9_0_review_prepare_record(record, projection_record=authority)
+
+    message = str(excinfo.value)
+    assert record["acceptance_contract_SHA256"] == contract["acceptance_contract_SHA256"]
+    assert contract["acceptance_contract_SHA256"] == pr._acceptance_contract_digest(contract)
+    assert "review-preparation record acceptance_contract_SHA256 mismatch" not in message
+    assert "review-preparation record review_package_SHA256 mismatch" in message
+    assert "historical_revision=1" in message
 
 
 def test_validated_noop_changes_requested_fresh_correction_newer_noop_prepares_new_round(
@@ -15382,6 +17016,12 @@ def test_validated_noop_changes_requested_fresh_correction_newer_noop_prepares_n
                 "files_modified": [],
                 "changes": [],
                 "Git_mutation": False,
+                "zero_change_evidence": {
+                    "disposition": "no_source_changes",
+                    "files_modified": [],
+                    "Git_mutation": False,
+                    "authority": "synthetic_exact_validation_noop_fixture",
+                },
                 "validation_passed": True,
                 "validation_command_results": _successful_contract_validation_results(contract),
             },

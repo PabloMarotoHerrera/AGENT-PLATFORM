@@ -103,6 +103,19 @@ PEPPER_REVIEW_PREPARE_ACTION_DIGEST_ALGORITHM = (
 PEPPER_REVIEW_PREPARE_PACKAGE_DIGEST_ALGORITHM = (
     "agent-platform-pepper-p18-9-0-review-package-sha256-v1"
 )
+PEPPER_ZERO_CHANGE_ATTESTATION_SOURCE_SYSTEM = (
+    "pepper-review-zero-change-attestation-action"
+)
+PEPPER_ZERO_CHANGE_ATTESTATION_SCHEMA_VERSION = 1
+PEPPER_ZERO_CHANGE_ATTESTATION_POLICY_ID = (
+    "pepper-current-review-zero-change-attestation-v1"
+)
+PEPPER_ZERO_CHANGE_ATTESTATION_DIGEST_ALGORITHM = (
+    "agent-platform-pepper-zero-change-attestation-sha256-v1"
+)
+PEPPER_ZERO_CHANGE_ATTESTATION_TEXT_DIGEST_ALGORITHM = (
+    "agent-platform-pepper-zero-change-attestation-text-sha256-v1"
+)
 PEPPER_REVIEW_CANDIDATE_INSPECTION_SOURCE_SYSTEM = (
     "pepper-review-candidate-inspection"
 )
@@ -250,6 +263,9 @@ PEPPER_GOVERNED_AUTONOMY_AUTHORITY_DIGEST_ALGORITHM = (
 _GOVERNED_TICKET_START_STORE_DIR = Path("agent-platform") / "pepper-worker-start-action"
 _GOVERNED_TICKET_RECOVERY_STORE_DIR = Path("agent-platform") / "pepper-recovery-action"
 _GOVERNED_TICKET_REVIEW_PREPARE_STORE_DIR = Path("agent-platform") / "pepper-review-prepare-action"
+_GOVERNED_TICKET_ZERO_CHANGE_ATTESTATION_STORE_DIR = (
+    Path("agent-platform") / "pepper-review-zero-change-attestation"
+)
 _GOVERNED_TICKET_REVIEW_ACCEPTANCE_STORE_DIR = (
     Path("agent-platform") / "pepper-review-human-acceptance-action"
 )
@@ -293,6 +309,14 @@ _GOVERNED_TICKET_AUTHORITY_PATH_SPECS = {
     "review_prepare_history": (
         _GOVERNED_TICKET_REVIEW_PREPARE_STORE_DIR,
         "review-prepare.history.jsonl",
+    ),
+    "zero_change_attestation": (
+        _GOVERNED_TICKET_ZERO_CHANGE_ATTESTATION_STORE_DIR,
+        "zero-change-attestation.json",
+    ),
+    "zero_change_attestation_history": (
+        _GOVERNED_TICKET_ZERO_CHANGE_ATTESTATION_STORE_DIR,
+        "zero-change-attestation.history.jsonl",
     ),
     "review_acceptance": (
         _GOVERNED_TICKET_REVIEW_ACCEPTANCE_STORE_DIR,
@@ -835,6 +859,41 @@ class CurrentTicketReviewPrepareRequest(BaseModel):
         return value
 
 
+class CurrentTicketZeroChangeAttestationRequest(BaseModel):
+    """Explicit human authority for ambiguous zero-change review preparation."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
+
+    human_attestation_text: str = Field(min_length=1, max_length=1024)
+    reviewer_id: str = Field(default="pepper-chat-human", min_length=1, max_length=128)
+    project_id: str = Field(min_length=1, max_length=128)
+    ticket_id: str = Field(min_length=1, max_length=128)
+    next_action_id: str = Field(min_length=1, max_length=128)
+
+    @field_validator("reviewer_id")
+    @classmethod
+    def reviewer_must_be_safe(cls, value: str) -> str:
+        if _CONTROL_CHARS.search(value):
+            raise ValueError("reviewer_id contains control characters")
+        if not _SAFE_ID.fullmatch(value):
+            raise ValueError("invalid reviewer_id")
+        return value
+
+    @field_validator("project_id", "ticket_id", "next_action_id")
+    @classmethod
+    def guards_must_be_safe(cls, value: str) -> str:
+        if not _SAFE_ID.fullmatch(value):
+            raise ValueError("invalid guarded identifier")
+        return value
+
+    @field_validator("human_attestation_text")
+    @classmethod
+    def attestation_text_must_be_text(cls, value: str) -> str:
+        if _CONTROL_CHARS.search(value):
+            raise ValueError("human_attestation_text contains control characters")
+        return unicodedata.normalize("NFC", value)
+
+
 class CurrentTicketReviewAcceptanceRequest(BaseModel):
     """Request body for bounded P18.9.0 human review acceptance."""
 
@@ -1074,6 +1133,7 @@ def governed_ticket_lifecycle_action_ids(ticket_id: str) -> dict[str, str]:
         "execution_start": f"START_{token}_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION",
         "execution_recovery": f"RECOVER_{token}_EXECUTION",
         "retry_start": f"START_{token}_RETRY_REQUIRES_HUMAN_AUTHORIZATION",
+        "zero_change_attestation": f"ATTEST_{token}_ZERO_CHANGE_FOR_REVIEW_PREPARE",
         "review_prepare": f"PREPARE_{token}_REVIEW",
         "review_acceptance": f"AWAIT_HUMAN_{token}_REVIEW_ACCEPTANCE",
         "monitor_execution": f"MONITOR_{token}_EXECUTION",
@@ -1090,6 +1150,15 @@ def governed_ticket_recovery_authorization_text(ticket_id: str) -> str:
     """Return the canonical explicit recovery authorization phrase for a ticket."""
 
     return f"Autorizo explícitamente la recuperación de la ejecución fallida de {ticket_id}."
+
+
+def governed_ticket_zero_change_attestation_text(ticket_id: str) -> str:
+    """Return the exact human attestation phrase for zero-change review prep."""
+
+    return (
+        f"I explicitly attest that {ticket_id} current terminal result contains no source "
+        "changes and no Git mutation for review preparation."
+    )
 
 
 def _int_or_none(value: object) -> int | None:
@@ -1733,6 +1802,17 @@ def _p18_9_0_generation_overlay() -> tuple[dict[str, Any] | None, dict[str, Any]
                 if retry_start_overlay is not None:
                     overlay.update(retry_start_overlay)
                     if overlay.get("workflow_status") == "execution_completed":
+                        zero_overlay, zero_blocker = (
+                            _current_ticket_zero_change_attestation_overlay(
+                                projection,
+                                completed_overlay=overlay,
+                            )
+                        )
+                        if zero_overlay is not None:
+                            overlay.update(zero_overlay)
+                        if zero_blocker is not None:
+                            return overlay, zero_blocker
+                    if overlay.get("workflow_status") == "execution_completed":
                         review_overlay, review_blocker = _p18_9_0_review_prepare_overlay(
                             projection,
                             completed_overlay=overlay,
@@ -1801,6 +1881,17 @@ def _p18_9_0_generation_overlay() -> tuple[dict[str, Any] | None, dict[str, Any]
                     return overlay, recovery_blocker
                 if recovery_overlay is not None:
                     return overlay, None
+                if overlay.get("workflow_status") == "execution_completed":
+                    zero_overlay, zero_blocker = (
+                        _current_ticket_zero_change_attestation_overlay(
+                            projection,
+                            completed_overlay=overlay,
+                        )
+                    )
+                    if zero_overlay is not None:
+                        overlay.update(zero_overlay)
+                    if zero_blocker is not None:
+                        return overlay, zero_blocker
                 if overlay.get("workflow_status") == "execution_completed":
                     review_overlay, review_blocker = _p18_9_0_review_prepare_overlay(
                         projection,
@@ -2362,6 +2453,33 @@ def _current_ticket_execution_lifecycle_blocker_ids(ticket_id: str) -> set[str]:
         f"{token}-WORKER-LIFECYCLE",
         f"{token}-RETRY-WORKER-LIFECYCLE",
     }
+
+
+def _review_prepare_authority_blocker_id(ticket_id: str) -> str:
+    token = governed_ticket_lifecycle_hyphen_token(ticket_id)
+    return f"{token}-REVIEW-PREPARE-AUTHORITY"
+
+
+def _review_prepare_projection_is_current_source(projection: dict[str, Any]) -> bool:
+    if not isinstance(projection, dict):
+        return False
+    try:
+        current = _load_current_projection_record()
+    except Exception:
+        return False
+    for key in (
+        "project_id",
+        "ticket_id",
+        "ticket_spec_SHA256",
+        "work_packet_id",
+        "work_packet_SHA256",
+        "projection_SHA256",
+        "kanban_board_slug",
+        "kanban_task_id",
+    ):
+        if key in projection and key in current and projection.get(key) != current.get(key):
+            return False
+    return True
 
 
 def _clear_current_ticket_execution_lifecycle_blockers(
@@ -4594,6 +4712,24 @@ def review_prepare_history_path_for_ticket(ticket_id: str) -> Path:
     )
 
 
+def zero_change_attestation_record_path_for_ticket(ticket_id: str) -> Path:
+    """Return the profile-scoped zero-change attestation authority path."""
+
+    return governed_ticket_lifecycle_authority_path(
+        "zero_change_attestation",
+        ticket_id=ticket_id,
+    )
+
+
+def zero_change_attestation_history_path_for_ticket(ticket_id: str) -> Path:
+    """Return the append-only zero-change attestation history path."""
+
+    return governed_ticket_lifecycle_authority_path(
+        "zero_change_attestation_history",
+        ticket_id=ticket_id,
+    )
+
+
 def p18_9_0_review_prepare_record_path() -> Path:
     """Return the profile-scoped P18.9.0 review-preparation authority path."""
 
@@ -4998,6 +5134,11 @@ def load_current_ticket_review_prepare_record(
         raise ProductRuntimeConflict(
             f"{projection['ticket_id']} review-preparation record is unreadable"
         ) from exc
+    if allow_historical_mismatch and _review_prepare_superseded_by_current_round(
+        record,
+        projection=projection,
+    ):
+        return None
     try:
         validated = validate_p18_9_0_review_prepare_record(
             record,
@@ -5013,6 +5154,40 @@ def load_current_ticket_review_prepare_record(
         if allow_historical_mismatch and _review_prepare_superseded_by_current_round(
             record,
             projection=projection,
+        ):
+            return None
+        raise
+
+
+def load_current_ticket_zero_change_attestation_record(
+    *,
+    projection_record: dict[str, Any] | None = None,
+    completion: dict[str, Any] | None = None,
+    allow_historical_mismatch: bool = False,
+) -> dict[str, Any] | None:
+    """Load and validate the current zero-change human attestation record."""
+
+    projection = projection_record if projection_record is not None else _load_current_projection_record()
+    path = zero_change_attestation_record_path_for_ticket(str(projection["ticket_id"]))
+    if not path.exists():
+        return None
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ProductRuntimeConflict(
+            f"{projection['ticket_id']} zero-change attestation record is unreadable"
+        ) from exc
+    try:
+        return validate_zero_change_attestation_record(
+            record,
+            projection_record=projection,
+            completion=completion,
+        )
+    except ProductRuntimeConflict:
+        if allow_historical_mismatch and not _zero_change_attestation_record_is_current(
+            record,
+            projection=projection,
+            completion=completion,
         ):
             return None
         raise
@@ -5054,6 +5229,24 @@ def _review_record_projection_identity_matches(
     return all(record.get(key) == value for key, value in expected.items())
 
 
+def _review_prepare_record_matches_projection_identity(
+    record: dict[str, Any],
+    projection: dict[str, Any],
+) -> bool:
+    if not isinstance(record, dict):
+        return False
+    _binding, identity = _current_ticket_identity_fields(projection)
+    expected = {
+        **identity,
+        "approval_publication_SHA256": projection["approval_publication_SHA256"],
+        "dependency_plan_SHA256": projection["dependency_plan_SHA256"],
+        "projection_SHA256": projection["projection_SHA256"],
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+    }
+    return all(record.get(key) == value for key, value in expected.items())
+
+
 def _review_prepare_superseded_by_current_round(
     record: dict[str, Any],
     *,
@@ -5063,16 +5256,8 @@ def _review_prepare_superseded_by_current_round(
         return False
     if record.get("review_prepare_action_SHA256") != _review_prepare_record_digest(record):
         return False
-    binding, identity = _current_ticket_identity_fields(projection)
-    expected = {
-        **identity,
-        "approval_publication_SHA256": projection["approval_publication_SHA256"],
-        "dependency_plan_SHA256": projection["dependency_plan_SHA256"],
-        "projection_SHA256": projection["projection_SHA256"],
-        "kanban_board_slug": projection["kanban_board_slug"],
-        "kanban_task_id": projection["kanban_task_id"],
-    }
-    if any(record.get(key) != value for key, value in expected.items()):
+    binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
+    if not _review_prepare_record_matches_projection_identity(record, projection):
         return False
     if _projection_has_valid_durable_ticket_completion(projection):
         return False
@@ -5087,7 +5272,22 @@ def _review_prepare_superseded_by_current_round(
         acceptance_contract = _acceptance_contract_for_review_projection(projection)
     except Exception:
         acceptance_contract = None
-    if not _review_prepare_reviewable_result(completion, acceptance_contract):
+    zero_change_authority = resolve_zero_change_authority(
+        projection,
+        completion,
+        allow_historical_mismatch=True,
+    )
+    superseded_by_attestable_noop = zero_change_authority.get(
+        "human_zero_change_attestation_required"
+    ) is True
+    if not (
+        _review_prepare_eligible_result(
+            completion,
+            acceptance_contract,
+            zero_change_authority=zero_change_authority,
+        )
+        or superseded_by_attestable_noop
+    ):
         return False
     return binding.ticket_id == record.get("ticket_id")
 
@@ -5161,7 +5361,16 @@ def _review_prepare_durable_completion_for_validation(
             "review-preparation durable completion result authority mismatch"
         )
     acceptance_contract = record.get("acceptance_contract")
-    if not _review_prepare_reviewable_result(durable_completion, acceptance_contract):
+    zero_change_authority = _review_prepare_record_zero_change_authority(
+        record,
+        projection=projection,
+        completion=durable_completion,
+    )
+    if not _review_prepare_reviewable_result(
+        durable_completion,
+        acceptance_contract,
+        zero_change_authority=zero_change_authority,
+    ):
         raise ProductRuntimeConflict(
             "review-preparation durable completion result is not reviewable terminal evidence"
         )
@@ -5240,17 +5449,14 @@ def _review_decision_revision_request_consumed_by_runtime(
             previous=runtime,
             effective_authority=effective_authority,
         )
-        terminal = _governed_autonomy_runtime_terminal_reconciliation(
-            runtime,
-            effective_authority=effective_authority,
-        )
     except ProductRuntimeConflict:
         return False
-    if terminal is None:
+    runtime_run_id = _int_or_none(runtime.get("kanban_run_id"))
+    if runtime_run_id is None:
         return False
-    if _int_or_none(terminal.get("terminal_run_id")) != current_run_id:
+    if runtime_run_id != current_run_id:
         return False
-    if _int_or_none(runtime.get("kanban_run_id")) != current_run_id:
+    if runtime_run_id <= reviewed_run_id:
         return False
     if runtime.get("fresh_execution_request_SHA256") != revision_sha:
         return False
@@ -5261,7 +5467,19 @@ def _review_decision_revision_request_consumed_by_runtime(
     runtime_request = runtime.get("fresh_execution_request_reference")
     if not isinstance(runtime_request, dict):
         return False
-    return runtime_request == revision_request
+    if runtime_request != revision_request:
+        return False
+    terminal_reconciliation = _governed_autonomy_runtime_terminal_reconciliation(
+        runtime,
+        effective_authority=effective_authority,
+    )
+    if terminal_reconciliation is None:
+        return False
+    if _int_or_none(terminal_reconciliation.get("terminal_run_id")) != current_run_id:
+        return False
+    if terminal_reconciliation.get("blocker_code"):
+        return False
+    return True
 
 
 def _review_decision_superseded_by_current_round(
@@ -5282,7 +5500,7 @@ def _review_decision_superseded_by_current_round(
         acceptance_contract = _acceptance_contract_for_review_projection(projection)
     except Exception:
         acceptance_contract = None
-    if not _review_prepare_reviewable_result(completion, acceptance_contract):
+    if not _review_prepare_eligible_result(completion, acceptance_contract):
         return False
     if record.get("review_decision") == "changes_requested":
         return _review_decision_revision_request_consumed_by_runtime(
@@ -5537,10 +5755,7 @@ def validate_current_ticket_review_decision_record(
             review_prepare.get("successful_run_id")
         ):
             raise ProductRuntimeConflict("review-decision prepared run mismatch")
-        if null_candidate_noop_accept and not _review_completion_validated_noop_result(
-            review_prepare.get("kanban_completion_result"),
-            review_prepare.get("acceptance_contract"),
-        ):
+        if null_candidate_noop_accept and review_prepare.get("validated_noop_result") is not True:
             raise ProductRuntimeConflict(
                 "review-decision null-candidate accept requires validated no-op prepared review"
             )
@@ -8352,10 +8567,19 @@ def validate_p18_9_0_review_prepare_record(
         projection=projection,
         completion=completion,
     )
+    zero_change_authority = _review_prepare_record_zero_change_authority(
+        record,
+        projection=projection,
+        completion=completion,
+    )
     run_status = str(completion.get("run_status") or "done")
     run_outcome = str(completion.get("run_outcome") or "completed")
     git_handoff_required = _review_prepare_human_git_handoff_required(completion)
-    if not _review_prepare_reviewable_result(completion, contract):
+    if not _review_prepare_reviewable_result(
+        completion,
+        contract,
+        zero_change_authority=zero_change_authority,
+    ):
         raise ProductRuntimeConflict(
             "review-preparation completion result is not reviewable terminal evidence"
         )
@@ -8364,13 +8588,18 @@ def validate_p18_9_0_review_prepare_record(
         if git_handoff_required
         else "not_required_for_ticket_result"
     )
-    zero_change_result = _review_completion_zero_change_result(completion)
+    zero_change_result = zero_change_authority.get("zero_change_result") is True
     validation_contract_satisfied = _review_completion_validation_contract_satisfied(
         completion,
         contract,
     )
     candidate_changes_available = _governed_autonomy_candidate_changes_available(
         completion.get("candidate_changes_reference"),
+    )
+    review_prepare_eligible_result = _review_prepare_eligible_result(
+        completion,
+        contract,
+        zero_change_authority=zero_change_authority,
     )
     binding, identity = _current_ticket_identity_fields(projection)
     expected = {
@@ -8393,15 +8622,28 @@ def validate_p18_9_0_review_prepare_record(
             projection=projection,
             completion=completion,
             acceptance_contract=contract,
+            zero_change_authority=zero_change_authority,
         ),
         "review_prepare_status": "prepared_pending_human_acceptance",
         "validation_state": "review_prepared_pending_human_acceptance",
         "review_state": "prepared_pending_human_acceptance",
         "zero_change_result": zero_change_result,
         "validation_contract_satisfied": validation_contract_satisfied,
+        "review_prepare_eligible_result": review_prepare_eligible_result,
         "reviewable_result": True,
         "candidate_changes_available": candidate_changes_available,
         "validated_noop_result": zero_change_result and validation_contract_satisfied,
+        "zero_change_authority_kind": zero_change_authority.get("authority_kind"),
+        "zero_change_authority_SHA256": zero_change_authority.get("authority_SHA256"),
+        "human_zero_change_attestation_SHA256": (
+            zero_change_authority.get("authority_SHA256")
+            if zero_change_authority.get("authority_kind") == "human_zero_change_attestation"
+            else None
+        ),
+        "zero_change_machine_authority_sufficient": zero_change_authority.get(
+            "zero_change_machine_authority_sufficient"
+        ) is True,
+        "human_zero_change_attestation_required": False,
         "human_git_handoff_required": git_handoff_required,
         "human_acceptance_required": True,
         "human_acceptance_recorded": False,
@@ -8433,6 +8675,8 @@ def validate_p18_9_0_review_prepare_record(
         raise ProductRuntimeConflict("review-preparation acceptance contract mismatch")
     if record.get("kanban_completion_result") != completion:
         raise ProductRuntimeConflict("review-preparation completion result mismatch")
+    if record.get("zero_change_authority") != zero_change_authority.get("authority_record"):
+        raise ProductRuntimeConflict("review-preparation zero-change authority mismatch")
     invariants = record.get("pre_review_invariants")
     if not isinstance(invariants, dict):
         raise ProductRuntimeConflict("review-preparation pre-review invariants missing")
@@ -8638,6 +8882,343 @@ def _review_acceptance_next_ticket_fields_match(
     return True
 
 
+def _validate_zero_change_attestation_request_guards(
+    request: CurrentTicketZeroChangeAttestationRequest,
+) -> CurrentTicketLifecycleBinding:
+    binding = resolve_current_ticket_lifecycle_binding()
+    expected_action = governed_ticket_lifecycle_action_ids(binding.ticket_id)[
+        "zero_change_attestation"
+    ]
+    if request.project_id != binding.project_id:
+        raise ProductRuntimeConflict(f"zero-change attestation is bounded to project {binding.project_id}")
+    if request.ticket_id != binding.ticket_id:
+        raise ProductRuntimeConflict(f"zero-change attestation is bounded to ticket {binding.ticket_id}")
+    if request.next_action_id != expected_action:
+        raise ProductRuntimeConflict(f"zero-change attestation requires {expected_action}")
+    expected_text = governed_ticket_zero_change_attestation_text(binding.ticket_id)
+    if request.human_attestation_text != expected_text:
+        raise ProductRuntimeConflict("zero-change attestation text mismatch")
+    return binding
+
+
+def _blocked_zero_change_attestation_result(
+    projection: dict[str, Any],
+    *,
+    request: CurrentTicketZeroChangeAttestationRequest,
+    blocker_code: str,
+    blocker_detail: str,
+    completion_source: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "source_system": PEPPER_ZERO_CHANGE_ATTESTATION_SOURCE_SYSTEM,
+        "schema_version": PEPPER_ZERO_CHANGE_ATTESTATION_SCHEMA_VERSION,
+        "policy_id": PEPPER_ZERO_CHANGE_ATTESTATION_POLICY_ID,
+        "zero_change_attestation_status": "blocked",
+        "zero_change_attestation_recorded": False,
+        "blocker_code": blocker_code,
+        "blocker_detail": _safe_text(blocker_detail, limit=300),
+        **_current_ticket_projection_identity_fields(projection),
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+        "requested_project_id": request.project_id,
+        "requested_ticket_id": request.ticket_id,
+        "requested_next_action_id": request.next_action_id,
+        "zero_change_result": False,
+        "zero_change_authority_kind": "none",
+        "human_zero_change_attestation_required": True,
+        "validation_contract_satisfied": False,
+        "review_prepare_eligible_result": False,
+        "reviewable_result": False,
+        "validated_noop_result": False,
+        "candidate_changes_available": _governed_autonomy_candidate_changes_available(
+            completion_source.get("candidate_changes_reference") if isinstance(completion_source, dict) else None,
+        ),
+        "human_git_handoff_required": (
+            _review_prepare_human_git_handoff_required(completion_source)
+            if isinstance(completion_source, dict)
+            else False
+        ),
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "worker_process_started": False,
+        "Kanban_dispatch": False,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+    }
+
+
+def _zero_change_attestation_workflow_blocker(
+    workflow: dict[str, Any],
+    request: CurrentTicketZeroChangeAttestationRequest,
+) -> tuple[str, str] | None:
+    if not isinstance(workflow, dict):
+        return (
+            "ZERO_CHANGE_ATTESTATION_ACTION_GAP",
+            "current workflow authority is unavailable",
+        )
+    if workflow.get("project_id") != request.project_id:
+        return (
+            "ZERO_CHANGE_ATTESTATION_ACTION_GAP",
+            "current workflow project does not authorize zero-change attestation",
+        )
+    if workflow.get("current_ticket_id") != request.ticket_id:
+        return (
+            "ZERO_CHANGE_ATTESTATION_ACTION_GAP",
+            "current workflow ticket does not authorize zero-change attestation",
+        )
+    if workflow.get("workflow_status") != "execution_completed_pending_zero_change_attestation":
+        return (
+            "ZERO_CHANGE_ATTESTATION_ACTION_GAP",
+            "current workflow status does not require zero-change attestation",
+        )
+    if workflow.get("human_zero_change_attestation_required") is not True:
+        return (
+            "ZERO_CHANGE_ATTESTATION_ACTION_GAP",
+            "current workflow does not require human zero-change attestation",
+        )
+    if workflow.get("zero_change_machine_authority_sufficient") is not False:
+        return (
+            "ZERO_CHANGE_ATTESTATION_ACTION_GAP",
+            "current workflow already has sufficient machine zero-change authority",
+        )
+    if workflow.get("candidate_changes_available") is not False:
+        return (
+            "ZERO_CHANGE_ATTESTATION_ACTION_GAP",
+            "current workflow is not a null-candidate zero-change attestation state",
+        )
+    if workflow.get("human_git_handoff_required") is not False:
+        return (
+            "ZERO_CHANGE_ATTESTATION_ACTION_GAP",
+            "current workflow requires human Git handoff instead of zero-change attestation",
+        )
+    if int(workflow.get("active_execution_count") or 0) != 0:
+        return ("EXECUTION_ALREADY_ACTIVE", "an execution is already active")
+    if workflow.get("recovery_state") != "not_required":
+        return (
+            "ZERO_CHANGE_ATTESTATION_ACTION_GAP",
+            "recovery state is not not_required",
+        )
+    action = workflow.get("next_action")
+    if not isinstance(action, dict):
+        return (
+            "ZERO_CHANGE_ATTESTATION_ACTION_GAP",
+            "current workflow next action is unavailable",
+        )
+    if action.get("id") != request.next_action_id:
+        return (
+            "ZERO_CHANGE_ATTESTATION_ACTION_GAP",
+            "current workflow next action is not zero-change attestation",
+        )
+    if action.get("target_ticket_id") != request.ticket_id:
+        return (
+            "ZERO_CHANGE_ATTESTATION_ACTION_GAP",
+            "current workflow next action targets a different ticket",
+        )
+    if (
+        action.get("required_human_action")
+        != "human_zero_change_review_preparation_attestation"
+    ):
+        return (
+            "ZERO_CHANGE_ATTESTATION_ACTION_GAP",
+            "current workflow next action does not require zero-change attestation",
+        )
+    if action.get("required_human_attestation_text") != request.human_attestation_text:
+        return (
+            "ZERO_CHANGE_ATTESTATION_ACTION_GAP",
+            "current workflow attestation text does not match the request",
+        )
+    return None
+
+
+def _build_zero_change_attestation_record(
+    *,
+    request: CurrentTicketZeroChangeAttestationRequest,
+    projection: dict[str, Any],
+    completion: dict[str, Any],
+) -> dict[str, Any]:
+    _binding, identity = _current_ticket_identity_fields(projection)
+    record = {
+        "schema_version": PEPPER_ZERO_CHANGE_ATTESTATION_SCHEMA_VERSION,
+        "policy_id": PEPPER_ZERO_CHANGE_ATTESTATION_POLICY_ID,
+        "source_system": PEPPER_ZERO_CHANGE_ATTESTATION_SOURCE_SYSTEM,
+        "created_at": _utc_now_iso(),
+        **identity,
+        "projection_SHA256": projection["projection_SHA256"],
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+        "terminal_run_id": completion["run_id"],
+        "kanban_completion_result_SHA256": completion["kanban_completion_result_SHA256"],
+        "human_attestation_text": request.human_attestation_text,
+        "human_attestation_text_SHA256": _zero_change_attestation_text_digest(
+            request.human_attestation_text,
+        ),
+        "reviewer_id": request.reviewer_id,
+        "zero_change_attested": True,
+        "source_changes_attested": False,
+        "Git_mutation_attested": False,
+        "candidate_changes_attested": False,
+        "capability_not_authority": True,
+        "validation_satisfied": False,
+        "review_accepted": False,
+        "ticket_closed": False,
+        "zero_change_authority_kind": "human_zero_change_attestation",
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "worker_process_started": False,
+        "Kanban_dispatch": False,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+    }
+    record["zero_change_attestation_SHA256"] = _zero_change_attestation_record_digest(record)
+    return record
+
+
+def _zero_change_attestation_operational_result(
+    record: dict[str, Any],
+    *,
+    idempotent_replay: bool,
+) -> dict[str, Any]:
+    binding = resolve_current_ticket_lifecycle_binding()
+    return {
+        "source_system": PEPPER_ZERO_CHANGE_ATTESTATION_SOURCE_SYSTEM,
+        "schema_version": PEPPER_ZERO_CHANGE_ATTESTATION_SCHEMA_VERSION,
+        "policy_id": PEPPER_ZERO_CHANGE_ATTESTATION_POLICY_ID,
+        "idempotent_replay": idempotent_replay,
+        "zero_change_attestation_status": "attested",
+        "zero_change_attestation_recorded": True,
+        "zero_change_attestation_SHA256": record["zero_change_attestation_SHA256"],
+        "zero_change_authority_kind": "human_zero_change_attestation",
+        "zero_change_authority_SHA256": record["zero_change_attestation_SHA256"],
+        "human_attestation_text_SHA256": record["human_attestation_text_SHA256"],
+        "human_attestation_text": record["human_attestation_text"],
+        "reviewer_id": record["reviewer_id"],
+        "project_id": record["project_id"],
+        "macroproject_id": record["macroproject_id"],
+        "ticket_id": record["ticket_id"],
+        "ticket_title": record["ticket_title"],
+        "ticket_spec_SHA256": record["ticket_spec_SHA256"],
+        "work_packet_id": record["work_packet_id"],
+        "work_packet_SHA256": record["work_packet_SHA256"],
+        "projection_SHA256": record["projection_SHA256"],
+        "kanban_board_slug": record["kanban_board_slug"],
+        "kanban_task_id": record["kanban_task_id"],
+        "terminal_run_id": record["terminal_run_id"],
+        "kanban_completion_result_SHA256": record["kanban_completion_result_SHA256"],
+        "zero_change_result": True,
+        "zero_change_machine_authority_sufficient": False,
+        "human_zero_change_attestation_required": False,
+        "validation_contract_satisfied": False,
+        "review_prepare_eligible_result": True,
+        "reviewable_result": False,
+        "validated_noop_result": False,
+        "candidate_changes_available": False,
+        "human_git_handoff_required": False,
+        "git_handoff_required": False,
+        "git_handoff_state": "not_required_for_ticket_result",
+        "human_acceptance_required": False,
+        "human_acceptance_recorded": False,
+        "ticket_closed": False,
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "worker_process_started": False,
+        "Kanban_dispatch": False,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+        "next_action": {
+            "id": binding.review_prepare_next_action_id,
+            "label": f"{binding.ticket_id} zero-change attestation is recorded; prepare review validation.",
+            "target_ticket_id": binding.ticket_id,
+            "target_ticket_title": binding.ticket_title,
+            "required_human_action": "review_validation_preparation_and_human_git_handoff",
+        },
+    }
+
+
+def attest_current_ticket_zero_change_for_review_prepare(
+    *,
+    human_attestation_text: str,
+    project_id: str,
+    ticket_id: str,
+    next_action_id: str,
+    reviewer_id: str = "pepper-chat-human",
+) -> dict[str, Any]:
+    """Record explicit human zero-change authority for current review preparation."""
+
+    request = CurrentTicketZeroChangeAttestationRequest(
+        human_attestation_text=human_attestation_text,
+        reviewer_id=reviewer_id,
+        project_id=project_id,
+        ticket_id=ticket_id,
+        next_action_id=next_action_id,
+    )
+    _validate_zero_change_attestation_request_guards(request)
+    projection = _load_current_projection_record()
+    _validate_execution_start_authority(projection)
+    completion = _current_review_round_completion_source(projection)
+    if completion.get("blocker_code"):
+        return _blocked_zero_change_attestation_result(
+            projection,
+            request=request,
+            blocker_code=str(completion["blocker_code"]),
+            blocker_detail=str(completion.get("blocker_detail") or "completion result is unavailable"),
+            completion_source=completion,
+        )
+    current_run_blocker = _completion_current_terminal_run_authority_blocker(
+        projection,
+        completion,
+        unavailable_code="ZERO_CHANGE_ATTESTATION_CURRENT_RUN_AUTHORITY_UNAVAILABLE",
+        mismatch_code="ZERO_CHANGE_ATTESTATION_CURRENT_RUN_MISMATCH",
+    )
+    if current_run_blocker is not None:
+        code, detail = current_run_blocker
+        return _blocked_zero_change_attestation_result(
+            projection,
+            request=request,
+            blocker_code=code,
+            blocker_detail=detail,
+            completion_source=completion,
+        )
+    if _completion_has_positive_mutation_evidence(completion):
+        return _blocked_zero_change_attestation_result(
+            projection,
+            request=request,
+            blocker_code="ZERO_CHANGE_ATTESTATION_MUTATION_EVIDENCE_PRESENT",
+            blocker_detail="completion contains candidate, file, or Git mutation evidence",
+            completion_source=completion,
+        )
+    existing = load_current_ticket_zero_change_attestation_record(
+        projection_record=projection,
+        completion=completion,
+        allow_historical_mismatch=True,
+    )
+    if existing is not None:
+        return _zero_change_attestation_operational_result(existing, idempotent_replay=True)
+    workflow = build_workflow_control_snapshot()
+    workflow_blocker = _zero_change_attestation_workflow_blocker(workflow, request)
+    if workflow_blocker is not None:
+        code, detail = workflow_blocker
+        return _blocked_zero_change_attestation_result(
+            projection,
+            request=request,
+            blocker_code=code,
+            blocker_detail=detail,
+            completion_source=completion,
+        )
+    record = _build_zero_change_attestation_record(
+        request=request,
+        projection=projection,
+        completion=completion,
+    )
+    _persist_zero_change_attestation_record(record)
+    return _zero_change_attestation_operational_result(record, idempotent_replay=False)
+
+
 def prepare_current_ticket_review(
     *,
     project_id: str | None = None,
@@ -8711,6 +9292,24 @@ def prepare_current_ticket_review(
     workflow_blocker = _review_prepare_workflow_blocker(workflow)
     if workflow_blocker is not None:
         code, detail = workflow_blocker
+        if code == "WORKFLOW_BLOCKER_PRESENT":
+            completion = _current_review_round_completion_source(projection)
+            if not completion.get("blocker_code"):
+                current_run_blocker = _completion_current_terminal_run_authority_blocker(
+                    projection,
+                    completion,
+                    unavailable_code="KANBAN_COMPLETION_CURRENT_RUN_AUTHORITY_UNAVAILABLE",
+                    mismatch_code="KANBAN_COMPLETION_CURRENT_RUN_MISMATCH",
+                )
+                if current_run_blocker is not None:
+                    code, detail = current_run_blocker
+                    return _blocked_current_review_prepare_result(
+                        projection,
+                        request=request,
+                        blocker_code=code,
+                        blocker_detail=detail,
+                        completion_source=completion,
+                    )
         return _blocked_current_review_prepare_result(
             projection,
             request=request,
@@ -8728,14 +9327,96 @@ def prepare_current_ticket_review(
             completion_source=completion,
         )
     acceptance_contract = _acceptance_contract_for_review_projection(projection)
-    if not _review_prepare_reviewable_result(completion, acceptance_contract):
+    current_run_blocker = _completion_current_terminal_run_authority_blocker(
+        projection,
+        completion,
+        unavailable_code="KANBAN_COMPLETION_CURRENT_RUN_AUTHORITY_UNAVAILABLE",
+        mismatch_code="KANBAN_COMPLETION_CURRENT_RUN_MISMATCH",
+    )
+    if current_run_blocker is not None:
+        code, detail = current_run_blocker
+        return _blocked_current_review_prepare_result(
+            projection,
+            request=request,
+            blocker_code=code,
+            blocker_detail=detail,
+            completion_source=completion,
+            acceptance_contract=acceptance_contract,
+        )
+    zero_change_authority = resolve_zero_change_authority(projection, completion)
+    zero_change_blocker = _zero_change_authority_prepare_blocker(zero_change_authority)
+    if zero_change_blocker is not None and not _review_prepare_human_git_handoff_required(completion):
+        code, detail = zero_change_blocker
+        return _blocked_current_review_prepare_result(
+            projection,
+            request=request,
+            blocker_code=code,
+            blocker_detail=detail,
+            completion_source=completion,
+            acceptance_contract=acceptance_contract,
+            zero_change_authority=zero_change_authority,
+        )
+    if not _review_prepare_eligible_result(
+        completion,
+        acceptance_contract,
+        zero_change_authority=zero_change_authority,
+    ):
         return _blocked_current_review_prepare_result(
             projection,
             request=request,
             blocker_code="KANBAN_COMPLETION_RESULT_NOT_REVIEWABLE",
-            blocker_detail="completion result lacks candidate changes or contract-bound validated no-op evidence",
+            blocker_detail="completion result lacks candidate changes or structured zero-change evidence",
             completion_source=completion,
             acceptance_contract=acceptance_contract,
+            zero_change_authority=zero_change_authority,
+        )
+    validation_attempt = _review_prepare_validate_completion_if_required(
+        projection=projection,
+        completion=completion,
+        acceptance_contract=acceptance_contract,
+        request=request,
+        zero_change_authority=zero_change_authority,
+    )
+    completion = validation_attempt["completion"]
+    if validation_attempt.get("blocker_code"):
+        if zero_change_authority.get("authority_kind") != "human_zero_change_attestation":
+            zero_change_authority = resolve_zero_change_authority(projection, completion)
+        return _blocked_current_review_prepare_result(
+            projection,
+            request=request,
+            blocker_code=str(validation_attempt["blocker_code"]),
+            blocker_detail=str(validation_attempt["blocker_detail"]),
+            completion_source=completion,
+            acceptance_contract=acceptance_contract,
+            zero_change_authority=zero_change_authority,
+        )
+    if zero_change_authority.get("authority_kind") != "human_zero_change_attestation":
+        zero_change_authority = resolve_zero_change_authority(projection, completion)
+    zero_change_blocker = _zero_change_authority_prepare_blocker(zero_change_authority)
+    if zero_change_blocker is not None and not _review_prepare_human_git_handoff_required(completion):
+        code, detail = zero_change_blocker
+        return _blocked_current_review_prepare_result(
+            projection,
+            request=request,
+            blocker_code=code,
+            blocker_detail=detail,
+            completion_source=completion,
+            acceptance_contract=acceptance_contract,
+            zero_change_authority=zero_change_authority,
+        )
+    if not _review_prepare_reviewable_result(
+        completion,
+        acceptance_contract,
+        zero_change_authority=zero_change_authority,
+    ):
+        return _blocked_current_review_prepare_result(
+            projection,
+            request=request,
+            blocker_code="KANBAN_COMPLETION_RESULT_NOT_REVIEWABLE",
+            blocker_detail="completion result is eligible but lacks complete contract validation evidence",
+            completion_source=completion,
+            acceptance_contract=acceptance_contract,
+            zero_change_authority=zero_change_authority,
         )
     record = _build_review_prepare_record(
         request=request,
@@ -8743,6 +9424,7 @@ def prepare_current_ticket_review(
         workflow=workflow,
         completion=completion,
         acceptance_contract=acceptance_contract,
+        zero_change_authority=zero_change_authority,
     )
     _persist_review_prepare_record(record)
     return _review_prepare_operational_result(record, idempotent_replay=False)
@@ -19299,11 +19981,185 @@ def _acceptance_contract_digest(contract: dict[str, Any]) -> str:
     return _digest_payload(PEPPER_ACCEPTANCE_CONTRACT_DIGEST_ALGORITHM, payload)
 
 
+def _zero_change_attestation_text_digest(text: str) -> str:
+    return _digest_payload(
+        PEPPER_ZERO_CHANGE_ATTESTATION_TEXT_DIGEST_ALGORITHM,
+        {"human_attestation_text": text},
+    )
+
+
+def _zero_change_attestation_record_digest(record: dict[str, Any]) -> str:
+    return _digest_payload(
+        PEPPER_ZERO_CHANGE_ATTESTATION_DIGEST_ALGORITHM,
+        {
+            key: value
+            for key, value in record.items()
+            if key != "zero_change_attestation_SHA256"
+        },
+    )
+
+
+def _zero_change_attestation_record_is_current(
+    record: dict[str, Any],
+    *,
+    projection: dict[str, Any],
+    completion: dict[str, Any] | None,
+) -> bool:
+    if not isinstance(record, dict):
+        return False
+    keys = (
+        "project_id",
+        "ticket_id",
+        "ticket_spec_SHA256",
+        "work_packet_id",
+        "work_packet_SHA256",
+        "projection_SHA256",
+        "kanban_board_slug",
+        "kanban_task_id",
+    )
+    if any(record.get(key) != projection.get(key) for key in keys):
+        return False
+    if completion is None:
+        return True
+    allowed_completion_shas = {
+        str(completion.get("kanban_completion_result_SHA256") or "").strip(),
+    }
+    metadata = completion.get("run_metadata")
+    if isinstance(metadata, dict):
+        allowed_completion_shas.add(
+            str(metadata.get("review_prepare_pre_validation_completion_SHA256") or "").strip(),
+        )
+    allowed_completion_shas.discard("")
+    return (
+        _int_or_none(record.get("terminal_run_id")) == _int_or_none(completion.get("run_id"))
+        and record.get("kanban_completion_result_SHA256") in allowed_completion_shas
+    )
+
+
+def validate_zero_change_attestation_record(
+    record: dict[str, Any],
+    *,
+    projection_record: dict[str, Any] | None = None,
+    completion: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Validate persisted human zero-change attestation authority."""
+
+    if not isinstance(record, dict):
+        raise ProductRuntimeConflict("zero-change attestation record must be an object")
+    if record.get("zero_change_attestation_SHA256") != _zero_change_attestation_record_digest(
+        record,
+    ):
+        raise ProductRuntimeConflict("zero-change attestation record digest mismatch")
+    projection = projection_record if projection_record is not None else _load_current_projection_record()
+    binding, identity = _current_ticket_identity_fields(projection)
+    expected = {
+        "schema_version": PEPPER_ZERO_CHANGE_ATTESTATION_SCHEMA_VERSION,
+        "policy_id": PEPPER_ZERO_CHANGE_ATTESTATION_POLICY_ID,
+        "source_system": PEPPER_ZERO_CHANGE_ATTESTATION_SOURCE_SYSTEM,
+        **identity,
+        "projection_SHA256": projection["projection_SHA256"],
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+        "zero_change_attested": True,
+        "source_changes_attested": False,
+        "Git_mutation_attested": False,
+        "candidate_changes_attested": False,
+        "capability_not_authority": True,
+        "validation_satisfied": False,
+        "review_accepted": False,
+        "ticket_closed": False,
+        "zero_change_authority_kind": "human_zero_change_attestation",
+    }
+    if completion is not None:
+        allowed_completion_shas = {
+            str(completion.get("kanban_completion_result_SHA256") or "").strip(),
+        }
+        metadata = completion.get("run_metadata")
+        if isinstance(metadata, dict):
+            allowed_completion_shas.add(
+                str(metadata.get("review_prepare_pre_validation_completion_SHA256") or "").strip(),
+            )
+        allowed_completion_shas.discard("")
+        expected.update({
+            "terminal_run_id": completion.get("run_id"),
+        })
+    for key, value in expected.items():
+        if record.get(key) != value:
+            raise ProductRuntimeConflict(f"zero-change attestation record {key} mismatch")
+    if completion is not None and record.get(
+        "kanban_completion_result_SHA256"
+    ) not in allowed_completion_shas:
+        raise ProductRuntimeConflict(
+            "zero-change attestation record kanban_completion_result_SHA256 mismatch"
+        )
+    if record.get("human_attestation_text") != governed_ticket_zero_change_attestation_text(
+        binding.ticket_id,
+    ):
+        raise ProductRuntimeConflict("zero-change attestation text mismatch")
+    if record.get("human_attestation_text_SHA256") != _zero_change_attestation_text_digest(
+        record["human_attestation_text"],
+    ):
+        raise ProductRuntimeConflict("zero-change attestation text digest mismatch")
+    reviewer = str(record.get("reviewer_id") or "").strip()
+    if not reviewer or not _SAFE_ID.fullmatch(reviewer):
+        raise ProductRuntimeConflict("zero-change attestation reviewer mismatch")
+    return record
+
+
+def _review_prepare_record_zero_change_authority(
+    record: dict[str, Any],
+    *,
+    projection: dict[str, Any],
+    completion: dict[str, Any],
+) -> dict[str, Any]:
+    kind = str(record.get("zero_change_authority_kind") or "").strip()
+    if kind == "human_zero_change_attestation":
+        attestation = record.get("zero_change_authority")
+        if not isinstance(attestation, dict):
+            raise ProductRuntimeConflict("review-preparation zero-change attestation missing")
+        validated = validate_zero_change_attestation_record(
+            attestation,
+            projection_record=projection,
+            completion=completion,
+        )
+        sha = validated["zero_change_attestation_SHA256"]
+        if record.get("zero_change_authority_SHA256") != sha:
+            raise ProductRuntimeConflict("review-preparation zero-change authority digest mismatch")
+        if record.get("human_zero_change_attestation_SHA256") != sha:
+            raise ProductRuntimeConflict("review-preparation human attestation digest mismatch")
+        return {
+            "zero_change_result": True,
+            "authority_kind": "human_zero_change_attestation",
+            "authority_SHA256": sha,
+            "authority_record": validated,
+            "zero_change_machine_authority_sufficient": False,
+            "human_zero_change_attestation_required": False,
+            "invalid_attestation_detail": None,
+        }
+    if _review_completion_zero_change_result(completion):
+        authority = {
+            "zero_change_result": True,
+            "authority_kind": "intrinsic_structured_zero_change_evidence",
+            "authority_SHA256": completion.get("kanban_completion_result_SHA256"),
+            "authority_record": None,
+            "zero_change_machine_authority_sufficient": True,
+            "human_zero_change_attestation_required": False,
+            "invalid_attestation_detail": None,
+        }
+        if kind and kind != authority["authority_kind"]:
+            raise ProductRuntimeConflict("review-preparation zero-change authority kind mismatch")
+        return authority
+    if kind in {"", "none"}:
+        return _zero_change_authority_none()
+    raise ProductRuntimeConflict("review-preparation zero-change authority kind mismatch")
+
+
 def _review_prepare_package_digest(
     *,
     projection: dict[str, Any],
     completion: dict[str, Any],
     acceptance_contract: dict[str, Any],
+    zero_change_authority: dict[str, Any] | None = None,
 ) -> str:
     binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
     payload = {
@@ -19324,6 +20180,11 @@ def _review_prepare_package_digest(
             "acceptance_contract_SHA256"
         ],
     }
+    if isinstance(zero_change_authority, dict) and zero_change_authority.get(
+        "zero_change_result"
+    ) is True:
+        payload["zero_change_authority_kind"] = zero_change_authority.get("authority_kind")
+        payload["zero_change_authority_SHA256"] = zero_change_authority.get("authority_SHA256")
     return _digest_payload(PEPPER_REVIEW_PREPARE_PACKAGE_DIGEST_ALGORITHM, payload)
 
 
@@ -19334,10 +20195,16 @@ def _review_prepare_acceptance_contract_for_validation(
     completion: dict[str, Any],
 ) -> dict[str, Any]:
     current_contract = _acceptance_contract_for_review_projection(projection)
+    current_zero_change_authority = _review_prepare_record_zero_change_authority(
+        record,
+        projection=projection,
+        completion=completion,
+    )
     current_package_sha = _review_prepare_package_digest(
         projection=projection,
         completion=completion,
         acceptance_contract=current_contract,
+        zero_change_authority=current_zero_change_authority,
     )
     if _review_prepare_contract_fields_match(
         record,
@@ -19347,13 +20214,20 @@ def _review_prepare_acceptance_contract_for_validation(
         return current_contract
 
     historical_contract = record.get("acceptance_contract")
+    historical_completion = _review_prepare_record_historical_completion(record)
     historical_package_sha = None
     if isinstance(historical_contract, dict):
         try:
+            historical_zero_change_authority = _review_prepare_record_zero_change_authority(
+                record,
+                projection=projection,
+                completion=historical_completion or completion,
+            )
             historical_package_sha = _review_prepare_package_digest(
                 projection=projection,
-                completion=completion,
+                completion=historical_completion or completion,
                 acceptance_contract=historical_contract,
+                zero_change_authority=historical_zero_change_authority,
             )
         except (KeyError, TypeError, ValueError):
             historical_package_sha = None
@@ -19375,12 +20249,51 @@ def _review_prepare_acceptance_contract_for_validation(
         historical_contract=historical_contract,
         historical_package_sha=historical_package_sha,
     )
+    if _review_prepare_contract_digest_fields_match_diagnostics(diagnostics):
+        raise ProductRuntimeConflict(
+            "review-preparation record review_package_SHA256 mismatch; "
+            f"persisted={diagnostics['persisted_review_package_SHA256']} "
+            f"expected_historical={diagnostics['expected_historical_review_package_SHA256']} "
+            f"current={diagnostics['current_review_package_SHA256']} "
+            f"historical_revision={diagnostics['historical_contract_revision']}"
+        )
     raise ProductRuntimeConflict(
         "review-preparation record acceptance_contract_SHA256 mismatch; "
         f"persisted={diagnostics['persisted_acceptance_contract_SHA256']} "
         f"expected_historical={diagnostics['expected_historical_acceptance_contract_SHA256']} "
         f"current={diagnostics['current_acceptance_contract_SHA256']} "
         f"historical_revision={diagnostics['historical_contract_revision']}"
+    )
+
+
+def _review_prepare_record_historical_completion(
+    record: dict[str, Any],
+) -> dict[str, Any] | None:
+    completion = record.get("kanban_completion_result")
+    if not isinstance(completion, dict):
+        return None
+    completion_sha = completion.get("kanban_completion_result_SHA256")
+    if completion_sha != _kanban_completion_result_digest(completion):
+        return None
+    if record.get("kanban_completion_result_SHA256") != completion_sha:
+        return None
+    return completion
+
+
+def _review_prepare_contract_digest_fields_match_diagnostics(
+    diagnostics: dict[str, Any],
+) -> bool:
+    persisted_contract_sha = diagnostics.get("persisted_acceptance_contract_SHA256")
+    persisted_criteria_sha = diagnostics.get("persisted_criteria_revision_SHA256")
+    return (
+        persisted_contract_sha is not None
+        and persisted_contract_sha
+        == diagnostics.get("expected_historical_acceptance_contract_SHA256")
+        == diagnostics.get("current_acceptance_contract_SHA256")
+        and persisted_criteria_sha is not None
+        and persisted_criteria_sha
+        == diagnostics.get("expected_historical_criteria_revision_SHA256")
+        == diagnostics.get("current_criteria_revision_SHA256")
     )
 
 
@@ -19562,6 +20475,18 @@ def _review_prepare_authority_projection(record: dict[str, Any]) -> dict[str, An
         "criteria_revision_SHA256": record["criteria_revision_SHA256"],
         "kanban_completion_result_SHA256": record["kanban_completion_result_SHA256"],
         "successful_run_id": record["successful_run_id"],
+        "zero_change_result": bool(record.get("zero_change_result")),
+        "zero_change_authority_kind": record.get("zero_change_authority_kind"),
+        "zero_change_authority_SHA256": record.get("zero_change_authority_SHA256"),
+        "human_zero_change_attestation_SHA256": record.get(
+            "human_zero_change_attestation_SHA256"
+        ),
+        "validation_contract_satisfied": bool(record.get("validation_contract_satisfied")),
+        "review_prepare_eligible_result": bool(record.get("review_prepare_eligible_result")),
+        "reviewable_result": bool(record.get("reviewable_result")),
+        "validated_noop_result": bool(record.get("validated_noop_result")),
+        "candidate_changes_available": bool(record.get("candidate_changes_available")),
+        "human_git_handoff_required": bool(record.get("human_git_handoff_required")),
         "human_acceptance_required": True,
         "human_acceptance_recorded": False,
     }
@@ -19647,6 +20572,11 @@ def _review_prepare_workflow_blocker(
         return "PEPPER_REVIEW_PREPARE_ACTION_GAP", f"current macroproject is not {binding.macroproject_id}"
     if workflow.get("current_ticket_id") != binding.ticket_id:
         return "PEPPER_REVIEW_PREPARE_ACTION_GAP", f"current ticket is not {binding.ticket_id}"
+    if workflow.get("workflow_status") == "execution_completed_pending_zero_change_attestation":
+        return (
+            "ZERO_CHANGE_ATTESTATION_REQUIRED",
+            "explicit human zero-change attestation is required before review preparation",
+        )
     if workflow.get("workflow_status") != "execution_completed":
         return "PEPPER_REVIEW_PREPARE_ACTION_GAP", "workflow status is not execution_completed"
     next_action = workflow.get("next_action")
@@ -19763,6 +20693,12 @@ def _review_decision_target_from_prepared_review_or_governed_autonomy(
     review_prepare = load_current_ticket_review_prepare_record(projection_record=projection)
     if review_prepare is not None:
         completion = review_prepare["kanban_completion_result"]
+        acceptance_contract = review_prepare.get("acceptance_contract")
+        zero_change_authority = _review_prepare_record_zero_change_authority(
+            review_prepare,
+            projection=projection,
+            completion=completion,
+        )
         candidate_reference = completion.get("candidate_changes_reference")
         reviewed_run_id = int(review_prepare["successful_run_id"])
         candidate_sha = _review_candidate_reference_digest(
@@ -19770,9 +20706,43 @@ def _review_decision_target_from_prepared_review_or_governed_autonomy(
             review_prepare,
             candidate_reference,
         )
+        reviewable_result = _review_prepare_reviewable_result(
+            completion,
+            acceptance_contract,
+            zero_change_authority=zero_change_authority,
+        )
+        review_prepare_eligible_result = _review_prepare_eligible_result(
+            completion,
+            acceptance_contract,
+            zero_change_authority=zero_change_authority,
+        )
+        validated_noop_result = _review_completion_validated_noop_result(
+            completion,
+            acceptance_contract,
+            zero_change_authority=zero_change_authority,
+        )
+        for key, expected in (
+            ("reviewable_result", reviewable_result),
+            ("review_prepare_eligible_result", review_prepare_eligible_result),
+            ("validated_noop_result", validated_noop_result),
+        ):
+            if bool(review_prepare.get(key)) != expected:
+                raise ProductRuntimeConflict(
+                    f"review-preparation record {key} does not match validated authority"
+                )
         return {
             "authority_kind": "review_prepare",
             "review_prepare": review_prepare,
+            "zero_change_authority_kind": zero_change_authority.get("authority_kind"),
+            "zero_change_authority_SHA256": zero_change_authority.get("authority_SHA256"),
+            "zero_change_machine_authority_sufficient": zero_change_authority.get(
+                "zero_change_machine_authority_sufficient"
+            ) is True,
+            "human_zero_change_attestation_SHA256": (
+                zero_change_authority.get("authority_SHA256")
+                if zero_change_authority.get("authority_kind") == "human_zero_change_attestation"
+                else None
+            ),
             "activation": {
                 "activation_action_SHA256": review_prepare["review_prepare_action_SHA256"],
                 "governed_autonomy_envelope_SHA256": review_prepare["review_package_SHA256"],
@@ -19792,15 +20762,10 @@ def _review_decision_target_from_prepared_review_or_governed_autonomy(
             "reviewed_run_id": reviewed_run_id,
             "candidate_reference": candidate_reference,
             "candidate_SHA256": candidate_sha,
-            "reviewable_result": _review_prepare_reviewable_result(
-                completion,
-                review_prepare.get("acceptance_contract"),
-            ),
+            "reviewable_result": reviewable_result,
+            "review_prepare_eligible_result": review_prepare_eligible_result,
             "candidate_changes_available": candidate_sha is not None,
-            "validated_noop_result": _review_completion_validated_noop_result(
-                completion,
-                review_prepare.get("acceptance_contract"),
-            ),
+            "validated_noop_result": validated_noop_result,
             "human_git_handoff_required": _review_prepare_human_git_handoff_required(
                 completion,
             ),
@@ -19853,6 +20818,7 @@ def _review_decision_target_from_governed_autonomy(
         "reviewed_run_id": terminal_reconciliation["terminal_run_id"],
         "candidate_reference": candidate_reference,
         "reviewable_result": True,
+        "review_prepare_eligible_result": True,
         "candidate_changes_available": True,
         "validated_noop_result": False,
         "human_git_handoff_required": True,
@@ -19878,10 +20844,12 @@ def _review_decision_target_validated_noop(target: dict[str, Any] | None) -> boo
     review_prepare = target.get("review_prepare")
     if not isinstance(review_prepare, dict):
         return False
-    completion = review_prepare.get("kanban_completion_result")
-    return _review_completion_validated_noop_result(
-        completion,
-        review_prepare.get("acceptance_contract"),
+    return (
+        target.get("reviewable_result") is True
+        and target.get("review_prepare_eligible_result") is True
+        and target.get("validated_noop_result") is True
+        and target.get("candidate_changes_available") is False
+        and target.get("human_git_handoff_required") is False
     )
 
 
@@ -20310,6 +21278,9 @@ def _build_current_ticket_review_decision_record(
         "capability_not_authority": True,
         "human_review_input_authority_expansion": False,
         "reviewable_result": bool(target.get("reviewable_result")),
+        "review_prepare_eligible_result": bool(
+            target.get("review_prepare_eligible_result")
+        ),
         "candidate_changes_available": candidate_changes_available,
         "validated_noop_result": bool(target.get("validated_noop_result")),
         "human_git_handoff_required": human_git_handoff_required,
@@ -20476,6 +21447,9 @@ def _review_decision_operational_result(
         "workflow_status": record["workflow_status"],
         "governed_workflow_state": record["governed_workflow_state"],
         "reviewable_result": bool(record.get("reviewable_result")),
+        "review_prepare_eligible_result": bool(
+            record.get("review_prepare_eligible_result")
+        ),
         "candidate_changes_available": bool(record.get("candidate_changes_available")),
         "validated_noop_result": bool(record.get("validated_noop_result")),
         "human_git_handoff_required": bool(record.get("human_git_handoff_required")),
@@ -23156,119 +24130,20 @@ def _metadata_strict_bool(metadata: Any, *keys: str) -> bool | None:
     return None
 
 
-def _normalized_validation_command(value: Any) -> str:
-    return " ".join(str(value or "").strip().split())
-
-
 def _review_acceptance_contract_validation_requirements(
     acceptance_contract: dict[str, Any] | None,
 ) -> tuple[dict[str, Any], ...]:
-    if not isinstance(acceptance_contract, dict):
-        return ()
-    requirements: list[dict[str, Any]] = []
-    seen: set[tuple[str | None, str]] = set()
-    for source_key in ("work_packet_validation_steps", "validation_steps"):
-        steps = acceptance_contract.get(source_key)
-        if not isinstance(steps, list):
-            continue
-        for index, step in enumerate(steps, start=1):
-            requirement = _review_validation_requirement_from_step(
-                step,
-                source_key=source_key,
-                index=index,
-            )
-            if requirement is None:
-                continue
-            key = (
-                requirement.get("validation_id"),
-                requirement["source_command"],
-            )
-            if key in seen:
-                continue
-            seen.add(key)
-            requirements.append(requirement)
-    return tuple(requirements)
+    from tools import workpacket_validation_tool as validation_tool
 
-
-def _review_validation_requirement_from_step(
-    step: Any,
-    *,
-    source_key: str,
-    index: int,
-) -> dict[str, Any] | None:
-    validation_id = None
-    command = None
-    expected_exit_codes: tuple[int, ...] = (0,)
-    not_applicable = False
-    if isinstance(step, dict):
-        optional = _strict_bool_metadata_value(step.get("optional"))
-        if optional is True:
-            return None
-        validation_id = str(
-            step.get("validation_id") or step.get("id") or f"{source_key}:{index}"
-        ).strip()
-        command = (
-            step.get("command")
-            or step.get("validation_command")
-            or step.get("source_command")
-        )
-        applicability = str(
-            step.get("applicability") or step.get("disposition") or ""
-        ).strip().casefold().replace("-", "_").replace(" ", "_")
-        not_applicable = applicability == "not_applicable"
-        expected_values = step.get("expected_exit_codes") or step.get("expected_exit_code")
-        if isinstance(expected_values, (list, tuple)):
-            parsed = tuple(
-                value for value in (_int_or_none(item) for item in expected_values) if value is not None
-            )
-            if parsed:
-                expected_exit_codes = parsed
-        else:
-            parsed = _int_or_none(expected_values)
-            if parsed is not None:
-                expected_exit_codes = (parsed,)
-    elif isinstance(step, str):
-        validation_id = f"{source_key}:{index}"
-        command = step
-    else:
-        return None
-    source_command = _normalized_validation_command(command)
-    if not source_command:
-        return None
-    if source_command.casefold().replace("-", "_").replace(" ", "_") == "not_applicable":
-        not_applicable = True
-    return {
-        "validation_id": validation_id or None,
-        "source_command": source_command,
-        "expected_exit_codes": expected_exit_codes,
-        "not_applicable": not_applicable,
-        "source_key": source_key,
-    }
+    return validation_tool.review_prepare_validation_requirements(acceptance_contract)
 
 
 def _review_completion_validation_result_records(
     completion: dict[str, Any],
 ) -> tuple[dict[str, Any], ...]:
-    records: list[dict[str, Any]] = []
-    containers = [completion]
-    metadata = completion.get("run_metadata")
-    if isinstance(metadata, dict):
-        containers.append(metadata)
-        nested = metadata.get("workpacket_validation")
-        if isinstance(nested, dict):
-            containers.append(nested)
-    for container in containers:
-        for key in (
-            "workpacket_validation_results",
-            "validation_command_results",
-            "validation_results",
-            "command_results",
-            "results",
-        ):
-            value = container.get(key) if isinstance(container, dict) else None
-            if isinstance(value, list):
-                records.extend(item for item in value if isinstance(item, dict))
-    return tuple(records)
+    from tools import workpacket_validation_tool as validation_tool
+
+    return validation_tool.review_prepare_validation_result_records(completion)
 
 
 def _review_validation_result_matches_requirement(
@@ -23277,95 +24152,147 @@ def _review_validation_result_matches_requirement(
     *,
     acceptance_contract: dict[str, Any],
 ) -> bool:
-    command = result.get("command") if isinstance(result.get("command"), dict) else {}
-    result_command = _normalized_validation_command(
-        command.get("source_command")
-        or result.get("source_command")
-        or result.get("command")
+    from tools import workpacket_validation_tool as validation_tool
+
+    return validation_tool.review_prepare_validation_result_matches_requirement(
+        result,
+        requirement,
+        acceptance_contract=acceptance_contract,
     )
-    if result_command != requirement["source_command"]:
-        return False
-    expected_validation_id = requirement.get("validation_id")
-    observed_validation_id = command.get("validation_id") or result.get("validation_id")
-    if expected_validation_id and observed_validation_id not in {None, expected_validation_id}:
-        return False
-    for key in ("ticket_id", "work_packet_id", "work_packet_SHA256"):
-        expected = acceptance_contract.get(key)
-        if expected is not None and result.get(key) != expected:
-            return False
-    disposition = str(result.get("disposition") or "").strip().casefold()
-    success = _strict_bool_metadata_value(result.get("success"))
-    if requirement.get("not_applicable"):
-        return disposition in {"not_applicable", "not-applicable", "skipped"} and success is not False
-    if success is not True or disposition != "passed":
-        return False
-    if _strict_bool_metadata_value(result.get("process_started")) is not True:
-        return False
-    exit_code = _int_or_none(result.get("exit_code"))
-    expected_exit_codes = tuple(requirement.get("expected_exit_codes") or (0,))
-    return exit_code in expected_exit_codes
 
 
 def _review_completion_validation_contract_satisfied(
     completion: dict[str, Any],
     acceptance_contract: dict[str, Any] | None,
 ) -> bool:
-    if not isinstance(completion, dict) or not isinstance(acceptance_contract, dict):
-        return False
-    metadata = completion.get("run_metadata")
-    observation = completion.get("validation_observation_reference")
-    if _metadata_strict_bool(metadata, "validation_infrastructure_failure") is True:
-        return False
-    if isinstance(observation, dict) and _metadata_strict_bool(
-        observation,
-        "infrastructure_failure",
-        "validation_infrastructure_failure",
-    ) is True:
-        return False
-    for container in (metadata, observation):
-        validation_passed = _metadata_strict_bool(
-            container,
-            "validation_passed",
-            "execution_validation_passed",
-        )
-        if validation_passed is False:
-            return False
-    for container in (metadata, completion):
-        closure_complete = _metadata_strict_bool(
-            container,
-            "validation_complete",
-            "validation_closed",
-            "validation_closure_complete",
-        )
-        if closure_complete is False:
-            return False
+    from tools import workpacket_validation_tool as validation_tool
+
+    return validation_tool.review_prepare_validation_contract_satisfied(
+        completion,
+        acceptance_contract,
+    )
+
+
+def _review_prepare_validate_completion_if_required(
+    *,
+    projection: dict[str, Any],
+    completion: dict[str, Any],
+    acceptance_contract: dict[str, Any],
+    request: CurrentTicketReviewPrepareRequest,
+    zero_change_authority: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if _review_completion_validation_contract_satisfied(
+        completion,
+        acceptance_contract,
+    ):
+        return {"completion": completion, "blocker_code": None, "blocker_detail": None}
+    resolved_zero_change = (
+        zero_change_authority.get("zero_change_result") is True
+        if isinstance(zero_change_authority, dict)
+        else _review_completion_zero_change_result(completion)
+    )
+    if not resolved_zero_change:
+        return {"completion": completion, "blocker_code": None, "blocker_detail": None}
     requirements = _review_acceptance_contract_validation_requirements(
         acceptance_contract,
     )
     if not requirements:
-        return any(
-            _metadata_strict_bool(
-                container,
-                "validation_passed",
-                "execution_validation_passed",
-            )
-            is True
-            for container in (metadata, observation, completion)
+        return {"completion": completion, "blocker_code": None, "blocker_detail": None}
+    from tools import workpacket_validation_tool as validation_tool
+
+    try:
+        validation = validation_tool.run_review_prepare_validation_commands(
+            projection=projection,
+            completion=completion,
+            acceptance_contract=acceptance_contract,
+            worker_env=_review_prepare_validation_env(projection, completion),
+            requirements=requirements,
+            requested_project_id=request.project_id,
+            requested_ticket_id=request.ticket_id,
+            requested_next_action_id=request.next_action_id,
         )
-    results = _review_completion_validation_result_records(completion)
-    if not results:
-        return False
-    return all(
-        any(
-            _review_validation_result_matches_requirement(
-                result,
-                requirement,
-                acceptance_contract=acceptance_contract,
-            )
-            for result in results
-        )
-        for requirement in requirements
+    except Exception as exc:  # pragma: no cover - defensive runtime guard
+        validation = {
+            "validation_executed": False,
+            "validation_complete": False,
+            "validation_passed": False,
+            "validation_command_results": [],
+            "review_prepare_validation_authority": None,
+            "review_prepare_validation_authority_SHA256": None,
+            "missing_requirements": [
+                validation_tool.review_prepare_validation_requirement_public(item) for item in requirements
+            ],
+            "failure_detail": _safe_text(exc, limit=300),
+        }
+    updated_completion = _review_completion_with_prepare_validation_results(
+        completion,
+        validation=validation,
     )
+    if _review_completion_validation_contract_satisfied(
+        updated_completion,
+        acceptance_contract,
+    ):
+        return {
+            "completion": updated_completion,
+            "blocker_code": None,
+            "blocker_detail": None,
+        }
+    if validation.get("validation_passed") is False:
+        return {
+            "completion": updated_completion,
+            "blocker_code": "REVIEW_PREPARE_VALIDATION_FAILED",
+            "blocker_detail": validation.get("failure_detail")
+            or "review-preparation validation command failed",
+        }
+    return {
+        "completion": updated_completion,
+        "blocker_code": "REVIEW_PREPARE_VALIDATION_INCOMPLETE",
+        "blocker_detail": validation.get("failure_detail")
+        or "review-preparation validation did not cover all acceptance-contract commands",
+    }
+
+
+def _review_prepare_validation_env(
+    projection: dict[str, Any],
+    completion: dict[str, Any],
+) -> dict[str, str]:
+    workspace = Path(str(completion.get("kanban_task_workspace_path") or "")).expanduser()
+    if not workspace.is_absolute():
+        raise ProductRuntimeConflict("review-preparation validation workspace path is unavailable")
+    env = dict(os.environ)
+    env.update(_pepper_governed_worker_env_overlay(projection))
+    env["HERMES_KANBAN_WORKSPACE"] = str(workspace)
+    env["TERMINAL_CWD"] = str(workspace)
+    return env
+
+
+def _review_completion_with_prepare_validation_results(
+    completion: dict[str, Any],
+    *,
+    validation: dict[str, Any],
+) -> dict[str, Any]:
+    updated = dict(completion)
+    metadata = completion.get("run_metadata")
+    metadata = dict(metadata) if isinstance(metadata, dict) else {}
+    metadata.setdefault(
+        "review_prepare_pre_validation_completion_SHA256",
+        completion.get("kanban_completion_result_SHA256"),
+    )
+    metadata["validation_command_results"] = list(validation.get("validation_command_results") or [])
+    metadata["validation_passed"] = validation.get("validation_passed") is True
+    metadata["validation_complete"] = validation.get("validation_complete") is True
+    metadata["review_prepare_validation_authority"] = validation.get(
+        "review_prepare_validation_authority"
+    )
+    metadata["review_prepare_validation_authority_SHA256"] = validation.get(
+        "review_prepare_validation_authority_SHA256"
+    )
+    metadata["review_prepare_validation_executed"] = bool(validation.get("validation_executed"))
+    if validation.get("missing_requirements"):
+        metadata["missing_validation_requirements"] = validation["missing_requirements"]
+    updated["run_metadata"] = metadata
+    updated["kanban_completion_result_SHA256"] = _kanban_completion_result_digest(updated)
+    return updated
 
 
 def _review_completion_text(completion: dict[str, Any]) -> str:
@@ -23400,8 +24327,71 @@ def _review_completion_has_explicit_zero_change_evidence(
             if isinstance(value, (list, tuple)) and not any(
                 str(item or "").strip() for item in value
             ):
-                return _metadata_bool(metadata, "Git_mutation", "git_mutation") is False
+                metadata_git_mutation = _metadata_bool(metadata, "Git_mutation", "git_mutation")
+                reported_git_mutation = completion.get("reported_git_mutation")
+                if metadata_git_mutation is not False and reported_git_mutation is not False:
+                    continue
+                return _review_completion_has_structured_zero_change_authority(metadata)
     return False
+
+
+def _review_completion_has_structured_zero_change_authority(metadata: dict[str, Any]) -> bool:
+    if not isinstance(metadata, dict):
+        return False
+    evidence = metadata.get("zero_change_evidence")
+    return isinstance(evidence, dict) and _zero_change_evidence_record_valid(evidence)
+
+
+def _completion_metadata_has_defined_no_change_verdict(metadata: dict[str, Any]) -> bool:
+    verdict = str(
+        metadata.get("completion_verdict")
+        or metadata.get("completion_outcome")
+        or metadata.get("result")
+        or ""
+    ).strip().casefold().replace("-", "_").replace(" ", "_")
+    if verdict not in {
+        "completed_without_source_changes",
+        "completed_without_file_changes",
+        "no_source_changes",
+        "no_file_changes",
+    }:
+        return False
+    git_mutation = _metadata_bool(metadata, "Git_mutation", "git_mutation")
+    if git_mutation is not False:
+        return False
+    for key in ("files_modified", "modified_files", "changed_files", "changes"):
+        if key not in metadata:
+            continue
+        value = metadata.get(key)
+        if not isinstance(value, (list, tuple)):
+            return False
+        if any(str(item or "").strip() for item in value):
+            return False
+    return any(key in metadata for key in ("files_modified", "modified_files", "changed_files", "changes"))
+
+
+def _zero_change_evidence_record_valid(evidence: dict[str, Any]) -> bool:
+    disposition = str(
+        evidence.get("disposition")
+        or evidence.get("status")
+        or evidence.get("result")
+        or ""
+    ).strip().casefold().replace("-", "_").replace(" ", "_")
+    if disposition not in {
+        "no_source_changes",
+        "no_file_changes",
+        "completed_without_source_changes",
+        "not_applicable",
+    }:
+        return False
+    for key in ("files_modified", "modified_files", "changed_files", "changes"):
+        value = evidence.get(key)
+        if isinstance(value, (list, tuple)) and any(str(item or "").strip() for item in value):
+            return False
+    git_mutation = _metadata_bool(evidence, "Git_mutation", "git_mutation")
+    if git_mutation is not False:
+        return False
+    return bool(str(evidence.get("authority") or evidence.get("reason") or "").strip())
 
 
 def _review_completion_zero_change_result(completion: dict[str, Any]) -> bool:
@@ -23429,25 +24419,236 @@ def _review_completion_zero_change_result(completion: dict[str, Any]) -> bool:
     return _review_completion_has_explicit_zero_change_evidence(completion)
 
 
+def _current_kanban_terminal_run_identity(
+    projection: dict[str, Any],
+) -> dict[str, Any] | None:
+    try:
+        from hermes_cli import kanban_db
+
+        board = _normalize_board(str(projection["kanban_board_slug"]))
+        task_id = str(projection["kanban_task_id"])
+        conn = kanban_db.connect(board=board)
+    except Exception:
+        return None
+    try:
+        task = kanban_db.get_task(conn, task_id)
+        if task is None:
+            return None
+        runs = kanban_db.list_runs(conn, task_id)
+        if not runs:
+            return None
+        active_runs = [run for run in runs if _execution_is_active(_run_dict(run))]
+        latest = runs[-1]
+        return {
+            "kanban_board_slug": board,
+            "kanban_task_id": task_id,
+            "task_status": task.status,
+            "task_current_run_id": task.current_run_id,
+            "active_run_ids": [int(run.id) for run in active_runs],
+            "terminal_run_id": int(latest.id),
+            "terminal_run_status": str(getattr(latest, "status", "") or "").strip().lower(),
+            "terminal_run_outcome": str(getattr(latest, "outcome", "") or "").strip().lower(),
+            "terminal_run_ended_at": getattr(latest, "ended_at", None),
+        }
+    finally:
+        conn.close()
+
+
+def _completion_binds_current_terminal_run(
+    projection: dict[str, Any],
+    completion: dict[str, Any],
+) -> bool:
+    return _completion_current_terminal_run_authority_blocker(
+        projection,
+        completion,
+        unavailable_code="CURRENT_RUN_AUTHORITY_UNAVAILABLE",
+        mismatch_code="CURRENT_RUN_AUTHORITY_MISMATCH",
+    ) is None
+
+
+def _completion_current_terminal_run_authority_blocker(
+    projection: dict[str, Any],
+    completion: dict[str, Any],
+    *,
+    unavailable_code: str,
+    mismatch_code: str,
+) -> tuple[str, str] | None:
+    identity = _current_kanban_terminal_run_identity(projection)
+    if identity is None:
+        return (
+            unavailable_code,
+            "canonical Kanban current terminal run authority is unavailable",
+        )
+    if identity["active_run_ids"] or identity["task_current_run_id"] is not None:
+        return (
+            mismatch_code,
+            "canonical Kanban task still has an active run",
+        )
+    if _int_or_none(completion.get("run_id")) != identity["terminal_run_id"]:
+        return (
+            mismatch_code,
+            "completion run_id is not the current terminal Kanban run",
+        )
+    completion_status = str(completion.get("run_status") or "").strip().lower()
+    completion_outcome = str(completion.get("run_outcome") or "").strip().lower()
+    if completion_status and completion_status != identity["terminal_run_status"]:
+        return (
+            mismatch_code,
+            "completion run_status does not match the current terminal Kanban run",
+        )
+    if completion_outcome and completion_outcome != identity["terminal_run_outcome"]:
+        return (
+            mismatch_code,
+            "completion run_outcome does not match the current terminal Kanban run",
+        )
+    return None
+
+
+def _completion_has_positive_mutation_evidence(completion: dict[str, Any]) -> bool:
+    if _governed_autonomy_candidate_changes_available(
+        completion.get("candidate_changes_reference"),
+    ):
+        return True
+    if completion.get("terminal_outcome_class") == "validated_review_required":
+        return True
+    reported_files = completion.get("reported_files_modified")
+    if isinstance(reported_files, list) and any(str(item or "").strip() for item in reported_files):
+        return True
+    if completion.get("reported_git_mutation") is True:
+        return True
+    metadata = completion.get("run_metadata")
+    if isinstance(metadata, dict):
+        for key in ("files_modified", "modified_files", "changed_files", "changes"):
+            value = metadata.get(key)
+            if isinstance(value, (list, tuple)) and any(str(item or "").strip() for item in value):
+                return True
+        if _metadata_bool(metadata, "Git_mutation", "git_mutation") is True:
+            return True
+    return False
+
+
+def _zero_change_authority_none(
+    *,
+    attestation_required: bool = False,
+    invalid_attestation: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "zero_change_result": False,
+        "authority_kind": "none",
+        "authority_SHA256": None,
+        "authority_record": None,
+        "zero_change_machine_authority_sufficient": False,
+        "human_zero_change_attestation_required": attestation_required,
+        "invalid_attestation_detail": invalid_attestation,
+    }
+
+
+def resolve_zero_change_authority(
+    projection: dict[str, Any],
+    completion: dict[str, Any],
+    *,
+    allow_historical_mismatch: bool = False,
+) -> dict[str, Any]:
+    """Resolve intrinsic or explicit human zero-change authority for a completion."""
+
+    if not isinstance(completion, dict) or completion.get("blocker_code"):
+        return _zero_change_authority_none()
+    if _completion_has_positive_mutation_evidence(completion):
+        return _zero_change_authority_none()
+    if _review_completion_zero_change_result(completion):
+        return {
+            "zero_change_result": True,
+            "authority_kind": "intrinsic_structured_zero_change_evidence",
+            "authority_SHA256": completion.get("kanban_completion_result_SHA256"),
+            "authority_record": None,
+            "zero_change_machine_authority_sufficient": True,
+            "human_zero_change_attestation_required": False,
+            "invalid_attestation_detail": None,
+        }
+    try:
+        attestation = load_current_ticket_zero_change_attestation_record(
+            projection_record=projection,
+            completion=completion,
+            allow_historical_mismatch=allow_historical_mismatch,
+        )
+    except ProductRuntimeConflict as exc:
+        return _zero_change_authority_none(invalid_attestation=str(exc))
+    if attestation is None:
+        return _zero_change_authority_none(attestation_required=True)
+    return {
+        "zero_change_result": True,
+        "authority_kind": "human_zero_change_attestation",
+        "authority_SHA256": attestation["zero_change_attestation_SHA256"],
+        "authority_record": attestation,
+        "zero_change_machine_authority_sufficient": False,
+        "human_zero_change_attestation_required": False,
+        "invalid_attestation_detail": None,
+    }
+
+
 def _review_completion_validated_noop_result(
     completion: dict[str, Any],
     acceptance_contract: dict[str, Any] | None,
+    zero_change_authority: dict[str, Any] | None = None,
 ) -> bool:
-    return _review_completion_zero_change_result(
-        completion,
-    ) and _review_completion_validation_contract_satisfied(
+    resolved = zero_change_authority
+    if resolved is None:
+        resolved = {
+            "zero_change_result": _review_completion_zero_change_result(completion),
+        }
+    return resolved.get("zero_change_result") is True and _review_completion_validation_contract_satisfied(
         completion,
         acceptance_contract,
+    ) and not _governed_autonomy_candidate_changes_available(
+        completion.get("candidate_changes_reference") if isinstance(completion, dict) else None,
     )
 
 
 def _review_prepare_reviewable_result(
     completion: dict[str, Any],
     acceptance_contract: dict[str, Any] | None = None,
+    zero_change_authority: dict[str, Any] | None = None,
 ) -> bool:
     return _review_prepare_human_git_handoff_required(
         completion,
-    ) or _review_completion_validated_noop_result(completion, acceptance_contract)
+    ) or _review_completion_validated_noop_result(
+        completion,
+        acceptance_contract,
+        zero_change_authority=zero_change_authority,
+    )
+
+
+def _review_prepare_eligible_result(
+    completion: dict[str, Any],
+    acceptance_contract: dict[str, Any] | None = None,
+    zero_change_authority: dict[str, Any] | None = None,
+) -> bool:
+    _ = acceptance_contract
+    resolved_zero_change = (
+        zero_change_authority.get("zero_change_result") is True
+        if isinstance(zero_change_authority, dict)
+        else _review_completion_zero_change_result(completion)
+    )
+    return _review_prepare_human_git_handoff_required(
+        completion,
+    ) or resolved_zero_change
+
+
+def _zero_change_authority_prepare_blocker(
+    zero_change_authority: dict[str, Any],
+) -> tuple[str, str] | None:
+    detail = zero_change_authority.get("invalid_attestation_detail")
+    if detail:
+        return (
+            "ZERO_CHANGE_ATTESTATION_AUTHORITY_INVALID",
+            _safe_text(detail, limit=300),
+        )
+    if zero_change_authority.get("human_zero_change_attestation_required") is True:
+        return (
+            "ZERO_CHANGE_ATTESTATION_REQUIRED",
+            "explicit human zero-change attestation is required before review preparation",
+        )
+    return None
 
 
 def _review_prepare_human_git_handoff_required(completion: dict[str, Any]) -> bool:
@@ -23700,6 +24901,7 @@ def _build_review_prepare_record(
     workflow: dict[str, Any],
     completion: dict[str, Any],
     acceptance_contract: dict[str, Any],
+    zero_change_authority: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     from hermes_cli.agent_platform.workflow.review_validation_loop import (
         REVIEW_VALIDATION_LOOP_POLICY_ID,
@@ -23709,16 +24911,19 @@ def _build_review_prepare_record(
         ReviewValidationRuntimeBoundary,
     )
 
-    package_sha = _review_prepare_package_digest(
-        projection=projection,
-        completion=completion,
-        acceptance_contract=acceptance_contract,
-    )
     binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
     run_status = str(completion.get("run_status") or "done")
     run_outcome = str(completion.get("run_outcome") or "completed")
     git_handoff_required = _review_prepare_human_git_handoff_required(completion)
-    zero_change_result = _review_completion_zero_change_result(completion)
+    if zero_change_authority is None:
+        zero_change_authority = resolve_zero_change_authority(projection, completion)
+    package_sha = _review_prepare_package_digest(
+        projection=projection,
+        completion=completion,
+        acceptance_contract=acceptance_contract,
+        zero_change_authority=zero_change_authority,
+    )
+    zero_change_result = zero_change_authority.get("zero_change_result") is True
     validation_contract_satisfied = _review_completion_validation_contract_satisfied(
         completion,
         acceptance_contract,
@@ -23726,6 +24931,12 @@ def _build_review_prepare_record(
     reviewable_result = _review_prepare_reviewable_result(
         completion,
         acceptance_contract,
+        zero_change_authority=zero_change_authority,
+    )
+    review_prepare_eligible_result = _review_prepare_eligible_result(
+        completion,
+        acceptance_contract,
+        zero_change_authority=zero_change_authority,
     )
     candidate_changes_available = _governed_autonomy_candidate_changes_available(
         completion.get("candidate_changes_reference"),
@@ -23789,9 +25000,22 @@ def _build_review_prepare_record(
         "review_state": "prepared_pending_human_acceptance",
         "zero_change_result": zero_change_result,
         "validation_contract_satisfied": validation_contract_satisfied,
+        "review_prepare_eligible_result": review_prepare_eligible_result,
         "reviewable_result": reviewable_result,
         "candidate_changes_available": candidate_changes_available,
         "validated_noop_result": zero_change_result and validation_contract_satisfied,
+        "zero_change_authority_kind": zero_change_authority.get("authority_kind"),
+        "zero_change_authority_SHA256": zero_change_authority.get("authority_SHA256"),
+        "zero_change_authority": zero_change_authority.get("authority_record"),
+        "human_zero_change_attestation_SHA256": (
+            zero_change_authority.get("authority_SHA256")
+            if zero_change_authority.get("authority_kind") == "human_zero_change_attestation"
+            else None
+        ),
+        "zero_change_machine_authority_sufficient": zero_change_authority.get(
+            "zero_change_machine_authority_sufficient"
+        ) is True,
+        "human_zero_change_attestation_required": False,
         "human_git_handoff_required": git_handoff_required,
         "review_validation_vocabulary": {
             "decisions": [item.value for item in ReviewValidationLoopDecision],
@@ -23988,6 +25212,21 @@ def _persist_review_prepare_record(record: dict[str, Any]) -> None:
     tmp.replace(path)
 
 
+def _persist_zero_change_attestation_record(record: dict[str, Any]) -> None:
+    validate_zero_change_attestation_record(record)
+    ticket_id = str(record["ticket_id"])
+    path = zero_change_attestation_record_path_for_ticket(ticket_id)
+    _archive_existing_authority_record(
+        path,
+        zero_change_attestation_history_path_for_ticket(ticket_id),
+        reason="replaced_by_current_zero_change_attestation",
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+
 def _persist_review_acceptance_record(record: dict[str, Any]) -> None:
     validate_p18_9_0_review_acceptance_record(record)
     path = p18_9_0_review_acceptance_record_path()
@@ -24078,11 +25317,22 @@ def _review_prepare_operational_result(
         "validation_contract_satisfied": bool(
             record.get("validation_contract_satisfied")
         ),
-        "reviewable_result": _review_prepare_reviewable_result(
-            completion,
-            record.get("acceptance_contract"),
+        "review_prepare_eligible_result": bool(
+            record.get("review_prepare_eligible_result")
         ),
+        "reviewable_result": bool(record.get("reviewable_result")),
         "validated_noop_result": bool(record.get("validated_noop_result")),
+        "zero_change_authority_kind": record.get("zero_change_authority_kind"),
+        "zero_change_authority_SHA256": record.get("zero_change_authority_SHA256"),
+        "human_zero_change_attestation_SHA256": record.get(
+            "human_zero_change_attestation_SHA256"
+        ),
+        "zero_change_machine_authority_sufficient": bool(
+            record.get("zero_change_machine_authority_sufficient")
+        ),
+        "human_zero_change_attestation_required": bool(
+            record.get("human_zero_change_attestation_required")
+        ),
         "candidate_changes_available": _governed_autonomy_candidate_changes_available(
             completion.get("candidate_changes_reference"),
         ),
@@ -24208,6 +25458,7 @@ def _blocked_current_review_prepare_result(
     blocker_detail: str,
     completion_source: dict[str, Any] | None = None,
     acceptance_contract: dict[str, Any] | None = None,
+    zero_change_authority: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     result = {
         "source_system": PEPPER_REVIEW_PREPARE_ACTION_SOURCE_SYSTEM,
@@ -24246,17 +25497,48 @@ def _blocked_current_review_prepare_result(
         "auto_rollback": False,
     }
     if isinstance(completion_source, dict):
-        result.update({
+        resolved_zero_change = zero_change_authority or {
             "zero_change_result": _review_completion_zero_change_result(
                 completion_source,
             ),
+            "authority_kind": None,
+            "authority_SHA256": None,
+            "zero_change_machine_authority_sufficient": False,
+            "human_zero_change_attestation_required": False,
+        }
+        result.update({
+            "zero_change_result": resolved_zero_change.get("zero_change_result") is True,
+            "zero_change_authority_kind": resolved_zero_change.get("authority_kind"),
+            "zero_change_authority_SHA256": resolved_zero_change.get("authority_SHA256"),
+            "human_zero_change_attestation_SHA256": (
+                resolved_zero_change.get("authority_SHA256")
+                if resolved_zero_change.get("authority_kind") == "human_zero_change_attestation"
+                else None
+            ),
+            "zero_change_machine_authority_sufficient": resolved_zero_change.get(
+                "zero_change_machine_authority_sufficient"
+            ) is True,
+            "human_zero_change_attestation_required": resolved_zero_change.get(
+                "human_zero_change_attestation_required"
+            ) is True,
             "validation_contract_satisfied": _review_completion_validation_contract_satisfied(
                 completion_source,
                 acceptance_contract,
             ),
+            "review_prepare_eligible_result": _review_prepare_eligible_result(
+                completion_source,
+                acceptance_contract,
+                zero_change_authority=resolved_zero_change,
+            ),
             "reviewable_result": _review_prepare_reviewable_result(
                 completion_source,
                 acceptance_contract,
+                zero_change_authority=resolved_zero_change,
+            ),
+            "validated_noop_result": _review_completion_validated_noop_result(
+                completion_source,
+                acceptance_contract,
+                zero_change_authority=resolved_zero_change,
             ),
             "candidate_changes_available": _governed_autonomy_candidate_changes_available(
                 completion_source.get("candidate_changes_reference"),
@@ -24301,6 +25583,130 @@ def _review_prepare_next_action(
         "target_ticket_title": binding.ticket_title,
         "required_human_action": "review_acceptance",
     }
+
+
+def _zero_change_attestation_next_action(
+    binding: CurrentTicketLifecycleBinding,
+) -> dict[str, Any]:
+    action_id = governed_ticket_lifecycle_action_ids(binding.ticket_id)[
+        "zero_change_attestation"
+    ]
+    return {
+        "id": action_id,
+        "label": (
+            f"{binding.ticket_id} current terminal result lacks machine zero-change "
+            "authority; record explicit human zero-change attestation before review preparation."
+        ),
+        "target_ticket_id": binding.ticket_id,
+        "target_ticket_title": binding.ticket_title,
+        "required_human_action": "human_zero_change_review_preparation_attestation",
+        "required_human_attestation_text": governed_ticket_zero_change_attestation_text(
+            binding.ticket_id,
+        ),
+    }
+
+
+def _current_ticket_zero_change_attestation_overlay(
+    projection: dict[str, Any],
+    *,
+    completed_overlay: dict[str, Any],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    if not _review_prepare_projection_is_current_source(projection):
+        return None, None
+    if completed_overlay.get("workflow_status") != "execution_completed":
+        return None, None
+    binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
+    try:
+        completion = _current_review_round_completion_source(projection)
+    except Exception:
+        if completed_overlay.get("candidate_changes_available") is True or completed_overlay.get(
+            "git_handoff_required"
+        ) is True:
+            return None, None
+        raise
+    if completion.get("blocker_code"):
+        return None, None
+    if _review_prepare_human_git_handoff_required(completion):
+        return None, None
+    if _completion_has_positive_mutation_evidence(completion):
+        return None, None
+    if not _completion_binds_current_terminal_run(projection, completion):
+        return None, {
+            "id": f"{binding.ticket_hyphen_token}-ZERO-CHANGE-ATTESTATION-AUTHORITY",
+            "status": "blocked_by_zero_change_attestation_current_run_mismatch",
+            "evidence": "completion does not bind the current terminal Kanban run",
+        }
+    authority = resolve_zero_change_authority(
+        projection,
+        completion,
+        allow_historical_mismatch=True,
+    )
+    if authority.get("invalid_attestation_detail"):
+        return None, {
+            "id": f"{binding.ticket_hyphen_token}-ZERO-CHANGE-ATTESTATION-AUTHORITY",
+            "status": "blocked_by_invalid_zero_change_attestation_authority",
+            "evidence": _safe_text(authority["invalid_attestation_detail"], limit=300),
+        }
+    if authority.get("zero_change_result") is True:
+        return {
+            "workflow_status": "execution_completed",
+            "validation_state": "execution_completed_pending_validation",
+            "review_state": "ready_for_review_validation",
+            "zero_change_result": True,
+            "zero_change_authority_kind": authority.get("authority_kind"),
+            "zero_change_authority_SHA256": authority.get("authority_SHA256"),
+            "human_zero_change_attestation_SHA256": (
+                authority.get("authority_SHA256")
+                if authority.get("authority_kind") == "human_zero_change_attestation"
+                else None
+            ),
+            "zero_change_machine_authority_sufficient": authority.get(
+                "zero_change_machine_authority_sufficient"
+            ) is True,
+            "human_zero_change_attestation_required": False,
+            "validation_contract_satisfied": False,
+            "review_prepare_eligible_result": True,
+            "reviewable_result": False,
+            "validated_noop_result": False,
+            "candidate_changes_available": False,
+            "human_git_handoff_required": False,
+            "git_handoff_required": False,
+            "git_handoff_state": "not_required_for_ticket_result",
+            "next_action": {
+                "id": binding.review_prepare_next_action_id,
+                "label": f"{binding.ticket_id} zero-change authority is current; prepare review validation.",
+                "target_ticket_id": binding.ticket_id,
+                "target_ticket_title": binding.ticket_title,
+                "required_human_action": "review_validation_preparation_and_human_git_handoff",
+            },
+        }, None
+    if authority.get("human_zero_change_attestation_required") is not True:
+        return None, None
+    return {
+        "workflow_state": f"{binding.ticket_id}-EXECUTION-COMPLETED-PENDING-ZERO-CHANGE-ATTESTATION",
+        "workflow_status": "execution_completed_pending_zero_change_attestation",
+        "queue_state": completed_overlay.get("queue_state", "kanban_execution_terminal"),
+        "execution_state": "no_active_executions",
+        "validation_state": "execution_completed_pending_zero_change_attestation",
+        "review_state": "zero_change_attestation_required",
+        "recovery_state": "not_required",
+        "zero_change_result": False,
+        "zero_change_authority_kind": "none",
+        "zero_change_authority_SHA256": None,
+        "zero_change_machine_authority_sufficient": False,
+        "human_zero_change_attestation_required": True,
+        "validation_contract_satisfied": False,
+        "review_prepare_eligible_result": False,
+        "reviewable_result": False,
+        "validated_noop_result": False,
+        "candidate_changes_available": False,
+        "human_git_handoff_required": False,
+        "git_handoff_required": False,
+        "git_handoff_state": "not_required_for_ticket_result",
+        "human_acceptance_required": False,
+        "human_acceptance_recorded": False,
+        "next_action": _zero_change_attestation_next_action(binding),
+    }, None
 
 
 def _blocked_current_review_acceptance_result(
@@ -24361,6 +25767,8 @@ def _p18_9_0_review_prepare_overlay(
     *,
     completed_overlay: dict[str, Any],
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    if not _review_prepare_projection_is_current_source(projection):
+        return None, None
     binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
     try:
         record = load_current_ticket_review_prepare_record(
@@ -24369,7 +25777,7 @@ def _p18_9_0_review_prepare_overlay(
         )
     except Exception as exc:  # pragma: no cover - defensive live-state guard
         return None, {
-            "id": f"{binding.ticket_hyphen_token}-REVIEW-PREPARE-AUTHORITY",
+            "id": _review_prepare_authority_blocker_id(binding.ticket_id),
             "status": "blocked_by_invalid_review_prepare_authority",
             "evidence": _safe_text(exc, limit=300),
         }
@@ -24377,7 +25785,7 @@ def _p18_9_0_review_prepare_overlay(
         return None, None
     if completed_overlay.get("workflow_status") != "execution_completed":
         return None, {
-            "id": f"{binding.ticket_hyphen_token}-REVIEW-PREPARE-AUTHORITY",
+            "id": _review_prepare_authority_blocker_id(binding.ticket_id),
             "status": "blocked_by_review_prepare_state_mismatch",
             "evidence": f"{binding.ticket_id} review preparation exists but execution is not completed",
         }
@@ -24400,6 +25808,18 @@ def _p18_9_0_review_prepare_overlay(
         "review_state": "prepared_pending_human_acceptance",
         "recovery_state": "not_required",
         "git_handoff_required": bool(record.get("git_handoff_required")),
+        "zero_change_result": bool(record.get("zero_change_result")),
+        "zero_change_authority_kind": record.get("zero_change_authority_kind"),
+        "zero_change_authority_SHA256": record.get("zero_change_authority_SHA256"),
+        "human_zero_change_attestation_SHA256": record.get(
+            "human_zero_change_attestation_SHA256"
+        ),
+        "validation_contract_satisfied": bool(record.get("validation_contract_satisfied")),
+        "review_prepare_eligible_result": bool(record.get("review_prepare_eligible_result")),
+        "reviewable_result": bool(record.get("reviewable_result")),
+        "validated_noop_result": bool(record.get("validated_noop_result")),
+        "candidate_changes_available": bool(record.get("candidate_changes_available")),
+        "human_git_handoff_required": bool(record.get("human_git_handoff_required")),
         "git_handoff_decision_basis": record.get("git_handoff_decision_basis"),
         "git_handoff_state": record.get("git_handoff_state"),
         "review_prepare_authority": {
@@ -26042,6 +27462,17 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
                     if autonomy_blocker is not None:
                         remaining_blockers.append(autonomy_blocker)
                     if snapshot.get("workflow_status") == "execution_completed":
+                        zero_change_overlay, zero_change_blocker = (
+                            _current_ticket_zero_change_attestation_overlay(
+                                projection,
+                                completed_overlay=snapshot,
+                            )
+                        )
+                        if zero_change_overlay is not None:
+                            snapshot.update(zero_change_overlay)
+                        if zero_change_blocker is not None:
+                            remaining_blockers.append(zero_change_blocker)
+                    if snapshot.get("workflow_status") == "execution_completed":
                         review_prepare_overlay, review_prepare_blocker = (
                             _p18_9_0_review_prepare_overlay(
                                 projection,
@@ -26110,6 +27541,7 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
             remaining_blockers.append(predecessor_blocker)
     _apply_current_ticket_durable_completion_precedence(snapshot, remaining_blockers)
     _apply_pending_successor_approval_precedence(snapshot, remaining_blockers)
+    snapshot["remaining_blockers"] = remaining_blockers
     snapshot["blocker_count"] = len(remaining_blockers)
     snapshot["next_action_label"] = _next_action_label(snapshot.get("next_action"))
     return snapshot
@@ -26187,6 +27619,15 @@ def build_lead_agent_operational_context() -> dict[str, Any]:
         "validation_state": _workflow_value(workflow, "validation_state", "unavailable"),
         "review_state": _workflow_value(workflow, "review_state", "unavailable"),
         "review_prepare_authority": workflow.get("review_prepare_authority"),
+        "zero_change_result": bool(workflow.get("zero_change_result")),
+        "zero_change_authority_kind": workflow.get("zero_change_authority_kind"),
+        "zero_change_authority_SHA256": workflow.get("zero_change_authority_SHA256"),
+        "human_zero_change_attestation_required": bool(
+            workflow.get("human_zero_change_attestation_required")
+        ),
+        "zero_change_machine_authority_sufficient": bool(
+            workflow.get("zero_change_machine_authority_sufficient")
+        ),
         "review_decision_recorded": bool(workflow.get("review_decision_recorded")),
         "review_decision_required": bool(workflow.get("review_decision_required")),
         "human_acceptance_required": bool(workflow.get("human_acceptance_required")),

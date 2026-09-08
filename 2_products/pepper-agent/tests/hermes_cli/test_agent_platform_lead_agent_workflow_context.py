@@ -321,6 +321,7 @@ def test_pepper_toolset_exposes_no_arbitrary_shell_or_file_authority(monkeypatch
         "get_governed_autonomy_status",
         "activate_current_ticket_governed_autonomy",
         "continue_current_ticket_governed_autonomy",
+        "attest_current_ticket_zero_change_for_review_prepare",
         "prepare_current_ticket_review",
         "accept_current_ticket_review",
         "submit_current_ticket_review_decision",
@@ -339,8 +340,10 @@ def test_pepper_toolset_exposes_no_arbitrary_shell_or_file_authority(monkeypatch
     activation_params = by_name["activate_current_ticket_governed_autonomy"]["parameters"]
     continuation_params = by_name["continue_current_ticket_governed_autonomy"]["parameters"]
     review_prepare_tool = by_name["prepare_current_ticket_review"]
+    attestation_tool = by_name["attest_current_ticket_zero_change_for_review_prepare"]
     review_accept_tool = by_name["accept_current_ticket_review"]
     review_prepare_params = review_prepare_tool["parameters"]
+    attestation_params = attestation_tool["parameters"]
     review_accept_params = review_accept_tool["parameters"]
     review_decision_params = by_name["submit_current_ticket_review_decision"]["parameters"]
     handoff_prepare_params = by_name["prepare_current_ticket_human_git_handoff"]["parameters"]
@@ -366,6 +369,31 @@ def test_pepper_toolset_exposes_no_arbitrary_shell_or_file_authority(monkeypatch
     assert "PREPARE_<current-ticket>_REVIEW" in json.dumps(review_prepare_params)
     assert "P18.9.0" not in review_prepare_tool["description"]
     assert "P18.9.0" not in json.dumps(review_prepare_params)
+    assert "current Pepper" in attestation_tool["description"]
+    assert "product-runtime" in attestation_tool["description"]
+    assert "does not prepare review validation" in attestation_tool["description"]
+    assert "ATTEST_<current-ticket>_ZERO_CHANGE_FOR_REVIEW_PREPARE" in json.dumps(
+        attestation_params
+    )
+    assert attestation_params["required"] == [
+        "project_id",
+        "ticket_id",
+        "next_action_id",
+        "human_attestation_text",
+    ]
+    assert set(attestation_params["properties"]) == {
+        "project_id",
+        "ticket_id",
+        "next_action_id",
+        "human_attestation_text",
+        "reviewer_id",
+    }
+    assert attestation_params["additionalProperties"] is False
+    assert "human_request_text" not in attestation_params["properties"]
+    assert "validation_command_results" not in attestation_params["properties"]
+    assert "review_decision" not in attestation_params["properties"]
+    assert "P18.9.0" not in attestation_tool["description"]
+    assert "P18.9.0" not in json.dumps(attestation_params)
     assert "current Pepper ticket" in review_accept_tool["description"]
     assert "AWAIT_HUMAN_<current-ticket>_REVIEW_ACCEPTANCE" in json.dumps(
         review_accept_params
@@ -406,6 +434,260 @@ def test_pepper_toolset_exposes_no_arbitrary_shell_or_file_authority(monkeypatch
     assert "shell_command" not in handoff_properties
     assert "workspace_path" not in handoff_properties
     assert not (names & {"terminal", "process", "read_file", "write_file", "patch", "search_files"})
+
+
+def test_zero_change_attestation_tool_delegates_without_chaining(monkeypatch) -> None:
+    import tools.pepper_workflow_tools as pepper_tools
+
+    captured: dict[str, object] = {}
+    calls: list[str] = []
+
+    class RuntimeStub:
+        def attest_current_ticket_zero_change_for_review_prepare(self, **kwargs):
+            calls.append("attest")
+            captured.update(kwargs)
+            return {
+                "zero_change_attestation_status": "attested",
+                "zero_change_attestation_recorded": True,
+                "zero_change_attestation_SHA256": "z" * 64,
+                "project_id": "PEPPER",
+                "ticket_id": "P99.101",
+                "work_packet_id": "WP-P99-101",
+                "work_packet_SHA256": "w" * 64,
+                "terminal_run_id": 20,
+                "zero_change_result": True,
+                "zero_change_authority_kind": "human_zero_change_attestation",
+                "zero_change_authority_SHA256": "z" * 64,
+                "review_prepare_eligible_result": True,
+                "validation_contract_satisfied": False,
+                "reviewable_result": False,
+                "next_action": {"id": "PREPARE_P99_101_REVIEW"},
+                "dispatch_performed": False,
+                "execution_started": False,
+                "Kanban_dispatch": False,
+                "Git_mutation": False,
+            }
+
+        def prepare_current_ticket_review(self, **_kwargs):
+            pytest.fail("attestation tool must not call PREPARE")
+
+        def submit_current_ticket_review_decision(self, **_kwargs):
+            pytest.fail("attestation tool must not submit review decision")
+
+        def start_current_ticket_execution(self, **_kwargs):
+            pytest.fail("attestation tool must not start execution")
+
+        def continue_current_ticket_governed_autonomy(self, **_kwargs):
+            pytest.fail("attestation tool must not continue autonomy")
+
+    monkeypatch.setattr(pepper_tools, "_runtime", lambda: RuntimeStub())
+    human_text = "ATTEST P99.101 ZERO CHANGE FOR REVIEW PREPARE"
+
+    result = json.loads(pepper_tools._attest_current_ticket_zero_change_for_review_prepare({
+        "human_attestation_text": human_text,
+        "project_id": "PEPPER",
+        "ticket_id": "P99.101",
+        "next_action_id": "ATTEST_P99_101_ZERO_CHANGE_FOR_REVIEW_PREPARE",
+        "reviewer_id": "human-reviewer-7",
+    }))
+
+    assert result["success"] is True
+    assert result["source_tool"] == "attest_current_ticket_zero_change_for_review_prepare"
+    assert calls == ["attest"]
+    assert captured == {
+        "human_attestation_text": human_text,
+        "project_id": "PEPPER",
+        "ticket_id": "P99.101",
+        "next_action_id": "ATTEST_P99_101_ZERO_CHANGE_FOR_REVIEW_PREPARE",
+        "reviewer_id": "human-reviewer-7",
+    }
+    assert result["zero_change_authority_SHA256"] == "z" * 64
+    assert result["review_prepare_eligible_result"] is True
+    assert result["validation_contract_satisfied"] is False
+    assert result["reviewable_result"] is False
+    assert result["next_action"]["id"] == "PREPARE_P99_101_REVIEW"
+    assert "review_prepare_validation_authority" not in result
+    assert "review_decision" not in result
+
+
+def test_zero_change_attestation_tool_non_exact_text_fails_closed_through_runtime(
+    monkeypatch,
+) -> None:
+    import tools.pepper_workflow_tools as pepper_tools
+
+    captured: dict[str, object] = {}
+
+    class RuntimeStub:
+        def attest_current_ticket_zero_change_for_review_prepare(self, **kwargs):
+            captured.update(kwargs)
+            raise RuntimeError("zero-change attestation text mismatch")
+
+        def prepare_current_ticket_review(self, **_kwargs):
+            pytest.fail("failed attestation must not call PREPARE")
+
+        def submit_current_ticket_review_decision(self, **_kwargs):
+            pytest.fail("failed attestation must not submit review decision")
+
+        def start_current_ticket_execution(self, **_kwargs):
+            pytest.fail("failed attestation must not start execution")
+
+    monkeypatch.setattr(pepper_tools, "_runtime", lambda: RuntimeStub())
+
+    result = json.loads(pepper_tools._attest_current_ticket_zero_change_for_review_prepare({
+        "human_attestation_text": "continue",
+        "project_id": "PEPPER",
+        "ticket_id": "P99.101",
+        "next_action_id": "ATTEST_P99_101_ZERO_CHANGE_FOR_REVIEW_PREPARE",
+    }))
+
+    assert result["success"] is False
+    assert "zero-change attestation text mismatch" in result["error"]
+    assert captured["human_attestation_text"] == "continue"
+
+
+def test_zero_change_attestation_required_state_surfaces_exact_text_not_prepare(
+    monkeypatch,
+) -> None:
+    required_text = "ATTEST P99.101 ZERO CHANGE FOR REVIEW PREPARE"
+    workflow = _workflow(
+        current_ticket_id="P99.101",
+        current_ticket_title="Ambiguous Null Candidate",
+        workflow_status="execution_completed_pending_zero_change_attestation",
+        validation_state="execution_completed_pending_zero_change_attestation",
+        review_state="zero_change_attestation_required",
+        human_zero_change_attestation_required=True,
+        zero_change_result=False,
+        candidate_changes_available=False,
+        human_git_handoff_required=False,
+        git_handoff_required=False,
+        next_action={
+            "id": "ATTEST_P99_101_ZERO_CHANGE_FOR_REVIEW_PREPARE",
+            "target_ticket_id": "P99.101",
+            "required_human_action": "human_zero_change_review_preparation_attestation",
+            "required_human_attestation_text": required_text,
+        },
+    )
+    _install_sources(monkeypatch, workflow=workflow)
+
+    next_action = _tool_result("get_next_action")
+    review = _tool_result("get_review_status")
+    control = _tool_result("get_workflow_control")
+
+    assert next_action["next_action"]["id"] == "ATTEST_P99_101_ZERO_CHANGE_FOR_REVIEW_PREPARE"
+    assert next_action["next_action"]["required_human_attestation_text"] == required_text
+    assert next_action["human_zero_change_attestation_required"] is True
+    assert review["human_zero_change_attestation_required"] is True
+    assert control["human_zero_change_attestation_required"] is True
+    assert next_action["next_action"]["id"] != "PREPARE_P99_101_REVIEW"
+
+
+def test_candidate_backed_and_intrinsic_zero_change_states_do_not_request_attestation(
+    monkeypatch,
+) -> None:
+    candidate_workflow = _workflow(
+        current_ticket_id="P99.102",
+        current_ticket_title="Candidate Review",
+        workflow_status="execution_completed",
+        validation_state="execution_completed_pending_validation",
+        review_state="ready_for_review_validation",
+        candidate_changes_available=True,
+        human_git_handoff_required=True,
+        git_handoff_required=True,
+        human_zero_change_attestation_required=False,
+        next_action={
+            "id": "PREPARE_P99_102_REVIEW",
+            "target_ticket_id": "P99.102",
+            "required_human_action": "review_validation_preparation_and_human_git_handoff",
+        },
+    )
+    _install_sources(monkeypatch, workflow=candidate_workflow)
+
+    candidate = _tool_result("get_next_action")
+
+    assert candidate["next_action"]["id"] == "PREPARE_P99_102_REVIEW"
+    assert "ATTEST" not in candidate["next_action"]["id"]
+    assert candidate["human_zero_change_attestation_required"] is False
+
+    intrinsic_workflow = _workflow(
+        current_ticket_id="P99.103",
+        current_ticket_title="Intrinsic No-Change",
+        workflow_status="execution_completed",
+        validation_state="execution_completed_pending_validation",
+        review_state="ready_for_review_validation",
+        zero_change_result=True,
+        zero_change_authority_kind="intrinsic_structured_zero_change_evidence",
+        zero_change_authority_SHA256="i" * 64,
+        zero_change_machine_authority_sufficient=True,
+        human_zero_change_attestation_required=False,
+        candidate_changes_available=False,
+        human_git_handoff_required=False,
+        git_handoff_required=False,
+        next_action={
+            "id": "PREPARE_P99_103_REVIEW",
+            "target_ticket_id": "P99.103",
+            "required_human_action": "review_validation_preparation_and_human_git_handoff",
+        },
+    )
+    _install_sources(monkeypatch, workflow=intrinsic_workflow)
+
+    intrinsic = _tool_result("get_next_action")
+
+    assert intrinsic["next_action"]["id"] == "PREPARE_P99_103_REVIEW"
+    assert intrinsic["zero_change_authority_kind"] == "intrinsic_structured_zero_change_evidence"
+    assert intrinsic["human_zero_change_attestation_required"] is False
+
+
+def test_invalid_and_historical_zero_change_attestation_states_remain_fail_closed(
+    monkeypatch,
+) -> None:
+    invalid_workflow = _workflow(
+        current_ticket_id="P99.104",
+        current_ticket_title="Invalid Attestation",
+        workflow_status="blocked_invalid_zero_change_attestation_authority",
+        validation_state="blocked_invalid_zero_change_attestation_authority",
+        review_state="blocked_invalid_zero_change_attestation_authority",
+        human_zero_change_attestation_required=True,
+        remaining_blockers=[{
+            "id": "P99-104-ZERO-CHANGE-ATTESTATION-AUTHORITY",
+            "status": "blocked_by_invalid_zero_change_attestation_authority",
+        }],
+        next_action={
+            "id": "P99_104_ZERO_CHANGE_ATTESTATION_AUTHORITY_REPAIR_REQUIRED",
+            "target_ticket_id": "P99.104",
+            "required_human_action": "repair_zero_change_attestation_authority",
+        },
+    )
+    _install_sources(monkeypatch, workflow=invalid_workflow)
+
+    invalid = _tool_result("get_next_action")
+
+    assert invalid["next_action"]["id"] == "P99_104_ZERO_CHANGE_ATTESTATION_AUTHORITY_REPAIR_REQUIRED"
+    assert invalid["next_action"]["id"] != "PREPARE_P99_104_REVIEW"
+    assert invalid["review_state"] == "blocked_invalid_zero_change_attestation_authority"
+
+    historical_text = "ATTEST P99.105 ZERO CHANGE FOR REVIEW PREPARE"
+    historical_workflow = _workflow(
+        current_ticket_id="P99.105",
+        current_ticket_title="Historical Attestation Is Stale",
+        workflow_status="execution_completed_pending_zero_change_attestation",
+        validation_state="execution_completed_pending_zero_change_attestation",
+        review_state="zero_change_attestation_required",
+        human_zero_change_attestation_required=True,
+        zero_change_attestation_history=[{"terminal_run_id": 19, "current": False}],
+        next_action={
+            "id": "ATTEST_P99_105_ZERO_CHANGE_FOR_REVIEW_PREPARE",
+            "target_ticket_id": "P99.105",
+            "required_human_action": "human_zero_change_review_preparation_attestation",
+            "required_human_attestation_text": historical_text,
+        },
+    )
+    _install_sources(monkeypatch, workflow=historical_workflow)
+
+    historical = _tool_result("get_next_action")
+
+    assert historical["next_action"]["id"] == "ATTEST_P99_105_ZERO_CHANGE_FOR_REVIEW_PREPARE"
+    assert historical["human_zero_change_attestation_required"] is True
+    assert historical["next_action"]["id"] != "PREPARE_P99_105_REVIEW"
 
 
 def test_continue_governed_autonomy_tool_forwards_pending_fresh_request_sha(
@@ -577,6 +859,21 @@ def test_lead_agent_prompt_requires_tool_backed_state() -> None:
     assert "submit_current_ticket_review_decision" in prompt
     assert "accept, changes_requested, and reject" in prompt
     assert "Do not route human review accept, changes_requested, or reject decisions" in prompt
+    assert "attest_current_ticket_zero_change_for_review_prepare" in prompt
+    assert "ATTEST_<current-ticket>_ZERO_CHANGE_FOR_REVIEW_PREPARE" in prompt
+    assert "required_human_action=human_zero_change_review_preparation_attestation" in prompt
+    assert "do not route to PREPARE_<current-ticket>_REVIEW yet" in prompt
+    assert "required_human_attestation_text" in prompt
+    assert "requires exact human zero-change attestation" in prompt
+    assert "Generic confirmations such as continue, yes, do it, confirm, prepare review, or no changes" in prompt
+    assert "must not be converted into the canonical attestation phrase" in prompt
+    assert "must stop at the resulting workflow state" in prompt
+    assert "Do not automatically call prepare_current_ticket_review" in prompt
+    assert "Candidate-backed results" in prompt
+    assert "machine-native structured zero-change authority" in prompt
+    assert "invalid/tampered attestation blockers" in prompt
+    assert "historical attestation existence alone" in prompt
+    assert "no PREPARE, validation success, review decision, closure, execution, continuation, or Git mutation" in prompt
     assert "prepare_current_ticket_human_git_handoff" in prompt
     assert "non-executing P17.7 human Git handoff package plus C12 materialization instructions" in prompt
     assert "copying accepted candidate bytes into the canonical checkout" in prompt
@@ -604,6 +901,10 @@ def test_lead_agent_prompt_requires_tool_backed_state() -> None:
     assert "resolve_repository_authority" in prompt
     assert "Do not infer the active governed project from cwd" in prompt
     assert "Do not tell the user to inspect or copy dashboard state" in prompt
+    assert "P18.9.4" not in prompt
+    assert "R0002" not in prompt
+    assert "run19" not in prompt
+    assert "t_7d7f88ad" not in prompt
 
 
 def test_context_has_no_gbrain_dependency(monkeypatch) -> None:
