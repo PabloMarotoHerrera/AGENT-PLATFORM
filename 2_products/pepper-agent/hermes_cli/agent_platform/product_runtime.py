@@ -72,6 +72,21 @@ PEPPER_SCRATCH_SOURCE_MATERIALIZATION_POLICY_ID = (
 PEPPER_SCRATCH_SOURCE_MATERIALIZATION_MANIFEST = (
     ".hermes-agent-platform/workpacket-source-materialization.json"
 )
+PEPPER_GOVERNED_SOURCE_AUTHORITY_POLICY_ID = (
+    "pepper-governed-workpacket-durable-source-authority-v1"
+)
+PEPPER_GOVERNED_SOURCE_AUTHORITY_DIGEST_ALGORITHM = (
+    "agent-platform-pepper-governed-source-authority-sha256-v1"
+)
+PEPPER_GOVERNED_SOURCE_SNAPSHOT_DIGEST_ALGORITHM = (
+    "agent-platform-pepper-governed-source-snapshot-sha256-v1"
+)
+PEPPER_GOVERNED_SOURCE_MATERIALIZATION_MANIFEST_DIGEST_ALGORITHM = (
+    "agent-platform-pepper-source-materialization-manifest-sha256-v1"
+)
+PEPPER_REVIEW_PREPARE_VALIDATION_WORKSPACE_POLICY_ID = (
+    "pepper-review-prepare-validation-rematerialized-workspace-v1"
+)
 PEPPER_SCRATCH_DEPENDENCY_SUBSTRATE_POLICY_ID = (
     "pepper-governed-workpacket-scratch-dependency-substrate-v1"
 )
@@ -280,6 +295,10 @@ _GOVERNED_TICKET_HUMAN_GIT_HANDOFF_PREPARE_STORE_DIR = (
 )
 _GOVERNED_TICKET_AUTONOMY_STORE_DIR = (
     Path("agent-platform") / "pepper-governed-autonomy-action"
+)
+_GOVERNED_SOURCE_AUTHORITY_STORE_DIR = Path("agent-platform") / "source-authority"
+_GOVERNED_REVIEW_PREPARE_VALIDATION_WORKSPACE_STORE_DIR = (
+    Path("agent-platform") / "review-prepare-workspaces"
 )
 _GOVERNED_TICKET_AUTHORITY_PATH_SPECS = {
     "execution_start": (
@@ -1698,6 +1717,91 @@ def governed_ticket_lifecycle_authority_path(
     )
     store_dir, suffix = _GOVERNED_TICKET_AUTHORITY_PATH_SPECS[kind]
     return get_hermes_home() / store_dir / f"{scoped_ticket_id}.{suffix}"
+
+
+def _safe_authority_path_token(value: object, *, limit: int = 128) -> str:
+    text = _safe_text(value, limit=limit).strip()
+    token = re.sub(r"[^A-Za-z0-9_.-]+", "_", text).strip("._")
+    return token or "unknown"
+
+
+def _governed_source_authority_path_identity(
+    projection: dict[str, Any],
+    run_id: int,
+) -> dict[str, Any]:
+    run_number = int(run_id)
+    return {
+        "policy_id": PEPPER_GOVERNED_SOURCE_AUTHORITY_POLICY_ID,
+        "project_id": _safe_text(projection.get("project_id"), limit=128),
+        "ticket_id": _safe_text(projection.get("ticket_id"), limit=128),
+        "ticket_spec_SHA256": _safe_text(
+            projection.get("ticket_spec_SHA256"),
+            limit=64,
+        ),
+        "work_packet_id": _safe_text(projection.get("work_packet_id"), limit=160),
+        "work_packet_SHA256": _safe_text(
+            projection.get("work_packet_SHA256"),
+            limit=64,
+        ),
+        "projection_SHA256": _safe_text(
+            projection.get("projection_SHA256"),
+            limit=64,
+        ),
+        "kanban_board_slug": _safe_text(
+            projection.get("kanban_board_slug"),
+            limit=128,
+        ),
+        "kanban_task_id": _safe_text(projection.get("kanban_task_id"), limit=160),
+        "run_id": run_number,
+    }
+
+
+def governed_source_authority_run_dir(projection: dict[str, Any], run_id: int) -> Path:
+    """Return the profile-scoped durable source-authority directory for a run."""
+
+    from hermes_constants import get_hermes_home
+
+    run_number = int(run_id)
+    path_digest = _digest_payload(
+        "pepper-governed-source-authority-path-id-sha256-v1",
+        _governed_source_authority_path_identity(projection, run_number),
+    )[:16]
+    return get_hermes_home() / _GOVERNED_SOURCE_AUTHORITY_STORE_DIR / f"r{run_number}-{path_digest}"
+
+
+def governed_source_authority_record_path_for_run(
+    projection: dict[str, Any],
+    run_id: int,
+) -> Path:
+    """Return the durable source-authority record path for a terminal run."""
+
+    return governed_source_authority_run_dir(projection, run_id) / "source-authority.json"
+
+
+def review_prepare_validation_workspace_path_for_run(
+    ticket_id: str,
+    run_id: int,
+    authority_sha256: str,
+) -> Path:
+    """Return the separate PREPARE validation workspace for a rematerialized run."""
+
+    from hermes_constants import get_hermes_home
+
+    run_number = int(run_id)
+    path_digest = _digest_payload(
+        "pepper-review-prepare-validation-workspace-path-id-sha256-v1",
+        {
+            "policy_id": PEPPER_REVIEW_PREPARE_VALIDATION_WORKSPACE_POLICY_ID,
+            "ticket_id": _safe_text(ticket_id, limit=128),
+            "run_id": run_number,
+            "authority_SHA256": _safe_text(authority_sha256, limit=64),
+        },
+    )[:16]
+    return (
+        get_hermes_home()
+        / _GOVERNED_REVIEW_PREPARE_VALIDATION_WORKSPACE_STORE_DIR
+        / f"r{run_number}-{path_digest}"
+    )
 
 
 def execution_start_record_path_for_ticket(ticket_id: str) -> Path:
@@ -13764,6 +13868,1074 @@ def _write_materialization_manifest(
     )
 
 
+def _governed_source_authority_record_digest(record: dict[str, Any]) -> str:
+    return _digest_payload(
+        PEPPER_GOVERNED_SOURCE_AUTHORITY_DIGEST_ALGORITHM,
+        {
+            key: value
+            for key, value in record.items()
+            if key != "governed_source_authority_SHA256"
+        },
+    )
+
+
+def _normalize_source_authority_snapshot_relative_path(value: object) -> str:
+    text = str(value or "").strip().replace("\\", "/")
+    if not text or text.startswith("/") or re.match(r"^[A-Za-z]:", text):
+        raise ProductRuntimeConflict("source-authority snapshot path must be repository-relative")
+    if any(ord(character) < 32 or ord(character) == 127 for character in text):
+        raise ProductRuntimeConflict("source-authority snapshot path contains control characters")
+    parts = tuple(part for part in text.split("/") if part)
+    if len(parts) != len(text.split("/")) or any(part in {".", ".."} for part in parts):
+        raise ProductRuntimeConflict("source-authority snapshot path contains traversal")
+    lowered = tuple(part.casefold() for part in parts)
+    if any(part in {".git", ".opencode", ".agents"} for part in lowered):
+        raise ProductRuntimeConflict("source-authority snapshot path targets a protected root")
+    if lowered and lowered[0] in {"graphify-out", "4_external"}:
+        raise ProductRuntimeConflict("source-authority snapshot path targets a protected root")
+    return "/".join(parts)
+
+
+def _source_authority_snapshot_roots(materialization: dict[str, Any]) -> tuple[str, ...]:
+    roots: set[str] = set()
+    for key in ("materialized_roots", "product_diff_excluded_roots"):
+        for item in materialization.get(key) or ():
+            roots.add(_normalize_source_authority_snapshot_relative_path(item))
+    for item in materialization.get("dependency_substrates") or ():
+        if isinstance(item, dict) and item.get("scratch_dependency_root_relative"):
+            roots.add(
+                _normalize_source_authority_snapshot_relative_path(
+                    item["scratch_dependency_root_relative"]
+                )
+            )
+    for item in materialization.get("local_package_source_materializations") or ():
+        if isinstance(item, dict) and item.get("local_package_source_relative"):
+            roots.add(
+                _normalize_source_authority_snapshot_relative_path(
+                    item["local_package_source_relative"]
+                )
+            )
+    return _prune_nested_source_authority_roots(tuple(sorted(roots)))
+
+
+def _prune_nested_source_authority_roots(roots: tuple[str, ...]) -> tuple[str, ...]:
+    pruned: list[str] = []
+    for root in roots:
+        if any(root == kept or root.startswith(f"{kept.rstrip('/')}/") for kept in pruned):
+            continue
+        pruned.append(root)
+    return tuple(pruned)
+
+
+def _remove_source_authority_directory(path: Path, *, base_dir: Path) -> None:
+    try:
+        resolved = path.resolve(strict=False)
+        resolved.relative_to(base_dir.resolve(strict=False))
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise ProductRuntimeConflict("source-authority directory escapes durable store") from exc
+    if path.is_symlink():
+        raise ProductRuntimeConflict("source-authority directory refuses symlink removal")
+    if path.exists():
+        shutil.rmtree(path)
+
+
+def _copy_source_authority_snapshot_root(
+    source_root: Path,
+    destination_root: Path,
+    *,
+    relative_root: str,
+    copied_files: set[str],
+    copied_directories: set[str],
+) -> None:
+    from hermes_cli.agent_platform.runtime_adapter.path_containment import is_reparse_or_symlink
+
+    rel = _normalize_source_authority_snapshot_relative_path(relative_root)
+    source = source_root / rel
+    destination = destination_root / rel
+    if not source.exists() and not source.is_symlink():
+        raise ProductRuntimeConflict(f"source-authority snapshot root is missing: {rel}")
+    if is_reparse_or_symlink(source):
+        raise ProductRuntimeConflict("source-authority snapshot refuses reparse source roots")
+    try:
+        source.resolve(strict=True).relative_to(source_root)
+        destination.resolve(strict=False).relative_to(destination_root)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise ProductRuntimeConflict("source-authority snapshot path escapes its authority root") from exc
+    if source.is_file():
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+        copied_files.add(rel)
+        return
+    if not source.is_dir():
+        raise ProductRuntimeConflict(f"source-authority snapshot root is not readable: {rel}")
+    for root, dirnames, filenames in os.walk(source):
+        root_path = Path(root)
+        rel_root = root_path.relative_to(source_root).as_posix()
+        copied_directories.add(rel_root)
+        kept_dirnames: list[str] = []
+        for dirname in dirnames:
+            child = root_path / dirname
+            if is_reparse_or_symlink(child):
+                raise ProductRuntimeConflict(
+                    "source-authority snapshot refuses reparse directories"
+                )
+            kept_dirnames.append(dirname)
+        dirnames[:] = kept_dirnames
+        dest_root = destination_root / rel_root
+        dest_root.mkdir(parents=True, exist_ok=True)
+        for filename in filenames:
+            source_file = root_path / filename
+            if is_reparse_or_symlink(source_file):
+                raise ProductRuntimeConflict("source-authority snapshot refuses symlinked files")
+            rel_file = source_file.relative_to(source_root).as_posix()
+            dest_file = destination_root / rel_file
+            dest_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_file, dest_file)
+            copied_files.add(rel_file)
+
+
+def _build_governed_source_snapshot_manifest(snapshot_root: Path) -> dict[str, Any]:
+    files: list[dict[str, Any]] = []
+    directories: set[str] = set()
+    try:
+        root = snapshot_root.resolve(strict=True)
+    except OSError as exc:
+        raise ProductRuntimeConflict("source-authority snapshot root is unavailable") from exc
+
+    def on_walk_error(error: OSError) -> None:
+        raise ProductRuntimeConflict("source-authority snapshot tree is unreadable") from error
+
+    for current_root, dirnames, filenames in os.walk(root, onerror=on_walk_error):
+        current_path = Path(current_root)
+        rel_root = current_path.relative_to(root).as_posix()
+        if rel_root != ".":
+            directories.add(rel_root)
+        dirnames.sort()
+        for filename in sorted(filenames):
+            path = current_path / filename
+            rel = path.relative_to(root).as_posix()
+            digest = _sha256_file_or_none(path)
+            if digest is None:
+                raise ProductRuntimeConflict("source-authority snapshot contains unreadable file")
+            files.append({
+                "relative_path": rel,
+                "SHA256": digest,
+                "size_bytes": path.stat().st_size,
+            })
+    payload = {
+        "schema_version": 1,
+        "policy_id": PEPPER_GOVERNED_SOURCE_AUTHORITY_POLICY_ID,
+        "files": files,
+        "directories": sorted(directories),
+        "file_count": len(files),
+        "directory_count": len(directories),
+        "total_bytes": sum(int(item["size_bytes"]) for item in files),
+    }
+    payload["snapshot_SHA256"] = _digest_payload(
+        PEPPER_GOVERNED_SOURCE_SNAPSHOT_DIGEST_ALGORITHM,
+        payload,
+    )
+    return payload
+
+
+def _create_governed_source_snapshot(
+    workspace_root: Path,
+    *,
+    run_dir: Path,
+    materialization: dict[str, Any],
+) -> dict[str, Any]:
+    run_dir.mkdir(parents=True, exist_ok=True)
+    temp_root = run_dir / "src.tmp"
+    _remove_source_authority_directory(temp_root, base_dir=run_dir)
+    temp_root.mkdir(parents=True, exist_ok=True)
+    copied_files: set[str] = set()
+    copied_directories: set[str] = set()
+    for relative_root in _source_authority_snapshot_roots(materialization):
+        _copy_source_authority_snapshot_root(
+            workspace_root,
+            temp_root,
+            relative_root=relative_root,
+            copied_files=copied_files,
+            copied_directories=copied_directories,
+        )
+    manifest = _build_governed_source_snapshot_manifest(temp_root)
+    final_root = run_dir / "src"
+    _remove_source_authority_directory(final_root, base_dir=run_dir)
+    temp_root.replace(final_root)
+    manifest["snapshot_root"] = str(final_root)
+    manifest_path = run_dir / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    manifest["snapshot_manifest_path"] = str(manifest_path)
+    manifest["snapshot_manifest_SHA256"] = _sha256_file_or_none(manifest_path)
+    return manifest
+
+
+def _run_source_authority_git(
+    source_root: Path,
+    *args: str,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=source_root,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=15,
+    )
+
+
+def _governed_source_git_status_pathspecs(
+    materialization: dict[str, Any],
+) -> tuple[str, ...]:
+    return tuple(
+        root.rstrip("/")
+        for root in _source_authority_snapshot_roots(materialization)
+        if root.rstrip("/")
+    )
+
+
+def _governed_source_git_authority(
+    source_root: Path,
+    *,
+    materialization: dict[str, Any],
+) -> dict[str, Any]:
+    try:
+        resolved_source = source_root.resolve(strict=True)
+    except OSError as exc:
+        raise ProductRuntimeConflict("source-authority canonical source root is unavailable") from exc
+    top = _run_source_authority_git(resolved_source, "rev-parse", "--show-toplevel")
+    if top.returncode != 0:
+        return {
+            "source_authority_kind": "filesystem_snapshot_without_git",
+            "git_available": False,
+            "source_root": str(resolved_source),
+            "clean_source_required": False,
+            "clean_source_validated": False,
+            "git_error_excerpt": _safe_text(top.stderr or top.stdout, limit=300),
+        }
+    git_root = Path(top.stdout.strip()).resolve(strict=True)
+    try:
+        resolved_source.relative_to(git_root)
+    except ValueError as exc:
+        raise ProductRuntimeConflict("source-authority source root is outside git root") from exc
+    branch = _run_source_authority_git(resolved_source, "rev-parse", "--abbrev-ref", "HEAD")
+    head = _run_source_authority_git(resolved_source, "rev-parse", "HEAD")
+    tree = _run_source_authority_git(resolved_source, "rev-parse", "HEAD^{tree}")
+    status_pathspecs = _governed_source_git_status_pathspecs(materialization)
+    if status_pathspecs:
+        status = _run_source_authority_git(
+            resolved_source,
+            "status",
+            "--porcelain",
+            "--untracked-files=all",
+            "--",
+            *status_pathspecs,
+        )
+    else:
+        status = subprocess.CompletedProcess(
+            args=("git", "status", "--porcelain", "--untracked-files=all", "--"),
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+    for label, result in (
+        ("branch", branch),
+        ("head", head),
+        ("tree", tree),
+        ("status", status),
+    ):
+        if result.returncode != 0:
+            raise ProductRuntimeConflict(
+                f"source-authority git {label} inspection failed: "
+                f"{_safe_text(result.stderr or result.stdout, limit=240)}"
+            )
+    status_lines = [line for line in status.stdout.splitlines() if line.strip()]
+    if status_lines:
+        raise ProductRuntimeConflict(
+            "governed source authority requires a clean git worktree; dirty entries: "
+            + ", ".join(_safe_text(line, limit=120) for line in status_lines[:5])
+        )
+    return {
+        "source_authority_kind": "git_clean_head_tree",
+        "git_available": True,
+        "source_root": str(resolved_source),
+        "git_repository_root": str(git_root),
+        "git_branch": branch.stdout.strip(),
+        "git_HEAD": head.stdout.strip().lower(),
+        "git_tree_SHA256": tree.stdout.strip().lower(),
+        "git_status_clean": True,
+        "git_status_scope": "materialized_source_closure",
+        "git_status_scope_pathspecs": list(status_pathspecs),
+        "clean_source_required": True,
+        "clean_source_validated": True,
+        "Git_mutation": False,
+    }
+
+
+def _source_authority_materialization_payload(
+    materialization: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in materialization.items()
+        if key
+        not in {
+            "durable_source_authority_reference",
+            "durable_source_authority_SHA256",
+            "governed_source_authority_path",
+            "governed_source_authority_snapshot_SHA256",
+        }
+    }
+
+
+def _governed_source_authority_reference(record: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "available": True,
+        "policy_id": PEPPER_GOVERNED_SOURCE_AUTHORITY_POLICY_ID,
+        "authority_path": record["authority_path"],
+        "authority_SHA256": record["governed_source_authority_SHA256"],
+        "snapshot_SHA256": record["snapshot_SHA256"],
+        "snapshot_manifest_SHA256": record.get("snapshot_manifest_SHA256"),
+        "source_authority_kind": record.get("source_authority_kind"),
+        "ticket_id": record["ticket_id"],
+        "work_packet_id": record["work_packet_id"],
+        "work_packet_SHA256": record["work_packet_SHA256"],
+        "projection_SHA256": record["projection_SHA256"],
+        "kanban_board_slug": record["kanban_board_slug"],
+        "kanban_task_id": record["kanban_task_id"],
+        "run_id": record["run_id"],
+    }
+
+
+def _materialization_with_durable_source_authority(
+    materialization: dict[str, Any],
+    reference: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not isinstance(reference, dict):
+        return materialization
+    updated = dict(materialization)
+    updated["durable_source_authority_reference"] = reference
+    updated["durable_source_authority_SHA256"] = reference.get("authority_SHA256")
+    updated["governed_source_authority_path"] = reference.get("authority_path")
+    updated["governed_source_authority_snapshot_SHA256"] = reference.get(
+        "snapshot_SHA256"
+    )
+    updated["source_authority_kind"] = reference.get("source_authority_kind")
+    return updated
+
+
+def _persist_governed_source_authority(
+    *,
+    projection: dict[str, Any],
+    workspace: Path | str,
+    materialization: dict[str, Any],
+    run_id: int | None,
+) -> dict[str, Any] | None:
+    if not isinstance(materialization, dict) or not materialization.get("source_root"):
+        return None
+    terminal_run_id = _int_or_none(run_id)
+    if terminal_run_id is None:
+        raise ProductRuntimeConflict("governed source authority requires a terminal run id")
+    workspace_root = Path(workspace).expanduser().resolve(strict=True)
+    run_dir = governed_source_authority_run_dir(projection, terminal_run_id)
+    source_root = Path(str(materialization["source_root"])).expanduser()
+    git_authority = _governed_source_git_authority(
+        source_root,
+        materialization=materialization,
+    )
+    snapshot = _create_governed_source_snapshot(
+        workspace_root,
+        run_dir=run_dir,
+        materialization=materialization,
+    )
+    manifest_payload = _source_authority_materialization_payload(materialization)
+    record = {
+        "schema_version": 1,
+        "policy_id": PEPPER_GOVERNED_SOURCE_AUTHORITY_POLICY_ID,
+        "source_system": "pepper-governed-source-authority",
+        "created_at": _utc_now_iso(),
+        "project_id": projection["project_id"],
+        "ticket_id": projection["ticket_id"],
+        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
+        "work_packet_id": projection["work_packet_id"],
+        "work_packet_SHA256": projection["work_packet_SHA256"],
+        "projection_SHA256": projection["projection_SHA256"],
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+        "run_id": terminal_run_id,
+        "authority_path": str(governed_source_authority_record_path_for_run(
+            projection,
+            terminal_run_id,
+        )),
+        "source_authority_kind": git_authority["source_authority_kind"],
+        "git_source_authority": git_authority,
+        "materialization_manifest": manifest_payload,
+        "materialization_manifest_SHA256": _digest_payload(
+            PEPPER_GOVERNED_SOURCE_MATERIALIZATION_MANIFEST_DIGEST_ALGORITHM,
+            manifest_payload,
+        ),
+        "snapshot_root": snapshot["snapshot_root"],
+        "snapshot_manifest_path": snapshot["snapshot_manifest_path"],
+        "snapshot_manifest_SHA256": snapshot["snapshot_manifest_SHA256"],
+        "snapshot_SHA256": snapshot["snapshot_SHA256"],
+        "snapshot_file_count": snapshot["file_count"],
+        "snapshot_directory_count": snapshot["directory_count"],
+        "snapshot_total_bytes": snapshot["total_bytes"],
+        "snapshot_manifest": {
+            key: value
+            for key, value in snapshot.items()
+            if key not in {"snapshot_root", "snapshot_manifest_path", "snapshot_manifest_SHA256"}
+        },
+        "validation_substrate_snapshot_materialized": True,
+        "dependency_install_performed": False,
+        "canonical_package_lock_materialized": False,
+        "Git_mutation": False,
+        "Docker_commands_executed": 0,
+        "Graphify_commands_executed": 0,
+    }
+    record["governed_source_authority_SHA256"] = _governed_source_authority_record_digest(
+        record
+    )
+    path = Path(record["authority_path"])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(
+        json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    tmp.replace(path)
+    return _governed_source_authority_reference(record)
+
+
+def _validate_governed_source_authority_record(
+    record: dict[str, Any],
+    *,
+    projection: dict[str, Any],
+    run_id: int | None = None,
+) -> dict[str, Any]:
+    if not isinstance(record, dict):
+        raise ProductRuntimeConflict("governed source authority record must be an object")
+    if record.get("governed_source_authority_SHA256") != _governed_source_authority_record_digest(record):
+        raise ProductRuntimeConflict("governed source authority record digest mismatch")
+    expected = {
+        "policy_id": PEPPER_GOVERNED_SOURCE_AUTHORITY_POLICY_ID,
+        "project_id": projection["project_id"],
+        "ticket_id": projection["ticket_id"],
+        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
+        "work_packet_id": projection["work_packet_id"],
+        "work_packet_SHA256": projection["work_packet_SHA256"],
+        "projection_SHA256": projection["projection_SHA256"],
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+    }
+    for key, value in expected.items():
+        if record.get(key) != value:
+            raise ProductRuntimeConflict(f"governed source authority record {key} mismatch")
+    if run_id is not None and _int_or_none(record.get("run_id")) != _int_or_none(run_id):
+        raise ProductRuntimeConflict("governed source authority run id mismatch")
+    expected_path = governed_source_authority_record_path_for_run(
+        projection,
+        int(record["run_id"]),
+    )
+    if Path(str(record.get("authority_path") or "")) != expected_path:
+        raise ProductRuntimeConflict("governed source authority path mismatch")
+    materialization = record.get("materialization_manifest")
+    if not isinstance(materialization, dict):
+        raise ProductRuntimeConflict("governed source authority materialization manifest missing")
+    if record.get("materialization_manifest_SHA256") != _digest_payload(
+        PEPPER_GOVERNED_SOURCE_MATERIALIZATION_MANIFEST_DIGEST_ALGORITHM,
+        materialization,
+    ):
+        raise ProductRuntimeConflict("governed source authority materialization digest mismatch")
+    snapshot_manifest_path = Path(str(record.get("snapshot_manifest_path") or "")).expanduser()
+    if _sha256_file_or_none(snapshot_manifest_path) != record.get("snapshot_manifest_SHA256"):
+        raise ProductRuntimeConflict("governed source authority snapshot manifest digest mismatch")
+    snapshot_root = Path(str(record.get("snapshot_root") or "")).expanduser()
+    observed_snapshot = _build_governed_source_snapshot_manifest(snapshot_root)
+    expected_snapshot = record.get("snapshot_manifest")
+    if not isinstance(expected_snapshot, dict):
+        raise ProductRuntimeConflict("governed source authority snapshot manifest missing")
+    for key in (
+        "snapshot_SHA256",
+        "file_count",
+        "directory_count",
+        "total_bytes",
+        "directories",
+        "files",
+    ):
+        if observed_snapshot.get(key) != expected_snapshot.get(key):
+            raise ProductRuntimeConflict("governed source authority snapshot digest mismatch")
+    git_authority = record.get("git_source_authority")
+    if not isinstance(git_authority, dict):
+        raise ProductRuntimeConflict("governed source authority git binding missing")
+    if record.get("source_authority_kind") == "git_clean_head_tree":
+        if git_authority.get("clean_source_validated") is not True:
+            raise ProductRuntimeConflict("governed source authority clean git binding missing")
+        for key in ("git_HEAD", "git_tree_SHA256"):
+            if not isinstance(git_authority.get(key), str) or not git_authority[key]:
+                raise ProductRuntimeConflict(f"governed source authority {key} missing")
+    return record
+
+
+def _validate_governed_source_authority_reference(
+    reference: dict[str, Any],
+    *,
+    projection: dict[str, Any],
+    run_id: int,
+) -> dict[str, Any]:
+    if not isinstance(reference, dict):
+        raise ProductRuntimeConflict("governed source authority reference is unavailable")
+    if reference.get("available") is not True:
+        raise ProductRuntimeConflict("governed source authority reference is unavailable")
+    if reference.get("policy_id") != PEPPER_GOVERNED_SOURCE_AUTHORITY_POLICY_ID:
+        raise ProductRuntimeConflict("governed source authority reference policy mismatch")
+    expected = {
+        "ticket_id": projection["ticket_id"],
+        "work_packet_id": projection["work_packet_id"],
+        "work_packet_SHA256": projection["work_packet_SHA256"],
+        "projection_SHA256": projection["projection_SHA256"],
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+        "run_id": int(run_id),
+    }
+    for key, value in expected.items():
+        if key not in reference:
+            continue
+        observed = _int_or_none(reference.get(key)) if key == "run_id" else reference.get(key)
+        if observed != value:
+            raise ProductRuntimeConflict(
+                f"governed source authority reference {key} mismatch"
+            )
+    for key in ("authority_SHA256", "snapshot_SHA256"):
+        value = str(reference.get(key) or "").strip().lower()
+        if not _SAFE_SHA256.fullmatch(value):
+            raise ProductRuntimeConflict(
+                f"governed source authority reference {key} invalid"
+            )
+        reference[key] = value
+    path = Path(str(reference.get("authority_path") or "")).expanduser()
+    expected_path = governed_source_authority_record_path_for_run(
+        projection,
+        run_id,
+    )
+    if path != expected_path:
+        raise ProductRuntimeConflict("governed source authority reference path mismatch")
+    validated = dict(reference)
+    validated["authority_path"] = str(expected_path)
+    return validated
+
+
+def _load_governed_source_authority_from_reference(
+    reference: dict[str, Any],
+    *,
+    projection: dict[str, Any],
+    run_id: int,
+) -> dict[str, Any]:
+    trusted_reference = _validate_governed_source_authority_reference(
+        reference,
+        projection=projection,
+        run_id=run_id,
+    )
+    path = Path(str(trusted_reference["authority_path"])).expanduser()
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ProductRuntimeConflict("governed source authority record is unreadable") from exc
+    if not isinstance(record, dict):
+        raise ProductRuntimeConflict("governed source authority record must be an object")
+    record_sha = record.get("governed_source_authority_SHA256")
+    if record_sha != _governed_source_authority_record_digest(record):
+        raise ProductRuntimeConflict("governed source authority record digest mismatch")
+    if trusted_reference.get("authority_SHA256") != record_sha:
+        raise ProductRuntimeConflict("governed source authority reference digest mismatch")
+    if trusted_reference.get("snapshot_SHA256") != record.get("snapshot_SHA256"):
+        raise ProductRuntimeConflict("governed source authority reference digest mismatch")
+    validated = _validate_governed_source_authority_record(
+        record,
+        projection=projection,
+        run_id=run_id,
+    )
+    return validated
+
+
+def _copy_governed_source_authority_snapshot_files(
+    *,
+    source_authority: dict[str, Any],
+    workspace_root: Path,
+) -> None:
+    from hermes_cli.agent_platform.runtime_adapter.path_containment import is_reparse_or_symlink
+
+    snapshot_root = Path(str(source_authority.get("snapshot_root") or "")).expanduser()
+    try:
+        snapshot = snapshot_root.resolve(strict=True)
+        workspace = workspace_root.expanduser().resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise ProductRuntimeConflict("governed source-authority snapshot is unavailable") from exc
+    if not snapshot.is_dir() or is_reparse_or_symlink(snapshot):
+        raise ProductRuntimeConflict("governed source-authority snapshot root is invalid")
+    if not workspace.is_dir() or is_reparse_or_symlink(workspace):
+        raise ProductRuntimeConflict("governed source-authority workspace root is invalid")
+    for root, dirnames, filenames in os.walk(snapshot):
+        root_path = Path(root)
+        rel_root = root_path.relative_to(snapshot).as_posix()
+        kept_dirnames: list[str] = []
+        for dirname in dirnames:
+            child = root_path / dirname
+            if is_reparse_or_symlink(child):
+                raise ProductRuntimeConflict(
+                    "governed source-authority snapshot contains a reparse directory"
+                )
+            kept_dirnames.append(dirname)
+        dirnames[:] = kept_dirnames
+        destination_root = workspace if rel_root == "." else workspace / rel_root
+        _ensure_materialized_directory(destination_root, workspace_root=workspace)
+        for filename in filenames:
+            source_file = root_path / filename
+            if is_reparse_or_symlink(source_file):
+                raise ProductRuntimeConflict(
+                    "governed source-authority snapshot contains a symlinked file"
+                )
+            destination_file = destination_root / filename
+            _ensure_materialized_directory(destination_file.parent, workspace_root=workspace)
+            _assert_materialized_destination(destination_file, workspace_root=workspace)
+            shutil.copy2(source_file, destination_file)
+
+
+def _dispatch_source_authority_materialization_manifest(
+    *,
+    source_authority: dict[str, Any],
+    workspace_root: Path,
+) -> dict[str, Any]:
+    materialization = source_authority.get("materialization_manifest")
+    if not isinstance(materialization, dict):
+        raise ProductRuntimeConflict("source authority materialization manifest is unavailable")
+    manifest = dict(materialization)
+    manifest.update({
+        "source_root": str(Path(str(source_authority["snapshot_root"])).resolve(strict=True)),
+        "workspace_root": str(workspace_root),
+        "manifest_path": str(workspace_root / PEPPER_SCRATCH_SOURCE_MATERIALIZATION_MANIFEST),
+        "source_authority_materialization_origin": "pre_dispatch_validated_source_authority",
+        "source_authority_materialized_before_worker_execution": True,
+        "durable_source_authority_validated_before_worker_execution": True,
+        "rematerialized_from_source_authority": True,
+        "rematerialized_from_terminal_run_id": source_authority["run_id"],
+        "original_workspace_root": materialization.get("workspace_root"),
+        "source_authority_materialization_manifest_SHA256": source_authority.get(
+            "materialization_manifest_SHA256"
+        ),
+        "durable_source_authority_reference": _governed_source_authority_reference(
+            source_authority
+        ),
+        "durable_source_authority_SHA256": source_authority.get(
+            "governed_source_authority_SHA256"
+        ),
+        "governed_source_authority_path": source_authority.get("authority_path"),
+        "governed_source_authority_snapshot_SHA256": source_authority.get(
+            "snapshot_SHA256"
+        ),
+        "source_authority_kind": source_authority.get("source_authority_kind"),
+    })
+    return manifest
+
+
+def _materialize_dispatch_workspace_from_source_authority(
+    *,
+    source_authority: dict[str, Any],
+    workspace_root: Path,
+) -> dict[str, Any]:
+    workspace = workspace_root.expanduser().resolve(strict=True)
+    _copy_governed_source_authority_snapshot_files(
+        source_authority=source_authority,
+        workspace_root=workspace,
+    )
+    manifest = _dispatch_source_authority_materialization_manifest(
+        source_authority=source_authority,
+        workspace_root=workspace,
+    )
+    _write_materialization_manifest(
+        Path(manifest["manifest_path"]),
+        manifest,
+        workspace_root=workspace,
+    )
+    verification = _verify_rematerialized_source_authority_workspace(
+        source_authority=source_authority,
+        workspace_root=workspace,
+    )
+    manifest["source_authority_materialization_verification"] = verification
+    _write_materialization_manifest(
+        Path(manifest["manifest_path"]),
+        manifest,
+        workspace_root=workspace,
+    )
+    return manifest
+
+
+def _prepare_governed_source_authority_for_dispatch(
+    *,
+    projection: dict[str, Any],
+    workspace: Path | str,
+    env_overlay: dict[str, str],
+    run_id: int | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    terminal_run_id = _int_or_none(run_id)
+    if terminal_run_id is None:
+        raise ProductRuntimeConflict("source authority validation requires a terminal run id")
+    run_dir = governed_source_authority_run_dir(projection, terminal_run_id)
+    derivation_workspace = run_dir / "d"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    _remove_source_authority_directory(derivation_workspace, base_dir=run_dir)
+    derivation_workspace.mkdir(parents=True, exist_ok=True)
+    try:
+        source_materialization = _materialize_pepper_governed_scratch_source(
+            projection,
+            derivation_workspace,
+            env_overlay=env_overlay,
+        )
+    except Exception:
+        try:
+            _remove_source_authority_directory(derivation_workspace, base_dir=run_dir)
+        except Exception:
+            pass
+        raise
+    try:
+        durable_reference = _persist_governed_source_authority(
+            projection=projection,
+            workspace=derivation_workspace,
+            materialization=source_materialization,
+            run_id=terminal_run_id,
+        )
+    except Exception as exc:
+        try:
+            _remove_source_authority_directory(derivation_workspace, base_dir=run_dir)
+        except Exception:
+            pass
+        raise ProductRuntimeConflict(f"source authority persistence failed: {exc}") from exc
+    try:
+        _remove_source_authority_directory(derivation_workspace, base_dir=run_dir)
+    except Exception:
+        pass
+    if durable_reference is None:
+        raise ProductRuntimeConflict("source authority persistence did not produce authority")
+    authority = _load_governed_source_authority_from_reference(
+        durable_reference,
+        projection=projection,
+        run_id=terminal_run_id,
+    )
+    try:
+        rematerialized = _materialize_dispatch_workspace_from_source_authority(
+            source_authority=authority,
+            workspace_root=Path(workspace),
+        )
+    except Exception as exc:
+        raise ProductRuntimeConflict(f"source authority materialization failed: {exc}") from exc
+    durable_reference = _governed_source_authority_reference(authority)
+    rematerialized = _materialization_with_durable_source_authority(
+        rematerialized,
+        durable_reference,
+    )
+    rematerialized["durable_source_authority_validated_before_worker_execution"] = True
+    rematerialized["source_authority_materialized_before_worker_execution"] = True
+    return rematerialized, durable_reference
+
+
+def _source_authority_reference_from_container(
+    container: dict[str, Any] | None,
+    *,
+    projection: dict[str, Any],
+    run_id: int,
+) -> dict[str, Any] | None:
+    if not isinstance(container, dict):
+        return None
+    nested = container.get("durable_source_authority_reference")
+    if isinstance(nested, dict):
+        return nested
+    path = str(container.get("governed_source_authority_path") or "").strip()
+    authority_sha = str(container.get("durable_source_authority_SHA256") or "").strip()
+    snapshot_sha = str(
+        container.get("governed_source_authority_snapshot_SHA256") or ""
+    ).strip()
+    if not path or not authority_sha or not snapshot_sha:
+        return None
+    return {
+        "available": True,
+        "policy_id": PEPPER_GOVERNED_SOURCE_AUTHORITY_POLICY_ID,
+        "authority_path": path,
+        "authority_SHA256": authority_sha,
+        "snapshot_SHA256": snapshot_sha,
+        "source_authority_kind": container.get("source_authority_kind"),
+        "ticket_id": projection["ticket_id"],
+        "work_packet_id": projection["work_packet_id"],
+        "work_packet_SHA256": projection["work_packet_SHA256"],
+        "projection_SHA256": projection["projection_SHA256"],
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+        "run_id": run_id,
+    }
+
+
+def _completion_durable_source_authority_reference(
+    projection: dict[str, Any],
+    completion: dict[str, Any],
+) -> dict[str, Any] | None:
+    run_id = _int_or_none(completion.get("run_id"))
+    if run_id is None:
+        return None
+    for container in (
+        completion,
+        completion.get("source_materialization_reference"),
+        completion.get("run_metadata"),
+    ):
+        reference = _source_authority_reference_from_container(
+            container if isinstance(container, dict) else None,
+            projection=projection,
+            run_id=run_id,
+        )
+        if reference is not None:
+            return reference
+    for loader in (
+        load_p18_9_0_execution_start_record,
+        load_current_ticket_retry_start_record,
+    ):
+        record = loader(projection_record=projection)
+        if not isinstance(record, dict):
+            continue
+        if _int_or_none(record.get("kanban_run_id")) != run_id:
+            continue
+        reference = _source_authority_reference_from_container(
+            record,
+            projection=projection,
+            run_id=run_id,
+        )
+        if reference is not None:
+            return reference
+    runtime = load_current_ticket_governed_autonomy_runtime_state(
+        projection_record=projection,
+    )
+    if isinstance(runtime, dict):
+        latest_decision = runtime.get("latest_decision_evidence")
+        direct_result = (
+            latest_decision.get("direct_execution_result_reference")
+            if isinstance(latest_decision, dict)
+            else None
+        )
+        if isinstance(direct_result, dict) and _int_or_none(
+            direct_result.get("kanban_run_id")
+        ) == run_id:
+            reference = _source_authority_reference_from_container(
+                direct_result.get("source_materialization_reference")
+                if isinstance(direct_result.get("source_materialization_reference"), dict)
+                else direct_result,
+                projection=projection,
+                run_id=run_id,
+            )
+            if reference is not None:
+                return reference
+    return None
+
+
+def _copy_governed_source_snapshot_to_workspace(
+    *,
+    source_authority: dict[str, Any],
+    workspace_root: Path,
+) -> None:
+    from hermes_constants import get_hermes_home
+    from hermes_cli.agent_platform.runtime_adapter.path_containment import is_reparse_or_symlink
+
+    snapshot_root = Path(str(source_authority.get("snapshot_root") or "")).expanduser()
+    try:
+        snapshot = snapshot_root.resolve(strict=True)
+        workspace = workspace_root.resolve(strict=False)
+    except (OSError, RuntimeError) as exc:
+        raise ProductRuntimeConflict("governed source-authority snapshot is unavailable") from exc
+    if not snapshot.is_dir() or is_reparse_or_symlink(snapshot):
+        raise ProductRuntimeConflict("governed source-authority snapshot root is invalid")
+    review_store_root = (
+        get_hermes_home()
+        / _GOVERNED_REVIEW_PREPARE_VALIDATION_WORKSPACE_STORE_DIR
+    )
+    review_store_root.mkdir(parents=True, exist_ok=True)
+    _remove_source_authority_directory(workspace_root, base_dir=review_store_root)
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    try:
+        workspace.relative_to(review_store_root.resolve(strict=False))
+    except ValueError as exc:
+        raise ProductRuntimeConflict("review PREPARE validation workspace escapes durable store") from exc
+    for root, dirnames, filenames in os.walk(snapshot):
+        root_path = Path(root)
+        rel_root = root_path.relative_to(snapshot).as_posix()
+        kept_dirnames: list[str] = []
+        for dirname in dirnames:
+            child = root_path / dirname
+            if is_reparse_or_symlink(child):
+                raise ProductRuntimeConflict(
+                    "governed source-authority snapshot contains a reparse directory"
+                )
+            kept_dirnames.append(dirname)
+        dirnames[:] = kept_dirnames
+        destination_root = workspace_root if rel_root == "." else workspace_root / rel_root
+        destination_root.mkdir(parents=True, exist_ok=True)
+        for filename in filenames:
+            source_file = root_path / filename
+            if is_reparse_or_symlink(source_file):
+                raise ProductRuntimeConflict(
+                    "governed source-authority snapshot contains a symlinked file"
+                )
+            destination_file = destination_root / filename
+            destination_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_file, destination_file)
+
+
+def _rematerialized_source_authority_manifest(
+    *,
+    source_authority: dict[str, Any],
+    workspace_root: Path,
+) -> dict[str, Any]:
+    materialization = source_authority.get("materialization_manifest")
+    if not isinstance(materialization, dict):
+        raise ProductRuntimeConflict("source authority materialization manifest is unavailable")
+    manifest = dict(materialization)
+    manifest.update({
+        "source_root": str(Path(str(source_authority["snapshot_root"])).resolve(strict=True)),
+        "workspace_root": str(workspace_root),
+        "manifest_path": str(workspace_root / PEPPER_SCRATCH_SOURCE_MATERIALIZATION_MANIFEST),
+        "validation_origin": "review_prepare_rematerialized_source_authority",
+        "review_prepare_validation_workspace_policy_id": (
+            PEPPER_REVIEW_PREPARE_VALIDATION_WORKSPACE_POLICY_ID
+        ),
+        "review_prepare_validation_workspace_path": str(workspace_root),
+        "rematerialized_from_source_authority": True,
+        "rematerialized_from_terminal_run_id": source_authority["run_id"],
+        "original_workspace_root": materialization.get("workspace_root"),
+        "source_authority_materialization_manifest_SHA256": source_authority.get(
+            "materialization_manifest_SHA256"
+        ),
+        "durable_source_authority_reference": _governed_source_authority_reference(
+            source_authority
+        ),
+        "durable_source_authority_SHA256": source_authority.get(
+            "governed_source_authority_SHA256"
+        ),
+        "governed_source_authority_path": source_authority.get("authority_path"),
+        "governed_source_authority_snapshot_SHA256": source_authority.get(
+            "snapshot_SHA256"
+        ),
+        "source_authority_kind": source_authority.get("source_authority_kind"),
+    })
+    return manifest
+
+
+def _verify_rematerialized_source_authority_workspace(
+    *,
+    source_authority: dict[str, Any],
+    workspace_root: Path,
+) -> dict[str, Any]:
+    expected_manifest = source_authority.get("snapshot_manifest")
+    if not isinstance(expected_manifest, dict):
+        raise ProductRuntimeConflict("source authority snapshot manifest is unavailable")
+    expected_files = {
+        str(item.get("relative_path")): item
+        for item in expected_manifest.get("files") or []
+        if isinstance(item, dict) and item.get("relative_path")
+    }
+    for relative_path, item in expected_files.items():
+        path = workspace_root / _normalize_source_authority_snapshot_relative_path(
+            relative_path
+        )
+        observed = _sha256_file_or_none(path)
+        if observed != item.get("SHA256"):
+            raise ProductRuntimeConflict(
+                "rematerialized source-authority workspace digest mismatch"
+            )
+        if path.stat().st_size != int(item.get("size_bytes") or -1):
+            raise ProductRuntimeConflict(
+                "rematerialized source-authority workspace size mismatch"
+            )
+    manifest_rel = Path(PEPPER_SCRATCH_SOURCE_MATERIALIZATION_MANIFEST).as_posix()
+    extra_files: list[str] = []
+    for root, _dirnames, filenames in os.walk(workspace_root):
+        root_path = Path(root)
+        for filename in filenames:
+            rel = (root_path / filename).relative_to(workspace_root).as_posix()
+            if rel == manifest_rel:
+                continue
+            if rel not in expected_files:
+                extra_files.append(rel)
+                if len(extra_files) >= 5:
+                    break
+        if len(extra_files) >= 5:
+            break
+    if extra_files:
+        raise ProductRuntimeConflict(
+            "rematerialized source-authority workspace contains unexpected files"
+        )
+    return {
+        "verified": True,
+        "snapshot_SHA256": source_authority.get("snapshot_SHA256"),
+        "file_count": len(expected_files),
+        "total_bytes": sum(int(item.get("size_bytes") or 0) for item in expected_files.values()),
+    }
+
+
+def _rematerialize_review_prepare_validation_workspace(
+    *,
+    source_authority: dict[str, Any],
+) -> dict[str, Any]:
+    workspace_root = review_prepare_validation_workspace_path_for_run(
+        str(source_authority["ticket_id"]),
+        int(source_authority["run_id"]),
+        str(source_authority["governed_source_authority_SHA256"]),
+    )
+    _copy_governed_source_snapshot_to_workspace(
+        source_authority=source_authority,
+        workspace_root=workspace_root,
+    )
+    manifest = _rematerialized_source_authority_manifest(
+        source_authority=source_authority,
+        workspace_root=workspace_root,
+    )
+    _write_materialization_manifest(
+        Path(manifest["manifest_path"]),
+        manifest,
+        workspace_root=workspace_root,
+    )
+    verification = _verify_rematerialized_source_authority_workspace(
+        source_authority=source_authority,
+        workspace_root=workspace_root,
+    )
+    return {
+        "workspace_path": str(workspace_root),
+        "manifest": manifest,
+        "source_materialization_reference": {
+            "available": True,
+            "manifest_path": manifest["manifest_path"],
+            "policy_id": manifest.get("policy_id"),
+            "source_materialized": manifest.get("source_materialized"),
+            "dependency_substrate_materialized": manifest.get(
+                "dependency_substrate_materialized"
+            ),
+            "dependency_substrate_kind": manifest.get("dependency_substrate_kind"),
+            "durable_source_authority_reference": manifest[
+                "durable_source_authority_reference"
+            ],
+            "durable_source_authority_SHA256": manifest[
+                "durable_source_authority_SHA256"
+            ],
+            "governed_source_authority_path": manifest[
+                "governed_source_authority_path"
+            ],
+            "governed_source_authority_snapshot_SHA256": manifest[
+                "governed_source_authority_snapshot_SHA256"
+            ],
+            "source_authority_kind": manifest.get("source_authority_kind"),
+            "validation_origin": "review_prepare_rematerialized_source_authority",
+        },
+        "workspace_verification": verification,
+    }
+
+
 def _dispatch_exact_current_kanban_task(
     projection: dict[str, Any],
     *,
@@ -13851,12 +15023,16 @@ def _dispatch_exact_current_kanban_task(
             )
         env_overlay = _pepper_governed_worker_env_overlay(projection)
         source_materialization = None
+        durable_source_authority_reference = None
         if _projection_requires_scratch_source_materialization(projection):
             try:
-                source_materialization = _materialize_pepper_governed_scratch_source(
-                    projection,
-                    workspace,
-                    env_overlay=env_overlay,
+                source_materialization, durable_source_authority_reference = (
+                    _prepare_governed_source_authority_for_dispatch(
+                        projection=projection,
+                        workspace=workspace,
+                        env_overlay=env_overlay,
+                        run_id=getattr(claimed, "current_run_id", None),
+                    )
                 )
             except ProductRuntimeDependencyGap as exc:
                 detail = f"{exc.dependency_code}: {_safe_text(str(exc), limit=240)}"
@@ -13945,6 +15121,39 @@ def _dispatch_exact_current_kanban_task(
             "workspace_created": True,
             "source_materialized": source_materialization is not None,
             "source_materialization": source_materialization,
+            "durable_source_authority_validated_before_worker_execution": bool(
+                source_materialization
+                and source_materialization.get(
+                    "durable_source_authority_validated_before_worker_execution"
+                )
+            ),
+            "source_authority_materialized_before_worker_execution": bool(
+                source_materialization
+                and source_materialization.get(
+                    "source_authority_materialized_before_worker_execution"
+                )
+            ),
+            "source_authority_materialization_verification": (
+                source_materialization.get("source_authority_materialization_verification")
+                if isinstance(source_materialization, dict)
+                else None
+            ),
+            "durable_source_authority_reference": durable_source_authority_reference,
+            "durable_source_authority_SHA256": (
+                durable_source_authority_reference.get("authority_SHA256")
+                if isinstance(durable_source_authority_reference, dict)
+                else None
+            ),
+            "governed_source_authority_path": (
+                durable_source_authority_reference.get("authority_path")
+                if isinstance(durable_source_authority_reference, dict)
+                else None
+            ),
+            "governed_source_authority_snapshot_SHA256": (
+                durable_source_authority_reference.get("snapshot_SHA256")
+                if isinstance(durable_source_authority_reference, dict)
+                else None
+            ),
             "runs": [_run_dict(run) for run in runs],
             "terminal_done_task_rearmed": bool(
                 terminal_done_claim_info
@@ -13984,6 +15193,14 @@ def _dispatch_blocked_result(
         "kanban_run_id": getattr(task, "current_run_id", None),
         "workspace_path": getattr(task, "workspace_path", None),
         "workspace_created": False,
+        "source_materialized": False,
+        "durable_source_authority_validated_before_worker_execution": False,
+        "source_authority_materialized_before_worker_execution": False,
+        "source_authority_materialization_verification": None,
+        "durable_source_authority_reference": None,
+        "durable_source_authority_SHA256": None,
+        "governed_source_authority_path": None,
+        "governed_source_authority_snapshot_SHA256": None,
         "runs": [_run_dict(run) for run in (runs or [])],
     }
 
@@ -14625,6 +15842,11 @@ def _governed_autonomy_materialization_manifest(
         "read_only_validation_support_files",
         "read_only_validation_support_copied_file_count",
         "product_diff_excluded_roots",
+        "durable_source_authority_reference",
+        "durable_source_authority_SHA256",
+        "governed_source_authority_path",
+        "governed_source_authority_snapshot_SHA256",
+        "source_authority_kind",
     ):
         if key in manifest:
             reference[key] = manifest.get(key)
@@ -17532,6 +18754,14 @@ def _governed_autonomy_dispatch_result_reference(
                 "dependency_install_performed",
                 "canonical_package_lock_materialized",
                 "manifest_path",
+                "durable_source_authority_reference",
+                "durable_source_authority_SHA256",
+                "governed_source_authority_path",
+                "governed_source_authority_snapshot_SHA256",
+                "source_authority_kind",
+                "durable_source_authority_validated_before_worker_execution",
+                "source_authority_materialized_before_worker_execution",
+                "source_authority_materialization_verification",
             )
             if key in source_materialization
         }
@@ -17551,6 +18781,12 @@ def _governed_autonomy_dispatch_result_reference(
         "workspace_path": dispatch_result.get("workspace_path"),
         "workspace_created": bool(dispatch_result.get("workspace_created")),
         "source_materialized": bool(dispatch_result.get("source_materialized")),
+        "durable_source_authority_validated_before_worker_execution": bool(
+            dispatch_result.get("durable_source_authority_validated_before_worker_execution")
+        ),
+        "source_authority_materialized_before_worker_execution": bool(
+            dispatch_result.get("source_authority_materialized_before_worker_execution")
+        ),
         "source_materialization_reference": materialization_reference,
     }
 
@@ -17572,6 +18808,15 @@ def _with_governed_autonomy_dispatch_result(
         "kanban_run_id",
         "workspace_path",
         "workspace_created",
+        "source_materialized",
+        "source_materialization",
+        "durable_source_authority_reference",
+        "durable_source_authority_SHA256",
+        "governed_source_authority_path",
+        "governed_source_authority_snapshot_SHA256",
+        "durable_source_authority_validated_before_worker_execution",
+        "source_authority_materialized_before_worker_execution",
+        "source_authority_materialization_verification",
     ):
         if key in dispatch_result:
             updated[key] = dispatch_result.get(key)
@@ -18700,6 +19945,19 @@ def _finalize_execution_start_record(
         "workspace_created",
     ):
         updated[key] = dispatch_result.get(key)
+    for key in (
+        "source_materialized",
+        "source_materialization",
+        "durable_source_authority_reference",
+        "durable_source_authority_SHA256",
+        "governed_source_authority_path",
+        "governed_source_authority_snapshot_SHA256",
+        "durable_source_authority_validated_before_worker_execution",
+        "source_authority_materialized_before_worker_execution",
+        "source_authority_materialization_verification",
+    ):
+        if key in dispatch_result:
+            updated[key] = dispatch_result.get(key)
     updated["updated_at"] = _utc_now_iso()
     updated.pop("start_authorization_SHA256", None)
     updated["start_authorization_SHA256"] = _execution_start_record_digest(updated)
@@ -18736,6 +19994,19 @@ def _finalize_retry_start_record(
         "workspace_created",
     ):
         updated[key] = dispatch_result.get(key)
+    for key in (
+        "source_materialized",
+        "source_materialization",
+        "durable_source_authority_reference",
+        "durable_source_authority_SHA256",
+        "governed_source_authority_path",
+        "governed_source_authority_snapshot_SHA256",
+        "durable_source_authority_validated_before_worker_execution",
+        "source_authority_materialized_before_worker_execution",
+        "source_authority_materialization_verification",
+    ):
+        if key in dispatch_result:
+            updated[key] = dispatch_result.get(key)
     runs = dispatch_result.get("runs") if isinstance(dispatch_result.get("runs"), list) else []
     updated["retry_execution_started"] = bool(dispatch_result.get("execution_started"))
     updated["retry_execution_count"] = 1 if bool(dispatch_result.get("dispatch_performed")) else 0
@@ -19150,6 +20421,28 @@ def _retry_start_operational_result(
         "workspace_kind": record["workspace_kind"],
         "workspace_path": (task.workspace_path if task is not None else record.get("workspace_path")),
         "workspace_created": bool(record.get("workspace_created")),
+        "source_materialized": bool(record.get("source_materialized")),
+        "durable_source_authority_validated_before_worker_execution": bool(
+            record.get("durable_source_authority_validated_before_worker_execution")
+        ),
+        "source_authority_materialized_before_worker_execution": bool(
+            record.get("source_authority_materialized_before_worker_execution")
+        ),
+        "source_authority_materialization_verification": record.get(
+            "source_authority_materialization_verification"
+        ),
+        "durable_source_authority_reference": record.get(
+            "durable_source_authority_reference"
+        ),
+        "durable_source_authority_SHA256": record.get(
+            "durable_source_authority_SHA256"
+        ),
+        "governed_source_authority_path": record.get(
+            "governed_source_authority_path"
+        ),
+        "governed_source_authority_snapshot_SHA256": record.get(
+            "governed_source_authority_snapshot_SHA256"
+        ),
         "task_prepare_status": record["task_prepare_status"],
         "task_unblocked": bool(record.get("task_unblocked")),
         "task_skills_corrected": bool(record.get("task_skills_corrected")),
@@ -19273,6 +20566,28 @@ def _execution_start_operational_result(
         "workspace_kind": record["workspace_kind"],
         "workspace_path": (task.workspace_path if task is not None else record.get("workspace_path")),
         "workspace_created": bool(record.get("workspace_created")),
+        "source_materialized": bool(record.get("source_materialized")),
+        "durable_source_authority_validated_before_worker_execution": bool(
+            record.get("durable_source_authority_validated_before_worker_execution")
+        ),
+        "source_authority_materialized_before_worker_execution": bool(
+            record.get("source_authority_materialized_before_worker_execution")
+        ),
+        "source_authority_materialization_verification": record.get(
+            "source_authority_materialization_verification"
+        ),
+        "durable_source_authority_reference": record.get(
+            "durable_source_authority_reference"
+        ),
+        "durable_source_authority_SHA256": record.get(
+            "durable_source_authority_SHA256"
+        ),
+        "governed_source_authority_path": record.get(
+            "governed_source_authority_path"
+        ),
+        "governed_source_authority_snapshot_SHA256": record.get(
+            "governed_source_authority_snapshot_SHA256"
+        ),
         "dispatch_performed": bool(record.get("dispatch_performed")),
         "execution_started": execution_started,
         "worker_execution": worker_execution,
@@ -24201,11 +25516,16 @@ def _review_prepare_validate_completion_if_required(
     from tools import workpacket_validation_tool as validation_tool
 
     try:
+        validation_context = _review_prepare_validation_context(
+            projection,
+            completion,
+        )
         validation = validation_tool.run_review_prepare_validation_commands(
             projection=projection,
             completion=completion,
             acceptance_contract=acceptance_contract,
-            worker_env=_review_prepare_validation_env(projection, completion),
+            worker_env=validation_context["worker_env"],
+            validation_context=validation_context["validation_context"],
             requirements=requirements,
             requested_project_id=request.project_id,
             requested_ticket_id=request.ticket_id,
@@ -24252,6 +25572,172 @@ def _review_prepare_validate_completion_if_required(
     }
 
 
+def _review_prepare_validation_context(
+    projection: dict[str, Any],
+    completion: dict[str, Any],
+) -> dict[str, Any]:
+    terminal_context = _review_prepare_terminal_workspace_validation_context(
+        projection,
+        completion,
+    )
+    if terminal_context is not None:
+        return terminal_context
+    run_id = _int_or_none(completion.get("run_id"))
+    if run_id is None:
+        raise ProductRuntimeConflict("review-preparation validation run id is unavailable")
+    reference = _completion_durable_source_authority_reference(projection, completion)
+    if reference is None:
+        raise ProductRuntimeConflict(
+            "review-preparation validation source authority is unavailable"
+        )
+    authority = _load_governed_source_authority_from_reference(
+        reference,
+        projection=projection,
+        run_id=run_id,
+    )
+    rematerialized = _rematerialize_review_prepare_validation_workspace(
+        source_authority=authority,
+    )
+    worker_env = _review_prepare_validation_env_for_workspace(
+        projection,
+        Path(rematerialized["workspace_path"]),
+    )
+    terminal_workspace = str(completion.get("kanban_task_workspace_path") or "").strip()
+    return {
+        "worker_env": worker_env,
+        "validation_context": {
+            "validation_origin": "review_prepare_rematerialized_source_authority",
+            "validation_workspace_policy_id": (
+                PEPPER_REVIEW_PREPARE_VALIDATION_WORKSPACE_POLICY_ID
+            ),
+            "workspace_path": rematerialized["workspace_path"],
+            "terminal_workspace_path": terminal_workspace or None,
+            "terminal_workspace_available": False,
+            "rematerialized_from_terminal_run_id": run_id,
+            "source_materialization_reference": rematerialized[
+                "source_materialization_reference"
+            ],
+            "durable_source_authority_reference": _governed_source_authority_reference(
+                authority
+            ),
+            "durable_source_authority_SHA256": authority.get(
+                "governed_source_authority_SHA256"
+            ),
+            "governed_source_authority_path": authority.get("authority_path"),
+            "governed_source_authority_snapshot_SHA256": authority.get(
+                "snapshot_SHA256"
+            ),
+            "workspace_verification": rematerialized["workspace_verification"],
+        },
+    }
+
+
+def _review_prepare_terminal_workspace_validation_context(
+    projection: dict[str, Any],
+    completion: dict[str, Any],
+) -> dict[str, Any] | None:
+    workspace_value = str(completion.get("kanban_task_workspace_path") or "").strip()
+    if not workspace_value:
+        return None
+    workspace = Path(workspace_value).expanduser()
+    if not workspace.is_absolute() or not workspace.is_dir():
+        return None
+    manifest, materialization_reference = _governed_autonomy_materialization_manifest(
+        workspace,
+    )
+    if not isinstance(manifest, dict) or not isinstance(materialization_reference, dict):
+        return None
+    if materialization_reference.get("available") is not True:
+        return None
+    for key in (
+        "ticket_id",
+        "ticket_spec_SHA256",
+        "work_packet_id",
+        "work_packet_SHA256",
+        "projection_SHA256",
+    ):
+        if manifest.get(key) != projection.get(key):
+            return None
+    run_id = _int_or_none(completion.get("run_id"))
+    durable_authority = None
+    durable_reference = _completion_durable_source_authority_reference(
+        projection,
+        completion,
+    )
+    if durable_reference is None and run_id is not None:
+        durable_reference = _source_authority_reference_from_container(
+            materialization_reference,
+            projection=projection,
+            run_id=run_id,
+        )
+    if durable_reference is not None:
+        if run_id is None:
+            raise ProductRuntimeConflict(
+                "review-preparation durable source authority run id is unavailable"
+            )
+        durable_authority = _load_governed_source_authority_from_reference(
+            durable_reference,
+            projection=projection,
+            run_id=run_id,
+        )
+        durable_reference = _governed_source_authority_reference(durable_authority)
+        nested_reference = materialization_reference.get("durable_source_authority_reference")
+        if isinstance(nested_reference, dict):
+            for observed_key, expected_key in (
+                ("authority_SHA256", "authority_SHA256"),
+                ("snapshot_SHA256", "snapshot_SHA256"),
+            ):
+                observed = str(nested_reference.get(observed_key) or "").strip()
+                if observed and observed != durable_reference.get(expected_key):
+                    raise ProductRuntimeConflict(
+                        "terminal workspace durable source authority reference mismatch"
+                    )
+        if (
+            materialization_reference.get("durable_source_authority_SHA256")
+            and materialization_reference.get("durable_source_authority_SHA256")
+            != durable_reference.get("authority_SHA256")
+        ):
+            raise ProductRuntimeConflict(
+                "terminal workspace durable source authority digest mismatch"
+            )
+        if (
+            materialization_reference.get("governed_source_authority_snapshot_SHA256")
+            and materialization_reference.get("governed_source_authority_snapshot_SHA256")
+            != durable_reference.get("snapshot_SHA256")
+        ):
+            raise ProductRuntimeConflict(
+                "terminal workspace durable source authority snapshot mismatch"
+            )
+    worker_env = _review_prepare_validation_env_for_workspace(projection, workspace)
+    context = {
+        "validation_origin": "review_prepare_terminal_workspace",
+        "workspace_path": str(workspace.resolve(strict=True)),
+        "terminal_workspace_path": str(workspace.resolve(strict=True)),
+        "terminal_workspace_available": True,
+        "source_materialization_reference": materialization_reference,
+        "durable_source_authority_reference": durable_reference,
+        "durable_source_authority_SHA256": (
+            durable_reference.get("authority_SHA256")
+            if isinstance(durable_reference, dict)
+            else None
+        ),
+        "governed_source_authority_path": (
+            durable_reference.get("authority_path")
+            if isinstance(durable_reference, dict)
+            else None
+        ),
+        "governed_source_authority_snapshot_SHA256": (
+            durable_reference.get("snapshot_SHA256")
+            if isinstance(durable_reference, dict)
+            else None
+        ),
+        "durable_source_authority_validated_for_review_prepare": (
+            durable_authority is not None
+        ),
+    }
+    return {"worker_env": worker_env, "validation_context": context}
+
+
 def _review_prepare_validation_env(
     projection: dict[str, Any],
     completion: dict[str, Any],
@@ -24264,6 +25750,21 @@ def _review_prepare_validation_env(
     env["HERMES_KANBAN_WORKSPACE"] = str(workspace)
     env["TERMINAL_CWD"] = str(workspace)
     return env
+
+
+def _review_prepare_validation_env_for_workspace(
+    projection: dict[str, Any],
+    workspace: Path,
+) -> dict[str, str]:
+    resolved = workspace.expanduser().resolve(strict=True)
+    if not resolved.is_dir():
+        raise ProductRuntimeConflict("review-preparation validation workspace is unavailable")
+    env = dict(os.environ)
+    env.update(_pepper_governed_worker_env_overlay(projection))
+    env["HERMES_KANBAN_WORKSPACE"] = str(resolved)
+    env["TERMINAL_CWD"] = str(resolved)
+    return env
+
 
 
 def _review_completion_with_prepare_validation_results(
@@ -24288,6 +25789,21 @@ def _review_completion_with_prepare_validation_results(
         "review_prepare_validation_authority_SHA256"
     )
     metadata["review_prepare_validation_executed"] = bool(validation.get("validation_executed"))
+    validation_context = validation.get("validation_context")
+    if isinstance(validation_context, dict):
+        metadata["review_prepare_validation_context"] = validation_context
+        metadata["review_prepare_validation_origin"] = validation_context.get(
+            "validation_origin"
+        )
+        metadata["review_prepare_validation_workspace_path"] = validation_context.get(
+            "workspace_path"
+        )
+        metadata["durable_source_authority_reference"] = validation_context.get(
+            "durable_source_authority_reference"
+        )
+        metadata["durable_source_authority_SHA256"] = validation_context.get(
+            "durable_source_authority_SHA256"
+        )
     if validation.get("missing_requirements"):
         metadata["missing_validation_requirements"] = validation["missing_requirements"]
     updated["run_metadata"] = metadata
@@ -24888,6 +26404,21 @@ def _kanban_completion_result_source(projection: dict[str, Any]) -> dict[str, An
                 "candidate_changes_reference": review_boundary["candidate_changes_reference"],
                 "candidate_changes_available": True,
             })
+        durable_reference = _completion_durable_source_authority_reference(
+            projection,
+            source,
+        )
+        if durable_reference is not None:
+            source["durable_source_authority_reference"] = durable_reference
+            source["durable_source_authority_SHA256"] = durable_reference.get(
+                "authority_SHA256"
+            )
+            source["governed_source_authority_path"] = durable_reference.get(
+                "authority_path"
+            )
+            source["governed_source_authority_snapshot_SHA256"] = durable_reference.get(
+                "snapshot_SHA256"
+            )
         source["kanban_completion_result_SHA256"] = _kanban_completion_result_digest(source)
         return source
     finally:

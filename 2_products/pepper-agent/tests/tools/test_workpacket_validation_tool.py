@@ -215,6 +215,27 @@ def _refresh_contract_digests(contract: dict[str, object]) -> None:
     )
 
 
+def _rematerialized_validation_context(
+    tmp_path: Path,
+    workspace: Path,
+    completion: dict[str, object],
+) -> dict[str, object]:
+    return {
+        "validation_origin": "review_prepare_rematerialized_source_authority",
+        "validation_workspace_policy_id": "pepper-review-prepare-validation-rematerialized-workspace-v1",
+        "workspace_path": workspace.as_posix(),
+        "terminal_workspace_path": completion.get("kanban_task_workspace_path"),
+        "terminal_workspace_available": False,
+        "rematerialized_from_terminal_run_id": completion["run_id"],
+        "durable_source_authority_reference": {
+            "authority_path": (tmp_path / "source-authority.json").as_posix(),
+            "authority_SHA256": "d" * 64,
+            "snapshot_SHA256": "e" * 64,
+        },
+        "durable_source_authority_SHA256": "d" * 64,
+    }
+
+
 def _passing_result(
     contract: dict[str, object],
     spec: tool.GovernedValidationCommandSpec,
@@ -420,6 +441,11 @@ def test_review_prepare_validation_api_runs_exact_authorized_requirement(
         completion=completion,
         acceptance_contract=contract,
         worker_env={"HERMES_AGENT_PLATFORM_WORKPACKET_ID": contract["work_packet_id"]},
+        validation_context=_rematerialized_validation_context(
+            tmp_path,
+            workspace,
+            completion,
+        ),
         requirements=requirements,
         requested_project_id="PEPPER",
         requested_ticket_id="P18.9.1",
@@ -485,6 +511,11 @@ def test_review_prepare_validation_authority_narrows_manifest_to_selected_requir
         completion=completion,
         acceptance_contract=contract,
         worker_env={},
+        validation_context=_rematerialized_validation_context(
+            tmp_path,
+            workspace,
+            completion,
+        ),
         requested_project_id="PEPPER",
         requested_ticket_id="P18.9.1",
         requested_next_action_id="PREPARE_P18_9_1_REVIEW",
@@ -506,6 +537,214 @@ def test_review_prepare_validation_authority_narrows_manifest_to_selected_requir
     assert authority_record["workpacket_capability_manifest_SHA256"] != authority_record[
         "review_prepare_authorized_command_manifest_SHA256"
     ]
+
+
+def test_review_prepare_validation_records_rematerialized_origin_context(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    workspace = tmp_path / "rematerialized"
+    workspace.mkdir()
+    terminal_workspace = tmp_path / "deleted-terminal-workspace"
+    command = "python -m pytest tests/example_test.py"
+    projection, contract, completion = _review_prepare_projection_contract_completion([
+        {"validation_id": "V1", "command": command, "expected_exit_codes": [0]},
+    ])
+    completion["kanban_task_workspace_path"] = terminal_workspace.as_posix()
+    _refresh_completion_digest(completion)
+    _install_review_prepare_current_run_authority(projection, completion)
+    context = {
+        "validation_origin": "review_prepare_rematerialized_source_authority",
+        "validation_workspace_policy_id": "pepper-review-prepare-validation-rematerialized-workspace-v1",
+        "workspace_path": workspace.as_posix(),
+        "terminal_workspace_path": terminal_workspace.as_posix(),
+        "terminal_workspace_available": False,
+        "rematerialized_from_terminal_run_id": completion["run_id"],
+        "durable_source_authority_reference": {
+            "authority_path": (tmp_path / "source-authority.json").as_posix(),
+            "authority_SHA256": "d" * 64,
+            "snapshot_SHA256": "e" * 64,
+        },
+        "durable_source_authority_SHA256": "d" * 64,
+    }
+    authority = _authority(workspace, allowed_paths=("tests/**",))
+    spec = tool.GovernedValidationCommandSpec(
+        command_id="GVCMD-001",
+        validation_id="V1",
+        source="workpacket.validation_steps.command",
+        source_command=command,
+        effective_argv=(Path(sys.executable).resolve().as_posix(), "-m", "pytest", "tests/example_test.py"),
+        working_directory=workspace.as_posix(),
+    )
+    monkeypatch.setattr(
+        tool,
+        "resolve_governed_workpacket_validation_authority",
+        lambda _env=None: (authority, _workpacket_with_steps()),
+    )
+    monkeypatch.setattr(tool, "build_governed_validation_command_specs", lambda *_args: (spec,))
+    monkeypatch.setattr(tool, "_run_command", lambda _authority, selected: json.dumps(_passing_result(contract, selected)))
+
+    result = tool.run_review_prepare_validation_commands(
+        projection=projection,
+        completion=completion,
+        acceptance_contract=contract,
+        worker_env={},
+        validation_context=context,
+        requested_project_id="PEPPER",
+        requested_ticket_id="P18.9.1",
+        requested_next_action_id="PREPARE_P18_9_1_REVIEW",
+    )
+
+    authority_record = result["review_prepare_validation_authority"]
+    assert result["validation_passed"] is True
+    assert result["validation_origin"] == "review_prepare_rematerialized_source_authority"
+    assert authority_record["validation_origin"] == "review_prepare_rematerialized_source_authority"
+    assert authority_record["validation_workspace_path"] == workspace.as_posix()
+    assert authority_record["durable_source_authority_SHA256"] == "d" * 64
+
+
+def test_review_prepare_validation_context_is_mandatory(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    command = "python -m pytest tests/example_test.py"
+    projection, contract, completion = _review_prepare_projection_contract_completion([
+        {"validation_id": "V1", "command": command, "expected_exit_codes": [0]},
+    ])
+    authority = _authority(workspace, allowed_paths=("tests/**",))
+    monkeypatch.setattr(
+        tool,
+        "resolve_governed_workpacket_validation_authority",
+        lambda _env=None: (authority, _workpacket_with_steps()),
+    )
+    monkeypatch.setattr(
+        tool,
+        "_run_command",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("missing context ran")),
+    )
+
+    result = tool.run_review_prepare_validation_commands(
+        projection=projection,
+        completion=completion,
+        acceptance_contract=contract,
+        worker_env={},
+        requested_project_id="PEPPER",
+        requested_ticket_id="P18.9.1",
+        requested_next_action_id="PREPARE_P18_9_1_REVIEW",
+    )
+
+    assert result["validation_executed"] is False
+    assert result["validation_passed"] is False
+    assert result["error_code"] == tool.REVIEW_PREPARE_VALIDATION_AUTHORITY_DENIED
+    assert "validation context" in result["failure_detail"]
+
+
+def test_review_prepare_validation_context_denies_workspace_mismatch(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    other_workspace = tmp_path / "other"
+    other_workspace.mkdir()
+    command = "python -m pytest tests/example_test.py"
+    projection, contract, completion = _review_prepare_projection_contract_completion([
+        {"validation_id": "V1", "command": command, "expected_exit_codes": [0]},
+    ])
+    completion["kanban_task_workspace_path"] = (tmp_path / "terminal").as_posix()
+    _refresh_completion_digest(completion)
+    _install_review_prepare_current_run_authority(projection, completion)
+    authority = _authority(workspace, allowed_paths=("tests/**",))
+    context = {
+        "validation_origin": "review_prepare_rematerialized_source_authority",
+        "workspace_path": other_workspace.as_posix(),
+        "rematerialized_from_terminal_run_id": completion["run_id"],
+        "durable_source_authority_reference": {
+            "authority_path": (tmp_path / "source-authority.json").as_posix(),
+            "authority_SHA256": "d" * 64,
+            "snapshot_SHA256": "e" * 64,
+        },
+        "durable_source_authority_SHA256": "d" * 64,
+    }
+    monkeypatch.setattr(
+        tool,
+        "resolve_governed_workpacket_validation_authority",
+        lambda _env=None: (authority, _workpacket_with_steps()),
+    )
+    monkeypatch.setattr(
+        tool,
+        "_run_command",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("mismatch executed")),
+    )
+
+    result = tool.run_review_prepare_validation_commands(
+        projection=projection,
+        completion=completion,
+        acceptance_contract=contract,
+        worker_env={},
+        validation_context=context,
+        requested_project_id="PEPPER",
+        requested_ticket_id="P18.9.1",
+        requested_next_action_id="PREPARE_P18_9_1_REVIEW",
+    )
+
+    assert result["validation_executed"] is False
+    assert result["error_code"] == tool.REVIEW_PREPARE_VALIDATION_AUTHORITY_DENIED
+    assert "workspace authority mismatch" in result["failure_detail"]
+
+
+def test_review_prepare_validation_context_requires_rematerialized_policy(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    command = "python -m pytest tests/example_test.py"
+    projection, contract, completion = _review_prepare_projection_contract_completion([
+        {"validation_id": "V1", "command": command, "expected_exit_codes": [0]},
+    ])
+    completion["kanban_task_workspace_path"] = (tmp_path / "terminal").as_posix()
+    _refresh_completion_digest(completion)
+    _install_review_prepare_current_run_authority(projection, completion)
+    authority = _authority(workspace, allowed_paths=("tests/**",))
+    context = {
+        "validation_origin": "review_prepare_rematerialized_source_authority",
+        "workspace_path": workspace.as_posix(),
+        "rematerialized_from_terminal_run_id": completion["run_id"],
+        "durable_source_authority_reference": {
+            "authority_path": (tmp_path / "source-authority.json").as_posix(),
+            "authority_SHA256": "d" * 64,
+            "snapshot_SHA256": "e" * 64,
+        },
+        "durable_source_authority_SHA256": "d" * 64,
+    }
+    monkeypatch.setattr(
+        tool,
+        "resolve_governed_workpacket_validation_authority",
+        lambda _env=None: (authority, _workpacket_with_steps()),
+    )
+    monkeypatch.setattr(
+        tool,
+        "_run_command",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("policy mismatch executed")),
+    )
+
+    result = tool.run_review_prepare_validation_commands(
+        projection=projection,
+        completion=completion,
+        acceptance_contract=contract,
+        worker_env={},
+        validation_context=context,
+        requested_project_id="PEPPER",
+        requested_ticket_id="P18.9.1",
+        requested_next_action_id="PREPARE_P18_9_1_REVIEW",
+    )
+
+    assert result["validation_executed"] is False
+    assert result["error_code"] == tool.REVIEW_PREPARE_VALIDATION_AUTHORITY_DENIED
+    assert "policy mismatch" in result["failure_detail"]
 
 
 def test_review_prepare_validation_authority_denies_stale_current_terminal_run(
@@ -582,6 +821,11 @@ def test_review_prepare_validation_authority_denies_stale_current_terminal_run(
         completion=completion,
         acceptance_contract=contract,
         worker_env={},
+        validation_context=_rematerialized_validation_context(
+            tmp_path,
+            workspace,
+            completion,
+        ),
         requested_project_id="PEPPER",
         requested_ticket_id="P18.9.1",
         requested_next_action_id="PREPARE_P18_9_1_REVIEW",
@@ -720,6 +964,11 @@ def test_review_prepare_validation_current_run_authority_matrix(
         completion=completion,
         acceptance_contract=contract,
         worker_env={},
+        validation_context=_rematerialized_validation_context(
+            tmp_path,
+            workspace,
+            completion,
+        ),
         requested_project_id="PEPPER",
         requested_ticket_id="P18.9.1",
         requested_next_action_id="PREPARE_P18_9_1_REVIEW",
@@ -793,6 +1042,11 @@ def test_review_prepare_validation_reuses_existing_evidence_immutably(
         completion=completion,
         acceptance_contract=contract,
         worker_env={},
+        validation_context=_rematerialized_validation_context(
+            tmp_path,
+            workspace,
+            completion,
+        ),
         requested_project_id="PEPPER",
         requested_ticket_id="P18.9.1",
         requested_next_action_id="PREPARE_P18_9_1_REVIEW",
@@ -868,6 +1122,11 @@ def test_review_prepare_validation_does_not_reuse_tampered_existing_evidence(
         completion=completion,
         acceptance_contract=contract,
         worker_env={},
+        validation_context=_rematerialized_validation_context(
+            tmp_path,
+            workspace,
+            completion,
+        ),
         requested_project_id="PEPPER",
         requested_ticket_id="P18.9.1",
         requested_next_action_id="PREPARE_P18_9_1_REVIEW",
@@ -961,6 +1220,11 @@ def test_review_prepare_validation_authority_negative_matrix_denied(
         completion=completion,
         acceptance_contract=contract,
         worker_env={},
+        validation_context=_rematerialized_validation_context(
+            tmp_path,
+            workspace,
+            completion,
+        ),
         requested_project_id=project_id,
         requested_ticket_id=ticket_id,
         requested_next_action_id=next_action_id,
@@ -1004,6 +1268,11 @@ def test_review_prepare_validation_api_rejects_acceptance_only_package_command(
         completion=completion,
         acceptance_contract=contract,
         worker_env={},
+        validation_context=_rematerialized_validation_context(
+            tmp_path,
+            workspace,
+            completion,
+        ),
         requested_project_id="PEPPER",
         requested_ticket_id="P18.9.1",
         requested_next_action_id="PREPARE_P18_9_1_REVIEW",
@@ -1087,6 +1356,11 @@ def test_review_prepare_validation_api_runs_workpacket_origin_package_test_plan(
         completion=completion,
         acceptance_contract=contract,
         worker_env={},
+        validation_context=_rematerialized_validation_context(
+            tmp_path,
+            workspace,
+            completion,
+        ),
         requested_project_id="PEPPER",
         requested_ticket_id="P18.9.1",
         requested_next_action_id="PREPARE_P18_9_1_REVIEW",
@@ -1149,6 +1423,11 @@ def test_review_prepare_validation_api_does_not_auto_execute_manual_commands(
         completion=completion,
         acceptance_contract=contract,
         worker_env={},
+        validation_context=_rematerialized_validation_context(
+            tmp_path,
+            workspace,
+            completion,
+        ),
         requested_project_id="PEPPER",
         requested_ticket_id="P18.9.1",
         requested_next_action_id="PREPARE_P18_9_1_REVIEW",
@@ -1207,6 +1486,11 @@ def test_review_prepare_validation_api_manual_command_accepts_existing_skipped_e
         completion=completion,
         acceptance_contract=contract,
         worker_env={},
+        validation_context=_rematerialized_validation_context(
+            tmp_path,
+            workspace,
+            completion,
+        ),
         requested_project_id="PEPPER",
         requested_ticket_id="P18.9.1",
         requested_next_action_id="PREPARE_P18_9_1_REVIEW",
@@ -1269,6 +1553,11 @@ def test_review_prepare_validation_api_preserves_not_applicable_evidence(
         completion=completion,
         acceptance_contract=contract,
         worker_env={},
+        validation_context=_rematerialized_validation_context(
+            tmp_path,
+            workspace,
+            completion,
+        ),
         requested_project_id="PEPPER",
         requested_ticket_id="P18.9.1",
         requested_next_action_id="PREPARE_P18_9_1_REVIEW",

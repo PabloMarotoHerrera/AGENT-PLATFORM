@@ -382,10 +382,11 @@ def validate_review_prepare_validation_authority(
     projection: Mapping[str, Any],
     completion: Mapping[str, Any],
     acceptance_contract: Mapping[str, Any],
-    requested_project_id: str | None,
-    requested_ticket_id: str | None,
-    requested_next_action_id: str | None,
-    authorized_specs: tuple[GovernedValidationCommandSpec, ...],
+    validation_context: Mapping[str, Any] | None = None,
+    requested_project_id: str | None = None,
+    requested_ticket_id: str | None = None,
+    requested_next_action_id: str | None = None,
+    authorized_specs: tuple[GovernedValidationCommandSpec, ...] = (),
 ) -> None:
     """Validate PREPARE authority independently from product runtime request guards."""
 
@@ -442,6 +443,11 @@ def validate_review_prepare_validation_authority(
     if not _completion_is_terminal_for_prepare(completion):
         raise ValueError("completion is not terminal/current")
     _validate_canonical_current_terminal_run_binding(projection, completion)
+    _validate_review_prepare_validation_context(
+        authority=authority,
+        completion=completion,
+        validation_context=validation_context,
+    )
 
     completion_sha = completion.get("kanban_completion_result_SHA256")
     if isinstance(completion_sha, str) and completion_sha:
@@ -472,12 +478,75 @@ def validate_review_prepare_validation_authority(
             _require_equal("criteria revision digest", criteria_sha, expected_criteria_sha)
 
 
+def _validate_review_prepare_validation_context(
+    *,
+    authority: file_guard.WorkPacketFileAuthority,
+    completion: Mapping[str, Any],
+    validation_context: Mapping[str, Any] | None,
+) -> None:
+    if not isinstance(validation_context, Mapping):
+        raise ValueError("PREPARE validation context is invalid")
+    origin = str(validation_context.get("validation_origin") or "").strip()
+    if origin not in {
+        "review_prepare_terminal_workspace",
+        "review_prepare_rematerialized_source_authority",
+    }:
+        raise ValueError("PREPARE validation origin is invalid")
+    workspace_path = Path(str(validation_context.get("workspace_path") or "")).expanduser()
+    if not workspace_path.is_absolute():
+        raise ValueError("PREPARE validation workspace path is invalid")
+    try:
+        resolved_workspace = workspace_path.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError("PREPARE validation workspace is unavailable") from exc
+    if resolved_workspace != authority.resolved_workspace_root:
+        raise ValueError("PREPARE validation workspace authority mismatch")
+    terminal_workspace_text = str(completion.get("kanban_task_workspace_path") or "").strip()
+    terminal_workspace = Path(terminal_workspace_text).expanduser() if terminal_workspace_text else None
+    if origin == "review_prepare_terminal_workspace":
+        if terminal_workspace is None or not terminal_workspace.is_absolute():
+            raise ValueError("terminal PREPARE validation workspace is unavailable")
+        try:
+            terminal_resolved = terminal_workspace.resolve(strict=True)
+        except OSError as exc:
+            raise ValueError("terminal PREPARE validation workspace is unavailable") from exc
+        if terminal_resolved != resolved_workspace:
+            raise ValueError("terminal PREPARE validation workspace mismatch")
+        return
+    if validation_context.get("validation_workspace_policy_id") not in {
+        "pepper-review-prepare-validation-rematerialized-workspace-v1",
+    }:
+        raise ValueError("rematerialized PREPARE validation policy mismatch")
+    if _int_or_none(validation_context.get("rematerialized_from_terminal_run_id")) != _int_or_none(
+        completion.get("run_id")
+    ):
+        raise ValueError("rematerialized PREPARE validation run binding mismatch")
+    reference = validation_context.get("durable_source_authority_reference")
+    if not isinstance(reference, Mapping):
+        raise ValueError("rematerialized PREPARE source authority reference is missing")
+    for key in ("authority_path", "authority_SHA256", "snapshot_SHA256"):
+        if not str(reference.get(key) or "").strip():
+            raise ValueError(f"rematerialized PREPARE source authority {key} is missing")
+    if validation_context.get("durable_source_authority_SHA256") != reference.get(
+        "authority_SHA256"
+    ):
+        raise ValueError("rematerialized PREPARE source authority digest mismatch")
+    if terminal_workspace is not None and terminal_workspace.is_absolute():
+        try:
+            terminal_resolved = terminal_workspace.resolve(strict=True)
+        except OSError:
+            terminal_resolved = None
+        if terminal_resolved == resolved_workspace:
+            raise ValueError("rematerialized PREPARE workspace must be separate")
+
+
 def run_review_prepare_validation_commands(
     *,
     projection: Mapping[str, Any],
     completion: Mapping[str, Any],
     acceptance_contract: Mapping[str, Any],
     worker_env: Mapping[str, str],
+    validation_context: Mapping[str, Any] | None = None,
     requirements: tuple[Mapping[str, Any], ...] | None = None,
     requested_project_id: str | None = None,
     requested_ticket_id: str | None = None,
@@ -506,6 +575,7 @@ def run_review_prepare_validation_commands(
             projection=projection,
             completion=completion,
             acceptance_contract=acceptance_contract,
+            validation_context=validation_context,
             requested_project_id=requested_project_id,
             requested_ticket_id=requested_ticket_id,
             requested_next_action_id=requested_next_action_id,
@@ -554,6 +624,7 @@ def run_review_prepare_validation_commands(
         projection=projection,
         completion=completion,
         acceptance_contract=acceptance_contract,
+        validation_context=validation_context,
         requirements=normalized_requirements,
         authorized_specs=tuple(spec for _requirement, spec in selected),
         workpacket_capability_specs=specs,
@@ -580,6 +651,12 @@ def run_review_prepare_validation_commands(
             "review_prepare_validation_authority_SHA256": authority_record[
                 "review_prepare_validation_authority_SHA256"
             ],
+            "validation_context": dict(validation_context)
+            if isinstance(validation_context, Mapping)
+            else None,
+            "validation_origin": validation_context.get("validation_origin")
+            if isinstance(validation_context, Mapping)
+            else None,
             "missing_requirements": [
                 review_prepare_validation_requirement_public(item) for item in missing
             ],
@@ -631,6 +708,12 @@ def run_review_prepare_validation_commands(
         "review_prepare_validation_authority_SHA256": authority_record[
             "review_prepare_validation_authority_SHA256"
         ],
+        "validation_context": dict(validation_context)
+        if isinstance(validation_context, Mapping)
+        else None,
+        "validation_origin": validation_context.get("validation_origin")
+        if isinstance(validation_context, Mapping)
+        else None,
         "missing_requirements": [],
         "failure_detail": failure_detail,
     }
@@ -641,7 +724,8 @@ def build_review_prepare_validation_authority_record(
     projection: Mapping[str, Any],
     completion: Mapping[str, Any],
     acceptance_contract: Mapping[str, Any],
-    requirements: tuple[Mapping[str, Any], ...],
+    validation_context: Mapping[str, Any] | None = None,
+    requirements: tuple[Mapping[str, Any], ...] = (),
     authorized_specs: tuple[GovernedValidationCommandSpec, ...] = (),
     workpacket_capability_specs: tuple[GovernedValidationCommandSpec, ...] | None = None,
     requested_project_id: str | None = None,
@@ -661,6 +745,7 @@ def build_review_prepare_validation_authority_record(
         {"commands": capability_manifest, "manifest_kind": "workpacket_capability"},
     )
     current_run_binding = _canonical_current_terminal_run_binding(projection, completion)
+    context_record = dict(validation_context) if isinstance(validation_context, Mapping) else None
     record = {
         "schema_version": 1,
         "authority_kind": "review_prepare_validation",
@@ -684,6 +769,23 @@ def build_review_prepare_validation_authority_record(
             else None
         ),
         "kanban_completion_result_SHA256": completion.get("kanban_completion_result_SHA256"),
+        "validation_origin": context_record.get("validation_origin")
+        if isinstance(context_record, dict)
+        else None,
+        "validation_context": context_record,
+        "validation_workspace_path": context_record.get("workspace_path")
+        if isinstance(context_record, dict)
+        else None,
+        "durable_source_authority_reference": context_record.get(
+            "durable_source_authority_reference"
+        )
+        if isinstance(context_record, dict)
+        else None,
+        "durable_source_authority_SHA256": context_record.get(
+            "durable_source_authority_SHA256"
+        )
+        if isinstance(context_record, dict)
+        else None,
         "acceptance_contract_SHA256": acceptance_contract.get("acceptance_contract_SHA256"),
         "criteria_revision_SHA256": acceptance_contract.get("criteria_revision_SHA256"),
         "requested_project_id": requested_project_id,

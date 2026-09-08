@@ -350,6 +350,151 @@ def _source_materialization_authority(
     )
 
 
+def _c21_source_authority_projection() -> dict[str, object]:
+    return {
+        "project_id": "PEPPER",
+        "ticket_id": "P18.9.1",
+        "ticket_spec_SHA256": "b" * 64,
+        "work_packet_id": "WP-P18-9-1-R0001-123456789abc",
+        "work_packet_SHA256": "a" * 64,
+        "projection_SHA256": "c" * 64,
+        "kanban_board_slug": "pepper",
+        "kanban_task_id": "task-c21-source-authority",
+        "assignee_profile": _IMPLEMENTATION_PROFILE,
+        "profile_assignment_policy_id": projection.PEPPER_EXECUTION_PROFILES_POLICY_ID,
+        "profile_assignment_policy_revision": (
+            projection.PEPPER_EXECUTION_PROFILES_POLICY_REVISION
+        ),
+    }
+
+
+def _c21_source_authority_materialization(
+    pr,
+    *,
+    source_root: Path,
+    workspace: Path,
+    projection_record: dict[str, object] | None = None,
+) -> dict[str, object]:
+    if projection_record is None:
+        projection_record = _c21_source_authority_projection()
+    workspace.mkdir(parents=True, exist_ok=True)
+    source_root.mkdir(parents=True, exist_ok=True)
+    _write_fixture_file(source_root, "README.md", "canonical source root\n")
+    _write_fixture_file(
+        workspace,
+        "2_products/pepper-agent/web/package.json",
+        json.dumps({"scripts": {"test": "vitest run"}}),
+    )
+    _write_fixture_file(
+        workspace,
+        "2_products/pepper-agent/web/src/App.tsx",
+        "export const app = 'scratch baseline';\n",
+    )
+    _write_fixture_file(
+        workspace,
+        "2_products/pepper-agent/node_modules/vitest/vitest.mjs",
+        "export const vitest = true;\n",
+    )
+    manifest_path = workspace / pr.PEPPER_SCRATCH_SOURCE_MATERIALIZATION_MANIFEST
+    record = {
+        "policy_id": pr.PEPPER_SCRATCH_SOURCE_MATERIALIZATION_POLICY_ID,
+        "created_at": "2026-01-01T00:00:00Z",
+        **projection_record,
+        "source_materialized": True,
+        "source_root": str(source_root),
+        "workspace_root": str(workspace),
+        "manifest_path": str(manifest_path),
+        "readable_source_roots": ["2_products/pepper-agent/web/src"],
+        "writable_allowed_paths": ["2_products/pepper-agent/web/src/App.tsx"],
+        "forbidden_paths": [],
+        "package_source_closures": ["2_products/pepper-agent/web"],
+        "read_only_validation_support_files": [],
+        "materialized_roots": [
+            "2_products/pepper-agent/web/package.json",
+            "2_products/pepper-agent/web/src",
+        ],
+        "missing_source_paths": [],
+        "copied_file_count": 3,
+        "dependency_substrate_materialized": True,
+        "dependency_substrate_policy_id": pr.PEPPER_SCRATCH_DEPENDENCY_SUBSTRATE_POLICY_ID,
+        "dependency_substrate_kind": "physical_node_modules_snapshot",
+        "dependency_substrates": [
+            {
+                "scratch_dependency_root_relative": "2_products/pepper-agent/node_modules",
+                "copied_file_count": 1,
+                "copied_directory_count": 2,
+                "copied_bytes": 28,
+            }
+        ],
+        "product_diff_excluded_roots": ["2_products/pepper-agent/node_modules"],
+        "local_package_sources_materialized": False,
+        "local_package_source_materializations": [],
+        "dependency_install_performed": False,
+        "canonical_package_lock_materialized": False,
+        "Git_commands_executed": 0,
+        "Docker_commands_executed": 0,
+        "Graphify_commands_executed": 0,
+    }
+    pr._write_materialization_manifest(
+        manifest_path,
+        record,
+        workspace_root=workspace,
+    )
+    return record
+
+
+def _initialize_c21_git_source(source_root: Path) -> None:
+    _write_fixture_file(source_root, "README.md", "canonical source root\n")
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/package.json",
+        json.dumps({"scripts": {"test": "vitest run"}}),
+    )
+    _write_fixture_file(
+        source_root,
+        "2_products/pepper-agent/web/src/App.tsx",
+        "export const app = 'canonical baseline';\n",
+    )
+    for args in (
+        ["git", "init"],
+        ["git", "config", "user.email", "pepper@example.invalid"],
+        ["git", "config", "user.name", "Pepper Test"],
+        ["git", "add", "README.md", "2_products/pepper-agent/web"],
+        ["git", "commit", "-m", "baseline"],
+    ):
+        result = subprocess.run(args, cwd=source_root, capture_output=True, text=True, check=False)
+        assert result.returncode == 0, result.stderr
+
+
+def _install_c21_implementation_profile_for_credentials(monkeypatch, home) -> None:
+    profile = _profile_stub(
+        home,
+        name=_IMPLEMENTATION_PROFILE,
+        description="Pepper frontend product implementation execution profile",
+        cli_toolsets=("pepper_repository", "file", "no_mcp"),
+        model_config=True,
+    )
+    _install_executor_profile_roster(monkeypatch, [profile])
+
+
+def _persist_c21_source_authority(pr, tmp_path, *, run_id: int = 7):
+    source_root = tmp_path / "source"
+    workspace = tmp_path / "scratch"
+    projection_record = _c21_source_authority_projection()
+    materialization = _c21_source_authority_materialization(
+        pr,
+        source_root=source_root,
+        workspace=workspace,
+    )
+    reference = pr._persist_governed_source_authority(
+        projection=projection_record,
+        workspace=workspace,
+        materialization=materialization,
+        run_id=run_id,
+    )
+    return projection_record, reference
+
+
 def _persist_started_execution_record(pr, projected, run_id: int) -> None:
     authority = projected
     if "projection_SHA256" not in authority or "dependency_plan_SHA256" not in authority:
@@ -556,6 +701,58 @@ def _projection_authority_record(projected: dict) -> dict:
     )
     assert authority is not None
     return authority
+
+
+def _synthetic_source_authority_materialization_record(
+    pr,
+    projected: dict[str, object],
+    workspace: Path,
+) -> dict[str, object]:
+    workspace_path = Path(workspace)
+    synthetic_source_root = workspace_path / ".synthetic-source-authority"
+    synthetic_source_root.mkdir(parents=True, exist_ok=True)
+    source_file = workspace_path / "2_products/pepper-agent/web/src/App.tsx"
+    source_file.parent.mkdir(parents=True, exist_ok=True)
+    source_file.write_text("export const synthetic = true;\n", encoding="utf-8")
+    vitest_file = workspace_path / "2_products/pepper-agent/node_modules/vitest/vitest.mjs"
+    vitest_file.parent.mkdir(parents=True, exist_ok=True)
+    vitest_file.write_text("export const vitest = true;\n", encoding="utf-8")
+    manifest_path = workspace_path / pr.PEPPER_SCRATCH_SOURCE_MATERIALIZATION_MANIFEST
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "policy_id": pr.PEPPER_SCRATCH_SOURCE_MATERIALIZATION_POLICY_ID,
+        "source_materialized": True,
+        "ticket_id": projected["ticket_id"],
+        "work_packet_id": projected["work_packet_id"],
+        "work_packet_SHA256": projected["work_packet_SHA256"],
+        "ticket_spec_SHA256": projected["ticket_spec_SHA256"],
+        "projection_SHA256": projected["projection_SHA256"],
+        "workspace_root": str(workspace_path),
+        "source_root": str(synthetic_source_root),
+        "dependency_substrate_materialized": True,
+        "dependency_substrate_kind": "synthetic_test_fixture",
+        "dependency_substrates": [
+            {
+                "scratch_dependency_root_relative": "2_products/pepper-agent/node_modules",
+                "copied_file_count": 1,
+                "copied_directory_count": 2,
+                "copied_bytes": vitest_file.stat().st_size,
+            }
+        ],
+        "dependency_install_performed": False,
+        "canonical_package_lock_materialized": False,
+        "manifest_path": str(manifest_path),
+        "readable_source_roots": ["2_products/pepper-agent/web/src"],
+        "writable_allowed_paths": ["2_products/pepper-agent/web/src/App.tsx"],
+        "forbidden_paths": [],
+        "materialized_roots": ["2_products/pepper-agent/web/src/App.tsx"],
+        "product_diff_excluded_roots": ["2_products/pepper-agent/node_modules"],
+    }
+    manifest_path.write_text(
+        json.dumps(record, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return record
 
 
 def _recovered_p18_9_2_dependency_failure_fixture(projection_home, monkeypatch):
@@ -770,30 +967,11 @@ def _closed_p18_9_0_with_projected_p18_9_1(projection_home, monkeypatch):
 def _patch_synthetic_scratch_materialization(monkeypatch, pr) -> None:
     def materialize(_projection, workspace, *, env_overlay=None, source_root=None):
         _ = env_overlay, source_root
-        workspace_path = Path(workspace)
-        manifest_path = workspace_path / pr.PEPPER_SCRATCH_SOURCE_MATERIALIZATION_MANIFEST
-        manifest_path.parent.mkdir(parents=True, exist_ok=True)
-        record = {
-            "policy_id": pr.PEPPER_SCRATCH_SOURCE_MATERIALIZATION_POLICY_ID,
-            "source_materialized": True,
-            "ticket_id": _projection["ticket_id"],
-            "work_packet_id": _projection["work_packet_id"],
-            "work_packet_SHA256": _projection["work_packet_SHA256"],
-            "ticket_spec_SHA256": _projection["ticket_spec_SHA256"],
-            "projection_SHA256": _projection["projection_SHA256"],
-            "workspace_root": str(workspace_path),
-            "dependency_substrate_materialized": True,
-            "dependency_substrate_kind": "synthetic_test_fixture",
-            "dependency_install_performed": False,
-            "canonical_package_lock_materialized": False,
-            "manifest_path": str(manifest_path),
-            "product_diff_excluded_roots": ["2_products/pepper-agent/node_modules"],
-        }
-        manifest_path.write_text(
-            json.dumps(record, sort_keys=True, indent=2) + "\n",
-            encoding="utf-8",
+        return _synthetic_source_authority_materialization_record(
+            pr,
+            _projection,
+            Path(workspace),
         )
-        return record
 
     monkeypatch.setattr(pr, "_materialize_pepper_governed_scratch_source", materialize)
 
@@ -2216,7 +2394,8 @@ def _install_c19_review_prepare_validation_tool_stub(
         completion,
         acceptance_contract,
         worker_env,
-        requirements,
+        validation_context=None,
+        requirements=None,
         requested_project_id=None,
         requested_ticket_id=None,
         requested_next_action_id=None,
@@ -2228,6 +2407,7 @@ def _install_c19_review_prepare_validation_tool_stub(
             projection=projection,
             completion=completion,
             acceptance_contract=acceptance_contract,
+            validation_context=validation_context,
             requirements=normalized_requirements,
             requested_project_id=requested_project_id,
             requested_ticket_id=requested_ticket_id,
@@ -2248,6 +2428,12 @@ def _install_c19_review_prepare_validation_tool_stub(
                 "review_prepare_validation_authority_SHA256": authority_record[
                     "review_prepare_validation_authority_SHA256"
                 ],
+                "validation_context": dict(validation_context)
+                if isinstance(validation_context, dict)
+                else None,
+                "validation_origin": validation_context.get("validation_origin")
+                if isinstance(validation_context, dict)
+                else None,
                 "missing_requirements": [
                     validation_tool.review_prepare_validation_requirement_public(item)
                     for item in missing
@@ -2328,6 +2514,12 @@ def _install_c19_review_prepare_validation_tool_stub(
             "review_prepare_validation_authority_SHA256": authority_record[
                 "review_prepare_validation_authority_SHA256"
             ],
+            "validation_context": dict(validation_context)
+            if isinstance(validation_context, dict)
+            else None,
+            "validation_origin": validation_context.get("validation_origin")
+            if isinstance(validation_context, dict)
+            else None,
             "missing_requirements": [],
             "failure_detail": failure_detail,
         }
@@ -4468,6 +4660,1000 @@ def test_scratch_source_materialization_copies_frontend_readable_closure(
     scratch_app.write_text("export const app = 'scratch edit';\n", encoding="utf-8")
 
     assert canonical_app.read_text(encoding="utf-8") == "export const app = 'canonical';\n"
+
+
+def test_c21_durable_source_authority_rematerializes_after_scratch_deleted(
+    projection_home,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _install_c21_implementation_profile_for_credentials(monkeypatch, projection_home)
+    source_root = tmp_path / "source"
+    workspace = tmp_path / "scratch"
+    projection_record = _c21_source_authority_projection()
+    materialization = _c21_source_authority_materialization(
+        pr,
+        source_root=source_root,
+        workspace=workspace,
+    )
+    reference = pr._persist_governed_source_authority(
+        projection=projection_record,
+        workspace=workspace,
+        materialization=materialization,
+        run_id=7,
+    )
+    assert reference["authority_path"].startswith(str(projection_home))
+
+    shutil.rmtree(workspace)
+    completion = {
+        "run_id": 7,
+        "run_status": "done",
+        "run_outcome": "completed",
+        "kanban_board_slug": projection_record["kanban_board_slug"],
+        "kanban_task_id": projection_record["kanban_task_id"],
+        "kanban_task_workspace_path": str(workspace),
+        "source_materialization_reference": {
+            "durable_source_authority_reference": reference,
+        },
+    }
+
+    context = pr._review_prepare_validation_context(projection_record, completion)
+
+    validation_context = context["validation_context"]
+    assert validation_context["validation_origin"] == (
+        "review_prepare_rematerialized_source_authority"
+    )
+    assert validation_context["rematerialized_from_terminal_run_id"] == 7
+    assert validation_context["workspace_verification"]["verified"] is True
+    rematerialized_workspace = Path(validation_context["workspace_path"])
+    assert rematerialized_workspace != workspace
+    assert rematerialized_workspace.is_dir()
+    assert not workspace.exists()
+    assert (
+        rematerialized_workspace / "2_products/pepper-agent/web/src/App.tsx"
+    ).read_text(encoding="utf-8") == "export const app = 'scratch baseline';\n"
+    remat_manifest = json.loads(
+        (rematerialized_workspace / pr.PEPPER_SCRATCH_SOURCE_MATERIALIZATION_MANIFEST)
+        .read_text(encoding="utf-8")
+    )
+    assert remat_manifest["validation_origin"] == (
+        "review_prepare_rematerialized_source_authority"
+    )
+    assert context["worker_env"]["HERMES_KANBAN_WORKSPACE"] == str(
+        rematerialized_workspace
+    )
+
+
+def test_c21_durable_source_authority_round_trips_immediate_reload(
+    projection_home,
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    projection_record, reference = _persist_c21_source_authority(pr, tmp_path, run_id=7)
+
+    authority = pr._load_governed_source_authority_from_reference(
+        reference,
+        projection=projection_record,
+        run_id=7,
+    )
+
+    assert reference["authority_path"].startswith(str(projection_home))
+    assert authority["run_id"] == 7
+    assert authority["governed_source_authority_SHA256"] == reference["authority_SHA256"]
+    assert authority["snapshot_SHA256"] == reference["snapshot_SHA256"]
+    assert authority["snapshot_file_count"] == 3
+    assert Path(authority["snapshot_root"]).is_dir()
+    assert Path(authority["snapshot_manifest_path"]).is_file()
+
+
+def test_c21_durable_source_authority_path_is_projection_scoped(
+    projection_home,
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    first_projection = _c21_source_authority_projection()
+    first_materialization = _c21_source_authority_materialization(
+        pr,
+        source_root=tmp_path / "source-one",
+        workspace=tmp_path / "scratch-one",
+        projection_record=first_projection,
+    )
+    first_reference = pr._persist_governed_source_authority(
+        projection=first_projection,
+        workspace=tmp_path / "scratch-one",
+        materialization=first_materialization,
+        run_id=7,
+    )
+    second_projection = {
+        **first_projection,
+        "projection_SHA256": "d" * 64,
+        "kanban_board_slug": "pepper-colliding-board",
+        "kanban_task_id": "task-c21-source-authority-collision",
+    }
+    second_materialization = _c21_source_authority_materialization(
+        pr,
+        source_root=tmp_path / "source-two",
+        workspace=tmp_path / "scratch-two",
+        projection_record=second_projection,
+    )
+    second_reference = pr._persist_governed_source_authority(
+        projection=second_projection,
+        workspace=tmp_path / "scratch-two",
+        materialization=second_materialization,
+        run_id=7,
+    )
+
+    assert first_reference["authority_path"] != second_reference["authority_path"]
+    assert Path(str(first_reference["authority_path"])).is_file()
+    assert Path(str(second_reference["authority_path"])).is_file()
+    assert first_reference["authority_path"].startswith(str(projection_home))
+    assert second_reference["authority_path"].startswith(str(projection_home))
+
+
+def test_c21_durable_source_authority_cross_board_runs_remain_independent(
+    projection_home,
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    first_projection = _c21_source_authority_projection()
+    first_materialization = _c21_source_authority_materialization(
+        pr,
+        source_root=tmp_path / "source-one",
+        workspace=tmp_path / "scratch-one",
+        projection_record=first_projection,
+    )
+    first_reference = pr._persist_governed_source_authority(
+        projection=first_projection,
+        workspace=tmp_path / "scratch-one",
+        materialization=first_materialization,
+        run_id=7,
+    )
+    second_projection = {
+        **first_projection,
+        "projection_SHA256": "d" * 64,
+        "kanban_board_slug": "pepper-colliding-board",
+        "kanban_task_id": "task-c21-source-authority-collision",
+    }
+    second_materialization = _c21_source_authority_materialization(
+        pr,
+        source_root=tmp_path / "source-two",
+        workspace=tmp_path / "scratch-two",
+        projection_record=second_projection,
+    )
+    second_reference = pr._persist_governed_source_authority(
+        projection=second_projection,
+        workspace=tmp_path / "scratch-two",
+        materialization=second_materialization,
+        run_id=7,
+    )
+
+    first_authority = pr._load_governed_source_authority_from_reference(
+        first_reference,
+        projection=first_projection,
+        run_id=7,
+    )
+    second_authority = pr._load_governed_source_authority_from_reference(
+        second_reference,
+        projection=second_projection,
+        run_id=7,
+    )
+
+    assert first_reference["authority_path"] != second_reference["authority_path"]
+    assert Path(str(first_reference["authority_path"])).is_file()
+    assert Path(str(second_reference["authority_path"])).is_file()
+    assert first_authority["kanban_board_slug"] == first_projection["kanban_board_slug"]
+    assert first_authority["kanban_task_id"] == first_projection["kanban_task_id"]
+    assert first_authority["projection_SHA256"] == first_projection["projection_SHA256"]
+    assert second_authority["kanban_board_slug"] == second_projection["kanban_board_slug"]
+    assert second_authority["kanban_task_id"] == second_projection["kanban_task_id"]
+    assert second_authority["projection_SHA256"] == second_projection["projection_SHA256"]
+    assert first_reference["authority_path"].startswith(str(projection_home))
+    assert second_reference["authority_path"].startswith(str(projection_home))
+
+
+def test_c21_terminal_workspace_validates_durable_source_authority_before_prepare(
+    projection_home,
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    source_root = tmp_path / "source"
+    workspace = tmp_path / "scratch"
+    projection_record = _c21_source_authority_projection()
+    materialization = _c21_source_authority_materialization(
+        pr,
+        source_root=source_root,
+        workspace=workspace,
+    )
+    reference = pr._persist_governed_source_authority(
+        projection=projection_record,
+        workspace=workspace,
+        materialization=materialization,
+        run_id=7,
+    )
+    authority_path = Path(str(reference["authority_path"]))
+    record = json.loads(authority_path.read_text(encoding="utf-8"))
+    record["created_at"] = "2026-01-01T00:00:01Z"
+    authority_path.write_text(
+        json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    completion = {
+        "run_id": 7,
+        "run_status": "done",
+        "run_outcome": "completed",
+        "kanban_board_slug": projection_record["kanban_board_slug"],
+        "kanban_task_id": projection_record["kanban_task_id"],
+        "kanban_task_workspace_path": str(workspace),
+        "source_materialization_reference": {
+            "durable_source_authority_reference": reference,
+        },
+    }
+
+    with pytest.raises(pr.ProductRuntimeConflict, match="record digest mismatch"):
+        pr._review_prepare_validation_context(projection_record, completion)
+
+    assert workspace.is_dir()
+    assert reference["authority_path"].startswith(str(projection_home))
+
+
+def test_c21_existing_terminal_workspace_with_valid_authority_is_accepted_for_prepare(
+    projection_home,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+    from tools import workpacket_validation_tool as validation_tool
+
+    _install_c21_implementation_profile_for_credentials(monkeypatch, projection_home)
+    source_root = tmp_path / "source"
+    workspace = tmp_path / "scratch"
+    projection_record = _c21_source_authority_projection()
+    materialization = _c21_source_authority_materialization(
+        pr,
+        source_root=source_root,
+        workspace=workspace,
+    )
+    reference = pr._persist_governed_source_authority(
+        projection=projection_record,
+        workspace=workspace,
+        materialization=materialization,
+        run_id=7,
+    )
+    completion = {
+        "run_id": 7,
+        "run_status": "done",
+        "run_outcome": "completed",
+        "kanban_board_slug": projection_record["kanban_board_slug"],
+        "kanban_task_id": projection_record["kanban_task_id"],
+        "kanban_task_workspace_path": str(workspace),
+        "source_materialization_reference": {
+            "durable_source_authority_reference": reference,
+        },
+    }
+
+    context = pr._review_prepare_terminal_workspace_validation_context(
+        projection_record,
+        completion,
+    )
+
+    assert context is not None
+    validation_context = context["validation_context"]
+    workspace_resolved = str(workspace.resolve(strict=True))
+    assert validation_context["validation_origin"] == "review_prepare_terminal_workspace"
+    assert validation_context["workspace_path"] == workspace_resolved
+    assert validation_context["terminal_workspace_path"] == workspace_resolved
+    assert validation_context["terminal_workspace_available"] is True
+    assert validation_context["durable_source_authority_reference"]["authority_SHA256"] == reference[
+        "authority_SHA256"
+    ]
+    assert validation_context["durable_source_authority_validated_for_review_prepare"] is True
+    assert context["worker_env"]["HERMES_KANBAN_WORKSPACE"] == workspace_resolved
+    validation_tool._validate_review_prepare_validation_context(
+        authority=_source_materialization_authority(
+            workspace,
+            allowed_paths=tuple(materialization["writable_allowed_paths"]),
+        ),
+        completion=completion,
+        validation_context=validation_context,
+    )
+
+
+def test_c21_terminal_workspace_denies_tampered_source_authority_reference(
+    projection_home,
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    source_root = tmp_path / "source"
+    workspace = tmp_path / "scratch"
+    projection_record = _c21_source_authority_projection()
+    materialization = _c21_source_authority_materialization(
+        pr,
+        source_root=source_root,
+        workspace=workspace,
+    )
+    reference = pr._persist_governed_source_authority(
+        projection=projection_record,
+        workspace=workspace,
+        materialization=materialization,
+        run_id=7,
+    )
+    tampered_reference = dict(reference)
+    tampered_reference["authority_SHA256"] = "0" * 64
+    completion = {
+        "run_id": 7,
+        "run_status": "done",
+        "run_outcome": "completed",
+        "kanban_board_slug": projection_record["kanban_board_slug"],
+        "kanban_task_id": projection_record["kanban_task_id"],
+        "kanban_task_workspace_path": str(workspace),
+        "source_materialization_reference": {
+            "durable_source_authority_reference": tampered_reference,
+        },
+    }
+
+    with pytest.raises(pr.ProductRuntimeConflict, match="reference digest mismatch"):
+        pr._review_prepare_terminal_workspace_validation_context(
+            projection_record,
+            completion,
+        )
+
+    assert workspace.is_dir()
+    assert reference["authority_path"].startswith(str(projection_home))
+
+
+def test_c21_legacy_existing_terminal_workspace_without_source_authority_is_supported(
+    projection_home,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+    from tools import workpacket_validation_tool as validation_tool
+
+    _install_c21_implementation_profile_for_credentials(monkeypatch, projection_home)
+    source_root = tmp_path / "source"
+    workspace = tmp_path / "scratch"
+    projection_record = _c21_source_authority_projection()
+    materialization = _c21_source_authority_materialization(
+        pr,
+        source_root=source_root,
+        workspace=workspace,
+    )
+    completion = {
+        "run_id": 7,
+        "run_status": "done",
+        "run_outcome": "completed",
+        "kanban_board_slug": projection_record["kanban_board_slug"],
+        "kanban_task_id": projection_record["kanban_task_id"],
+        "kanban_task_workspace_path": str(workspace),
+        "run_metadata": {},
+    }
+
+    context = pr._review_prepare_terminal_workspace_validation_context(
+        projection_record,
+        completion,
+    )
+
+    assert context is not None
+    validation_context = context["validation_context"]
+    workspace_resolved = str(workspace.resolve(strict=True))
+    assert validation_context["validation_origin"] == "review_prepare_terminal_workspace"
+    assert validation_context["workspace_path"] == workspace_resolved
+    assert validation_context["terminal_workspace_available"] is True
+    assert validation_context["durable_source_authority_reference"] is None
+    assert validation_context["durable_source_authority_SHA256"] is None
+    assert validation_context["durable_source_authority_validated_for_review_prepare"] is False
+    validation_tool._validate_review_prepare_validation_context(
+        authority=_source_materialization_authority(
+            workspace,
+            allowed_paths=tuple(materialization["writable_allowed_paths"]),
+        ),
+        completion=completion,
+        validation_context=validation_context,
+    )
+
+
+def test_c21_durable_source_authority_rejects_tampered_authority_record_digest(
+    projection_home,
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    projection_record, reference = _persist_c21_source_authority(pr, tmp_path, run_id=7)
+    authority_path = Path(str(reference["authority_path"]))
+    record = json.loads(authority_path.read_text(encoding="utf-8"))
+    record["created_at"] = "2026-01-01T00:00:01Z"
+    authority_path.write_text(
+        json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(pr.ProductRuntimeConflict, match="record digest mismatch"):
+        pr._load_governed_source_authority_from_reference(
+            reference,
+            projection=projection_record,
+            run_id=7,
+        )
+    assert reference["authority_path"].startswith(str(projection_home))
+
+
+def test_c21_durable_source_authority_rejects_tampered_snapshot_manifest_digest(
+    projection_home,
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    projection_record, reference = _persist_c21_source_authority(pr, tmp_path, run_id=7)
+    authority_record = json.loads(
+        Path(str(reference["authority_path"])).read_text(encoding="utf-8")
+    )
+    manifest_path = Path(str(authority_record["snapshot_manifest_path"]))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["total_bytes"] = int(manifest["total_bytes"]) + 1
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(pr.ProductRuntimeConflict, match="snapshot manifest digest mismatch"):
+        pr._load_governed_source_authority_from_reference(
+            reference,
+            projection=projection_record,
+            run_id=7,
+        )
+    assert reference["authority_path"].startswith(str(projection_home))
+
+
+def test_c21_durable_source_authority_rejects_tampered_snapshot_payload_bytes(
+    projection_home,
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    projection_record, reference = _persist_c21_source_authority(pr, tmp_path, run_id=7)
+    authority_record = json.loads(
+        Path(str(reference["authority_path"])).read_text(encoding="utf-8")
+    )
+    payload_path = (
+        Path(str(authority_record["snapshot_root"]))
+        / "2_products/pepper-agent/web/src/App.tsx"
+    )
+    payload_path.write_text("export const app = 'tampered snapshot';\n", encoding="utf-8")
+
+    with pytest.raises(pr.ProductRuntimeConflict, match="snapshot digest mismatch"):
+        pr._load_governed_source_authority_from_reference(
+            reference,
+            projection=projection_record,
+            run_id=7,
+        )
+    assert reference["authority_path"].startswith(str(projection_home))
+
+
+def test_c21_durable_source_authority_rejects_tampered_reference_digest(
+    projection_home,
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    source_root = tmp_path / "source"
+    workspace = tmp_path / "scratch"
+    projection_record = _c21_source_authority_projection()
+    materialization = _c21_source_authority_materialization(
+        pr,
+        source_root=source_root,
+        workspace=workspace,
+    )
+    reference = pr._persist_governed_source_authority(
+        projection=projection_record,
+        workspace=workspace,
+        materialization=materialization,
+        run_id=7,
+    )
+    tampered_reference = dict(reference)
+    tampered_reference["authority_SHA256"] = "0" * 64
+    shutil.rmtree(workspace)
+
+    completion = {
+        "run_id": 7,
+        "run_status": "done",
+        "run_outcome": "completed",
+        "kanban_board_slug": projection_record["kanban_board_slug"],
+        "kanban_task_id": projection_record["kanban_task_id"],
+        "kanban_task_workspace_path": str(workspace),
+        "source_materialization_reference": {
+            "durable_source_authority_reference": tampered_reference,
+        },
+    }
+
+    with pytest.raises(pr.ProductRuntimeConflict, match="reference digest mismatch"):
+        pr._review_prepare_validation_context(projection_record, completion)
+
+    assert not pr.review_prepare_validation_workspace_path_for_run(
+        str(projection_record["ticket_id"]),
+        7,
+        str(reference["authority_SHA256"]),
+    ).exists()
+    assert reference["authority_path"].startswith(str(projection_home))
+
+
+def _c21_dispatch_fixture(projection_home, monkeypatch):
+    _install_implementation_profile(monkeypatch, projection_home)
+    _approve_next_ticket()
+    projected = _project_next_ticket_direct()
+
+    from hermes_cli import kanban_db
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    projection_record = _projection_authority_record(projected)
+    monkeypatch.setattr(
+        pr,
+        "_projection_requires_scratch_source_materialization",
+        lambda _projection_record: True,
+    )
+    return pr, kanban_db, projection_record
+
+
+def _install_c21_source_authority_derivation(monkeypatch, pr, events: list[str]) -> None:
+    def materialize(_projection, workspace, *, env_overlay=None, source_root=None):
+        _ = env_overlay, source_root
+        workspace_path = Path(workspace)
+        assert workspace_path.name == "d"
+        events.append("source_authority_derivation")
+        return _synthetic_source_authority_materialization_record(
+            pr,
+            _projection,
+            workspace_path,
+        )
+
+    monkeypatch.setattr(pr, "_materialize_pepper_governed_scratch_source", materialize)
+
+
+def _c21_spawn_counter():
+    counts = {"worker_start_count": 0, "provider_dispatch_count": 0}
+
+    def spawn(_task, _workspace, *, board=None, env_overlay=None):
+        _ = board, env_overlay
+        counts["worker_start_count"] += 1
+        counts["provider_dispatch_count"] += 1
+        return 4321
+
+    return counts, spawn
+
+
+def _assert_c21_pre_dispatch_failure_contained(
+    pr,
+    kanban_db,
+    projection_record: dict[str, object],
+) -> None:
+    conn = kanban_db.connect(board=projection_record["kanban_board_slug"])
+    try:
+        task = kanban_db.get_task(conn, projection_record["kanban_task_id"])
+        assert task is not None
+        assert task.status == "blocked"
+        assert task.current_run_id is None
+        assert task.worker_pid is None
+        runs = kanban_db.list_runs(conn, task.id)
+        assert len(runs) == 1
+        assert runs[0].ended_at is not None
+        assert runs[0].worker_pid is None
+        workspace = Path(task.workspace_path)
+        assert not (
+            workspace / "2_products/pepper-agent/web/src/App.tsx"
+        ).exists()
+        assert not (
+            workspace / "2_products/pepper-agent/node_modules/vitest/vitest.mjs"
+        ).exists()
+        assert not (
+            workspace / pr.PEPPER_SCRATCH_SOURCE_MATERIALIZATION_MANIFEST
+        ).exists()
+    finally:
+        conn.close()
+
+
+def test_c21_pre_dispatch_source_authority_success_orders_worker_after_validation(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, _kanban_db, projection_record = _c21_dispatch_fixture(projection_home, monkeypatch)
+    events: list[str] = []
+    _install_c21_source_authority_derivation(monkeypatch, pr, events)
+    original_persist = pr._persist_governed_source_authority
+    original_load = pr._load_governed_source_authority_from_reference
+    original_materialize = pr._materialize_dispatch_workspace_from_source_authority
+    original_verify = pr._verify_rematerialized_source_authority_workspace
+
+    def persist_authority(**kwargs):
+        events.append("source_authority_persistence")
+        return original_persist(**kwargs)
+
+    def validate_authority(reference, *, projection, run_id):
+        events.append("source_authority_validation")
+        return original_load(reference, projection=projection, run_id=run_id)
+
+    def materialize_from_authority(**kwargs):
+        events.append("source_authority_materialization")
+        return original_materialize(**kwargs)
+
+    def verify_materialization(**kwargs):
+        events.append("source_authority_materialization_verification")
+        return original_verify(**kwargs)
+
+    monkeypatch.setattr(pr, "_persist_governed_source_authority", persist_authority)
+    monkeypatch.setattr(pr, "_load_governed_source_authority_from_reference", validate_authority)
+    monkeypatch.setattr(
+        pr,
+        "_materialize_dispatch_workspace_from_source_authority",
+        materialize_from_authority,
+    )
+    monkeypatch.setattr(
+        pr,
+        "_verify_rematerialized_source_authority_workspace",
+        verify_materialization,
+    )
+
+    def spawn(_task, workspace, *, board=None, env_overlay=None):
+        _ = board, env_overlay
+        assert events == [
+            "source_authority_derivation",
+            "source_authority_persistence",
+            "source_authority_validation",
+            "source_authority_materialization",
+            "source_authority_materialization_verification",
+        ]
+        manifest_path = Path(workspace) / pr.PEPPER_SCRATCH_SOURCE_MATERIALIZATION_MANIFEST
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        assert manifest["durable_source_authority_validated_before_worker_execution"] is True
+        assert manifest["source_authority_materialized_before_worker_execution"] is True
+        events.append("worker_spawn")
+        return 4321
+
+    result = pr._dispatch_exact_current_kanban_task(projection_record, spawn_fn=spawn)
+
+    assert result["start_status"] == "started"
+    assert result["durable_source_authority_validated_before_worker_execution"] is True
+    assert result["source_authority_materialized_before_worker_execution"] is True
+    assert result["source_authority_materialization_verification"]["verified"] is True
+    assert result["worker_process_started"] is True
+    assert events[-1] == "worker_spawn"
+
+
+def test_c21_source_authority_derivation_failure_releases_claim_before_spawn(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, kanban_db, projection_record = _c21_dispatch_fixture(projection_home, monkeypatch)
+    source_mutation_count = 0
+    counts, spawn = _c21_spawn_counter()
+
+    def derivation_failure(_projection, workspace, *, env_overlay=None, source_root=None):
+        _ = workspace, env_overlay, source_root
+        raise pr.ProductRuntimeDependencyGap(
+            pr.DEPENDENCY_MATERIALIZATION_FAILED,
+            "source authority derivation failed",
+        )
+
+    monkeypatch.setattr(pr, "_materialize_pepper_governed_scratch_source", derivation_failure)
+
+    result = pr._dispatch_exact_current_kanban_task(projection_record, spawn_fn=spawn)
+
+    assert result["start_status"] == "blocked"
+    assert result["execution_started"] is False
+    assert result["worker_process_started"] is False
+    assert counts == {"worker_start_count": 0, "provider_dispatch_count": 0}
+    assert source_mutation_count == 0
+    _assert_c21_pre_dispatch_failure_contained(pr, kanban_db, projection_record)
+
+
+def test_c21_source_authority_persistence_failure_releases_claim_before_spawn(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, kanban_db, projection_record = _c21_dispatch_fixture(projection_home, monkeypatch)
+    events: list[str] = []
+    source_mutation_count = 0
+    counts, spawn = _c21_spawn_counter()
+    _install_c21_source_authority_derivation(monkeypatch, pr, events)
+
+    def persistence_failure(**kwargs):
+        _ = kwargs
+        raise pr.ProductRuntimeConflict("synthetic persistence failure")
+
+    def materialize_from_authority(**kwargs):
+        nonlocal source_mutation_count
+        _ = kwargs
+        source_mutation_count += 1
+        raise AssertionError("worker workspace materialization must not start")
+
+    monkeypatch.setattr(pr, "_persist_governed_source_authority", persistence_failure)
+    monkeypatch.setattr(
+        pr,
+        "_materialize_dispatch_workspace_from_source_authority",
+        materialize_from_authority,
+    )
+
+    result = pr._dispatch_exact_current_kanban_task(projection_record, spawn_fn=spawn)
+
+    assert result["start_status"] == "blocked"
+    assert "persistence failed" in result["blocker_detail"]
+    assert counts == {"worker_start_count": 0, "provider_dispatch_count": 0}
+    assert source_mutation_count == 0
+    _assert_c21_pre_dispatch_failure_contained(pr, kanban_db, projection_record)
+
+
+def test_c21_source_authority_validation_failure_releases_claim_before_spawn(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, kanban_db, projection_record = _c21_dispatch_fixture(projection_home, monkeypatch)
+    events: list[str] = []
+    source_mutation_count = 0
+    counts, spawn = _c21_spawn_counter()
+    captured_reference: dict[str, object] = {}
+    _install_c21_source_authority_derivation(monkeypatch, pr, events)
+    original_persist = pr._persist_governed_source_authority
+
+    def persist_authority(**kwargs):
+        reference = original_persist(**kwargs)
+        captured_reference.update(reference or {})
+        return reference
+
+    def validation_failure(reference, *, projection, run_id):
+        _ = reference, projection, run_id
+        raise pr.ProductRuntimeConflict("synthetic source authority tamper")
+
+    def materialize_from_authority(**kwargs):
+        nonlocal source_mutation_count
+        _ = kwargs
+        source_mutation_count += 1
+        raise AssertionError("worker workspace materialization must not start")
+
+    monkeypatch.setattr(pr, "_persist_governed_source_authority", persist_authority)
+    monkeypatch.setattr(pr, "_load_governed_source_authority_from_reference", validation_failure)
+    monkeypatch.setattr(
+        pr,
+        "_materialize_dispatch_workspace_from_source_authority",
+        materialize_from_authority,
+    )
+
+    result = pr._dispatch_exact_current_kanban_task(projection_record, spawn_fn=spawn)
+
+    assert result["start_status"] == "blocked"
+    assert "tamper" in result["blocker_detail"]
+    assert counts == {"worker_start_count": 0, "provider_dispatch_count": 0}
+    assert source_mutation_count == 0
+    assert Path(str(captured_reference["authority_path"])).is_file()
+    _assert_c21_pre_dispatch_failure_contained(pr, kanban_db, projection_record)
+
+
+def test_c21_source_authority_materialization_failure_blocks_before_spawn(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, kanban_db, projection_record = _c21_dispatch_fixture(projection_home, monkeypatch)
+    events: list[str] = []
+    counts, spawn = _c21_spawn_counter()
+    captured_reference: dict[str, object] = {}
+    _install_c21_source_authority_derivation(monkeypatch, pr, events)
+    original_persist = pr._persist_governed_source_authority
+
+    def persist_authority(**kwargs):
+        reference = original_persist(**kwargs)
+        captured_reference.update(reference or {})
+        return reference
+
+    def materialization_failure(**kwargs):
+        _ = kwargs
+        raise pr.ProductRuntimeConflict("synthetic materialization failure")
+
+    monkeypatch.setattr(pr, "_persist_governed_source_authority", persist_authority)
+    monkeypatch.setattr(
+        pr,
+        "_materialize_dispatch_workspace_from_source_authority",
+        materialization_failure,
+    )
+
+    result = pr._dispatch_exact_current_kanban_task(projection_record, spawn_fn=spawn)
+
+    assert result["start_status"] == "blocked"
+    assert "materialization failed" in result["blocker_detail"]
+    assert counts == {"worker_start_count": 0, "provider_dispatch_count": 0}
+    assert Path(str(captured_reference["authority_path"])).is_file()
+    _assert_c21_pre_dispatch_failure_contained(pr, kanban_db, projection_record)
+
+
+def test_c21_terminal_completion_binds_pre_dispatch_source_authority_digest(
+    projection_home,
+    monkeypatch,
+) -> None:
+    pr, kanban_db, projection_record = _c21_dispatch_fixture(projection_home, monkeypatch)
+    events: list[str] = []
+    _install_c21_source_authority_derivation(monkeypatch, pr, events)
+    monkeypatch.setattr(
+        pr,
+        "build_workflow_control_snapshot",
+        lambda: _queued_workflow_for_projection(projection_record),
+    )
+    monkeypatch.setattr(
+        pr,
+        "_executor_provider_readiness",
+        lambda profile_name: _ready_executor_provider_payload(profile_name),
+    )
+    monkeypatch.setattr(
+        pr,
+        "_preflight_pepper_governed_worker_credentials",
+        lambda _projection_record, *, enabled=True: _ready_worker_credential_probe(),
+    )
+
+    started = pr.start_current_ticket_execution(
+        human_authorization_text="Start P18.9.1 execution now",
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+        next_action_id="START_P18_9_1_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION",
+        spawn_fn=lambda _task, _workspace, board=None, env_overlay=None: 4321,
+    )
+    assert started["start_status"] == "started"
+    authority_sha = started["durable_source_authority_SHA256"]
+
+    conn = kanban_db.connect(board=projection_record["kanban_board_slug"])
+    try:
+        assert kanban_db.complete_task(
+            conn,
+            projection_record["kanban_task_id"],
+            result="implementation completed",
+            summary="implementation completed",
+            metadata={"Git_mutation": False, "files_modified": []},
+            expected_run_id=started["kanban_run_id"],
+        )
+    finally:
+        conn.close()
+
+    completion = pr._kanban_completion_result_source(projection_record)
+
+    assert completion["blocker_code"] is None
+    assert completion["run_id"] == started["kanban_run_id"]
+    assert completion["durable_source_authority_SHA256"] == authority_sha
+    assert completion["durable_source_authority_reference"]["authority_SHA256"] == authority_sha
+
+
+def test_c21_old_run19_does_not_receive_backfilled_source_authority(
+    projection_home,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _ = projection_home
+    projection_record = _c21_source_authority_projection()
+    completion = {
+        "run_id": 19,
+        "run_status": "done",
+        "run_outcome": "completed",
+        "kanban_board_slug": projection_record["kanban_board_slug"],
+        "kanban_task_id": projection_record["kanban_task_id"],
+        "kanban_task_workspace_path": "",
+        "run_metadata": {
+            "Git_mutation": False,
+            "files_modified": [],
+        },
+    }
+
+    assert pr._completion_durable_source_authority_reference(
+        projection_record,
+        completion,
+    ) is None
+    assert not pr.governed_source_authority_record_path_for_run(
+        projection_record,
+        19,
+    ).exists()
+
+
+def test_c21_durable_source_authority_rejects_dirty_git_source(
+    projection_home,
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    if subprocess.run(["git", "--version"], capture_output=True, check=False).returncode:
+        pytest.skip("git is unavailable")
+    source_root = tmp_path / "source"
+    workspace = tmp_path / "scratch"
+    materialization = _c21_source_authority_materialization(
+        pr,
+        source_root=source_root,
+        workspace=workspace,
+    )
+    _initialize_c21_git_source(source_root)
+    (source_root / "2_products/pepper-agent/web/src/App.tsx").write_text(
+        "export const app = 'dirty materialized source';\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(pr.ProductRuntimeConflict, match="clean git worktree"):
+        pr._persist_governed_source_authority(
+            projection=_c21_source_authority_projection(),
+            workspace=workspace,
+            materialization=materialization,
+            run_id=8,
+        )
+
+
+def test_c21_durable_source_authority_ignores_dirty_git_source_outside_closure(
+    projection_home,
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    if subprocess.run(["git", "--version"], capture_output=True, check=False).returncode:
+        pytest.skip("git is unavailable")
+    source_root = tmp_path / "source"
+    workspace = tmp_path / "scratch"
+    materialization = _c21_source_authority_materialization(
+        pr,
+        source_root=source_root,
+        workspace=workspace,
+    )
+    _initialize_c21_git_source(source_root)
+    (source_root / "README.md").write_text("dirty outside closure\n", encoding="utf-8")
+    _write_fixture_file(source_root, "unrelated/notes.txt", "untracked outside closure\n")
+
+    reference = pr._persist_governed_source_authority(
+        projection=_c21_source_authority_projection(),
+        workspace=workspace,
+        materialization=materialization,
+        run_id=8,
+    )
+
+    authority_record = json.loads(
+        Path(str(reference["authority_path"])).read_text(encoding="utf-8")
+    )
+    pathspecs = authority_record["git_source_authority"]["git_status_scope_pathspecs"]
+    assert "2_products/pepper-agent/web/src" in pathspecs
+    assert "README.md" not in pathspecs
+    assert reference["authority_path"].startswith(str(projection_home))
+
+
+def test_c21_untracked_inside_governed_closure_blocks_dispatch_before_spawn(
+    projection_home,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    if subprocess.run(["git", "--version"], capture_output=True, check=False).returncode:
+        pytest.skip("git is unavailable")
+    pr, kanban_db, projection_record = _c21_dispatch_fixture(projection_home, monkeypatch)
+    counts, spawn = _c21_spawn_counter()
+    canonical_source_root = tmp_path / "source"
+
+    def materialize(_projection, workspace, *, env_overlay=None, source_root=None):
+        _ = env_overlay, source_root
+        workspace_path = Path(workspace)
+        record = _c21_source_authority_materialization(
+            pr,
+            source_root=canonical_source_root,
+            workspace=workspace_path,
+            projection_record=_projection,
+        )
+        _initialize_c21_git_source(canonical_source_root)
+        _write_fixture_file(
+            canonical_source_root,
+            "2_products/pepper-agent/web/src/untracked-inside.ts",
+            "export const untrackedInsideClosure = true;\n",
+        )
+        return record
+
+    monkeypatch.setattr(pr, "_materialize_pepper_governed_scratch_source", materialize)
+
+    result = pr._dispatch_exact_current_kanban_task(projection_record, spawn_fn=spawn)
+
+    assert result["start_status"] == "blocked"
+    assert "clean git worktree" in result["blocker_detail"]
+    assert counts == {"worker_start_count": 0, "provider_dispatch_count": 0}
+    _assert_c21_pre_dispatch_failure_contained(pr, kanban_db, projection_record)
 
 
 def test_scratch_source_materialization_copies_web_read_only_validation_support(
