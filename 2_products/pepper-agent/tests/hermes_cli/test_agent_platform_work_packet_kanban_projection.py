@@ -6295,6 +6295,392 @@ def test_workpacket_validation_discovers_scratch_only_frontend_tests(
     )
 
 
+def _c24_package_work_packet(command: str | None) -> SimpleNamespace:
+    return SimpleNamespace(
+        validation_steps=(
+            SimpleNamespace(
+                validation_id="V-C24-PACKAGE",
+                description="Package validation must run in governed scratch.",
+                expected_result="The package validation command passes.",
+                command=command,
+            ),
+        ),
+        source_ticket=SimpleNamespace(ticket_type="implementation"),
+    )
+
+
+def _write_c24_package_fixture(
+    source_root: Path,
+    *,
+    scripts: dict[str, str],
+    cli_entries: tuple[str, ...] = (),
+    package_rel: str = "2_products/pepper-agent/web",
+    root_modules_rel: str = "2_products/pepper-agent/node_modules",
+) -> None:
+    _write_fixture_file(
+        source_root,
+        f"{package_rel}/package.json",
+        json.dumps({"scripts": scripts}),
+    )
+    if package_rel == "2_products/pepper-agent/web":
+        _write_web_read_only_validation_support_file(source_root)
+    _write_fixture_file(
+        source_root,
+        f"{package_rel}/src/App.tsx",
+        "export const app = true;\n",
+    )
+    for entry in cli_entries:
+        _write_fixture_file(
+            source_root,
+            f"{root_modules_rel}/{entry}",
+            f"// synthetic {entry}\n",
+        )
+
+
+def test_c24_workpacket_package_commands_require_dependency_substrate(
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+    from tools import workpacket_validation_tool as validation_tool
+
+    source_root = tmp_path / "source"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    package_rel = "2_products/pepper-agent/web"
+    cli_entries = (
+        "vitest/vitest.mjs",
+        "typescript/lib/tsc.js",
+        "vite/bin/vite.js",
+    )
+    _write_c24_package_fixture(
+        source_root,
+        scripts={
+            "validate": "vitest run src/App.tsx && tsc -p . --noEmit && vite build",
+        },
+        cli_entries=cli_entries,
+        package_rel=package_rel,
+    )
+    authority = _source_materialization_authority(
+        workspace,
+        allowed_paths=(f"{package_rel}/src/App.tsx",),
+    )
+    work_packet = _c24_package_work_packet(
+        f"cd {package_rel} && npm run validate",
+    )
+
+    pr._materialize_workpacket_scratch_source_tree(authority, source_root=source_root)
+    record = pr._materialize_workpacket_dependency_substrate(
+        authority,
+        work_packet,
+        source_root=source_root,
+    )
+
+    specs = validation_tool.build_governed_validation_command_specs(authority, work_packet)
+    assert specs[0].source == "workpacket.validation_steps.package_command"
+    assert tuple(step["cli_entry"] for step in specs[0].execution_plan) == cli_entries
+    assert record["dependency_substrate_materialized"] is True
+    for entry in cli_entries:
+        assert validation_tool._resolve_node_module_entry(  # noqa: SLF001
+            workspace,
+            workspace / package_rel,
+            entry,
+        ) == (workspace / "2_products/pepper-agent/node_modules" / entry).resolve(strict=True)
+
+
+def test_c24_derived_package_specs_still_require_dependency_substrate(
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    source_root = tmp_path / "source"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    package_rel = "2_products/pepper-agent/web"
+    _write_c24_package_fixture(
+        source_root,
+        scripts={"test": "vitest run"},
+        cli_entries=("vitest/vitest.mjs",),
+        package_rel=package_rel,
+    )
+    _write_fixture_file(
+        source_root,
+        f"{package_rel}/src/App.test.ts",
+        "test('derived package spec', () => {})\n",
+    )
+    authority = _source_materialization_authority(
+        workspace,
+        allowed_paths=(f"{package_rel}/src/App.test.ts",),
+    )
+    work_packet = _c24_package_work_packet(None)
+
+    pr._materialize_workpacket_scratch_source_tree(authority, source_root=source_root)
+    record = pr._materialize_workpacket_dependency_substrate(
+        authority,
+        work_packet,
+        source_root=source_root,
+    )
+
+    assert record["dependency_substrate_materialized"] is True
+    assert (workspace / "2_products/pepper-agent/node_modules/vitest/vitest.mjs").is_file()
+
+
+@pytest.mark.parametrize(
+    ("script", "cli_entry"),
+    (
+        ("tsc -p . --noEmit", "typescript/lib/tsc.js"),
+        ("vite build", "vite/bin/vite.js"),
+    ),
+)
+def test_c24_package_command_does_not_require_vitest_for_non_vitest_cli(
+    tmp_path,
+    script: str,
+    cli_entry: str,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    source_root = tmp_path / "source"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    package_rel = "2_products/pepper-agent/web"
+    _write_c24_package_fixture(
+        source_root,
+        scripts={"check": script},
+        cli_entries=(cli_entry,),
+        package_rel=package_rel,
+    )
+    authority = _source_materialization_authority(
+        workspace,
+        allowed_paths=(f"{package_rel}/src/App.tsx",),
+    )
+    work_packet = _c24_package_work_packet(f"cd {package_rel} && npm run check")
+
+    pr._materialize_workpacket_scratch_source_tree(authority, source_root=source_root)
+    record = pr._materialize_workpacket_dependency_substrate(
+        authority,
+        work_packet,
+        source_root=source_root,
+    )
+
+    assert record["dependency_substrate_materialized"] is True
+    assert (workspace / f"2_products/pepper-agent/node_modules/{cli_entry}").is_file()
+    assert not (workspace / "2_products/pepper-agent/node_modules/vitest/vitest.mjs").exists()
+
+
+def test_c24_missing_required_package_cli_entry_fails_closed(tmp_path) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    source_root = tmp_path / "source"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    package_rel = "2_products/pepper-agent/web"
+    _write_c24_package_fixture(
+        source_root,
+        scripts={"check": "tsc -p . --noEmit"},
+        package_rel=package_rel,
+    )
+    authority = _source_materialization_authority(
+        workspace,
+        allowed_paths=(f"{package_rel}/src/App.tsx",),
+    )
+    work_packet = _c24_package_work_packet(f"cd {package_rel} && npm run check")
+
+    pr._materialize_workpacket_scratch_source_tree(authority, source_root=source_root)
+    with pytest.raises(pr.ProductRuntimeDependencyGap) as exc_info:
+        pr._materialize_workpacket_dependency_substrate(
+            authority,
+            work_packet,
+            source_root=source_root,
+        )
+
+    assert exc_info.value.dependency_code == pr.DEPENDENCY_SOURCE_NOT_FOUND
+    assert "typescript/lib/tsc.js" in str(exc_info.value)
+
+
+def test_c24_no_package_validation_does_not_materialize_dependency_substrate(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+    from tools import workpacket_validation_tool as validation_tool
+
+    source_root = tmp_path / "source"
+    workspace = tmp_path / "workspace"
+    source_root.mkdir()
+    workspace.mkdir()
+    authority = _source_materialization_authority(
+        workspace,
+        allowed_paths=("2_products/pepper-agent/hermes_cli/example.py",),
+    )
+    python_spec = validation_tool.GovernedValidationCommandSpec(
+        command_id="GVCMD-001",
+        validation_id="V-PYTHON",
+        source="workpacket.validation_steps.command",
+        source_command="python -m unittest",
+        effective_argv=(sys.executable, "-m", "unittest"),
+        working_directory=workspace.as_posix(),
+    )
+    monkeypatch.setattr(
+        validation_tool,
+        "build_governed_validation_command_specs",
+        lambda _authority, _work_packet: (python_spec,),
+    )
+
+    record = pr._materialize_workpacket_dependency_substrate(
+        authority,
+        _c24_package_work_packet("python -m unittest"),
+        source_root=source_root,
+    )
+
+    assert record["dependency_substrate_materialized"] is False
+    assert record["dependency_substrate_kind"] == "not_required"
+    assert record["dependency_substrates"] == []
+
+
+def test_c24_package_execution_plan_package_mismatch_fails_closed(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+    from tools import workpacket_validation_tool as validation_tool
+
+    source_root = tmp_path / "source"
+    workspace = tmp_path / "workspace"
+    source_root.mkdir()
+    workspace.mkdir()
+    authority = _source_materialization_authority(
+        workspace,
+        allowed_paths=("2_products/pepper-agent/web/src/App.tsx",),
+    )
+    mismatched_spec = validation_tool.GovernedValidationCommandSpec(
+        command_id="GVCMD-001",
+        validation_id="V-C24-PACKAGE",
+        source="workpacket.validation_steps.package_command",
+        source_command="cd 2_products/pepper-agent/web && npm run check",
+        effective_argv=("node", "node_modules/typescript/lib/tsc.js"),
+        working_directory=(workspace / "2_products/pepper-agent/web").as_posix(),
+        execution_plan=(
+            {
+                "subcommand_id": "GVCMD-001.1",
+                "effective_argv": ("node", "node_modules/typescript/lib/tsc.js"),
+                "working_directory": (workspace / "2_products/pepper-agent/web").as_posix(),
+                "package_relative_path": "2_products/pepper-agent/apps/desktop",
+                "cli_entry": "typescript/lib/tsc.js",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        validation_tool,
+        "build_governed_validation_command_specs",
+        lambda _authority, _work_packet: (mismatched_spec,),
+    )
+
+    with pytest.raises(pr.ProductRuntimeDependencyGap) as exc_info:
+        pr._materialize_workpacket_dependency_substrate(
+            authority,
+            _c24_package_work_packet("cd 2_products/pepper-agent/web && npm run check"),
+            source_root=source_root,
+        )
+
+    assert exc_info.value.dependency_code == pr.DEPENDENCY_PROVENANCE_MISMATCH
+    assert "does not match" in str(exc_info.value)
+
+
+def test_c24_copied_node_modules_roots_are_excluded_from_candidate_diff(
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    source_root = tmp_path / "source"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    package_rel = "2_products/pepper-agent/web"
+    _write_c24_package_fixture(
+        source_root,
+        scripts={"check": "tsc -p . --noEmit"},
+        cli_entries=("typescript/lib/tsc.js",),
+        package_rel=package_rel,
+    )
+    authority = _source_materialization_authority(
+        workspace,
+        allowed_paths=(f"{package_rel}/src/App.tsx",),
+    )
+    work_packet = _c24_package_work_packet(f"cd {package_rel} && npm run check")
+
+    materialization = pr._materialize_workpacket_scratch_source_tree(
+        authority,
+        source_root=source_root,
+    )
+    materialization.update(
+        pr._materialize_workpacket_dependency_substrate(
+            authority,
+            work_packet,
+            source_root=source_root,
+        )
+    )
+
+    excluded_roots = tuple(materialization["product_diff_excluded_roots"])
+    assert "2_products/pepper-agent/node_modules" in excluded_roots
+    assert pr._governed_autonomy_candidate_diff_excluded(
+        "2_products/pepper-agent/node_modules/typescript/lib/tsc.js",
+        excluded_roots=excluded_roots,
+    )
+
+
+def test_c24_durable_source_authority_snapshot_contains_dependency_substrate(
+    tmp_path,
+    projection_home,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    source_root = tmp_path / "source"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    package_rel = "2_products/pepper-agent/web"
+    _write_c24_package_fixture(
+        source_root,
+        scripts={"check": "tsc -p . --noEmit"},
+        cli_entries=("typescript/lib/tsc.js",),
+        package_rel=package_rel,
+    )
+    authority = _source_materialization_authority(
+        workspace,
+        allowed_paths=(f"{package_rel}/src/App.tsx",),
+    )
+    work_packet = _c24_package_work_packet(f"cd {package_rel} && npm run check")
+
+    materialization = pr._materialize_workpacket_scratch_source_tree(
+        authority,
+        source_root=source_root,
+    )
+    materialization.update(
+        pr._materialize_workpacket_dependency_substrate(
+            authority,
+            work_packet,
+            source_root=source_root,
+        )
+    )
+    reference = pr._persist_governed_source_authority(
+        projection={
+            **_c21_source_authority_projection(),
+            "ticket_id": authority.ticket_id,
+            "work_packet_id": authority.work_packet_id,
+            "work_packet_SHA256": authority.work_packet_SHA256,
+            "ticket_spec_SHA256": authority.ticket_spec_SHA256,
+            "projection_SHA256": authority.projection_SHA256,
+        },
+        workspace=workspace,
+        materialization=materialization,
+        run_id=24,
+    )
+
+    assert reference is not None
+    authority_record = json.loads(Path(reference["authority_path"]).read_text(encoding="utf-8"))
+    snapshot_files = {
+        item["relative_path"] for item in authority_record["snapshot_manifest"]["files"]
+    }
+    assert "2_products/pepper-agent/node_modules/typescript/lib/tsc.js" in snapshot_files
+
+
 def test_dependency_substrate_materializes_snapshot_and_runs_scratch_validation(
     tmp_path,
     monkeypatch,

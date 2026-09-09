@@ -12876,8 +12876,18 @@ def _materialize_workpacket_dependency_substrate(
         ) from exc
     workspace = Path(authority.resolved_workspace_root).resolve(strict=True)
     specs = validation_tool.build_governed_validation_command_specs(authority, work_packet)
-    frontend_specs = tuple(spec for spec in specs if str(spec.source).startswith("package:"))
-    if not frontend_specs:
+    package_requirements = tuple(
+        requirement
+        for spec in specs
+        if (
+            requirement := _validation_spec_package_dependency_requirement(
+                spec,
+                workspace_root=workspace,
+            )
+        )
+        is not None
+    )
+    if not package_requirements:
         return _empty_dependency_materialization_record(authority)
 
     substrates: list[dict[str, Any]] = []
@@ -12885,18 +12895,17 @@ def _materialize_workpacket_dependency_substrate(
     local_package_sources: list[dict[str, Any]] = []
     copied_local_package_source_roots: set[str] = set()
     local_package_source_copied_file_count = 0
-    for spec in frontend_specs:
-        package_dir = Path(spec.working_directory)
-        try:
-            package_rel = package_dir.relative_to(workspace).as_posix()
-        except ValueError as exc:
-            raise ProductRuntimeDependencyGap(
-                VALIDATION_RUNTIME_UNAVAILABLE,
-                "validation package cwd is outside scratch workspace",
-            ) from exc
+    for requirement in package_requirements:
+        package_rel = str(requirement["package_rel"])
+        required_cli_entries = frozenset(requirement["required_cli_entries"])
         dependency_entries = _package_dependency_entries(resolved_source, package_rel)
         required_package_names = frozenset(
             str(entry["name"]) for entry in dependency_entries
+        ) | frozenset(
+            package_name
+            for entry in required_cli_entries
+            if (package_name := _dependency_module_name_from_relative_path(entry))
+            is not None
         )
         local_source_records, copied_count = _materialize_local_file_package_sources(
             resolved_source,
@@ -12912,17 +12921,22 @@ def _materialize_workpacket_dependency_substrate(
             source_root=resolved_source,
             workspace_root=workspace,
         )
-        if not any(
-            (source_root_path / "vitest/vitest.mjs").is_file()
-            for source_root_path, _dest in candidates
-        ):
+        missing_source_entries = _missing_package_cli_entries(
+            candidates,
+            required_cli_entries,
+        )
+        if missing_source_entries:
             raise ProductRuntimeDependencyGap(
                 DEPENDENCY_SOURCE_NOT_FOUND,
-                "vitest dependency source root is unavailable for scratch validation",
+                "package CLI dependency source is unavailable for scratch validation: "
+                + ", ".join(missing_source_entries[:3]),
             )
         for source_root_path, destination_root in candidates:
             if not source_root_path.is_dir():
                 continue
+            has_required_cli_entry = any(
+                (source_root_path / entry).is_file() for entry in required_cli_entries
+            )
             has_runtime_sentinel = any(
                 (source_root_path / entry).exists()
                 for entry in _FRONTEND_DEPENDENCY_SENTINEL_ENTRIES
@@ -12931,7 +12945,7 @@ def _materialize_workpacket_dependency_substrate(
                 source_root_path,
                 required_package_names,
             )
-            if not has_runtime_sentinel and not has_declared_package:
+            if not has_required_cli_entry and not has_runtime_sentinel and not has_declared_package:
                 continue
             destination_key = destination_root.resolve(strict=False).as_posix().casefold()
             if destination_key in copied_destinations:
@@ -12946,17 +12960,21 @@ def _materialize_workpacket_dependency_substrate(
                     package_rel=package_rel,
                     authority=authority,
                     required_package_names=required_package_names,
+                    required_cli_entries=required_cli_entries,
                 )
             )
-        resolved_vitest = validation_tool._resolve_node_module_entry(  # noqa: SLF001
-            workspace,
-            workspace / package_rel,
-            "vitest/vitest.mjs",
+        missing_scratch_entries = _missing_resolved_package_cli_entries(
+            validation_tool,
+            workspace_root=workspace,
+            package_dir=workspace / package_rel,
+            required_cli_entries=required_cli_entries,
         )
-        if resolved_vitest is None:
+        if missing_scratch_entries:
             raise ProductRuntimeDependencyGap(
                 DEPENDENCY_PROVENANCE_MISMATCH,
-                "scratch dependency substrate does not expose vitest at the authorized package cwd",
+                "scratch dependency substrate does not expose required package CLI entries "
+                "at the authorized package cwd: "
+                + ", ".join(missing_scratch_entries[:3]),
             )
 
     total_files = sum(int(item["copied_file_count"]) for item in substrates)
@@ -12988,6 +13006,172 @@ def _materialize_workpacket_dependency_substrate(
         "dependency_install_performed": False,
         "canonical_package_lock_materialized": False,
     }
+
+
+def _validation_spec_package_dependency_requirement(
+    spec: Any,
+    *,
+    workspace_root: Path,
+) -> dict[str, Any] | None:
+    execution_plan = tuple(getattr(spec, "execution_plan", ()) or ())
+    plan_package_rels: list[str] = []
+    required_cli_entries: list[str] = []
+    working_directories = [getattr(spec, "working_directory", None)]
+    for step in execution_plan:
+        if not isinstance(step, dict):
+            continue
+        package_rel_value = step.get("package_relative_path")
+        cli_entry_value = step.get("cli_entry")
+        if package_rel_value is None and cli_entry_value is None:
+            continue
+        if package_rel_value is None or cli_entry_value is None:
+            raise ProductRuntimeDependencyGap(
+                DEPENDENCY_PROVENANCE_MISMATCH,
+                "validation package execution-plan dependency evidence is incomplete",
+            )
+        plan_package_rels.append(
+            _normalize_validation_package_relative_path(package_rel_value)
+        )
+        required_cli_entries.append(_normalize_package_cli_entry(cli_entry_value))
+        working_directories.append(step.get("working_directory"))
+    if plan_package_rels:
+        package_rels = tuple(dict.fromkeys(plan_package_rels))
+        if len(package_rels) != 1:
+            raise ProductRuntimeDependencyGap(
+                DEPENDENCY_PROVENANCE_MISMATCH,
+                "validation package execution-plan contains multiple package roots",
+            )
+        package_rel = package_rels[0]
+        _validate_validation_package_working_directories(
+            package_rel,
+            working_directories,
+            workspace_root=workspace_root,
+        )
+        return {
+            "package_rel": package_rel,
+            "required_cli_entries": tuple(dict.fromkeys(required_cli_entries)),
+        }
+    if str(getattr(spec, "source", "") or "").startswith("package:"):
+        package_rel = _validation_package_relative_path_from_working_directory(
+            getattr(spec, "working_directory", None),
+            workspace_root=workspace_root,
+        )
+        return {
+            "package_rel": package_rel,
+            "required_cli_entries": ("vitest/vitest.mjs",),
+        }
+    return None
+
+
+def _normalize_validation_package_relative_path(value: object) -> str:
+    rel = _normalize_runtime_relative_path(value)
+    parts = tuple(part.casefold() for part in rel.split("/"))
+    if "node_modules" in parts:
+        raise ProductRuntimeDependencyGap(
+            DEPENDENCY_PROVENANCE_MISMATCH,
+            "validation package root cannot target node_modules",
+        )
+    return rel
+
+
+def _normalize_package_cli_entry(value: object) -> str:
+    text = str(value or "").strip().replace("\\", "/")
+    if not text or text.startswith("/") or re.match(r"^[A-Za-z]:", text):
+        raise ProductRuntimeDependencyGap(
+            DEPENDENCY_PROVENANCE_MISMATCH,
+            "validation package CLI entry must be node_modules-relative",
+        )
+    if any(ord(character) < 32 or ord(character) == 127 for character in text):
+        raise ProductRuntimeDependencyGap(
+            DEPENDENCY_PROVENANCE_MISMATCH,
+            "validation package CLI entry contains control characters",
+        )
+    parts = tuple(text.split("/"))
+    if any(part in {"", ".", ".."} for part in parts):
+        raise ProductRuntimeDependencyGap(
+            DEPENDENCY_PROVENANCE_MISMATCH,
+            "validation package CLI entry contains traversal",
+        )
+    if parts[0].casefold() == "node_modules":
+        raise ProductRuntimeDependencyGap(
+            DEPENDENCY_PROVENANCE_MISMATCH,
+            "validation package CLI entry must not include node_modules",
+        )
+    return text
+
+
+def _validation_package_relative_path_from_working_directory(
+    working_directory: object,
+    *,
+    workspace_root: Path,
+) -> str:
+    try:
+        working_dir = Path(str(working_directory or "")).expanduser().resolve(strict=False)
+        package_rel = working_dir.relative_to(workspace_root).as_posix()
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise ProductRuntimeDependencyGap(
+            VALIDATION_RUNTIME_UNAVAILABLE,
+            "validation package cwd is outside scratch workspace",
+        ) from exc
+    return _normalize_validation_package_relative_path(package_rel)
+
+
+def _validate_validation_package_working_directories(
+    package_rel: str,
+    working_directories: list[object],
+    *,
+    workspace_root: Path,
+) -> None:
+    expected = (workspace_root / package_rel).resolve(strict=False)
+    for working_directory in working_directories:
+        if working_directory in {None, ""}:
+            raise ProductRuntimeDependencyGap(
+                DEPENDENCY_PROVENANCE_MISMATCH,
+                "validation package cwd evidence is unavailable",
+            )
+        try:
+            working_dir = Path(str(working_directory)).expanduser().resolve(strict=False)
+            working_dir.relative_to(workspace_root)
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise ProductRuntimeDependencyGap(
+                DEPENDENCY_PROVENANCE_MISMATCH,
+                "validation package cwd is outside scratch workspace",
+            ) from exc
+        if working_dir != expected:
+            raise ProductRuntimeDependencyGap(
+                DEPENDENCY_PROVENANCE_MISMATCH,
+                "validation package cwd does not match execution-plan package root",
+            )
+
+
+def _missing_package_cli_entries(
+    candidates: tuple[tuple[Path, Path], ...],
+    required_cli_entries: frozenset[str],
+) -> tuple[str, ...]:
+    return tuple(
+        entry
+        for entry in sorted(required_cli_entries)
+        if not any((source_root_path / entry).is_file() for source_root_path, _dest in candidates)
+    )
+
+
+def _missing_resolved_package_cli_entries(
+    validation_tool: Any,
+    *,
+    workspace_root: Path,
+    package_dir: Path,
+    required_cli_entries: frozenset[str],
+) -> tuple[str, ...]:
+    return tuple(
+        entry
+        for entry in sorted(required_cli_entries)
+        if validation_tool._resolve_node_module_entry(  # noqa: SLF001
+            workspace_root,
+            package_dir,
+            entry,
+        )
+        is None
+    )
 
 
 def _empty_dependency_materialization_record(authority: Any) -> dict[str, Any]:
@@ -13190,6 +13374,7 @@ def _copy_dependency_substrate_root(
     package_rel: str,
     authority: Any,
     required_package_names: frozenset[str] = frozenset(),
+    required_cli_entries: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     from hermes_cli.agent_platform.runtime_adapter.path_containment import is_reparse_or_symlink
 
@@ -13337,8 +13522,14 @@ def _copy_dependency_substrate_root(
         "scratch_dependency_root_relative": scratch_rel,
         "source_package_json_SHA256": _sha256_file_or_none(package_json),
         "canonical_package_lock_SHA256": _sha256_file_or_none(canonical_lock),
-        "dependency_sentinel_SHA256": _dependency_sentinel_hashes(source_dependency_root),
-        "scratch_dependency_sentinel_SHA256": _dependency_sentinel_hashes(scratch_dependency_root),
+        "dependency_sentinel_SHA256": _dependency_sentinel_hashes(
+            source_dependency_root,
+            required_cli_entries=required_cli_entries,
+        ),
+        "scratch_dependency_sentinel_SHA256": _dependency_sentinel_hashes(
+            scratch_dependency_root,
+            required_cli_entries=required_cli_entries,
+        ),
         "copied_file_count": copied_files,
         "copied_directory_count": copied_dirs,
         "copied_bytes": copied_bytes,
@@ -13447,10 +13638,14 @@ def _sha256_file_or_none(path: Path) -> str | None:
         return None
 
 
-def _dependency_sentinel_hashes(dependency_root: Path) -> dict[str, str | None]:
+def _dependency_sentinel_hashes(
+    dependency_root: Path,
+    *,
+    required_cli_entries: frozenset[str] = frozenset(),
+) -> dict[str, str | None]:
     return {
         entry: _sha256_file_or_none(dependency_root / entry)
-        for entry in _FRONTEND_DEPENDENCY_SENTINEL_ENTRIES
+        for entry in sorted(frozenset(_FRONTEND_DEPENDENCY_SENTINEL_ENTRIES) | required_cli_entries)
     }
 
 
