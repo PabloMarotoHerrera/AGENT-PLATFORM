@@ -18,7 +18,7 @@ import threading
 import unicodedata
 from typing import Annotated, Any, Literal, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
 from hermes_constants import get_hermes_home
 from hermes_cli.agent_platform.ticket_factory import (
@@ -42,9 +42,11 @@ from hermes_cli.agent_platform.ticket_factory import (
     ProjectSpec,
     RepositoryScopeSpec,
     ReviewedTicketProposal,
+    StructuredResultSchemaSpec,
     TicketApprovalRecord,
     TicketApprovalRequest,
     TicketDependencyPlan,
+    TicketDependencySpec,
     TicketGenerationRequest,
     TicketGeneratorRole,
     TicketLintDisposition,
@@ -75,6 +77,7 @@ from hermes_cli.agent_platform.work_packet import (
     build_work_packet_compilation_authorization,
     compile_ticket_spec_to_work_packet,
 )
+from hermes_cli.agent_platform.work_packet.compiler import SOURCE_TICKET_DIGEST_ALGORITHM
 from hermes_cli.agent_platform.workflow import governed_state_machine as gsm
 from hermes_cli.agent_platform.workflow.governed_state_machine import (
     GOVERNED_WORKFLOW_STATE_MACHINE_POLICY_ID,
@@ -236,8 +239,99 @@ def _normalized_structured_revision_text(value: str) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip()).casefold()
 
 
+class TicketResponseContractRevision(BaseModel):
+    """Sparse overlay for structured worker response requirements."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        validate_default=True,
+        str_strip_whitespace=True,
+    )
+
+    required_sections: tuple[StructuredRevisionText, ...] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=32,
+    )
+    completion_verdict: str | None = Field(default=None, min_length=1, max_length=256)
+    include_files_inspected: StrictBool | None = None
+    include_files_modified: StrictBool | None = None
+    include_commands_run: StrictBool | None = None
+    include_tests_run: StrictBool | None = None
+    include_limitations: StrictBool | None = None
+    required_fields: tuple[StructuredRevisionText, ...] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+    )
+    structured_result_schema: StructuredResultSchemaSpec | None = None
+
+    @field_validator("required_sections", "required_fields", mode="after")
+    @classmethod
+    def _validate_response_entries(
+        cls,
+        value: tuple[str, ...] | None,
+    ) -> tuple[str, ...] | None:
+        if value is None:
+            return None
+        checked = tuple(
+            _reject_structured_revision_control_text(
+                item,
+                field_name="response contract entry",
+            )
+            for item in value
+        )
+        normalized = tuple(_normalized_structured_revision_text(item) for item in checked)
+        if len(normalized) != len(frozenset(normalized)):
+            raise ValueError("response contract entries must be unique after normalization")
+        return checked
+
+    @field_validator("structured_result_schema", mode="after")
+    @classmethod
+    def _validate_structured_result_schema(
+        cls,
+        value: StructuredResultSchemaSpec | None,
+    ) -> StructuredResultSchemaSpec | None:
+        if value is None:
+            return None
+        try:
+            encoded = json.dumps(
+                value.model_dump(mode="json"),
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError("structured_result_schema must be JSON serializable") from exc
+        if "\x00" in encoded or "\\u0000" in encoded:
+            raise ValueError("structured_result_schema must not contain NUL characters")
+        if len(encoded) > 32768:
+            raise ValueError("structured_result_schema is too large")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_has_material_response_change(self) -> TicketResponseContractRevision:
+        if not any(
+            getattr(self, field_name) is not None
+            for field_name in (
+                "required_sections",
+                "completion_verdict",
+                "include_files_inspected",
+                "include_files_modified",
+                "include_commands_run",
+                "include_tests_run",
+                "include_limitations",
+                "required_fields",
+                "structured_result_schema",
+            )
+        ):
+            raise ValueError("response_contract revision must specify at least one field")
+        return self
+
+
 class TicketSpecMaterialRevisionContract(BaseModel):
-    """Bounded structured replacement contract for material TicketSpec revisions."""
+    """Bounded sparse overlay contract for material TicketSpec revisions."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -248,17 +342,61 @@ class TicketSpecMaterialRevisionContract(BaseModel):
 
     schema_version: Literal[1] = TICKET_SPEC_MATERIAL_REVISION_CONTRACT_SCHEMA_VERSION
     ticket_id: str = Field(min_length=4, max_length=64, pattern=r"^P[1-9][0-9]{0,3}(?:\.[A-Z0-9]+)+$")
-    objective: str = Field(min_length=1, max_length=8192)
-    context: tuple[StructuredRevisionText, ...] = Field(min_length=1, max_length=32)
-    scope: RepositoryScopeSpec
-    constraints: tuple[StructuredRevisionText, ...] = Field(min_length=1, max_length=32)
-    tasks: tuple[StructuredRevisionText, ...] = Field(min_length=1, max_length=32)
-    acceptance_criteria: tuple[StructuredRevisionText, ...] = Field(min_length=1, max_length=32)
-    validation_steps: tuple[TicketValidationStepSpec, ...] = Field(min_length=1, max_length=32)
+    objective: str | None = Field(default=None, min_length=1, max_length=8192)
+    context: tuple[StructuredRevisionText, ...] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=32,
+    )
+    scope: RepositoryScopeSpec | None = None
+    constraints: tuple[StructuredRevisionText, ...] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=32,
+    )
+    tasks: tuple[StructuredRevisionText, ...] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=32,
+    )
+    acceptance_criteria: tuple[StructuredRevisionText, ...] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=32,
+    )
+    validation_steps: tuple[TicketValidationStepSpec, ...] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=32,
+    )
+    dependencies: tuple[TicketDependencySpec, ...] | None = Field(
+        default=None,
+        max_length=32,
+    )
+    parallelization_hint: ParallelizationHint | None = None
+    response_contract: TicketResponseContractRevision | None = None
+    governance_invariants: tuple[StructuredRevisionText, ...] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=32,
+    )
+    execution_requirements: tuple[StructuredRevisionText, ...] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=32,
+    )
+    recommended_commit_message: str | None = Field(default=None, min_length=1, max_length=512)
 
-    @field_validator("ticket_id", "objective", mode="after")
+    @field_validator("ticket_id", mode="after")
     @classmethod
     def _validate_scalar_text(cls, value: str) -> str:
+        return _reject_structured_revision_control_text(value, field_name="structured revision text")
+
+    @field_validator("objective", "recommended_commit_message", mode="after")
+    @classmethod
+    def _validate_optional_scalar_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         return _reject_structured_revision_control_text(value, field_name="structured revision text")
 
     @field_validator(
@@ -266,10 +404,17 @@ class TicketSpecMaterialRevisionContract(BaseModel):
         "constraints",
         "tasks",
         "acceptance_criteria",
+        "governance_invariants",
+        "execution_requirements",
         mode="after",
     )
     @classmethod
-    def _validate_text_entries(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+    def _validate_text_entries(
+        cls,
+        value: tuple[str, ...] | None,
+    ) -> tuple[str, ...] | None:
+        if value is None:
+            return None
         checked = tuple(
             _reject_structured_revision_control_text(
                 item,
@@ -283,21 +428,45 @@ class TicketSpecMaterialRevisionContract(BaseModel):
         return checked
 
     @model_validator(mode="after")
-    def _validate_validation_steps(self) -> TicketSpecMaterialRevisionContract:
-        validation_ids = tuple(step.validation_id for step in self.validation_steps)
-        if len(validation_ids) != len(frozenset(validation_ids)):
-            raise ValueError("structured validation steps must have unique validation IDs")
-        for step in self.validation_steps:
-            for field_name in ("description", "expected_result"):
-                _reject_structured_revision_control_text(
-                    getattr(step, field_name),
-                    field_name=f"validation step {field_name}",
-                )
-            if step.command is not None:
-                _reject_structured_revision_control_text(
-                    step.command,
-                    field_name="validation step command",
-                )
+    def _validate_material_revision_payload(self) -> TicketSpecMaterialRevisionContract:
+        if self.validation_steps is not None:
+            validation_ids = tuple(step.validation_id for step in self.validation_steps)
+            if len(validation_ids) != len(frozenset(validation_ids)):
+                raise ValueError("structured validation steps must have unique validation IDs")
+            for step in self.validation_steps:
+                for field_name in ("description", "expected_result"):
+                    _reject_structured_revision_control_text(
+                        getattr(step, field_name),
+                        field_name=f"validation step {field_name}",
+                    )
+                if step.command is not None:
+                    _reject_structured_revision_control_text(
+                        step.command,
+                        field_name="validation step command",
+                    )
+        if self.dependencies is not None:
+            dependency_ids = tuple(dependency.ticket_id for dependency in self.dependencies)
+            if len(dependency_ids) != len(frozenset(dependency_ids)):
+                raise ValueError("structured revision dependencies must be unique")
+        if not any(
+            getattr(self, field_name) is not None
+            for field_name in (
+                "objective",
+                "context",
+                "scope",
+                "constraints",
+                "tasks",
+                "acceptance_criteria",
+                "validation_steps",
+                "dependencies",
+                "parallelization_hint",
+                "response_contract",
+                "governance_invariants",
+                "execution_requirements",
+                "recommended_commit_message",
+            )
+        ):
+            raise ValueError("structured revision contract must specify at least one material field")
         return self
 
 
@@ -1033,6 +1202,15 @@ def _ticket_commit_slug(ticket_id: str) -> str:
 class TicketArchitectBridgeError(ValueError):
     """Base error for governed Ticket Architect bridge failures."""
 
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        failure_envelope: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.failure_envelope = failure_envelope
+
 
 class TicketArchitectBridgeInputError(TicketArchitectBridgeError):
     """Raised when the requested project, ticket, or action is not eligible."""
@@ -1255,6 +1433,18 @@ def _validate_generation_record_evidence(
                 raise TicketArchitectBridgeConflict("revision authority digest mismatch")
             if record.get("revision_sequence") != int(authority["new_publication_revision"]):
                 raise TicketArchitectBridgeConflict("revision authority sequence mismatch")
+            revision_contract = _revision_contract_from_authority(
+                authority,
+                target=target,
+            )
+            expected_ticket_spec = (
+                _revision_base_ticket_spec_from_authority(
+                    authority,
+                    target=target,
+                )
+                if revision_contract is not None
+                else _build_ticket_spec(target)
+            )
             expected_ticket_spec = _build_revision_ticket_spec(
                 expected_ticket_spec,
                 target=target,
@@ -2008,136 +2198,188 @@ def revise_rejected_successor_ticket(
 ) -> dict[str, Any]:
     """Revise one explicitly rejected generated successor back to pending approval."""
 
-    safe_ticket_id = _revision_ticket_id_from_workflow(
-        workflow,
-        requested_ticket_id=requested_ticket_id,
-    )
-    target = _revision_generation_target_for_ticket(safe_ticket_id, workflow=workflow)
-    _validate_revision_requested_identity(
-        requested_project_id=requested_project_id,
-        requested_ticket_id=requested_ticket_id,
-        requested_next_action_id=requested_next_action_id,
-        target=target,
-    )
-    _validate_rejected_successor_revision_workflow(workflow, target=target)
-    human_authorization_text = _validate_revision_authorization_text(
-        human_authorization_text,
-        ticket_id=target.ticket_id,
-        revise_next_action_id=target.revise_next_action_id,
-    )
-    validated_revision_contract = (
-        validate_ticket_spec_material_revision_contract(
-            revision_contract,
+    target: GovernedTicketGenerationTarget | None = None
+    rejected_generation: dict[str, Any] | None = None
+    rejected_decision: dict[str, Any] | None = None
+    revised_generation: dict[str, Any] | None = None
+    revision_authority: dict[str, Any] | None = None
+    history_entry: dict[str, Any] | None = None
+    revision_contract_requested = revision_contract is not None
+    validated_revision_contract: TicketSpecMaterialRevisionContract | None = None
+    successor_publication_created = False
+    successor_generated = False
+    state_mutated = False
+    failure_stage = "REVISION_REQUEST_ACCEPTED"
+
+    try:
+        safe_ticket_id = _revision_ticket_id_from_workflow(
+            workflow,
+            requested_ticket_id=requested_ticket_id,
+        )
+        target = _revision_generation_target_for_ticket(safe_ticket_id, workflow=workflow)
+        _validate_revision_requested_identity(
+            requested_project_id=requested_project_id,
+            requested_ticket_id=requested_ticket_id,
+            requested_next_action_id=requested_next_action_id,
             target=target,
         )
-        if revision_contract is not None
-        else None
-    )
-    authorizer_id = _reviewer_id_from_actor(authorizer_id)
-
-    with _STORE_LOCK:
-        rejected_generation = load_generation_record(
+        _validate_rejected_successor_revision_workflow(workflow, target=target)
+        human_authorization_text = _validate_revision_authorization_text(
+            human_authorization_text,
             ticket_id=target.ticket_id,
-            allow_terminal_rejected_historical=True,
+            revise_next_action_id=target.revise_next_action_id,
         )
-        if rejected_generation is None:
-            raise TicketArchitectBridgeConflict(
-                f"{target.ticket_id} has no rejected generated ticket to revise"
-            )
-        rejected_decision = load_approval_decision_record(
-            ticket_id=target.ticket_id,
-            generation_record=rejected_generation,
-        )
-        if rejected_decision is None:
-            raise TicketArchitectBridgeConflict(
-                f"{target.ticket_id} rejected ticket decision is absent"
-            )
-        _validate_terminal_rejected_decision_binding(
-            rejected_generation,
-            decision_record=rejected_decision,
-        )
-        revision_authority = _build_material_revision_authority(
-            rejected_generation=rejected_generation,
-            rejected_decision=rejected_decision,
-            target=target,
-            human_authorization_text=human_authorization_text,
-            authorizer_id=authorizer_id,
-            revision_contract=validated_revision_contract,
-        )
-        prior_publication = _publication_from_generation_record(rejected_generation)
-
-        revision_workflow = _revision_generation_workflow(workflow, target=target)
-        try:
-            revised_generation = _build_generation_record(
-                revision_workflow,
+        failure_stage = "REVISION_CONTRACT_ACCEPTED"
+        validated_revision_contract = (
+            validate_ticket_spec_material_revision_contract(
+                revision_contract,
                 target=target,
-                revision_authority=revision_authority,
-                prior_publication=prior_publication,
             )
-            validate_generation_record(revised_generation, target=target)
-            _validate_material_revision_generation(
-                rejected_generation=rejected_generation,
-                revised_generation=revised_generation,
-                revision_authority=revision_authority,
-            )
-        except TicketArchitectBridgeError:
-            raise
-        except Exception as exc:
-            raise TicketArchitectBridgeGenerationError(
-                f"{target.ticket_id} rejected-successor revision failed"
-            ) from exc
-
-        history_entry = _build_rejected_successor_revision_history_entry(
-            rejected_generation=rejected_generation,
-            rejected_decision=rejected_decision,
-            revised_generation=revised_generation,
-            target=target,
-            human_authorization_text=human_authorization_text,
-            authorizer_id=authorizer_id,
+            if revision_contract is not None
+            else None
         )
-        decision_path = approval_decision_record_path_for_ticket(target.ticket_id)
-        try:
-            _write_json_atomic(generation_record_path_for_ticket(target.ticket_id), revised_generation)
-            try:
-                decision_path.unlink()
-            except FileNotFoundError:
-                pass
-            _append_rejected_successor_revision_history_entry(
-                target.ticket_id,
-                history_entry,
-            )
-        except OSError as exc:
-            raise TicketArchitectBridgeGenerationError(
-                f"{target.ticket_id} rejected-successor revision persistence failed"
-            ) from exc
+        authorizer_id = _reviewer_id_from_actor(authorizer_id)
 
-    result = _operational_result(revised_generation, idempotent_replay=False)
-    result.update({
-        "revision_applied": True,
-        "revision_status": "awaiting_ticket_approval",
-        "revision_action_id": target.revise_next_action_id,
-        "human_authorization_text": human_authorization_text,
-        "authorizer_id": authorizer_id,
-        "rejected_generation_bridge_SHA256": rejected_generation["bridge_SHA256"],
-        "rejected_approval_publication_SHA256": rejected_decision[
-            "approval_publication_SHA256"
-        ],
-        "historical_rejected_generation_preserved": True,
-        "historical_rejected_decision_preserved": True,
-        "revision_history_path": str(
-            rejected_successor_revision_history_path_for_ticket(target.ticket_id)
-        ),
-        "revision_SHA256": history_entry["revision_SHA256"],
-        "revision_contract_SHA256": revision_authority.get("revision_contract_SHA256"),
-        "pending_ticket_approval_count": 1,
-        "active_execution_count": 0,
-        "provider_dispatch_count": 0,
-        "model_inference_count": 0,
-        "Git_commands_executed": 0,
-        "Docker_commands_executed": 0,
-        "Graphify_commands_executed": 0,
-    })
-    return result
+        with _STORE_LOCK:
+            rejected_generation = load_generation_record(
+                ticket_id=target.ticket_id,
+                allow_terminal_rejected_historical=True,
+            )
+            if rejected_generation is None:
+                raise TicketArchitectBridgeConflict(
+                    f"{target.ticket_id} has no rejected generated ticket to revise"
+                )
+            rejected_decision = load_approval_decision_record(
+                ticket_id=target.ticket_id,
+                generation_record=rejected_generation,
+            )
+            if rejected_decision is None:
+                raise TicketArchitectBridgeConflict(
+                    f"{target.ticket_id} rejected ticket decision is absent"
+                )
+            _validate_terminal_rejected_decision_binding(
+                rejected_generation,
+                decision_record=rejected_decision,
+            )
+            failure_stage = "REVISION_AUTHORITY_ACCEPTED"
+            revision_authority = _build_material_revision_authority(
+                rejected_generation=rejected_generation,
+                rejected_decision=rejected_decision,
+                target=target,
+                human_authorization_text=human_authorization_text,
+                authorizer_id=authorizer_id,
+                revision_contract=validated_revision_contract,
+            )
+            prior_publication = _publication_from_generation_record(rejected_generation)
+
+            revision_workflow = _revision_generation_workflow(workflow, target=target)
+            failure_stage = "REVISION_CONTRACT_APPLIED"
+            try:
+                revised_generation = _build_generation_record(
+                    revision_workflow,
+                    target=target,
+                    revision_authority=revision_authority,
+                    prior_publication=prior_publication,
+                )
+                successor_publication_created = True
+                validate_generation_record(revised_generation, target=target)
+                _validate_material_revision_generation(
+                    rejected_generation=rejected_generation,
+                    revised_generation=revised_generation,
+                    revision_authority=revision_authority,
+                )
+                successor_generated = True
+            except TicketArchitectBridgeError:
+                raise
+            except Exception as exc:
+                raise TicketArchitectBridgeGenerationError(
+                    f"{target.ticket_id} rejected-successor revision failed"
+                ) from exc
+
+            history_entry = _build_rejected_successor_revision_history_entry(
+                rejected_generation=rejected_generation,
+                rejected_decision=rejected_decision,
+                revised_generation=revised_generation,
+                target=target,
+                human_authorization_text=human_authorization_text,
+                authorizer_id=authorizer_id,
+            )
+            decision_path = approval_decision_record_path_for_ticket(target.ticket_id)
+            failure_stage = "SUCCESSOR_GENERATED"
+            try:
+                _write_json_atomic(
+                    generation_record_path_for_ticket(target.ticket_id),
+                    revised_generation,
+                )
+                state_mutated = True
+                try:
+                    decision_path.unlink()
+                except FileNotFoundError:
+                    pass
+                _append_rejected_successor_revision_history_entry(
+                    target.ticket_id,
+                    history_entry,
+                )
+            except OSError as exc:
+                raise TicketArchitectBridgeGenerationError(
+                    f"{target.ticket_id} rejected-successor revision persistence failed"
+                ) from exc
+
+        result = _operational_result(revised_generation, idempotent_replay=False)
+        result.update({
+            "revision_applied": True,
+            "revision_status": "awaiting_ticket_approval",
+            "revision_action_id": target.revise_next_action_id,
+            "human_authorization_text": human_authorization_text,
+            "authorizer_id": authorizer_id,
+            "rejected_generation_bridge_SHA256": rejected_generation["bridge_SHA256"],
+            "rejected_approval_publication_SHA256": rejected_decision[
+                "approval_publication_SHA256"
+            ],
+            "historical_rejected_generation_preserved": True,
+            "historical_rejected_decision_preserved": True,
+            "revision_history_path": str(
+                rejected_successor_revision_history_path_for_ticket(target.ticket_id)
+            ),
+            "revision_SHA256": history_entry["revision_SHA256"],
+            "revision_contract_SHA256": revision_authority.get("revision_contract_SHA256"),
+            "revision_authority_accepted": True,
+            "revision_authority_recorded": True,
+            "revision_contract_supplied": revision_contract_requested,
+            "revision_contract_accepted": validated_revision_contract is not None,
+            "revision_contract_recorded": validated_revision_contract is not None,
+            "revision_contract_applied": validated_revision_contract is not None,
+            "successor_publication_created": True,
+            "successor_publication_persisted": True,
+            "successor_generated": True,
+            "REVISION_AUTHORITY_ACCEPTED": True,
+            "REVISION_CONTRACT_ACCEPTED": validated_revision_contract is not None,
+            "REVISION_CONTRACT_APPLIED": validated_revision_contract is not None,
+            "SUCCESSOR_GENERATED": True,
+            "pending_ticket_approval_count": 1,
+            "active_execution_count": 0,
+            "provider_dispatch_count": 0,
+            "model_inference_count": 0,
+            "Git_commands_executed": 0,
+            "Docker_commands_executed": 0,
+            "Graphify_commands_executed": 0,
+        })
+        return result
+    except TicketArchitectBridgeError as exc:
+        if getattr(exc, "failure_envelope", None) is None:
+            exc.failure_envelope = _rejected_successor_revision_failure_envelope(
+                stage=failure_stage,
+                exc=exc,
+                target=target,
+                requested_ticket_id=requested_ticket_id,
+                revision_contract_requested=revision_contract_requested,
+                revision_contract_accepted=validated_revision_contract is not None,
+                revision_authority=revision_authority,
+                successor_publication_created=successor_publication_created,
+                successor_generated=successor_generated,
+                state_mutated=state_mutated,
+            )
+        raise
 
 
 def generate_p18_9_0_ticket(
@@ -2449,6 +2691,178 @@ def ticket_spec_material_revision_contract_digest(
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _ticket_spec_digest(ticket: TicketSpec) -> str:
+    encoded = json.dumps(
+        {
+            "algorithm": SOURCE_TICKET_DIGEST_ALGORITHM,
+            "source_ticket": ticket.model_dump(mode="json"),
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _revision_base_ticket_spec_from_generation(
+    rejected_generation: dict[str, Any],
+    *,
+    target: GovernedTicketGenerationTarget,
+) -> TicketSpec:
+    try:
+        ticket_spec = TicketSpec.model_validate(rejected_generation["ticket_spec"])
+    except (KeyError, ValueError) as exc:
+        raise TicketArchitectBridgeConflict(
+            "rejected generation TicketSpec is unavailable for revision base"
+        ) from exc
+    if ticket_spec.project_id != target.project_id or ticket_spec.ticket_id != target.ticket_id:
+        raise TicketArchitectBridgeConflict("rejected generation TicketSpec target mismatch")
+    if ticket_spec.title != target.ticket_title:
+        raise TicketArchitectBridgeConflict("rejected generation TicketSpec title mismatch")
+    if _ticket_spec_digest(ticket_spec) != rejected_generation.get("ticket_spec_SHA256"):
+        raise TicketArchitectBridgeConflict("rejected generation TicketSpec digest mismatch")
+    return ticket_spec
+
+
+def _revision_base_ticket_spec_from_authority(
+    authority: dict[str, Any],
+    *,
+    target: GovernedTicketGenerationTarget,
+) -> TicketSpec:
+    raw_ticket_spec = authority.get("revision_base_ticket_spec")
+    if raw_ticket_spec is None:
+        return _build_ticket_spec(target)
+    try:
+        ticket_spec = TicketSpec.model_validate(raw_ticket_spec)
+    except ValueError as exc:
+        raise TicketArchitectBridgeConflict("revision base TicketSpec is invalid") from exc
+    expected_sha = authority.get("revision_base_ticket_spec_SHA256")
+    if expected_sha is None:
+        raise TicketArchitectBridgeConflict("revision base TicketSpec digest is absent")
+    if expected_sha != authority.get("previous_ticket_spec_SHA256"):
+        raise TicketArchitectBridgeConflict("revision base TicketSpec digest mismatches predecessor")
+    if _ticket_spec_digest(ticket_spec) != expected_sha:
+        raise TicketArchitectBridgeConflict("revision base TicketSpec digest mismatch")
+    if ticket_spec.project_id != target.project_id or ticket_spec.ticket_id != target.ticket_id:
+        raise TicketArchitectBridgeConflict("revision base TicketSpec target mismatch")
+    if ticket_spec.title != target.ticket_title:
+        raise TicketArchitectBridgeConflict("revision base TicketSpec title mismatch")
+    return ticket_spec
+
+
+def _merge_revision_response_contract(
+    base: TicketResponseContractSpec,
+    revision: TicketResponseContractRevision | None,
+) -> TicketResponseContractSpec:
+    if revision is None:
+        return base
+    data = base.model_dump(mode="json")
+    for field_name in (
+        "required_sections",
+        "completion_verdict",
+        "include_files_inspected",
+        "include_files_modified",
+        "include_commands_run",
+        "include_tests_run",
+        "include_limitations",
+        "required_fields",
+        "structured_result_schema",
+    ):
+        value = getattr(revision, field_name)
+        if value is not None:
+            data[field_name] = value
+    try:
+        return TicketResponseContractSpec.model_validate(data)
+    except ValueError as exc:
+        raise TicketArchitectBridgeInputError(
+            "structured response_contract revision is invalid"
+        ) from exc
+
+
+def _revision_error_schema_detail(exc: Exception) -> dict[str, Any]:
+    cause = getattr(exc, "__cause__", None)
+    errors = cause.errors() if hasattr(cause, "errors") else None
+    if errors:
+        first = errors[0]
+        loc = first.get("loc") or ()
+        return {
+            "message": str(first.get("msg") or str(exc)),
+            "field_path": ".".join(str(part) for part in loc) or None,
+        }
+    return {"message": str(exc) or exc.__class__.__name__, "field_path": None}
+
+
+def _revision_failure_classification(exc: Exception) -> str:
+    if isinstance(exc, TicketArchitectBridgeInputError):
+        return "revision_request_invalid"
+    if isinstance(exc, TicketArchitectBridgeConflict):
+        return "governed_authority_conflict"
+    if isinstance(exc, TicketArchitectBridgeGenerationError):
+        return "successor_generation_failed"
+    return "governed_revision_failed"
+
+
+def _rejected_successor_revision_failure_envelope(
+    *,
+    stage: str,
+    exc: Exception,
+    target: GovernedTicketGenerationTarget | None,
+    requested_ticket_id: str | None,
+    revision_contract_requested: bool,
+    revision_contract_accepted: bool,
+    revision_authority: dict[str, Any] | None,
+    successor_publication_created: bool,
+    successor_generated: bool,
+    state_mutated: bool,
+) -> dict[str, Any]:
+    schema_detail = _revision_error_schema_detail(exc)
+    ticket_id = target.ticket_id if target is not None else str(requested_ticket_id or "").strip()
+    return {
+        "schema_version": TICKET_ARCHITECT_BRIDGE_SCHEMA_VERSION,
+        "source_system": "pepper-ticket-architect-bridge",
+        "operation": "revise_rejected_successor_ticket",
+        "ticket_id": ticket_id or None,
+        "revision_action_id": target.revise_next_action_id if target is not None else None,
+        "revision_sequence": (
+            int(revision_authority["new_publication_revision"])
+            if isinstance(revision_authority, dict)
+            and revision_authority.get("new_publication_revision") is not None
+            else None
+        ),
+        "failure_stage": stage,
+        "failure_classification": _revision_failure_classification(exc),
+        "validation_schema_error": schema_detail["message"],
+        "field_path": schema_detail["field_path"],
+        "revision_authority_accepted": revision_authority is not None,
+        "revision_authority_recorded": False,
+        "revision_contract_supplied": revision_contract_requested,
+        "revision_contract_accepted": revision_contract_accepted,
+        "revision_contract_recorded": False,
+        "revision_contract_applied": False,
+        "successor_publication_created": successor_publication_created,
+        "successor_publication_persisted": False,
+        "state_mutated": state_mutated,
+        "ticket_generated": successor_generated,
+        "successor_generated": successor_generated,
+        "REVISION_AUTHORITY_ACCEPTED": revision_authority is not None,
+        "REVISION_CONTRACT_ACCEPTED": revision_contract_accepted,
+        "REVISION_CONTRACT_APPLIED": False,
+        "SUCCESSOR_GENERATED": successor_generated,
+        "recovery_next_action_hint": (
+            "Retry the governed rejected-successor revision with valid human authority "
+            "and a valid material revision contract; no fallback successor was generated."
+        ),
+        "worker_execution": False,
+        "Kanban_dispatch": False,
+        "Git_mutation": False,
+        "provider_dispatch_count": 0,
+        "model_inference_count": 0,
+        "Git_commands_executed": 0,
+        "Docker_commands_executed": 0,
+        "Graphify_commands_executed": 0,
+    }
+
+
 def _revision_contract_from_authority(
     authority: dict[str, Any],
     *,
@@ -2484,6 +2898,10 @@ def _build_material_revision_authority(
     revision_contract: TicketSpecMaterialRevisionContract | dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     previous_publication = _publication_from_generation_record(rejected_generation)
+    base_ticket_spec = _revision_base_ticket_spec_from_generation(
+        rejected_generation,
+        target=target,
+    )
     previous_revision = int(previous_publication.revision)
     validated_contract = (
         validate_ticket_spec_material_revision_contract(
@@ -2508,6 +2926,8 @@ def _build_material_revision_authority(
         "roadmap_authority_section": target.roadmap_authority_section,
         "previous_bridge_SHA256": rejected_generation["bridge_SHA256"],
         "previous_ticket_spec_SHA256": rejected_generation["ticket_spec_SHA256"],
+        "revision_base_ticket_spec": base_ticket_spec.model_dump(mode="json"),
+        "revision_base_ticket_spec_SHA256": rejected_generation["ticket_spec_SHA256"],
         "previous_dependency_plan_SHA256": rejected_generation["dependency_plan_SHA256"],
         "previous_lint_report_SHA256": rejected_generation["lint_report_SHA256"],
         "previous_work_packet_id": rejected_generation["work_packet_id"],
@@ -2569,6 +2989,7 @@ def _validate_material_revision_authority(
         raise TicketArchitectBridgeConflict("revision authority revision sequence mismatch")
     if not str(authority.get("human_authorization_text") or "").strip():
         raise TicketArchitectBridgeConflict("revision authority human correction is absent")
+    _revision_base_ticket_spec_from_authority(authority, target=target)
     _revision_contract_from_authority(authority, target=target)
     for field_name in (
         "previous_bridge_SHA256",
@@ -2579,6 +3000,8 @@ def _validate_material_revision_authority(
         "rejected_approval_publication_SHA256",
     ):
         _safe_digest(authority.get(field_name))
+    if authority.get("revision_base_ticket_spec") is not None:
+        _safe_digest(authority.get("revision_base_ticket_spec_SHA256"))
     return authority
 
 
@@ -2628,18 +3051,42 @@ def _build_revision_ticket_spec(
         ),
     )
     if revision_contract is not None:
-        product_objective = revision_contract.objective
-        product_context = revision_contract.context
-        product_scope = revision_contract.scope
-        product_constraints = revision_contract.constraints
-        product_tasks = revision_contract.tasks
-        product_acceptance_criteria = revision_contract.acceptance_criteria
-        product_validation_steps = revision_contract.validation_steps
+        product_objective = revision_contract.objective or base.objective
+        product_context = revision_contract.context or base.context
+        product_scope = revision_contract.scope or base.scope
+        product_constraints = revision_contract.constraints or base.constraints
+        product_tasks = revision_contract.tasks or base.tasks
+        product_acceptance_criteria = (
+            revision_contract.acceptance_criteria or base.acceptance_criteria
+        )
+        product_validation_steps = revision_contract.validation_steps or base.validation_steps
+        product_dependencies = (
+            revision_contract.dependencies
+            if revision_contract.dependencies is not None
+            else base.dependencies
+        )
+        product_parallelization_hint = (
+            revision_contract.parallelization_hint or base.parallelization_hint
+        )
+        product_response_contract = _merge_revision_response_contract(
+            base.response_contract,
+            revision_contract.response_contract,
+        )
+        product_recommended_commit_message = (
+            revision_contract.recommended_commit_message or revision_commit_message
+        )
+        additive_constraints = tuple(
+            f"Governance invariant: {item}"
+            for item in (revision_contract.governance_invariants or ())
+        ) + tuple(
+            f"Execution requirement: {item}"
+            for item in (revision_contract.execution_requirements or ())
+        )
         revision_context = (
             (
                 f"{revision_label} structured material revision contract "
-                f"{authority['revision_contract_SHA256']} replaces the canonical base "
-                "TicketSpec product-contract fields."
+                f"{authority['revision_contract_SHA256']} overlays the rejected predecessor "
+                "TicketSpec; omitted fields inherit unchanged."
             ),
         )
     else:
@@ -2650,6 +3097,11 @@ def _build_revision_ticket_spec(
         product_tasks = base.tasks
         product_acceptance_criteria = base.acceptance_criteria
         product_validation_steps = base.validation_steps
+        product_dependencies = base.dependencies
+        product_parallelization_hint = base.parallelization_hint
+        product_response_contract = base.response_contract
+        product_recommended_commit_message = revision_commit_message
+        additive_constraints = ()
         revision_context = ()
     next_validation_id = _next_revision_validation_id(product_validation_steps)
     return TicketSpec(
@@ -2675,11 +3127,12 @@ def _build_revision_ticket_spec(
             )
         ),
         authority_references=base.authority_references + revision_refs,
-        dependencies=base.dependencies,
-        parallelization_hint=base.parallelization_hint,
+        dependencies=product_dependencies,
+        parallelization_hint=product_parallelization_hint,
         scope=product_scope,
         constraints=_dedupe_texts(
             product_constraints
+            + additive_constraints
             + (
                 (
                     f"Material revision {revision_label} must address the authoritative "
@@ -2723,8 +3176,8 @@ def _build_revision_ticket_spec(
                 ),
             ),
         ),
-        response_contract=base.response_contract,
-        recommended_commit_message=revision_commit_message,
+        response_contract=product_response_contract,
+        recommended_commit_message=product_recommended_commit_message,
     )
 
 
@@ -2917,13 +3370,30 @@ def _build_generation_record(
     prior_publication: PublishedTicketArtifact | None = None,
 ) -> dict[str, Any]:
     project_spec = _build_project_spec(target)
-    ticket_spec = _build_ticket_spec(target)
     if revision_authority is not None:
+        if prior_publication is None:
+            raise TicketArchitectBridgeGenerationError(
+                "revision generation requires predecessor publication"
+            )
+        revision_contract = _revision_contract_from_authority(
+            revision_authority,
+            target=target,
+        )
+        ticket_spec = (
+            _revision_base_ticket_spec_from_authority(
+                revision_authority,
+                target=target,
+            )
+            if revision_contract is not None
+            else _build_ticket_spec(target)
+        )
         ticket_spec = _build_revision_ticket_spec(
             ticket_spec,
             target=target,
             revision_authority=revision_authority,
         )
+    else:
+        ticket_spec = _build_ticket_spec(target)
     context_pack = _assemble_context_pack(
         project_spec,
         ticket_spec,

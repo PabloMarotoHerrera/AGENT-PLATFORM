@@ -8,6 +8,7 @@ or execute validation commands.
 from __future__ import annotations
 
 from enum import Enum
+import json
 import re
 from typing import Annotated, Literal, TypeAlias
 
@@ -19,7 +20,9 @@ from pydantic import (
     Field,
     StrictBool,
     StringConstraints,
+    field_serializer,
     field_validator,
+    model_serializer,
     model_validator,
 )
 
@@ -251,6 +254,77 @@ class TicketValidationStepSpec(_TicketFactoryModel):
     required: StrictBool = True
 
 
+StructuredResultPropertyType: TypeAlias = Literal[
+    "string",
+    "number",
+    "integer",
+    "boolean",
+    "object",
+    "array",
+]
+
+
+class StructuredResultPropertySpec(_TicketFactoryModel):
+    name: ShortText
+    type: StructuredResultPropertyType
+    enum: tuple[ShortText, ...] = ()
+    description: ShortText | None = None
+
+    @model_validator(mode="after")
+    def _validate_property(self) -> StructuredResultPropertySpec:
+        _reject_duplicate_values(self.enum, "structured_result_schema property enum")
+        return self
+
+
+class StructuredResultSchemaSpec(_TicketFactoryModel):
+    type: Literal["object"] = "object"
+    required: tuple[ShortText, ...] = ()
+    properties: tuple[StructuredResultPropertySpec, ...] = ()
+    additionalProperties: StrictBool = False
+
+    @field_validator("properties", mode="before")
+    @classmethod
+    def _coerce_properties(cls, value: object) -> object:
+        if value is None:
+            return ()
+        if isinstance(value, dict):
+            coerced = []
+            for name, schema in value.items():
+                if not isinstance(schema, dict):
+                    raise ValueError("structured_result_schema properties must be objects")
+                coerced.append({"name": name, **{k: v for k, v in schema.items() if k != "name"}})
+            return tuple(coerced)
+        return value
+
+    @field_serializer("properties")
+    def _serialize_properties(
+        self,
+        properties: tuple[StructuredResultPropertySpec, ...],
+    ) -> dict[str, object]:
+        serialized = {}
+        for item in properties:
+            data = item.model_dump(mode="json")
+            data.pop("name", None)
+            if not data.get("enum"):
+                data.pop("enum", None)
+            if data.get("description") is None:
+                data.pop("description", None)
+            serialized[item.name] = data
+        return serialized
+
+    @model_validator(mode="after")
+    def _validate_schema(self) -> StructuredResultSchemaSpec:
+        _reject_duplicate_values(self.required, "structured_result_schema required")
+        property_names = tuple(property_spec.name for property_spec in self.properties)
+        _reject_duplicate_values(property_names, "structured_result_schema properties")
+        missing_required = set(self.required) - set(property_names)
+        if missing_required:
+            raise ValueError("structured_result_schema required fields must be defined")
+        if self.additionalProperties:
+            raise ValueError("structured_result_schema additionalProperties must be false")
+        return self
+
+
 class TicketResponseContractSpec(_TicketFactoryModel):
     required_sections: tuple[ShortText, ...] = Field(min_length=1)
     completion_verdict: VerdictToken
@@ -259,12 +333,46 @@ class TicketResponseContractSpec(_TicketFactoryModel):
     include_commands_run: StrictBool = True
     include_tests_run: StrictBool = True
     include_limitations: StrictBool = True
+    required_fields: tuple[ShortText, ...] = ()
+    structured_result_schema: StructuredResultSchemaSpec | None = None
 
-    @field_validator("required_sections", mode="after")
+    @field_validator("required_sections", "required_fields", mode="after")
     @classmethod
-    def _validate_required_sections(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        _reject_duplicate_values(value, "required_sections")
+    def _validate_unique_response_entries(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        _reject_duplicate_values(value, "response contract entries")
         return value
+
+    @field_validator("structured_result_schema", mode="after")
+    @classmethod
+    def _validate_structured_result_schema(
+        cls,
+        value: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        try:
+            encoded = json.dumps(
+                value.model_dump(mode="json"),
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError("structured_result_schema must be JSON serializable") from exc
+        if "\x00" in encoded or "\\u0000" in encoded:
+            raise ValueError("structured_result_schema must not contain NUL characters")
+        if len(encoded) > 32768:
+            raise ValueError("structured_result_schema is too large")
+        return value
+
+    @model_serializer(mode="wrap")
+    def _serialize_response_contract(self, handler):
+        data = handler(self)
+        if not self.required_fields:
+            data.pop("required_fields", None)
+        if self.structured_result_schema is None:
+            data.pop("structured_result_schema", None)
+        return data
 
 
 class ProjectSpec(_TicketFactoryModel):

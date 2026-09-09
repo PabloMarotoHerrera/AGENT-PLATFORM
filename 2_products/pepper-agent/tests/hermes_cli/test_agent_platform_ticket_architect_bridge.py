@@ -1203,6 +1203,189 @@ def test_structured_revision_contract_replaces_ticket_spec_fields_and_binds_auth
     assert result["Git_mutation"] is False
 
 
+def test_response_contract_only_revision_overlays_rejected_predecessor_ticket_spec(
+    bridge_home,
+) -> None:
+    bridge.generate_current_ticket(workflow=_p18_9_2_workflow())
+    original = bridge.load_generation_record(ticket_id="P18.9.2")
+    assert original is not None
+    bridge.apply_ticket_approval_decision(
+        ticket_id="P18.9.2",
+        decision="reject",
+        actor="human.p18.9",
+    )
+    rejected_decision = bridge.load_approval_decision_record(
+        ticket_id="P18.9.2",
+        generation_record=original,
+    )
+    assert rejected_decision is not None
+    structured_result_schema = {
+        "type": "object",
+        "required": ["revision_contract_sha256", "decision"],
+        "properties": {
+            "revision_contract_sha256": {"type": "string"},
+            "decision": {"type": "string", "enum": ["ready", "blocked"]},
+        },
+        "additionalProperties": False,
+    }
+    contract = {
+        "schema_version": bridge.TICKET_SPEC_MATERIAL_REVISION_CONTRACT_SCHEMA_VERSION,
+        "ticket_id": "P18.9.2",
+        "response_contract": {
+            "required_fields": ["revision_contract_sha256", "decision"],
+            "structured_result_schema": structured_result_schema,
+        },
+    }
+    normalized_contract = bridge.validate_ticket_spec_material_revision_contract(
+        contract,
+        target=bridge.resolve_generation_target_from_workflow(_p18_9_2_workflow()),
+    ).model_dump(mode="json")
+    contract_digest = bridge.ticket_spec_material_revision_contract_digest(contract)
+
+    result = bridge.revise_rejected_successor_ticket(
+        workflow=_p18_9_2_rejected_successor_workflow(original),
+        human_authorization_text=(
+            "Authorize REVISE_P18_9_2 revision with the supplied structured response contract."
+        ),
+        revision_contract=contract,
+        authorizer_id="human.p18.9",
+        requested_project_id="PEPPER",
+        requested_ticket_id="P18.9.2",
+        requested_next_action_id="REVISE_P18_9_2",
+    )
+    revised = bridge.load_generation_record(ticket_id="P18.9.2")
+    assert revised is not None
+    ticket = revised["ticket_spec"]
+    original_ticket = original["ticket_spec"]
+    work_packet = revised["work_packet_compilation_result"]["work_packet"]
+    history_lines = bridge.rejected_successor_revision_history_path_for_ticket(
+        "P18.9.2"
+    ).read_text(encoding="utf-8").splitlines()
+    history = json.loads(history_lines[0])
+    authority = revised["revision_authority"]
+
+    assert result["revision_contract_SHA256"] == contract_digest
+    assert result["revision_authority_accepted"] is True
+    assert result["revision_authority_recorded"] is True
+    assert result["revision_contract_supplied"] is True
+    assert result["revision_contract_accepted"] is True
+    assert result["revision_contract_recorded"] is True
+    assert result["revision_contract_applied"] is True
+    assert result["successor_generated"] is True
+    assert result["REVISION_AUTHORITY_ACCEPTED"] is True
+    assert result["REVISION_CONTRACT_ACCEPTED"] is True
+    assert result["REVISION_CONTRACT_APPLIED"] is True
+    assert result["SUCCESSOR_GENERATED"] is True
+    assert authority["revision_base_ticket_spec"] == original_ticket
+    assert authority["revision_base_ticket_spec_SHA256"] == original["ticket_spec_SHA256"]
+    assert authority["previous_ticket_spec_SHA256"] == original["ticket_spec_SHA256"]
+    assert authority["revision_contract"] == normalized_contract
+    assert authority["revision_contract_SHA256"] == contract_digest
+    assert ticket["objective"] == original_ticket["objective"]
+    assert ticket["scope"] == original_ticket["scope"]
+    assert ticket["dependencies"] == original_ticket["dependencies"]
+    assert ticket["parallelization_hint"] == original_ticket["parallelization_hint"]
+    assert ticket["context"][: len(original_ticket["context"])] == original_ticket["context"]
+    assert ticket["constraints"][: len(original_ticket["constraints"])] == original_ticket[
+        "constraints"
+    ]
+    assert ticket["tasks"][: len(original_ticket["tasks"])] == original_ticket["tasks"]
+    assert ticket["acceptance_criteria"][: len(original_ticket["acceptance_criteria"])] == original_ticket[
+        "acceptance_criteria"
+    ]
+    assert ticket["validation_steps"][: len(original_ticket["validation_steps"])] == original_ticket[
+        "validation_steps"
+    ]
+    assert ticket["response_contract"]["required_sections"] == original_ticket[
+        "response_contract"
+    ]["required_sections"]
+    assert ticket["response_contract"]["completion_verdict"] == original_ticket[
+        "response_contract"
+    ]["completion_verdict"]
+    assert ticket["response_contract"]["required_fields"] == [
+        "revision_contract_sha256",
+        "decision",
+    ]
+    assert ticket["response_contract"]["structured_result_schema"] == structured_result_schema
+    assert work_packet["response_contract"] == ticket["response_contract"]
+    assert history["revision_contract_SHA256"] == contract_digest
+    assert history["revision_contract"] == normalized_contract
+    assert history["historical_rejected_generation_record"] == original
+    assert history["historical_rejected_approval_decision_record"] == rejected_decision
+    assert history["new_generation_record"] == revised
+    assert bridge.load_approval_decision_record(
+        ticket_id="P18.9.2",
+        generation_record=revised,
+    ) is None
+    assert result["ticket_execution_authorized"] is False
+    assert result["WorkPacket_execution_authorized"] is False
+    assert result["worker_execution"] is False
+    assert result["Kanban_dispatch"] is False
+    assert result["Git_mutation"] is False
+
+
+def test_response_contract_revision_invalid_schema_fails_closed_with_stage_envelope(
+    bridge_home,
+) -> None:
+    bridge.generate_current_ticket(workflow=_p18_9_2_workflow())
+    original = bridge.load_generation_record(ticket_id="P18.9.2")
+    assert original is not None
+    bridge.apply_ticket_approval_decision(
+        ticket_id="P18.9.2",
+        decision="reject",
+        actor="human.p18.9",
+    )
+    rejected_decision = bridge.load_approval_decision_record(
+        ticket_id="P18.9.2",
+        generation_record=original,
+    )
+    assert rejected_decision is not None
+    contract = {
+        "schema_version": bridge.TICKET_SPEC_MATERIAL_REVISION_CONTRACT_SCHEMA_VERSION,
+        "ticket_id": "P18.9.2",
+        "response_contract": {
+            "structured_result_schema": {
+                "properties": {"bad": {"type": "string", "description": "\x00"}}
+            },
+        },
+    }
+
+    with pytest.raises(bridge.TicketArchitectBridgeInputError) as exc_info:
+        bridge.revise_rejected_successor_ticket(
+            workflow=_p18_9_2_rejected_successor_workflow(original),
+            human_authorization_text=(
+                "Authorize REVISE_P18_9_2 revision with the supplied structured response contract."
+            ),
+            revision_contract=contract,
+            authorizer_id="human.p18.9",
+            requested_project_id="PEPPER",
+            requested_ticket_id="P18.9.2",
+            requested_next_action_id="REVISE_P18_9_2",
+        )
+
+    failure = exc_info.value.failure_envelope
+    assert failure["failure_stage"] == "REVISION_CONTRACT_ACCEPTED"
+    assert failure["revision_contract_supplied"] is True
+    assert failure["revision_contract_accepted"] is False
+    assert failure["revision_contract_recorded"] is False
+    assert failure["revision_contract_applied"] is False
+    assert failure["revision_authority_accepted"] is False
+    assert failure["successor_generated"] is False
+    assert failure["REVISION_AUTHORITY_ACCEPTED"] is False
+    assert failure["REVISION_CONTRACT_ACCEPTED"] is False
+    assert failure["REVISION_CONTRACT_APPLIED"] is False
+    assert failure["SUCCESSOR_GENERATED"] is False
+    assert failure["field_path"].startswith("response_contract.structured_result_schema")
+    assert "NUL" in failure["validation_schema_error"]
+    assert failure["state_mutated"] is False
+    assert bridge.load_generation_record(ticket_id="P18.9.2") == original
+    assert bridge.load_approval_decision_record(
+        ticket_id="P18.9.2",
+        generation_record=original,
+    ) == rejected_decision
+    assert not bridge.rejected_successor_revision_history_path_for_ticket("P18.9.2").exists()
+
+
 def test_structured_revision_contract_digest_is_deterministic_and_field_sensitive(
     bridge_home,
 ) -> None:
@@ -1696,23 +1879,24 @@ def test_revise_generated_successor_ticket_schema_exposes_bounded_revision_contr
     assert params["required"] == ["human_authorization_text"]
     assert params["additionalProperties"] is False
     assert contract["additionalProperties"] is False
-    assert set(contract["required"]) == {
-        "schema_version",
-        "ticket_id",
-        "objective",
-        "context",
-        "scope",
-        "constraints",
-        "tasks",
-        "acceptance_criteria",
-        "validation_steps",
-    }
+    assert contract["required"] == ["schema_version", "ticket_id"]
     assert contract["properties"]["objective"]["maxLength"] == 8192
     assert contract["properties"]["context"]["maxItems"] == 32
     assert contract["properties"]["validation_steps"]["maxItems"] == 32
     assert contract["properties"]["scope"]["additionalProperties"] is False
+    assert contract["properties"]["dependencies"]["maxItems"] == 32
+    assert contract["properties"]["parallelization_hint"]["enum"] == [
+        "unspecified",
+        "serial",
+        "parallel_candidate",
+    ]
+    response_contract = contract["properties"]["response_contract"]
+    assert response_contract["additionalProperties"] is False
+    assert response_contract["properties"]["required_fields"]["maxItems"] == 64
+    assert "structured_result_schema" in response_contract["properties"]
+    assert "governance_invariants" in contract["properties"]
+    assert "execution_requirements" in contract["properties"]
     assert "project_id" not in contract["properties"]
-    assert "dependencies" not in contract["properties"]
     assert "execution_authority" not in contract["properties"]
 
 
@@ -1817,6 +2001,68 @@ def test_chat_revise_generated_successor_ticket_rejects_structured_contract_guar
     result = _chat_tool_result("revise_generated_successor_ticket", args)
 
     assert result["success"] is False
+    assert bridge.load_generation_record(ticket_id="P18.9.2") == record
+    assert bridge.load_approval_decision_record(
+        ticket_id="P18.9.2",
+        generation_record=record,
+    ) == rejected_decision
+    assert not bridge.rejected_successor_revision_history_path_for_ticket("P18.9.2").exists()
+
+
+def test_chat_revise_generated_successor_ticket_returns_structured_contract_error(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    bridge.generate_current_ticket(workflow=_p18_9_2_workflow())
+    record = bridge.load_generation_record(ticket_id="P18.9.2")
+    assert record is not None
+    bridge.apply_ticket_approval_decision(
+        ticket_id="P18.9.2",
+        decision="reject",
+        actor="human.p18.9",
+    )
+    rejected_decision = bridge.load_approval_decision_record(
+        ticket_id="P18.9.2",
+        generation_record=record,
+    )
+    assert rejected_decision is not None
+    monkeypatch.setattr(
+        pr,
+        "_p18_9_0_generation_overlay",
+        lambda: (_p18_9_2_workflow(), None),
+    )
+
+    result = _chat_tool_result(
+        "revise_generated_successor_ticket",
+        {
+            "human_authorization_text": (
+                "Authorize REVISE_P18_9_2 revision with the supplied structured response contract."
+            ),
+            "revision_contract": {
+                "schema_version": bridge.TICKET_SPEC_MATERIAL_REVISION_CONTRACT_SCHEMA_VERSION,
+                "ticket_id": "P18.9.2",
+                "response_contract": {
+                    "structured_result_schema": {
+                        "properties": {"bad": {"type": "string", "description": "\x00"}}
+                    },
+                },
+            },
+            "project_id": "PEPPER",
+            "ticket_id": "P18.9.2",
+            "next_action_id": "REVISE_P18_9_2",
+        },
+    )
+
+    assert result["success"] is False
+    assert result["failure_stage"] == "REVISION_CONTRACT_ACCEPTED"
+    assert result["revision_contract_supplied"] is True
+    assert result["revision_contract_accepted"] is False
+    assert result["revision_authority_accepted"] is False
+    assert result["successor_generated"] is False
+    assert result["field_path"].startswith("response_contract.structured_result_schema")
+    assert "NUL" in result["validation_schema_error"]
     assert bridge.load_generation_record(ticket_id="P18.9.2") == record
     assert bridge.load_approval_decision_record(
         ticket_id="P18.9.2",

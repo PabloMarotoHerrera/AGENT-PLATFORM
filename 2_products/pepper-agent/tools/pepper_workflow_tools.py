@@ -969,6 +969,13 @@ def _revise_generated_successor_ticket(args: dict[str, Any], **_kwargs) -> str:
         )
         updated_context = pr.build_lead_agent_operational_context()
     except Exception as exc:
+        failure_envelope = getattr(exc, "failure_envelope", None)
+        if isinstance(failure_envelope, dict):
+            return tool_error(
+                str(exc) or "generated successor revision failed",
+                success=False,
+                **failure_envelope,
+            )
         return tool_error(str(exc) or "generated successor revision failed", success=False)
     return _result({
         "source_tool": "revise_generated_successor_ticket",
@@ -1630,22 +1637,14 @@ _REVISE_GENERATED_SUCCESSOR_TICKET_SCHEMA = {
         "revision_contract": {
             "type": "object",
             "description": (
-                "Optional bounded structured TicketSpec material revision contract. "
-                "When supplied it replaces only objective, context, scope, constraints, "
-                "tasks, acceptance_criteria, and validation_steps for the same rejected ticket; "
-                "it grants no approval or execution authority."
+                "Optional bounded structured TicketSpec material revision overlay. "
+                "When supplied it must bind to the rejected ticket and may replace objective, "
+                "context, scope, constraints, tasks, acceptance_criteria, validation_steps, "
+                "dependencies, parallelization_hint, response_contract, governance_invariants, "
+                "execution_requirements, or recommended_commit_message; omitted fields inherit "
+                "from the rejected predecessor TicketSpec. It grants no approval or execution authority."
             ),
-            "required": [
-                "schema_version",
-                "ticket_id",
-                "objective",
-                "context",
-                "scope",
-                "constraints",
-                "tasks",
-                "acceptance_criteria",
-                "validation_steps",
-            ],
+            "required": ["schema_version", "ticket_id"],
             "properties": {
                 "schema_version": {"type": "integer", "enum": [1]},
                 "ticket_id": {
@@ -1738,6 +1737,90 @@ _REVISE_GENERATED_SUCCESSOR_TICKET_SCHEMA = {
                         },
                         "additionalProperties": False,
                     },
+                },
+                "dependencies": {
+                    "type": "array",
+                    "maxItems": 32,
+                    "items": {
+                        "type": "object",
+                        "required": ["ticket_id", "kind", "scope", "rationale"],
+                        "properties": {
+                            "ticket_id": {
+                                "type": "string",
+                                "minLength": 4,
+                                "maxLength": 64,
+                                "pattern": r"^P[1-9][0-9]{0,3}(?:\.[A-Z0-9]+)+$",
+                            },
+                            "kind": {
+                                "type": "string",
+                                "enum": ["hard_prerequisite", "soft_predecessor"],
+                            },
+                            "scope": {
+                                "type": "string",
+                                "enum": ["internal_project", "external_project"],
+                            },
+                            "rationale": {"type": "string", "minLength": 1, "maxLength": 512},
+                        },
+                        "additionalProperties": False,
+                    },
+                },
+                "parallelization_hint": {
+                    "type": "string",
+                    "enum": ["unspecified", "serial", "parallel_candidate"],
+                },
+                "response_contract": {
+                    "type": "object",
+                    "description": (
+                        "Sparse worker response-contract overlay. Supplied fields replace the "
+                        "predecessor response-contract fields; omitted fields inherit."
+                    ),
+                    "properties": {
+                        "required_sections": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 32,
+                            "items": {"type": "string", "minLength": 1, "maxLength": 512},
+                        },
+                        "completion_verdict": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256,
+                            "pattern": r"^[a-z0-9]+(?:_[a-z0-9]+)*$",
+                        },
+                        "include_files_inspected": {"type": "boolean"},
+                        "include_files_modified": {"type": "boolean"},
+                        "include_commands_run": {"type": "boolean"},
+                        "include_tests_run": {"type": "boolean"},
+                        "include_limitations": {"type": "boolean"},
+                        "required_fields": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 64,
+                            "items": {"type": "string", "minLength": 1, "maxLength": 512},
+                        },
+                        "structured_result_schema": {
+                            "type": "object",
+                            "description": "JSON-serializable structured result schema.",
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+                "governance_invariants": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 32,
+                    "items": {"type": "string", "minLength": 1, "maxLength": 8192},
+                },
+                "execution_requirements": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 32,
+                    "items": {"type": "string", "minLength": 1, "maxLength": 8192},
+                },
+                "recommended_commit_message": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512,
                 },
             },
             "additionalProperties": False,
