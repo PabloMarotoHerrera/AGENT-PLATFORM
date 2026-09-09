@@ -14887,6 +14887,17 @@ def _rematerialized_source_authority_manifest(
     return manifest
 
 
+def _source_authority_snapshot_file_size(item: dict[str, Any]) -> int:
+    size_value = item.get("size_bytes")
+    if (
+        not isinstance(size_value, int)
+        or isinstance(size_value, bool)
+        or size_value < 0
+    ):
+        raise ProductRuntimeConflict("source authority snapshot file size is invalid")
+    return size_value
+
+
 def _verify_rematerialized_source_authority_workspace(
     *,
     source_authority: dict[str, Any],
@@ -14909,7 +14920,8 @@ def _verify_rematerialized_source_authority_workspace(
             raise ProductRuntimeConflict(
                 "rematerialized source-authority workspace digest mismatch"
             )
-        if path.stat().st_size != int(item.get("size_bytes") or -1):
+        expected_size = _source_authority_snapshot_file_size(item)
+        if path.stat().st_size != expected_size:
             raise ProductRuntimeConflict(
                 "rematerialized source-authority workspace size mismatch"
             )
@@ -14935,7 +14947,10 @@ def _verify_rematerialized_source_authority_workspace(
         "verified": True,
         "snapshot_SHA256": source_authority.get("snapshot_SHA256"),
         "file_count": len(expected_files),
-        "total_bytes": sum(int(item.get("size_bytes") or 0) for item in expected_files.values()),
+        "total_bytes": sum(
+            _source_authority_snapshot_file_size(item)
+            for item in expected_files.values()
+        ),
     }
 
 

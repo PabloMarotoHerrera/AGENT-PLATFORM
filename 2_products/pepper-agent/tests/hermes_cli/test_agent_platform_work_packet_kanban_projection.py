@@ -495,6 +495,60 @@ def _persist_c21_source_authority(pr, tmp_path, *, run_id: int = 7):
     return projection_record, reference
 
 
+def _c23_source_authority_with_file(
+    pr,
+    tmp_path: Path,
+    *,
+    contents: bytes,
+    size_bytes: object,
+    sha256: str | None = None,
+    run_id: int = 23,
+) -> tuple[dict[str, object], Path]:
+    relative_path = "2_products/pepper-agent/tests/hermes_cli/__init__.py"
+    snapshot_root = tmp_path / f"snapshot-{run_id}"
+    source_file = snapshot_root / relative_path
+    source_file.parent.mkdir(parents=True, exist_ok=True)
+    source_file.write_bytes(contents)
+    projection_record = _c21_source_authority_projection()
+    file_entry: dict[str, object] = {
+        "relative_path": relative_path,
+        "SHA256": sha256 or hashlib.sha256(contents).hexdigest(),
+        "size_bytes": size_bytes,
+    }
+    snapshot_manifest = {
+        "schema_version": 1,
+        "policy_id": pr.PEPPER_GOVERNED_SOURCE_AUTHORITY_POLICY_ID,
+        "files": [file_entry],
+        "directories": [
+            "2_products",
+            "2_products/pepper-agent",
+            "2_products/pepper-agent/tests",
+            "2_products/pepper-agent/tests/hermes_cli",
+        ],
+        "file_count": 1,
+        "directory_count": 4,
+        "total_bytes": size_bytes if isinstance(size_bytes, int) else None,
+        "snapshot_SHA256": "c" * 64,
+    }
+    authority = {
+        **projection_record,
+        "run_id": run_id,
+        "authority_path": str(tmp_path / f"source-authority-{run_id}.json"),
+        "governed_source_authority_SHA256": "d" * 64,
+        "snapshot_SHA256": snapshot_manifest["snapshot_SHA256"],
+        "snapshot_root": str(snapshot_root),
+        "snapshot_manifest": snapshot_manifest,
+        "source_authority_kind": "filesystem_snapshot_without_git",
+        "materialization_manifest": {
+            "source_root": str(tmp_path / f"source-{run_id}"),
+            "workspace_root": str(tmp_path / f"scratch-{run_id}"),
+            "source_materialized": True,
+        },
+        "materialization_manifest_SHA256": "e" * 64,
+    }
+    return authority, source_file
+
+
 def _persist_started_execution_record(pr, projected, run_id: int) -> None:
     authority = projected
     if "projection_SHA256" not in authority or "dependency_plan_SHA256" not in authority:
@@ -5133,6 +5187,127 @@ def test_c21_durable_source_authority_rejects_tampered_snapshot_payload_bytes(
             run_id=7,
         )
     assert reference["authority_path"].startswith(str(projection_home))
+
+
+def test_c23_zero_byte_source_authority_file_verifies_after_rematerialization(
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    empty_sha = hashlib.sha256(b"").hexdigest()
+    authority, source_file = _c23_source_authority_with_file(
+        pr,
+        tmp_path,
+        contents=b"",
+        size_bytes=0,
+    )
+    file_entry = authority["snapshot_manifest"]["files"][0]
+
+    assert file_entry["size_bytes"] == 0
+    assert source_file.stat().st_size == 0
+    assert file_entry["SHA256"] == empty_sha
+
+    rematerialized = pr._rematerialize_review_prepare_validation_workspace(
+        source_authority=authority,
+    )
+    rematerialized_file = Path(rematerialized["workspace_path"]) / str(
+        file_entry["relative_path"]
+    )
+
+    assert rematerialized["workspace_verification"]["verified"] is True
+    assert rematerialized["workspace_verification"]["file_count"] == 1
+    assert rematerialized["workspace_verification"]["total_bytes"] == 0
+    assert rematerialized_file.is_file()
+    assert rematerialized_file.stat().st_size == 0
+    assert hashlib.sha256(rematerialized_file.read_bytes()).hexdigest() == empty_sha
+
+
+def test_c23_source_authority_file_missing_size_fails_closed(tmp_path) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    authority, _source_file = _c23_source_authority_with_file(
+        pr,
+        tmp_path,
+        contents=b"",
+        size_bytes=0,
+    )
+    del authority["snapshot_manifest"]["files"][0]["size_bytes"]
+
+    with pytest.raises(
+        pr.ProductRuntimeConflict,
+        match="source authority snapshot file size is invalid",
+    ):
+        pr._verify_rematerialized_source_authority_workspace(
+            source_authority=authority,
+            workspace_root=Path(str(authority["snapshot_root"])),
+        )
+
+
+@pytest.mark.parametrize("size_bytes", [None, -1, True, False, "0"])
+def test_c23_source_authority_file_invalid_size_types_fail_closed(
+    tmp_path,
+    size_bytes,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    authority, _source_file = _c23_source_authority_with_file(
+        pr,
+        tmp_path,
+        contents=b"",
+        size_bytes=size_bytes,
+    )
+
+    with pytest.raises(
+        pr.ProductRuntimeConflict,
+        match="source authority snapshot file size is invalid",
+    ):
+        pr._verify_rematerialized_source_authority_workspace(
+            source_authority=authority,
+            workspace_root=Path(str(authority["snapshot_root"])),
+        )
+
+
+def test_c23_source_authority_real_size_mismatch_still_fails(tmp_path) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    authority, _source_file = _c23_source_authority_with_file(
+        pr,
+        tmp_path,
+        contents=b"",
+        size_bytes=1,
+    )
+
+    with pytest.raises(
+        pr.ProductRuntimeConflict,
+        match="rematerialized source-authority workspace size mismatch",
+    ):
+        pr._verify_rematerialized_source_authority_workspace(
+            source_authority=authority,
+            workspace_root=Path(str(authority["snapshot_root"])),
+        )
+
+
+def test_c23_source_authority_digest_mismatch_still_fails_before_size_validation(
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    authority, _source_file = _c23_source_authority_with_file(
+        pr,
+        tmp_path,
+        contents=b"changed bytes",
+        size_bytes=None,
+        sha256=hashlib.sha256(b"").hexdigest(),
+    )
+
+    with pytest.raises(
+        pr.ProductRuntimeConflict,
+        match="rematerialized source-authority workspace digest mismatch",
+    ):
+        pr._verify_rematerialized_source_authority_workspace(
+            source_authority=authority,
+            workspace_root=Path(str(authority["snapshot_root"])),
+        )
 
 
 def test_c21_durable_source_authority_rejects_tampered_reference_digest(
