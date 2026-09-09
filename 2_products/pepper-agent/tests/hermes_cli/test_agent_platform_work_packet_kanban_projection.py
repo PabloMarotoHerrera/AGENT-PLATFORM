@@ -21624,6 +21624,650 @@ def test_current_p18_9_1_governed_autonomy_fresh_execution_after_terminal_run_is
     ).read_bytes() == run_5_manifest
 
 
+def _c22_terminal_reconciliation_for_done_run(pr, projection_record: dict, run_id: int) -> dict:
+    return {
+        "terminal_run_reconciled": True,
+        "governed_autonomy_runtime_status": "direct_execution_terminal_completed",
+        "terminal_run_id": run_id,
+        "terminal_run_status": "done",
+        "terminal_run_outcome": "completed",
+        "terminal_run_ended_at": 1_766_000_000,
+        "terminal_run_failure_category": None,
+        "terminal_run_failure_summary": None,
+        "validation_infrastructure_failure": False,
+        "validation_observation_reference": {
+            "tool_name": "workpacket_validation",
+            "infrastructure_failure": False,
+            "validation_passed": True,
+            "validated_candidate_review_required": False,
+        },
+        "source_materialization_reference": None,
+        "candidate_changes_reference": None,
+        "candidate_changes_available": False,
+        "validated_candidate_review_required": False,
+        "blocker_code": None,
+        "blocker_detail": None,
+        "next_autonomous_action": (
+            "prepare governed review validation from terminal completion evidence"
+        ),
+        "next_human_action": None,
+        "next_action": {
+            "id": pr.governed_ticket_lifecycle_action_ids(str(projection_record["ticket_id"]))[
+                "review_prepare"
+            ],
+            "target_ticket_id": projection_record["ticket_id"],
+            "required_human_action": "review_validation_preparation",
+        },
+    }
+
+
+def _c22_strip_c21_source_authority_from_runtime_state(
+    pr,
+    projection_record: dict,
+    *,
+    terminal_run_id: int,
+    workspace: Path,
+) -> None:
+    manifest_path = workspace / pr.PEPPER_SCRATCH_SOURCE_MATERIALIZATION_MANIFEST
+    if manifest_path.exists():
+        manifest_path.unlink()
+    run_dir = pr.governed_source_authority_run_dir(projection_record, terminal_run_id)
+    if run_dir.exists():
+        shutil.rmtree(run_dir)
+    runtime = pr.load_current_ticket_governed_autonomy_runtime_state()
+    assert runtime is not None
+    assert runtime["kanban_run_id"] == terminal_run_id
+    source_authority_keys = (
+        "durable_source_authority_reference",
+        "durable_source_authority_SHA256",
+        "governed_source_authority_path",
+        "governed_source_authority_snapshot_SHA256",
+        "durable_source_authority_validated_before_worker_execution",
+        "source_authority_materialized_before_worker_execution",
+        "source_authority_materialization_verification",
+        "source_authority_kind",
+    )
+    for key in source_authority_keys:
+        runtime.pop(key, None)
+    source_materialization = runtime.get("source_materialization")
+    if isinstance(source_materialization, dict):
+        for key in source_authority_keys:
+            source_materialization.pop(key, None)
+    latest = runtime.get("latest_decision_evidence")
+    if isinstance(latest, dict):
+        direct_result = latest.get("direct_execution_result_reference")
+        if isinstance(direct_result, dict):
+            for key in source_authority_keys:
+                direct_result.pop(key, None)
+            materialization_reference = direct_result.get("source_materialization_reference")
+            if isinstance(materialization_reference, dict):
+                for key in source_authority_keys:
+                    materialization_reference.pop(key, None)
+    runtime.pop("runtime_state_SHA256", None)
+    runtime["runtime_state_SHA256"] = pr._governed_autonomy_runtime_record_digest(runtime)
+    pr._persist_governed_autonomy_runtime_state(runtime)
+
+
+def _c22_missing_prepare_substrate_done_terminal_fixture(
+    projection_home,
+    monkeypatch,
+    *,
+    strip_c21_source_authority: bool = True,
+):
+    pr, projected, authority = _closed_p18_9_0_with_projected_p18_9_1(
+        projection_home,
+        monkeypatch,
+    )
+
+    from hermes_cli import kanban_db
+
+    run_4 = _force_p18_9_1_blocked_run_4(pr, kanban_db, projected, monkeypatch)
+    activation = _activate_p18_9_1_governed_autonomy_for_test(pr, monkeypatch)[
+        "activation"
+    ]
+    monkeypatch.setattr(
+        pr,
+        "_projection_requires_scratch_source_materialization",
+        lambda _projection_record: False,
+    )
+    monkeypatch.setattr(kanban_db, "_pid_alive", lambda pid: int(pid) == 6825)
+    started = pr.continue_current_ticket_governed_autonomy(
+        runtime_goal="Create a synthetic pre-C21 terminal run without PREPARE substrate.",
+        strategy="DIRECT",
+        spawn_fn=lambda _task, _workspace, board=None, env_overlay=None: 6825,
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+    terminal_run_id = started["kanban_run_id"]
+    assert terminal_run_id == run_4 + 1
+    terminal_workspace = Path(started["workspace_path"])
+    if strip_c21_source_authority:
+        _c22_strip_c21_source_authority_from_runtime_state(
+            pr,
+            projected,
+            terminal_run_id=terminal_run_id,
+            workspace=terminal_workspace,
+        )
+        assert not (
+            terminal_workspace / pr.PEPPER_SCRATCH_SOURCE_MATERIALIZATION_MANIFEST
+        ).exists()
+    _mark_projected_run_done_for_review_revision_fixture(
+        kanban_db,
+        projected,
+        terminal_run_id,
+        summary="synthetic pre-C21 terminal run completed with missing PREPARE substrate",
+    )
+    shutil.rmtree(terminal_workspace)
+    return SimpleNamespace(
+        pr=pr,
+        projected=projected,
+        authority=authority,
+        kanban_db=kanban_db,
+        run_4=run_4,
+        activation=activation,
+        terminal_run_id=terminal_run_id,
+        terminal_workspace=terminal_workspace,
+    )
+
+
+def test_c22_missing_prepare_substrate_exposes_runtime_recovery_action(
+    projection_home,
+    monkeypatch,
+) -> None:
+    state = _c22_missing_prepare_substrate_done_terminal_fixture(
+        projection_home,
+        monkeypatch,
+    )
+
+    status = state.pr.get_current_ticket_governed_autonomy_status(
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+    workflow = state.pr.build_workflow_control_snapshot()
+
+    assert status["terminal_run_id"] == state.terminal_run_id
+    assert status["blocker_code"] == state.pr.SOURCE_AUTHORITY_ABSENT_FOR_PRE_C21_TERMINAL_RUN, status.get(
+        "review_prepare_substrate_probe"
+    )
+    assert status["next_action"]["id"] == state.pr.PEPPER_RUNTIME_SUBSTRATE_RECOVERY_NEXT_ACTION_ID
+    assert status["next_action"]["id"] != "PREPARE_P18_9_1_REVIEW"
+    assert status["next_action"]["required_human_action"] == (
+        state.pr.PEPPER_RUNTIME_SUBSTRATE_RECOVERY_REQUIRED_HUMAN_ACTION
+    )
+    assert workflow["workflow_status"] == "runtime_substrate_recovery_required"
+    assert workflow["recovery_state"] == "runtime_substrate_recovery_required"
+    assert workflow["next_action"]["id"] == state.pr.PEPPER_RUNTIME_SUBSTRATE_RECOVERY_NEXT_ACTION_ID
+    assert workflow["review_prepare_substrate_probe"]["recovery_eligible"] is True
+    assert workflow["review_prepare_substrate_probe"]["blocker_code"] == (
+        state.pr.SOURCE_AUTHORITY_ABSENT_FOR_PRE_C21_TERMINAL_RUN
+    )
+
+
+def test_c22_true_pre_c21_missing_source_authority_is_recovery_eligible(
+    projection_home,
+    monkeypatch,
+) -> None:
+    state = _c22_missing_prepare_substrate_done_terminal_fixture(
+        projection_home,
+        monkeypatch,
+    )
+
+    status = state.pr.get_current_ticket_governed_autonomy_status(
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+    probe = status["review_prepare_substrate_probe"]
+
+    assert status["blocker_code"] == (
+        state.pr.SOURCE_AUTHORITY_ABSENT_FOR_PRE_C21_TERMINAL_RUN
+    )
+    assert probe["probe_status"] == "missing"
+    assert probe["recovery_eligible"] is True
+    assert probe["c21_source_authority_provenance_detected"] is False
+    assert probe["source_authority_absence_classification"] == (
+        state.pr.SOURCE_AUTHORITY_ABSENT_FOR_PRE_C21_TERMINAL_RUN
+    )
+
+
+def test_c22_post_c21_missing_source_authority_fails_closed(
+    projection_home,
+    monkeypatch,
+) -> None:
+    state = _c22_missing_prepare_substrate_done_terminal_fixture(
+        projection_home,
+        monkeypatch,
+        strip_c21_source_authority=False,
+    )
+
+    status = state.pr.get_current_ticket_governed_autonomy_status(
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+    workflow = state.pr.build_workflow_control_snapshot()
+    probe = status["review_prepare_substrate_probe"]
+
+    assert status["blocker_code"] == state.pr.SOURCE_AUTHORITY_MISSING_FOR_C21_TERMINAL_RUN
+    assert status["governed_autonomy_runtime_status"] == (
+        "direct_execution_terminal_review_prepare_substrate_invalid"
+    )
+    assert status["runtime_substrate_recovery_required"] is False
+    assert probe["probe_status"] == "invalid"
+    assert probe["recovery_eligible"] is False
+    assert probe["c21_source_authority_provenance_detected"] is True
+    assert workflow["workflow_status"] != "runtime_substrate_recovery_required"
+    assert workflow.get("runtime_substrate_recovery_required") is not True
+
+
+def test_c22_runtime_substrate_recovery_exposes_exact_human_authorization_text(
+    projection_home,
+    monkeypatch,
+) -> None:
+    state = _c22_missing_prepare_substrate_done_terminal_fixture(
+        projection_home,
+        monkeypatch,
+    )
+    expected_text = state.pr._runtime_substrate_recovery_required_human_authorization_text(
+        "P18.9.1",
+        state.terminal_run_id,
+    )
+    expected_sha = hashlib.sha256(expected_text.encode("utf-8")).hexdigest()
+
+    status = state.pr.get_current_ticket_governed_autonomy_status(
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+    workflow = state.pr.build_workflow_control_snapshot()
+
+    for action in (status["next_action"], workflow["next_action"]):
+        assert action["required_human_authorization_text"] == expected_text
+        assert action["required_human_authorization_text_SHA256"] == expected_sha
+
+
+def test_c22_runtime_substrate_recovery_exact_authorization_replays_after_recovery_run_terminal(
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    projection_record = _c21_source_authority_projection()
+    terminal_run_id = 19
+    request_text = pr._runtime_substrate_recovery_required_human_authorization_text(
+        projection_record["ticket_id"],
+        terminal_run_id,
+    )
+    monkeypatch.setattr(
+        pr,
+        "_completion_durable_source_authority_reference",
+        lambda _projection, _completion: None,
+    )
+    request = pr.CurrentTicketGovernedAutonomyContinuationRequest(
+        runtime_goal="Create recovery request for terminalized replay validation.",
+        strategy="DIRECT",
+        fresh_execution_request_text=request_text,
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+    first_reference = pr._governed_autonomy_fresh_execution_request_reference(
+        request,
+        projection=projection_record,
+        activation={"activation_action_SHA256": "a" * 64},
+        terminal_reconciliation=_c22_terminal_reconciliation_for_done_run(
+            pr,
+            projection_record,
+            terminal_run_id,
+        ),
+    )
+    assert first_reference is not None
+    assert first_reference["transition_classification"] == "HUMAN_RUNTIME_SUBSTRATE_RECOVERY"
+    recovery_run_id = terminal_run_id + 1
+    previous = {
+        "fresh_execution_request_reference": first_reference,
+        "fresh_execution_request_SHA256": first_reference["fresh_execution_request_SHA256"],
+        "kanban_run_id": recovery_run_id,
+    }
+
+    replay_reference = pr._governed_autonomy_fresh_execution_request_reference(
+        request,
+        projection=projection_record,
+        activation={"activation_action_SHA256": "a" * 64},
+        previous=previous,
+        terminal_reconciliation=_c22_terminal_reconciliation_for_done_run(
+            pr,
+            projection_record,
+            recovery_run_id,
+        ),
+    )
+
+    assert replay_reference == first_reference
+    assert replay_reference["prior_terminal_run_id"] == terminal_run_id
+
+
+def test_c22_runtime_substrate_recovery_rejects_noncanonical_human_text(
+    projection_home,
+    monkeypatch,
+) -> None:
+    state = _c22_missing_prepare_substrate_done_terminal_fixture(
+        projection_home,
+        monkeypatch,
+    )
+    pr = state.pr
+    kanban_db = state.kanban_db
+    expected_text = pr._runtime_substrate_recovery_required_human_authorization_text(
+        "P18.9.1",
+        state.terminal_run_id,
+    )
+    conn = kanban_db.connect(board=state.projected["kanban_board_slug"])
+    try:
+        before_run_ids = [
+            run.id for run in kanban_db.list_runs(conn, state.projected["kanban_task_id"])
+        ]
+    finally:
+        conn.close()
+
+    blocked = pr.continue_current_ticket_governed_autonomy(
+        runtime_goal="Attempt runtime-substrate recovery with paraphrased authority.",
+        strategy="DIRECT",
+        fresh_execution_request_text=(
+            "Authorize one fresh P18.9.1 execution after runtime substrate correction."
+        ),
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("noncanonical text must not spawn"),
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+
+    assert blocked["governed_autonomy_runtime_status"] == "blocked_stop_for_human"
+    assert blocked["blocker_code"] == (
+        pr.FRESH_EXECUTION_RUNTIME_SUBSTRATE_RECOVERY_AUTHORIZATION_TEXT_MISMATCH
+    )
+    assert blocked["kanban_run_created"] is False
+    assert blocked["dispatch_performed"] is False
+    assert blocked["fresh_execution_requested"] is False
+    blocked_reference = blocked["latest_decision_evidence"][
+        "fresh_execution_request_reference"
+    ]
+    assert blocked_reference["fresh_execution_request_blocker_code"] == (
+        pr.FRESH_EXECUTION_RUNTIME_SUBSTRATE_RECOVERY_AUTHORIZATION_TEXT_MISMATCH
+    )
+    assert blocked_reference["required_human_authorization_text"] == expected_text
+    assert "fresh_execution_request_SHA256" not in blocked_reference
+    conn = kanban_db.connect(board=state.projected["kanban_board_slug"])
+    try:
+        after_run_ids = [
+            run.id for run in kanban_db.list_runs(conn, state.projected["kanban_task_id"])
+        ]
+    finally:
+        conn.close()
+    assert after_run_ids == before_run_ids
+
+
+def test_c22_runtime_substrate_recovery_creates_one_fresh_run_with_c21_ordering(
+    projection_home,
+    monkeypatch,
+) -> None:
+    state = _c22_missing_prepare_substrate_done_terminal_fixture(
+        projection_home,
+        monkeypatch,
+    )
+    pr = state.pr
+    kanban_db = state.kanban_db
+    events: list[str] = []
+    _install_c21_source_authority_derivation(monkeypatch, pr, events)
+    original_persist = pr._persist_governed_source_authority
+    original_load = pr._load_governed_source_authority_from_reference
+    original_materialize = pr._materialize_dispatch_workspace_from_source_authority
+    original_verify = pr._verify_rematerialized_source_authority_workspace
+
+    monkeypatch.setattr(
+        pr,
+        "_projection_requires_scratch_source_materialization",
+        lambda _projection_record: True,
+    )
+
+    def persist_authority(**kwargs):
+        events.append("source_authority_persistence")
+        return original_persist(**kwargs)
+
+    def validate_authority(reference, *, projection, run_id):
+        events.append("source_authority_validation")
+        return original_load(reference, projection=projection, run_id=run_id)
+
+    def materialize_from_authority(**kwargs):
+        events.append("source_authority_materialization")
+        return original_materialize(**kwargs)
+
+    def verify_materialization(**kwargs):
+        events.append("source_authority_materialization_verification")
+        return original_verify(**kwargs)
+
+    monkeypatch.setattr(pr, "_persist_governed_source_authority", persist_authority)
+    monkeypatch.setattr(pr, "_load_governed_source_authority_from_reference", validate_authority)
+    monkeypatch.setattr(
+        pr,
+        "_materialize_dispatch_workspace_from_source_authority",
+        materialize_from_authority,
+    )
+    monkeypatch.setattr(
+        pr,
+        "_verify_rematerialized_source_authority_workspace",
+        verify_materialization,
+    )
+    monkeypatch.setattr(kanban_db, "_pid_alive", lambda pid: int(pid) == 6826)
+
+    def spawn(_task, workspace, *, board=None, env_overlay=None):
+        _ = board, env_overlay
+        assert events == [
+            "source_authority_derivation",
+            "source_authority_persistence",
+            "source_authority_validation",
+            "source_authority_materialization",
+            "source_authority_materialization_verification",
+        ]
+        assert Path(workspace) != state.terminal_workspace
+        (Path(workspace) / "2_products/pepper-agent/web/src/App.tsx").write_text(
+            "export const synthetic = 'runtime-substrate-recovery';\n",
+            encoding="utf-8",
+        )
+        events.append("worker_spawn")
+        return 6826
+
+    request_text = pr.get_current_ticket_governed_autonomy_status(
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )["next_action"]["required_human_authorization_text"]
+    fresh = pr.continue_current_ticket_governed_autonomy(
+        runtime_goal="Start exactly one runtime-substrate recovery execution for P18.9.1.",
+        strategy="DIRECT",
+        fresh_execution_request_text=request_text,
+        spawn_fn=spawn,
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+
+    assert events[-1] == "worker_spawn"
+    assert fresh["governed_autonomy_runtime_status"] == "direct_execution_continuation_started"
+    assert fresh["kanban_run_id"] == state.terminal_run_id + 1
+    assert fresh["prior_terminal_run_id"] == state.terminal_run_id
+    reference = fresh["fresh_execution_request_reference"]
+    assert reference["fresh_execution_provenance"] == "human_runtime_substrate_correction"
+    assert reference["transition_classification"] == "HUMAN_RUNTIME_SUBSTRATE_RECOVERY"
+    assert reference["prior_terminal_run_id"] == state.terminal_run_id
+    assert reference["prior_terminal_completion_SHA256"] != (
+        reference.get("fresh_execution_request_SHA256")
+    )
+    assert "zero_change_attestation_SHA256" not in reference
+    assert fresh["durable_source_authority_validated_before_worker_execution"] is True
+    assert fresh["source_authority_materialized_before_worker_execution"] is True
+    manifest, _materialization_reference = pr._governed_autonomy_materialization_manifest(
+        fresh["workspace_path"],
+    )
+    candidate_changes = pr._governed_autonomy_candidate_changes_reference(manifest)
+    assert pr._governed_autonomy_candidate_changes_available(candidate_changes), candidate_changes
+
+    conn = kanban_db.connect(board=state.projected["kanban_board_slug"])
+    try:
+        task = kanban_db.get_task(conn, state.projected["kanban_task_id"])
+        runs = kanban_db.list_runs(conn, state.projected["kanban_task_id"])
+        kanban_events = kanban_db.list_events(conn, state.projected["kanban_task_id"])
+        assert task is not None
+        assert task.status == "running"
+        assert task.current_run_id == state.terminal_run_id + 1
+        assert [run.id for run in runs][-2:] == [
+            state.terminal_run_id,
+            state.terminal_run_id + 1,
+        ]
+        prior_run = next(run for run in runs if run.id == state.terminal_run_id)
+        assert prior_run.status == "done"
+        assert prior_run.outcome == "completed"
+        body = json.loads(task.body or "{}")
+        assert body["fresh_execution_provenance"] == "human_runtime_substrate_correction"
+        assert body["fresh_execution_transition_classification"] == (
+            "HUMAN_RUNTIME_SUBSTRATE_RECOVERY"
+        )
+        assert body["prior_terminal_completion_SHA256"] == reference[
+            "prior_terminal_completion_SHA256"
+        ]
+        assert "zero_change_attestation_SHA256" not in body
+        assert any(
+            event.kind == "governed_autonomy_terminal_runtime_substrate_recovery_rearmed"
+            and event.run_id == state.terminal_run_id
+            for event in kanban_events
+        )
+    finally:
+        conn.close()
+
+    replay = pr.continue_current_ticket_governed_autonomy(
+        runtime_goal="Replay the same runtime-substrate recovery authorization.",
+        strategy="DIRECT",
+        fresh_execution_request_text=request_text,
+        spawn_fn=lambda *_args, **_kwargs: pytest.fail("duplicate recovery must not spawn"),
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+    assert replay["idempotent_replay"] is True
+    assert replay["fresh_execution_duplicate_suppressed"] is True
+    assert replay["fresh_execution_request_SHA256"] == fresh[
+        "fresh_execution_request_SHA256"
+    ]
+
+    _mark_projected_run_done_for_review_revision_fixture(
+        kanban_db,
+        state.projected,
+        state.terminal_run_id + 1,
+        summary=(
+            "runtime-substrate recovery implementation is completed; "
+            "validation passed; human review required with fresh C21 source authority"
+        ),
+    )
+    workflow_after = pr.build_workflow_control_snapshot()
+    assert workflow_after["workflow_status"] == "execution_completed"
+    assert workflow_after["next_action"]["id"] == "PREPARE_P18_9_1_REVIEW"
+    assert workflow_after.get("runtime_substrate_recovery_required") is not True
+
+
+def test_c22_tampered_source_authority_is_not_runtime_recovery_eligible(
+    projection_home,
+    tmp_path,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _ = projection_home
+    source_root = tmp_path / "source"
+    workspace = tmp_path / "scratch"
+    projection_record = _c21_source_authority_projection()
+    materialization = _c21_source_authority_materialization(
+        pr,
+        source_root=source_root,
+        workspace=workspace,
+    )
+    reference = pr._persist_governed_source_authority(
+        projection=projection_record,
+        workspace=workspace,
+        materialization=materialization,
+        run_id=19,
+    )
+    tampered_reference = dict(reference)
+    tampered_reference["authority_SHA256"] = "0" * 64
+    manifest_path = workspace / pr.PEPPER_SCRATCH_SOURCE_MATERIALIZATION_MANIFEST
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.update({
+        "durable_source_authority_reference": tampered_reference,
+        "durable_source_authority_SHA256": tampered_reference["authority_SHA256"],
+        "governed_source_authority_path": tampered_reference["authority_path"],
+        "governed_source_authority_snapshot_SHA256": tampered_reference["snapshot_SHA256"],
+    })
+    pr._write_materialization_manifest(
+        manifest_path,
+        manifest,
+        workspace_root=workspace,
+    )
+
+    probe = pr._governed_autonomy_review_prepare_substrate_probe(
+        projection_record,
+        _c22_terminal_reconciliation_for_done_run(pr, projection_record, 19),
+        runtime_state={"workspace_path": str(workspace)},
+    )
+
+    assert probe["probe_status"] == "invalid"
+    assert probe["recovery_eligible"] is False
+    assert probe["blocker_code"] == "SOURCE_AUTHORITY_INVALID_FOR_REVIEW_PREPARE"
+    assert "digest mismatch" in probe["blocker_detail"]
+
+
+def test_c22_runtime_substrate_recovery_yields_to_changes_requested_review_revision(
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    projection_record = _c21_source_authority_projection()
+    monkeypatch.setattr(
+        pr,
+        "_completion_durable_source_authority_reference",
+        lambda _projection, _completion: None,
+    )
+    request = pr.CurrentTicketGovernedAutonomyContinuationRequest(
+        runtime_goal="Create recovery request for precedence validation.",
+        strategy="DIRECT",
+        fresh_execution_request_text=(
+            pr._runtime_substrate_recovery_required_human_authorization_text(
+                projection_record["ticket_id"],
+                19,
+            )
+        ),
+        project_id="PEPPER",
+        ticket_id="P18.9.1",
+    )
+    recovery_ref = pr._governed_autonomy_fresh_execution_request_reference(
+        request,
+        projection=projection_record,
+        activation={"activation_action_SHA256": "a" * 64},
+        terminal_reconciliation=_c22_terminal_reconciliation_for_done_run(
+            pr,
+            projection_record,
+            19,
+        ),
+    )
+    assert recovery_ref is not None
+    monkeypatch.setattr(
+        pr,
+        "load_current_ticket_review_decision_record",
+        lambda projection_record=None: {
+            "review_decision": "changes_requested",
+            "review_revision_request_reference": {
+                "fresh_execution_request_SHA256": "b" * 64,
+            },
+        },
+    )
+
+    blocker = pr._human_runtime_substrate_recovery_fresh_execution_request_blocker(
+        projection=projection_record,
+        fresh_execution_request=recovery_ref,
+    )
+
+    assert blocker == (
+        "FRESH_EXECUTION_REVIEW_REVISION_AUTHORITY_REQUIRED",
+        "current changes_requested review-revision authority takes precedence over runtime substrate recovery",
+    )
+
+
 def test_current_p18_9_1_governed_autonomy_fresh_preparation_blocker_is_unconsumed(
     projection_home,
     monkeypatch,

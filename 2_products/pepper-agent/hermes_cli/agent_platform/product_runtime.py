@@ -87,6 +87,36 @@ PEPPER_GOVERNED_SOURCE_MATERIALIZATION_MANIFEST_DIGEST_ALGORITHM = (
 PEPPER_REVIEW_PREPARE_VALIDATION_WORKSPACE_POLICY_ID = (
     "pepper-review-prepare-validation-rematerialized-workspace-v1"
 )
+PEPPER_RUNTIME_SUBSTRATE_RECOVERY_POLICY_ID = (
+    "pepper-current-ticket-runtime-substrate-recovery-v1"
+)
+PEPPER_RUNTIME_SUBSTRATE_RECOVERY_DIGEST_ALGORITHM = (
+    "agent-platform-pepper-runtime-substrate-recovery-request-sha256-v1"
+)
+PEPPER_RUNTIME_SUBSTRATE_RECOVERY_NEXT_ACTION_ID = (
+    "START_FRESH_EXECUTION_AFTER_RUNTIME_SUBSTRATE_CORRECTION_REQUIRES_HUMAN_AUTHORIZATION"
+)
+PEPPER_RUNTIME_SUBSTRATE_RECOVERY_REQUIRED_HUMAN_ACTION = (
+    "fresh_execution_after_runtime_substrate_correction"
+)
+SOURCE_AUTHORITY_ABSENT_FOR_PRE_C21_TERMINAL_RUN = (
+    "SOURCE_AUTHORITY_ABSENT_FOR_PRE_C21_TERMINAL_RUN"
+)
+SOURCE_AUTHORITY_MISSING_FOR_C21_TERMINAL_RUN = (
+    "SOURCE_AUTHORITY_MISSING_FOR_C21_TERMINAL_RUN"
+)
+FRESH_EXECUTION_RUNTIME_SUBSTRATE_RECOVERY_AUTHORIZATION_TEXT_MISMATCH = (
+    "FRESH_EXECUTION_RUNTIME_SUBSTRATE_RECOVERY_AUTHORIZATION_TEXT_MISMATCH"
+)
+_C21_SOURCE_AUTHORITY_PROVENANCE_KEYS = frozenset({
+    "durable_source_authority_validated_before_worker_execution",
+    "source_authority_materialized_before_worker_execution",
+    "source_authority_materialization_verification",
+    "durable_source_authority_reference",
+    "durable_source_authority_SHA256",
+    "governed_source_authority_path",
+    "governed_source_authority_snapshot_SHA256",
+})
 PEPPER_SCRATCH_DEPENDENCY_SUBSTRATE_POLICY_ID = (
     "pepper-governed-workpacket-scratch-dependency-substrate-v1"
 )
@@ -2322,6 +2352,7 @@ def _terminal_completed_predecessor_runtime_review_target(
 ) -> dict[str, Any]:
     terminal_reconciliation = _governed_autonomy_runtime_terminal_reconciliation(
         runtime,
+        projection_record=projection,
     )
     if terminal_reconciliation is None:
         raise ProductRuntimeConflict(
@@ -5575,6 +5606,7 @@ def _review_decision_revision_request_consumed_by_runtime(
         return False
     terminal_reconciliation = _governed_autonomy_runtime_terminal_reconciliation(
         runtime,
+        projection_record=projection,
         effective_authority=effective_authority,
     )
     if terminal_reconciliation is None:
@@ -10710,11 +10742,13 @@ def get_current_ticket_governed_autonomy_status(
         return result
     terminal_reconciliation = _governed_autonomy_runtime_terminal_reconciliation(
         runtime_state,
+        projection_record=projection,
         effective_authority=effective_authority,
     )
     runtime_summary = _governed_autonomy_runtime_summary(
         runtime_state,
         terminal_reconciliation=terminal_reconciliation,
+        projection_record=projection,
         effective_authority=effective_authority,
     )
     result.update({
@@ -10922,6 +10956,7 @@ def continue_current_ticket_governed_autonomy(
     decision = _select_governed_autonomy_runtime_decision(request)
     terminal_reconciliation = _governed_autonomy_runtime_terminal_reconciliation(
         previous,
+        projection_record=projection,
         effective_authority=effective_authority,
     )
     if fresh_execution_request_override is not None and (
@@ -10941,6 +10976,7 @@ def continue_current_ticket_governed_autonomy(
         request,
         projection=projection,
         activation=activation,
+        previous=previous,
         terminal_reconciliation=terminal_reconciliation,
     )
     resume_pending_sha = request.resume_pending_fresh_execution_request_SHA256
@@ -11005,6 +11041,7 @@ def continue_current_ticket_governed_autonomy(
             realized_record,
             activation_record=activation,
             idempotent_replay=True,
+            projection_record=projection,
             effective_authority=effective_authority,
         )
         result["fresh_execution_requested"] = True
@@ -11028,6 +11065,7 @@ def continue_current_ticket_governed_autonomy(
             previous,
             activation_record=activation,
             idempotent_replay=True,
+            projection_record=projection,
             effective_authority=effective_authority,
         )
         result["non_consuming_observation"] = True
@@ -11042,6 +11080,7 @@ def continue_current_ticket_governed_autonomy(
                 previous,
                 activation_record=activation,
                 idempotent_replay=True,
+                projection_record=projection,
                 effective_authority=effective_authority,
             )
             result["fresh_execution_requested"] = True
@@ -11058,6 +11097,7 @@ def continue_current_ticket_governed_autonomy(
                 previous,
                 activation_record=activation,
                 idempotent_replay=True,
+                projection_record=projection,
                 effective_authority=effective_authority,
             )
             result["non_consuming_observation"] = True
@@ -11088,6 +11128,7 @@ def continue_current_ticket_governed_autonomy(
             record,
             activation_record=activation,
             idempotent_replay=False,
+            projection_record=projection,
             effective_authority=effective_authority,
         )
 
@@ -11111,6 +11152,7 @@ def continue_current_ticket_governed_autonomy(
             record,
             activation_record=activation,
             idempotent_replay=False,
+            projection_record=projection,
             effective_authority=effective_authority,
         )
     provider_readiness = _executor_provider_readiness(str(projection["assignee_profile"]))
@@ -11131,6 +11173,7 @@ def continue_current_ticket_governed_autonomy(
             record,
             activation_record=activation,
             idempotent_replay=False,
+            projection_record=projection,
         )
     if decision == "DIRECT":
         worker_credential_probe = _preflight_pepper_governed_worker_credentials(
@@ -11159,6 +11202,7 @@ def continue_current_ticket_governed_autonomy(
                 record,
                 activation_record=activation,
                 idempotent_replay=False,
+                projection_record=projection,
             )
         provider_readiness = dict(provider_readiness)
         provider_readiness["worker_credential_probe"] = worker_credential_probe
@@ -11188,6 +11232,7 @@ def continue_current_ticket_governed_autonomy(
             record,
             activation_record=activation,
             idempotent_replay=False,
+            projection_record=projection,
         )
 
     if decision == "TASK_LOCAL_SELF_EXTENSION":
@@ -11245,6 +11290,7 @@ def continue_current_ticket_governed_autonomy(
         record,
         activation_record=activation,
         idempotent_replay=False,
+        projection_record=projection,
     )
 
 
@@ -14736,6 +14782,20 @@ def _completion_durable_source_authority_reference(
     return None
 
 
+def _has_c21_source_authority_provenance(value: object) -> bool:
+    if isinstance(value, dict):
+        if any(key in value for key in _C21_SOURCE_AUTHORITY_PROVENANCE_KEYS):
+            return True
+        return any(
+            _has_c21_source_authority_provenance(nested)
+            for nested in value.values()
+            if isinstance(nested, dict | list)
+        )
+    if isinstance(value, list):
+        return any(_has_c21_source_authority_provenance(item) for item in value)
+    return False
+
+
 def _copy_governed_source_snapshot_to_workspace(
     *,
     source_authority: dict[str, Any],
@@ -17332,6 +17392,7 @@ def _governed_autonomy_validation_infrastructure_failure(
 def _governed_autonomy_runtime_terminal_reconciliation(
     record: dict[str, Any] | None,
     *,
+    projection_record: dict[str, Any] | None = None,
     effective_authority: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     if record is None:
@@ -17484,7 +17545,419 @@ def _governed_autonomy_runtime_terminal_reconciliation(
             "kanban_block_kind",
         ):
             reconciliation[key] = review_boundary[key]
+    return _governed_autonomy_apply_review_prepare_substrate_probe(
+        record,
+        reconciliation,
+        projection_record=projection_record,
+    )
+
+
+def _governed_autonomy_terminal_completion_digest_payload(
+    projection: dict[str, Any],
+    *,
+    terminal_run_id: object,
+    terminal_run_status: object,
+    terminal_run_outcome: object,
+    terminal_run_ended_at: object,
+    terminal_run_failure_category: object = None,
+    terminal_run_failure_summary: object = None,
+) -> dict[str, Any]:
+    return {
+        "policy_id": "pepper-current-ticket-terminal-completion-digest-v1",
+        "project_id": projection.get("project_id"),
+        "ticket_id": projection.get("ticket_id"),
+        "ticket_spec_SHA256": projection.get("ticket_spec_SHA256"),
+        "work_packet_id": projection.get("work_packet_id"),
+        "work_packet_SHA256": projection.get("work_packet_SHA256"),
+        "projection_SHA256": projection.get("projection_SHA256"),
+        "kanban_board_slug": projection.get("kanban_board_slug"),
+        "kanban_task_id": projection.get("kanban_task_id"),
+        "terminal_run_id": _int_or_none(terminal_run_id),
+        "terminal_run_status": str(terminal_run_status or "").strip().lower() or None,
+        "terminal_run_outcome": str(terminal_run_outcome or "").strip().lower() or None,
+        "terminal_run_ended_at": terminal_run_ended_at,
+        "terminal_run_failure_category": terminal_run_failure_category,
+        "terminal_run_failure_summary": terminal_run_failure_summary,
+    }
+
+
+def _governed_autonomy_terminal_completion_digest(
+    projection: dict[str, Any],
+    terminal_reconciliation: dict[str, Any],
+) -> str:
+    return _digest_payload(
+        "pepper-current-ticket-terminal-completion-sha256-v1",
+        _governed_autonomy_terminal_completion_digest_payload(
+            projection,
+            terminal_run_id=terminal_reconciliation.get("terminal_run_id"),
+            terminal_run_status=terminal_reconciliation.get("terminal_run_status"),
+            terminal_run_outcome=terminal_reconciliation.get("terminal_run_outcome"),
+            terminal_run_ended_at=terminal_reconciliation.get("terminal_run_ended_at"),
+            terminal_run_failure_category=terminal_reconciliation.get(
+                "terminal_run_failure_category"
+            ),
+            terminal_run_failure_summary=terminal_reconciliation.get(
+                "terminal_run_failure_summary"
+            ),
+        ),
+    )
+
+
+def _governed_autonomy_terminal_completion_digest_from_run(
+    projection: dict[str, Any],
+    run: Any,
+) -> str:
+    run_view = _run_dict(run)
+    return _digest_payload(
+        "pepper-current-ticket-terminal-completion-sha256-v1",
+        _governed_autonomy_terminal_completion_digest_payload(
+            projection,
+            terminal_run_id=run_view.get("id"),
+            terminal_run_status=run_view.get("status"),
+            terminal_run_outcome=run_view.get("outcome"),
+            terminal_run_ended_at=run_view.get("ended_at"),
+            terminal_run_failure_category=run_view.get("failure_category"),
+            terminal_run_failure_summary=run_view.get("failure_summary"),
+        ),
+    )
+
+
+def _terminal_reconciliation_completion_for_substrate_probe(
+    runtime_state: dict[str, Any] | None,
+    terminal_reconciliation: dict[str, Any],
+) -> dict[str, Any]:
+    materialization_reference = terminal_reconciliation.get("source_materialization_reference")
+    workspace_path = (
+        runtime_state.get("workspace_path")
+        if isinstance(runtime_state, dict)
+        else None
+    )
+    if not workspace_path and isinstance(materialization_reference, dict):
+        manifest_path = str(materialization_reference.get("manifest_path") or "").strip()
+        if manifest_path:
+            workspace_path = str(Path(manifest_path).expanduser().parent.parent)
+    return {
+        "run_id": terminal_reconciliation.get("terminal_run_id"),
+        "run_status": terminal_reconciliation.get("terminal_run_status"),
+        "run_outcome": terminal_reconciliation.get("terminal_run_outcome"),
+        "run_ended_at": terminal_reconciliation.get("terminal_run_ended_at"),
+        "kanban_task_workspace_path": workspace_path,
+        "source_materialization_reference": materialization_reference,
+    }
+
+
+def _governed_autonomy_review_prepare_substrate_probe(
+    projection: dict[str, Any],
+    terminal_reconciliation: dict[str, Any] | None,
+    *,
+    runtime_state: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if not isinstance(terminal_reconciliation, dict):
+        return {"probe_status": "not_applicable", "recovery_eligible": False}
+    next_action = terminal_reconciliation.get("next_action")
+    action_id = next_action.get("id") if isinstance(next_action, dict) else None
+    expected_prepare_action = governed_ticket_lifecycle_action_ids(
+        str(projection.get("ticket_id") or "")
+    )["review_prepare"]
+    if action_id != expected_prepare_action:
+        return {"probe_status": "not_applicable", "recovery_eligible": False}
+    run_id = _int_or_none(terminal_reconciliation.get("terminal_run_id"))
+    base = {
+        "policy_id": PEPPER_RUNTIME_SUBSTRATE_RECOVERY_POLICY_ID,
+        "probe_status": "unknown",
+        "recovery_eligible": False,
+        "terminal_run_id": run_id,
+        "prior_terminal_completion_SHA256": _governed_autonomy_terminal_completion_digest(
+            projection,
+            terminal_reconciliation,
+        ),
+    }
+    if run_id is None:
+        return {
+            **base,
+            "probe_status": "invalid",
+            "blocker_code": "TERMINAL_COMPLETION_AUTHORITY_INVALID",
+            "blocker_detail": "terminal completion run id is unavailable",
+        }
+    completion = _terminal_reconciliation_completion_for_substrate_probe(
+        runtime_state,
+        terminal_reconciliation,
+    )
+    try:
+        terminal_context = _review_prepare_terminal_workspace_validation_context(
+            projection,
+            completion,
+        )
+    except ProductRuntimeConflict as exc:
+        return {
+            **base,
+            "probe_status": "invalid",
+            "blocker_code": "SOURCE_AUTHORITY_INVALID_FOR_REVIEW_PREPARE",
+            "blocker_detail": _safe_text(exc, limit=300),
+            "source_authority_failure_contained": True,
+        }
+    if terminal_context is not None:
+        validation_context = terminal_context["validation_context"]
+        return {
+            **base,
+            "probe_status": "available",
+            "substrate_source": "terminal_workspace",
+            "terminal_workspace_available": True,
+            "durable_source_authority_available": bool(
+                validation_context.get("durable_source_authority_reference")
+            ),
+            "recovery_eligible": False,
+        }
+    try:
+        durable_reference = _completion_durable_source_authority_reference(
+            projection,
+            completion,
+        )
+    except ProductRuntimeConflict as exc:
+        return {
+            **base,
+            "probe_status": "invalid",
+            "blocker_code": "SOURCE_AUTHORITY_INVALID_FOR_REVIEW_PREPARE",
+            "blocker_detail": _safe_text(exc, limit=300),
+            "source_authority_failure_contained": True,
+        }
+    if durable_reference is not None:
+        try:
+            authority = _load_governed_source_authority_from_reference(
+                durable_reference,
+                projection=projection,
+                run_id=run_id,
+            )
+        except ProductRuntimeConflict as exc:
+            return {
+                **base,
+                "probe_status": "invalid",
+                "blocker_code": "SOURCE_AUTHORITY_INVALID_FOR_REVIEW_PREPARE",
+                "blocker_detail": _safe_text(exc, limit=300),
+                "source_authority_failure_contained": True,
+            }
+        return {
+            **base,
+            "probe_status": "available",
+            "substrate_source": "durable_source_authority",
+            "terminal_workspace_available": False,
+            "durable_source_authority_available": True,
+            "durable_source_authority_SHA256": authority.get(
+                "governed_source_authority_SHA256"
+            ),
+            "recovery_eligible": False,
+        }
+    if _has_c21_source_authority_provenance(completion) or _has_c21_source_authority_provenance(
+        runtime_state
+    ):
+        return {
+            **base,
+            "probe_status": "invalid",
+            "blocker_code": SOURCE_AUTHORITY_MISSING_FOR_C21_TERMINAL_RUN,
+            "blocker_detail": (
+                "terminal completion carries C21 source-authority provenance but no "
+                "reachable review PREPARE workspace or durable source authority; "
+                "failing closed before any recovery execution"
+            ),
+            "source_authority_failure_contained": True,
+            "c21_source_authority_provenance_detected": True,
+            "terminal_workspace_available": False,
+            "durable_source_authority_available": False,
+        }
+    return {
+        **base,
+        "probe_status": "missing",
+        "blocker_code": SOURCE_AUTHORITY_ABSENT_FOR_PRE_C21_TERMINAL_RUN,
+        "blocker_detail": (
+            "terminal completion has no reachable review PREPARE workspace or durable "
+            "source authority; a human-authorized fresh execution is required"
+        ),
+        "recovery_eligible": True,
+        "source_authority_absence_classification": (
+            SOURCE_AUTHORITY_ABSENT_FOR_PRE_C21_TERMINAL_RUN
+        ),
+        "terminal_workspace_available": False,
+        "durable_source_authority_available": False,
+        "c21_source_authority_provenance_detected": False,
+    }
+
+
+def _runtime_substrate_recovery_required_human_authorization_text(
+    ticket_id: object,
+    prior_terminal_run_id: object,
+) -> str:
+    run_id = _int_or_none(prior_terminal_run_id)
+    run_id_text = str(run_id if run_id is not None else prior_terminal_run_id).strip()
+    return (
+        f"I explicitly authorize one fresh execution of {str(ticket_id).strip()} after "
+        "the runtime-substrate correction, preserving terminal run "
+        f"{run_id_text} and requiring durable source authority before worker execution."
+    )
+
+
+def _runtime_substrate_recovery_required_human_authorization_text_sha256(
+    ticket_id: object,
+    prior_terminal_run_id: object,
+) -> str:
+    text = _runtime_substrate_recovery_required_human_authorization_text(
+        ticket_id,
+        prior_terminal_run_id,
+    )
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _runtime_substrate_recovery_next_action(
+    projection: dict[str, Any],
+    probe: dict[str, Any],
+) -> dict[str, Any]:
+    required_text = _runtime_substrate_recovery_required_human_authorization_text(
+        projection["ticket_id"],
+        probe.get("terminal_run_id"),
+    )
+    return {
+        "id": PEPPER_RUNTIME_SUBSTRATE_RECOVERY_NEXT_ACTION_ID,
+        "label": (
+            f"{projection['ticket_id']} terminal run lacks a reachable PREPARE substrate; "
+            "authorize one fresh execution after runtime substrate correction."
+        ),
+        "target_ticket_id": projection["ticket_id"],
+        "target_ticket_title": projection.get("ticket_title"),
+        "authority": "human_runtime_substrate_correction",
+        "required_human_action": PEPPER_RUNTIME_SUBSTRATE_RECOVERY_REQUIRED_HUMAN_ACTION,
+        "recommended_strategy": "DIRECT",
+        "transition_policy_id": PEPPER_RUNTIME_SUBSTRATE_RECOVERY_POLICY_ID,
+        "transition_classification": "HUMAN_RUNTIME_SUBSTRATE_RECOVERY",
+        "prior_terminal_run_id": probe.get("terminal_run_id"),
+        "prior_terminal_completion_SHA256": probe.get(
+            "prior_terminal_completion_SHA256"
+        ),
+        "required_human_authorization_text": required_text,
+        "required_human_authorization_text_SHA256": hashlib.sha256(
+            required_text.encode("utf-8")
+        ).hexdigest(),
+    }
+
+
+def _governed_autonomy_apply_review_prepare_substrate_probe(
+    record: dict[str, Any],
+    reconciliation: dict[str, Any],
+    *,
+    projection_record: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    projection = projection_record if projection_record is not None else record
+    probe = _governed_autonomy_review_prepare_substrate_probe(
+        projection,
+        reconciliation,
+        runtime_state=record,
+    )
+    if probe.get("probe_status") == "not_applicable":
+        return reconciliation
+    reconciliation["review_prepare_substrate_probe"] = probe
+    if probe.get("recovery_eligible") is True:
+        reconciliation.update({
+            "governed_autonomy_runtime_status": (
+                "direct_execution_terminal_runtime_substrate_recovery_required"
+            ),
+            "runtime_substrate_recovery_required": True,
+            "blocker_code": probe["blocker_code"],
+            "blocker_detail": probe["blocker_detail"],
+            "next_autonomous_action": None,
+            "next_human_action": (
+                "authorize one fresh execution after runtime substrate correction"
+            ),
+            "next_action": _runtime_substrate_recovery_next_action(projection, probe),
+        })
+    elif probe.get("probe_status") == "invalid":
+        reconciliation.update({
+            "governed_autonomy_runtime_status": (
+                "direct_execution_terminal_review_prepare_substrate_invalid"
+            ),
+            "runtime_substrate_recovery_required": False,
+            "blocker_code": probe.get("blocker_code"),
+            "blocker_detail": probe.get("blocker_detail"),
+            "next_autonomous_action": None,
+            "next_human_action": "source authority integrity review required",
+            "next_action": None,
+        })
     return reconciliation
+
+
+def _runtime_substrate_recovery_request_identity(
+    projection: dict[str, Any],
+    *,
+    prior_terminal_run_id: int,
+    prior_terminal_completion_sha256: str,
+    human_authorization_text_sha256: str,
+) -> dict[str, Any]:
+    return {
+        "project_id": projection["project_id"],
+        "ticket_id": projection["ticket_id"],
+        "ticket_spec_SHA256": projection["ticket_spec_SHA256"],
+        "work_packet_id": projection["work_packet_id"],
+        "work_packet_SHA256": projection["work_packet_SHA256"],
+        "projection_SHA256": projection["projection_SHA256"],
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+        "prior_terminal_run_id": prior_terminal_run_id,
+        "prior_terminal_completion_SHA256": prior_terminal_completion_sha256,
+        "human_authorization_text_SHA256": human_authorization_text_sha256,
+        "transition_policy_id": PEPPER_RUNTIME_SUBSTRATE_RECOVERY_POLICY_ID,
+    }
+
+
+def _runtime_substrate_recovery_request_sha256(
+    projection: dict[str, Any],
+    *,
+    prior_terminal_run_id: int,
+    prior_terminal_completion_sha256: str,
+    human_authorization_text_sha256: str,
+) -> str:
+    return _digest_payload(
+        PEPPER_RUNTIME_SUBSTRATE_RECOVERY_DIGEST_ALGORITHM,
+        _runtime_substrate_recovery_request_identity(
+            projection,
+            prior_terminal_run_id=prior_terminal_run_id,
+            prior_terminal_completion_sha256=prior_terminal_completion_sha256,
+            human_authorization_text_sha256=human_authorization_text_sha256,
+        ),
+    )
+
+
+def _previous_fresh_execution_reference_for_text(
+    previous: dict[str, Any] | None,
+    *,
+    human_request_text_sha256: str,
+    terminal_reconciliation: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not isinstance(previous, dict):
+        return None
+    reference = previous.get("fresh_execution_request_reference")
+    if not isinstance(reference, dict):
+        return None
+    if reference.get("fresh_execution_request_SHA256") != previous.get(
+        "fresh_execution_request_SHA256"
+    ):
+        return None
+    if reference.get("human_request_text_SHA256") != human_request_text_sha256:
+        return None
+    terminal_run_id = (
+        _int_or_none(terminal_reconciliation.get("terminal_run_id"))
+        if isinstance(terminal_reconciliation, dict)
+        else None
+    )
+    prior_terminal_run_id = _int_or_none(reference.get("prior_terminal_run_id"))
+    if terminal_run_id is None or prior_terminal_run_id == terminal_run_id:
+        return dict(reference)
+    created_run_id = _int_or_none(previous.get("kanban_run_id"))
+    if created_run_id is not None and created_run_id != terminal_run_id:
+        return dict(reference)
+    if (
+        created_run_id is not None
+        and created_run_id == terminal_run_id
+        and _fresh_execution_request_is_runtime_substrate_recovery(reference)
+    ):
+        return dict(reference)
+    return None
 
 
 def _governed_autonomy_fresh_execution_request_reference(
@@ -17492,10 +17965,139 @@ def _governed_autonomy_fresh_execution_request_reference(
     *,
     projection: dict[str, Any],
     activation: dict[str, Any],
+    previous: dict[str, Any] | None = None,
     terminal_reconciliation: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     if not request.fresh_execution_request_text:
         return None
+    text_sha256 = hashlib.sha256(
+        request.fresh_execution_request_text.encode("utf-8")
+    ).hexdigest()
+    existing_reference = _previous_fresh_execution_reference_for_text(
+        previous,
+        human_request_text_sha256=text_sha256,
+        terminal_reconciliation=terminal_reconciliation,
+    )
+    if existing_reference is not None:
+        return existing_reference
+    recovery_probe = (
+        terminal_reconciliation.get("review_prepare_substrate_probe")
+        if isinstance(terminal_reconciliation, dict)
+        else None
+    )
+    if not isinstance(recovery_probe, dict) and terminal_reconciliation is not None:
+        recovery_probe = _governed_autonomy_review_prepare_substrate_probe(
+            projection,
+            terminal_reconciliation,
+            runtime_state=previous,
+        )
+    if isinstance(recovery_probe, dict) and recovery_probe.get("recovery_eligible") is True:
+        prior_terminal_run_id = _int_or_none(recovery_probe.get("terminal_run_id"))
+        prior_completion_sha = str(
+            recovery_probe.get("prior_terminal_completion_SHA256") or ""
+        ).strip()
+        if prior_terminal_run_id is not None and _SAFE_SHA256.fullmatch(prior_completion_sha):
+            required_text = _runtime_substrate_recovery_required_human_authorization_text(
+                projection["ticket_id"],
+                prior_terminal_run_id,
+            )
+            required_text_sha = hashlib.sha256(required_text.encode("utf-8")).hexdigest()
+            if request.fresh_execution_request_text != required_text:
+                return {
+                    "fresh_execution_requested": True,
+                    "fresh_execution_provenance": "human_runtime_substrate_correction",
+                    "transition_classification": (
+                        "HUMAN_RUNTIME_SUBSTRATE_RECOVERY_AUTHORIZATION_TEXT_MISMATCH"
+                    ),
+                    "transition_policy_id": PEPPER_RUNTIME_SUBSTRATE_RECOVERY_POLICY_ID,
+                    "runtime_substrate_recovery_policy_id": (
+                        PEPPER_RUNTIME_SUBSTRATE_RECOVERY_POLICY_ID
+                    ),
+                    "fresh_execution_request_blocker_code": (
+                        FRESH_EXECUTION_RUNTIME_SUBSTRATE_RECOVERY_AUTHORIZATION_TEXT_MISMATCH
+                    ),
+                    "fresh_execution_request_blocker_detail": (
+                        "runtime substrate recovery requires the exact published "
+                        "human authorization text"
+                    ),
+                    "human_request_text_SHA256": text_sha256,
+                    "human_authorization_text_SHA256": text_sha256,
+                    "human_request_text_excerpt": _safe_text(
+                        request.fresh_execution_request_text,
+                        limit=300,
+                    ),
+                    "required_human_authorization_text": required_text,
+                    "required_human_authorization_text_SHA256": required_text_sha,
+                    "required_human_action": (
+                        PEPPER_RUNTIME_SUBSTRATE_RECOVERY_REQUIRED_HUMAN_ACTION
+                    ),
+                    "source_authority_absence_classification": (
+                        SOURCE_AUTHORITY_ABSENT_FOR_PRE_C21_TERMINAL_RUN
+                    ),
+                    "review_prepare_substrate_probe": recovery_probe,
+                    "prior_terminal_completion_SHA256": prior_completion_sha,
+                    "prior_terminal_run_id": prior_terminal_run_id,
+                    "prior_terminal_run_status": terminal_reconciliation.get(
+                        "terminal_run_status"
+                    ),
+                    "prior_terminal_run_outcome": terminal_reconciliation.get(
+                        "terminal_run_outcome"
+                    ),
+                    "prior_terminal_run_ended_at": terminal_reconciliation.get(
+                        "terminal_run_ended_at"
+                    ),
+                    "prior_terminal_run_preserved": True,
+                }
+            recovery_sha = _runtime_substrate_recovery_request_sha256(
+                projection,
+                prior_terminal_run_id=prior_terminal_run_id,
+                prior_terminal_completion_sha256=prior_completion_sha,
+                human_authorization_text_sha256=text_sha256,
+            )
+            return {
+                "fresh_execution_requested": True,
+                "transition_classification": "HUMAN_RUNTIME_SUBSTRATE_RECOVERY",
+                "transition_policy_id": PEPPER_RUNTIME_SUBSTRATE_RECOVERY_POLICY_ID,
+                "runtime_substrate_recovery_policy_id": (
+                    PEPPER_RUNTIME_SUBSTRATE_RECOVERY_POLICY_ID
+                ),
+                "execution_attempt_reason": PEPPER_GOVERNED_AUTONOMY_FRESH_EXECUTION_REASON,
+                "fresh_execution_provenance": "human_runtime_substrate_correction",
+                "fresh_execution_request_SHA256": recovery_sha,
+                "human_request_text_SHA256": text_sha256,
+                "human_authorization_text_SHA256": text_sha256,
+                "human_authorization_text": required_text,
+                "human_request_text_excerpt": _safe_text(
+                    request.fresh_execution_request_text,
+                    limit=300,
+                ),
+                "required_human_authorization_text": required_text,
+                "required_human_authorization_text_SHA256": required_text_sha,
+                "required_human_action": (
+                    PEPPER_RUNTIME_SUBSTRATE_RECOVERY_REQUIRED_HUMAN_ACTION
+                ),
+                "source_authority_absence_classification": (
+                    SOURCE_AUTHORITY_ABSENT_FOR_PRE_C21_TERMINAL_RUN
+                ),
+                "review_prepare_substrate_probe": recovery_probe,
+                "prior_terminal_completion_SHA256": prior_completion_sha,
+                "same_ticket": True,
+                "same_work_packet_authority": True,
+                "same_kanban_task": True,
+                "same_authority_envelope": True,
+                "new_scratch_required": True,
+                "prior_terminal_run_id": prior_terminal_run_id,
+                "prior_terminal_run_status": terminal_reconciliation.get(
+                    "terminal_run_status"
+                ),
+                "prior_terminal_run_outcome": terminal_reconciliation.get(
+                    "terminal_run_outcome"
+                ),
+                "prior_terminal_run_ended_at": terminal_reconciliation.get(
+                    "terminal_run_ended_at"
+                ),
+                "prior_terminal_run_preserved": True,
+            }
     identity = {
         "project_id": projection["project_id"],
         "ticket_id": projection["ticket_id"],
@@ -17508,9 +18110,6 @@ def _governed_autonomy_fresh_execution_request_reference(
         "activation_action_SHA256": activation["activation_action_SHA256"],
         "human_request_text": request.fresh_execution_request_text,
     }
-    text_sha256 = hashlib.sha256(
-        request.fresh_execution_request_text.encode("utf-8")
-    ).hexdigest()
     reference = {
         "fresh_execution_requested": True,
         "transition_classification": "FRESH_EXECUTION_TRANSITION_REPRESENTED",
@@ -17651,6 +18250,267 @@ def _human_review_revision_fresh_execution_request_blocker(
     return None
 
 
+def _fresh_execution_request_is_review_revision(
+    fresh_execution_request: dict[str, Any],
+) -> bool:
+    return (
+        fresh_execution_request.get("fresh_execution_provenance")
+        == "human_review_changes_requested"
+        or fresh_execution_request.get("transition_classification")
+        == "HUMAN_REVIEW_CHANGES_REQUESTED_REVISION"
+    )
+
+
+def _fresh_execution_request_is_runtime_substrate_recovery(
+    fresh_execution_request: dict[str, Any],
+) -> bool:
+    return (
+        fresh_execution_request.get("fresh_execution_provenance")
+        == "human_runtime_substrate_correction"
+        and fresh_execution_request.get("transition_classification")
+        == "HUMAN_RUNTIME_SUBSTRATE_RECOVERY"
+    )
+
+
+def _fresh_execution_request_embedded_blocker(
+    fresh_execution_request: dict[str, Any] | None,
+) -> tuple[str, str] | None:
+    if not isinstance(fresh_execution_request, dict):
+        return None
+    code = fresh_execution_request.get("fresh_execution_request_blocker_code")
+    if not code:
+        return None
+    return (
+        str(code),
+        str(
+            fresh_execution_request.get("fresh_execution_request_blocker_detail")
+            or "fresh execution request is blocked"
+        ),
+    )
+
+
+def _terminal_done_fresh_execution_rearm_reason(
+    fresh_execution_request: dict[str, Any],
+) -> str:
+    if _fresh_execution_request_is_runtime_substrate_recovery(fresh_execution_request):
+        return "human_runtime_substrate_correction"
+    return "human_review_changes_requested_revision"
+
+
+def _terminal_reconciliation_for_recovery_probe_from_run(
+    projection: dict[str, Any],
+    run: Any,
+) -> dict[str, Any]:
+    run_view = _run_dict(run)
+    return {
+        "terminal_run_reconciled": True,
+        "governed_autonomy_runtime_status": "direct_execution_terminal_completed",
+        "terminal_run_id": _int_or_none(run_view.get("id")),
+        "terminal_run_status": str(run_view.get("status") or "").strip().lower() or None,
+        "terminal_run_outcome": str(run_view.get("outcome") or "").strip().lower() or None,
+        "terminal_run_ended_at": run_view.get("ended_at"),
+        "terminal_run_failure_category": run_view.get("failure_category"),
+        "terminal_run_failure_summary": run_view.get("failure_summary"),
+        "source_materialization_reference": None,
+        "candidate_changes_reference": None,
+        "candidate_changes_available": False,
+        "validated_candidate_review_required": False,
+        "blocker_code": None,
+        "blocker_detail": None,
+        "next_autonomous_action": "prepare governed review validation from terminal completion evidence",
+        "next_human_action": None,
+        "next_action": {
+            "id": governed_ticket_lifecycle_action_ids(str(projection["ticket_id"]))[
+                "review_prepare"
+            ],
+            "target_ticket_id": projection["ticket_id"],
+            "required_human_action": "review_validation_preparation",
+        },
+    }
+
+
+def _current_changes_requested_review_revision_precedence_blocker(
+    *,
+    projection: dict[str, Any],
+) -> tuple[str, str] | None:
+    try:
+        review_decision = load_current_ticket_review_decision_record(
+            projection_record=projection,
+        )
+    except ProductRuntimeConflict as exc:
+        return (
+            "FRESH_EXECUTION_REVIEW_REVISION_AUTHORITY_MISMATCH",
+            "current review-decision authority is invalid for terminal done task rearm: "
+            f"{_safe_text(exc, limit=220)}",
+        )
+    if review_decision is None or review_decision.get("review_decision") != "changes_requested":
+        return None
+    return (
+        "FRESH_EXECUTION_REVIEW_REVISION_AUTHORITY_REQUIRED",
+        "current changes_requested review-revision authority takes precedence over runtime substrate recovery",
+    )
+
+
+def _human_runtime_substrate_recovery_fresh_execution_request_blocker(
+    *,
+    projection: dict[str, Any],
+    fresh_execution_request: dict[str, Any],
+    task: Any | None = None,
+    runs: list[Any] | None = None,
+) -> tuple[str, str] | None:
+    embedded_blocker = _fresh_execution_request_embedded_blocker(fresh_execution_request)
+    if embedded_blocker is not None:
+        return embedded_blocker
+    expected = {
+        "fresh_execution_requested": True,
+        "fresh_execution_provenance": "human_runtime_substrate_correction",
+        "transition_classification": "HUMAN_RUNTIME_SUBSTRATE_RECOVERY",
+        "transition_policy_id": PEPPER_RUNTIME_SUBSTRATE_RECOVERY_POLICY_ID,
+        "runtime_substrate_recovery_policy_id": PEPPER_RUNTIME_SUBSTRATE_RECOVERY_POLICY_ID,
+        "execution_attempt_reason": PEPPER_GOVERNED_AUTONOMY_FRESH_EXECUTION_REASON,
+        "same_ticket": True,
+        "same_work_packet_authority": True,
+        "same_kanban_task": True,
+        "same_authority_envelope": True,
+        "new_scratch_required": True,
+        "required_human_action": PEPPER_RUNTIME_SUBSTRATE_RECOVERY_REQUIRED_HUMAN_ACTION,
+        "source_authority_absence_classification": (
+            SOURCE_AUTHORITY_ABSENT_FOR_PRE_C21_TERMINAL_RUN
+        ),
+    }
+    for key, value in expected.items():
+        if fresh_execution_request.get(key) != value:
+            return (
+                "FRESH_EXECUTION_RUNTIME_SUBSTRATE_RECOVERY_AUTHORITY_GAP",
+                "runtime substrate recovery requires a bounded human recovery request "
+                f"with {key}={value!r}",
+            )
+    fresh_request_sha = fresh_execution_request.get("fresh_execution_request_SHA256")
+    human_text_sha = fresh_execution_request.get("human_authorization_text_SHA256")
+    prior_completion_sha = fresh_execution_request.get("prior_terminal_completion_SHA256")
+    if not isinstance(fresh_request_sha, str) or not _SAFE_SHA256.fullmatch(fresh_request_sha):
+        return (
+            "FRESH_EXECUTION_RUNTIME_SUBSTRATE_RECOVERY_AUTHORITY_GAP",
+            "runtime substrate recovery request digest is invalid",
+        )
+    if not isinstance(human_text_sha, str) or not _SAFE_SHA256.fullmatch(human_text_sha):
+        return (
+            "FRESH_EXECUTION_RUNTIME_SUBSTRATE_RECOVERY_AUTHORITY_GAP",
+            "runtime substrate recovery human authorization digest is invalid",
+        )
+    if not isinstance(prior_completion_sha, str) or not _SAFE_SHA256.fullmatch(
+        prior_completion_sha
+    ):
+        return (
+            "FRESH_EXECUTION_RUNTIME_SUBSTRATE_RECOVERY_AUTHORITY_GAP",
+            "runtime substrate recovery prior terminal completion digest is invalid",
+        )
+    prior_terminal_run_id = _int_or_none(
+        fresh_execution_request.get("prior_terminal_run_id")
+    )
+    if prior_terminal_run_id is None:
+        return (
+            "FRESH_EXECUTION_RUNTIME_SUBSTRATE_RECOVERY_AUTHORITY_GAP",
+            "runtime substrate recovery requires a bounded prior terminal run",
+        )
+    expected_human_text = _runtime_substrate_recovery_required_human_authorization_text(
+        projection["ticket_id"],
+        prior_terminal_run_id,
+    )
+    expected_human_text_sha = hashlib.sha256(
+        expected_human_text.encode("utf-8")
+    ).hexdigest()
+    expected_text_fields = {
+        "human_authorization_text": expected_human_text,
+        "required_human_authorization_text": expected_human_text,
+        "required_human_authorization_text_SHA256": expected_human_text_sha,
+        "human_request_text_SHA256": expected_human_text_sha,
+        "human_authorization_text_SHA256": expected_human_text_sha,
+    }
+    for key, value in expected_text_fields.items():
+        if fresh_execution_request.get(key) != value:
+            return (
+                FRESH_EXECUTION_RUNTIME_SUBSTRATE_RECOVERY_AUTHORIZATION_TEXT_MISMATCH,
+                "runtime substrate recovery requires the exact published human authorization text",
+            )
+    expected_sha = _runtime_substrate_recovery_request_sha256(
+        projection,
+        prior_terminal_run_id=prior_terminal_run_id,
+        prior_terminal_completion_sha256=prior_completion_sha,
+        human_authorization_text_sha256=human_text_sha,
+    )
+    if expected_sha != fresh_request_sha:
+        return (
+            "FRESH_EXECUTION_RUNTIME_SUBSTRATE_RECOVERY_AUTHORITY_MISMATCH",
+            "runtime substrate recovery request digest does not match current authority",
+        )
+    precedence_blocker = _current_changes_requested_review_revision_precedence_blocker(
+        projection=projection,
+    )
+    if precedence_blocker is not None:
+        return precedence_blocker
+    if runs:
+        latest_run = runs[-1]
+        if _int_or_none(getattr(latest_run, "id", None)) != prior_terminal_run_id:
+            return (
+                "FRESH_EXECUTION_RUNTIME_SUBSTRATE_RECOVERY_AUTHORITY_MISMATCH",
+                "runtime substrate recovery request does not target the latest terminal run",
+            )
+        current_completion_sha = _governed_autonomy_terminal_completion_digest_from_run(
+            projection,
+            latest_run,
+        )
+        if current_completion_sha != prior_completion_sha:
+            return (
+                "FRESH_EXECUTION_RUNTIME_SUBSTRATE_RECOVERY_AUTHORITY_MISMATCH",
+                "runtime substrate recovery prior terminal completion digest changed",
+            )
+        probe = _governed_autonomy_review_prepare_substrate_probe(
+            projection,
+            _terminal_reconciliation_for_recovery_probe_from_run(projection, latest_run),
+            runtime_state={"workspace_path": getattr(task, "workspace_path", None)},
+        )
+        if probe.get("probe_status") == "invalid":
+            return (
+                str(probe.get("blocker_code") or "SOURCE_AUTHORITY_INVALID_FOR_REVIEW_PREPARE"),
+                str(probe.get("blocker_detail") or "source authority is invalid"),
+            )
+        if probe.get("recovery_eligible") is not True:
+            return (
+                "REVIEW_PREPARE_SUBSTRATE_AVAILABLE",
+                "review PREPARE substrate is reachable; runtime substrate recovery is not eligible",
+            )
+    return None
+
+
+def _terminal_done_fresh_execution_request_authority_blocker(
+    *,
+    projection: dict[str, Any],
+    fresh_execution_request: dict[str, Any],
+    task: Any | None = None,
+    runs: list[Any] | None = None,
+) -> tuple[str, str] | None:
+    embedded_blocker = _fresh_execution_request_embedded_blocker(fresh_execution_request)
+    if embedded_blocker is not None:
+        return embedded_blocker
+    if _fresh_execution_request_is_review_revision(fresh_execution_request):
+        return _human_review_revision_fresh_execution_request_blocker(
+            projection=projection,
+            fresh_execution_request=fresh_execution_request,
+        )
+    if _fresh_execution_request_is_runtime_substrate_recovery(fresh_execution_request):
+        return _human_runtime_substrate_recovery_fresh_execution_request_blocker(
+            projection=projection,
+            fresh_execution_request=fresh_execution_request,
+            task=task,
+            runs=runs,
+        )
+    return (
+        "FRESH_EXECUTION_TERMINAL_DONE_AUTHORITY_GAP",
+        "terminal done task rearm requires review-revision or runtime-substrate recovery authority",
+    )
+
+
 def _terminal_done_task_rearm_blocker(
     *,
     task: Any,
@@ -17755,6 +18615,15 @@ def _governed_autonomy_dispatch_task_body(
         "fresh_execution_provenance": fresh_execution_request.get(
             "fresh_execution_provenance"
         ),
+        "fresh_execution_transition_classification": fresh_execution_request.get(
+            "transition_classification"
+        ),
+        "runtime_substrate_recovery_policy_id": fresh_execution_request.get(
+            "runtime_substrate_recovery_policy_id"
+        ),
+        "prior_terminal_completion_SHA256": fresh_execution_request.get(
+            "prior_terminal_completion_SHA256"
+        ),
         "review_decision_SHA256": fresh_execution_request.get("review_decision_SHA256"),
         "reviewed_run_id": fresh_execution_request.get("reviewed_run_id"),
         "reviewed_candidate_SHA256": fresh_execution_request.get(
@@ -17791,6 +18660,21 @@ def _governed_autonomy_continuation_prepared_event_payload(
         )
         if fresh_execution_request is not None
         else None,
+        "transition_classification": fresh_execution_request.get(
+            "transition_classification"
+        )
+        if fresh_execution_request is not None
+        else None,
+        "runtime_substrate_recovery_policy_id": fresh_execution_request.get(
+            "runtime_substrate_recovery_policy_id"
+        )
+        if fresh_execution_request is not None
+        else None,
+        "prior_terminal_completion_SHA256": fresh_execution_request.get(
+            "prior_terminal_completion_SHA256"
+        )
+        if fresh_execution_request is not None
+        else None,
         "review_decision_SHA256": fresh_execution_request.get("review_decision_SHA256")
         if fresh_execution_request is not None
         else None,
@@ -17819,7 +18703,7 @@ def _claim_terminal_done_review_revision_task(
             "blocker_code": "FRESH_EXECUTION_REVIEW_REVISION_AUTHORITY_GAP",
             "blocker_detail": "terminal done rearm requires a review-revision request",
         }
-    authority_blocker = _human_review_revision_fresh_execution_request_blocker(
+    authority_blocker = _terminal_done_fresh_execution_request_authority_blocker(
         projection=projection,
         fresh_execution_request=fresh_execution_request,
     )
@@ -17850,6 +18734,14 @@ def _claim_terminal_done_review_revision_task(
             )
             if rearm_blocker is not None:
                 raise _KanbanDispatchPreparationBlocked(*rearm_blocker)
+            authority_blocker = _terminal_done_fresh_execution_request_authority_blocker(
+                projection=projection,
+                fresh_execution_request=fresh_execution_request,
+                task=task,
+                runs=runs,
+            )
+            if authority_blocker is not None:
+                raise _KanbanDispatchPreparationBlocked(*authority_blocker)
             if task.assignee != projection["assignee_profile"]:
                 raise _KanbanDispatchPreparationBlocked(
                     "KANBAN_TASK_GAP",
@@ -17924,8 +18816,11 @@ def _claim_terminal_done_review_revision_task(
             if cur.rowcount != 1:
                 raise _KanbanDispatchPreparationBlocked(
                     "KANBAN_TERMINAL_REARM_FAILED",
-                    "terminal done Kanban task could not be rearmed for review revision",
+                    "terminal done Kanban task could not be rearmed for fresh execution",
                 )
+            rearm_reason = _terminal_done_fresh_execution_rearm_reason(
+                fresh_execution_request
+            )
             kanban_db._append_event(
                 conn,
                 task_id,
@@ -17933,24 +18828,43 @@ def _claim_terminal_done_review_revision_task(
                 {
                     "from": "done",
                     "to": "ready",
-                    "reason": "human_review_changes_requested_revision",
+                    "reason": rearm_reason,
                     "fresh_execution_request_SHA256": fresh_execution_request[
                         "fresh_execution_request_SHA256"
                     ],
                 },
                 run_id=prior_terminal_run_id,
             )
+            rearm_event = (
+                "governed_autonomy_terminal_runtime_substrate_recovery_rearmed"
+                if _fresh_execution_request_is_runtime_substrate_recovery(
+                    fresh_execution_request
+                )
+                else "governed_autonomy_terminal_review_revision_rearmed"
+            )
             kanban_db._append_event(
                 conn,
                 task_id,
-                "governed_autonomy_terminal_review_revision_rearmed",
+                rearm_event,
                 {
                     "source": PEPPER_GOVERNED_AUTONOMY_RUNTIME_SOURCE_SYSTEM,
                     "fresh_execution_request_SHA256": fresh_execution_request[
                         "fresh_execution_request_SHA256"
                     ],
+                    "fresh_execution_provenance": fresh_execution_request.get(
+                        "fresh_execution_provenance"
+                    ),
+                    "transition_classification": fresh_execution_request.get(
+                        "transition_classification"
+                    ),
                     "prior_terminal_run_id": prior_terminal_run_id,
+                    "prior_terminal_completion_SHA256": fresh_execution_request.get(
+                        "prior_terminal_completion_SHA256"
+                    ),
                     "prior_terminal_run_preserved": True,
+                    "runtime_substrate_recovery_policy_id": fresh_execution_request.get(
+                        "runtime_substrate_recovery_policy_id"
+                    ),
                     "revision_source_base": fresh_execution_request.get(
                         "revision_source_base"
                     ),
@@ -18345,6 +19259,8 @@ def _governed_autonomy_apply_terminal_reconciliation(
         "review_boundary_kind",
         "terminal_outcome_authority",
         "kanban_block_kind",
+        "runtime_substrate_recovery_required",
+        "review_prepare_substrate_probe",
     ):
         if key in terminal_reconciliation:
             payload[key] = terminal_reconciliation[key]
@@ -18557,6 +19473,16 @@ def _prepare_current_ticket_governed_autonomy_task_for_dispatch(
                 "blocker_code": "KANBAN_TASK_GAP",
                 "blocker_detail": "projected Kanban task is missing",
             }
+        embedded_fresh_blocker = _fresh_execution_request_embedded_blocker(
+            fresh_execution_request
+        )
+        if embedded_fresh_blocker is not None:
+            code, detail = embedded_fresh_blocker
+            return {
+                "task_prepare_status": "blocked",
+                "blocker_code": code,
+                "blocker_detail": detail,
+            }
         task_unblocked = False
         task_triage_specified = False
         terminal_done_task_rearm_pending = False
@@ -18600,9 +19526,11 @@ def _prepare_current_ticket_governed_autonomy_task_for_dispatch(
                     "blocker_code": code,
                     "blocker_detail": detail,
                 }
-            authority_blocker = _human_review_revision_fresh_execution_request_blocker(
+            authority_blocker = _terminal_done_fresh_execution_request_authority_blocker(
                 projection=projection,
                 fresh_execution_request=fresh_execution_request,
+                task=task,
+                runs=runs,
             )
             if authority_blocker is not None:
                 code, detail = authority_blocker
@@ -18875,6 +19803,7 @@ def _build_governed_autonomy_direct_runtime_record(
             request,
             projection=projection,
             activation=activation,
+            previous=previous,
             terminal_reconciliation=terminal_reconciliation,
         )
     prep_result = _prepare_current_ticket_governed_autonomy_task_for_dispatch(
@@ -20816,11 +21745,13 @@ def _governed_autonomy_runtime_summary(
     record: dict[str, Any],
     *,
     terminal_reconciliation: dict[str, Any] | None = None,
+    projection_record: dict[str, Any] | None = None,
     effective_authority: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if terminal_reconciliation is None:
         terminal_reconciliation = _governed_autonomy_runtime_terminal_reconciliation(
             record,
+            projection_record=projection_record,
             effective_authority=effective_authority,
         )
     summary = {
@@ -20872,6 +21803,24 @@ def _governed_autonomy_runtime_summary(
         "kanban_run_created": bool(record.get("kanban_run_created")),
         "kanban_run_id": record.get("kanban_run_id"),
         "workspace_path": record.get("workspace_path"),
+        "source_materialized": bool(record.get("source_materialized")),
+        "durable_source_authority_validated_before_worker_execution": bool(
+            record.get("durable_source_authority_validated_before_worker_execution")
+        ),
+        "source_authority_materialized_before_worker_execution": bool(
+            record.get("source_authority_materialized_before_worker_execution")
+        ),
+        "source_authority_materialization_verification": record.get(
+            "source_authority_materialization_verification"
+        ),
+        "durable_source_authority_reference": record.get(
+            "durable_source_authority_reference"
+        ),
+        "durable_source_authority_SHA256": record.get("durable_source_authority_SHA256"),
+        "governed_source_authority_path": record.get("governed_source_authority_path"),
+        "governed_source_authority_snapshot_SHA256": record.get(
+            "governed_source_authority_snapshot_SHA256"
+        ),
         "dispatch_performed": bool(record.get("dispatch_performed")),
         "execution_started": bool(record.get("execution_started")),
         "worker_execution": bool(record.get("worker_execution")),
@@ -20896,11 +21845,13 @@ def _governed_autonomy_runtime_operational_result(
     *,
     activation_record: dict[str, Any],
     idempotent_replay: bool,
+    projection_record: dict[str, Any] | None = None,
     effective_authority: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     task_visibility, runs = _governed_autonomy_kanban_visibility(record)
     terminal_reconciliation = _governed_autonomy_runtime_terminal_reconciliation(
         record,
+        projection_record=projection_record,
         effective_authority=effective_authority,
     )
     result = {
@@ -20961,6 +21912,24 @@ def _governed_autonomy_runtime_operational_result(
         "kanban_run_created": bool(record.get("kanban_run_created")),
         "kanban_run_id": record.get("kanban_run_id"),
         "workspace_path": record.get("workspace_path"),
+        "source_materialized": bool(record.get("source_materialized")),
+        "durable_source_authority_validated_before_worker_execution": bool(
+            record.get("durable_source_authority_validated_before_worker_execution")
+        ),
+        "source_authority_materialized_before_worker_execution": bool(
+            record.get("source_authority_materialized_before_worker_execution")
+        ),
+        "source_authority_materialization_verification": record.get(
+            "source_authority_materialization_verification"
+        ),
+        "durable_source_authority_reference": record.get(
+            "durable_source_authority_reference"
+        ),
+        "durable_source_authority_SHA256": record.get("durable_source_authority_SHA256"),
+        "governed_source_authority_path": record.get("governed_source_authority_path"),
+        "governed_source_authority_snapshot_SHA256": record.get(
+            "governed_source_authority_snapshot_SHA256"
+        ),
         "task": task_visibility,
         "runs": runs,
         "dispatch_performed": bool(record.get("dispatch_performed")),
@@ -20982,6 +21951,7 @@ def _governed_autonomy_runtime_operational_result(
         "governed_autonomy_runtime": _governed_autonomy_runtime_summary(
             record,
             terminal_reconciliation=terminal_reconciliation,
+            projection_record=projection_record,
             effective_authority=effective_authority,
         ),
         "live_autonomous_continuation_marker": record.get("live_autonomous_continuation_marker"),
@@ -22115,6 +23085,7 @@ def _review_decision_target_from_governed_autonomy(
     )
     terminal_reconciliation = _governed_autonomy_runtime_terminal_reconciliation(
         previous,
+        projection_record=projection,
         effective_authority=effective_authority,
     )
     if terminal_reconciliation is None:
@@ -22432,6 +23403,7 @@ def _record_prepared_review_revision_authority(
         record,
         activation_record=activation,
         idempotent_replay=False,
+        projection_record=projection,
         effective_authority=effective_authority,
     )
     result.update({
@@ -26208,6 +27180,7 @@ def _governed_autonomy_current_review_round_completion_source(
     )
     terminal = _governed_autonomy_runtime_terminal_reconciliation(
         runtime,
+        projection_record=projection,
         effective_authority=effective_authority,
     )
     if terminal is None or terminal.get("validated_candidate_review_required") is not True:
@@ -28039,6 +29012,7 @@ def _current_ticket_governed_autonomy_overlay(
     terminal_reconciliation = (
         _governed_autonomy_runtime_terminal_reconciliation(
             runtime_state,
+            projection_record=projection,
             effective_authority=effective_authority,
         )
         if runtime_state is not None
@@ -28048,6 +29022,7 @@ def _current_ticket_governed_autonomy_overlay(
         _governed_autonomy_runtime_summary(
             runtime_state,
             terminal_reconciliation=terminal_reconciliation,
+            projection_record=projection,
             effective_authority=effective_authority,
         )
         if runtime_state is not None
@@ -28319,6 +29294,32 @@ def _current_ticket_governed_autonomy_overlay(
                 "validation_state": "governed_autonomy_validation_infrastructure_repairable",
                 "review_state": "candidate_available_pending_governed_validation",
                 "recovery_state": "not_required_same_authority_reconciliation_available",
+                "next_action": terminal_next_action,
+            })
+        elif terminal_next_action.get("id") == PEPPER_RUNTIME_SUBSTRATE_RECOVERY_NEXT_ACTION_ID:
+            terminal_next_action.setdefault(
+                "label",
+                (
+                    f"{binding.ticket_id} governed-autonomy terminal run lacks a reachable "
+                    "review PREPARE substrate; authorize one fresh execution after correction."
+                ),
+            )
+            overlay.update({
+                "readiness": "governed_autonomy_runtime_substrate_recovery_required",
+                "workflow_state": f"{binding.ticket_id}-GOVERNED-AUTONOMY-RUNTIME-SUBSTRATE-RECOVERY-REQUIRED",
+                "workflow_status": "runtime_substrate_recovery_required",
+                "queue_state": "governed_autonomy_kanban_execution_terminal_substrate_missing",
+                "execution_state": "no_active_executions",
+                "active_execution_count": 0,
+                "validation_state": "review_prepare_substrate_missing",
+                "review_state": "review_prepare_blocked_runtime_substrate_missing",
+                "recovery_state": "runtime_substrate_recovery_required",
+                "blocker_code": terminal_reconciliation.get("blocker_code"),
+                "blocker_detail": terminal_reconciliation.get("blocker_detail"),
+                "runtime_substrate_recovery_required": True,
+                "review_prepare_substrate_probe": terminal_reconciliation.get(
+                    "review_prepare_substrate_probe"
+                ),
                 "next_action": terminal_next_action,
             })
         else:
