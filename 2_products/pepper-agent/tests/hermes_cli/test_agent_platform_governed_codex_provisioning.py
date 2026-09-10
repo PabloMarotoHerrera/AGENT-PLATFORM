@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -32,6 +33,26 @@ from hermes_cli.subcommands.agent_platform import build_agent_platform_parser
 
 
 NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+
+def _absolute_preserving_symlink(path: Path) -> str:
+    return os.path.abspath(os.fspath(path))
+
+
+def _symlinked_python(tmp_path: Path) -> tuple[Path, Path]:
+    real_dir = tmp_path / "real"
+    real_dir.mkdir()
+    real_python = real_dir / "python3"
+    real_python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    real_python.chmod(0o755)
+    venv_bin = tmp_path / "venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    venv_python = venv_bin / "python"
+    try:
+        venv_python.symlink_to(real_python)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+    return venv_python, real_python
 
 
 class FakeProtectionBackend:
@@ -107,7 +128,7 @@ def test_governed_provisioning_promotes_isolated_acquisition_to_primary_store(
     monkeypatch.setenv("HERMES_HOME", str(home))
     calls: list[tuple[tuple[str, ...], dict[str, str], Path]] = []
     acquired: dict[str, str] = {}
-    authoritative_python = Path(sys.executable).resolve(strict=False)
+    authoritative_python, real_python = _symlinked_python(tmp_path)
 
     def fake_executor(argv, env, cwd):
         calls.append((tuple(argv), dict(env), cwd))
@@ -128,7 +149,8 @@ def test_governed_provisioning_promotes_isolated_acquisition_to_primary_store(
     entry = payload["credential_pool"]["openai-codex"][0]
 
     assert status.configured is True
-    assert calls[0][0][0] == str(authoritative_python)
+    assert calls[0][0][0] == _absolute_preserving_symlink(authoritative_python)
+    assert calls[0][0][0] != str(real_python.resolve(strict=False))
     assert calls[0][0][1:] == (
         "-m",
         "hermes_cli.main",
@@ -170,7 +192,7 @@ def test_governed_provisioning_failure_remains_fail_closed_without_promotion(
     home = tmp_path / "hermes-home"
     monkeypatch.setenv("HERMES_HOME", str(home))
     calls: list[tuple[tuple[str, ...], dict[str, str], Path]] = []
-    authoritative_python = Path(sys.executable).resolve(strict=False)
+    authoritative_python = Path(sys.executable)
 
     def failing_executor(argv, env, cwd):
         calls.append((tuple(argv), dict(env), cwd))
@@ -189,7 +211,7 @@ def test_governed_provisioning_failure_remains_fail_closed_without_promotion(
     governed_auth_file = default_openai_codex_credential_store_root() / "auth.json"
     assert exc_info.value.validation_category == "oauth_acquisition_failed"
     assert "token=redacted" not in str(exc_info.value)
-    assert calls[0][0][0] == str(authoritative_python)
+    assert calls[0][0][0] == _absolute_preserving_symlink(authoritative_python)
     assert not governed_auth_file.exists()
 
 

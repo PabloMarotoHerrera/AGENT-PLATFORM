@@ -5,7 +5,10 @@ from pathlib import Path
 import sys
 from types import SimpleNamespace
 
+import pytest
+
 from hermes_cli.agent_platform.provider_credentials.oauth_acquisition import (
+    InvalidProviderCredentialOAuthPlanError,
     build_openai_codex_oauth_acquisition_plan,
     run_openai_codex_oauth_acquisition,
 )
@@ -23,6 +26,26 @@ AUTH_PARSER_PATH = PRODUCT_ROOT / "hermes_cli" / "subcommands" / "auth.py"
 AUTH_COMMANDS_PATH = PRODUCT_ROOT / "hermes_cli" / "auth_commands.py"
 
 
+def _absolute_preserving_symlink(path: Path) -> str:
+    return os.path.abspath(os.fspath(path))
+
+
+def _symlinked_python(tmp_path: Path) -> tuple[Path, Path]:
+    real_dir = tmp_path / "real"
+    real_dir.mkdir()
+    real_python = real_dir / "python3"
+    real_python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    real_python.chmod(0o755)
+    venv_bin = tmp_path / "venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    venv_python = venv_bin / "python"
+    try:
+        venv_python.symlink_to(real_python)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+    return venv_python, real_python
+
+
 def test_oauth_plan_uses_fixed_python_command_and_isolated_environment(
     tmp_path: Path,
     monkeypatch,
@@ -36,7 +59,7 @@ def test_oauth_plan_uses_fixed_python_command_and_isolated_environment(
         trusted_acquisition_root=acquisition_root,
     )
 
-    assert plan.command_argv[0] == str(Path(sys.executable).resolve(strict=False))
+    assert plan.command_argv[0] == _absolute_preserving_symlink(Path(sys.executable))
     assert plan.command_argv[0] != "python"
     assert Path(plan.command_argv[0]).is_absolute()
     assert plan.command_argv[1:] == (
@@ -70,7 +93,7 @@ def test_oauth_plan_uses_controlled_authoritative_python_path(
     monkeypatch.delenv("HERMES_PYTHON", raising=False)
     product_root = tmp_path / "pepper-agent"
     product_root.mkdir()
-    authoritative_python = Path(sys.executable).resolve(strict=False)
+    authoritative_python = Path(sys.executable)
 
     plan = build_openai_codex_oauth_acquisition_plan(
         product_root=product_root,
@@ -78,7 +101,44 @@ def test_oauth_plan_uses_controlled_authoritative_python_path(
         python_executable=authoritative_python,
     )
 
-    assert plan.command_argv[0] == str(authoritative_python)
+    assert plan.command_argv[0] == _absolute_preserving_symlink(authoritative_python)
+
+
+def test_oauth_plan_preserves_explicit_symlink_python_identity(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("HERMES_PYTHON", raising=False)
+    product_root = tmp_path / "pepper-agent"
+    product_root.mkdir()
+    venv_python, real_python = _symlinked_python(tmp_path)
+
+    plan = build_openai_codex_oauth_acquisition_plan(
+        product_root=product_root,
+        trusted_acquisition_root=tmp_path / "acquisition",
+        python_executable=venv_python,
+    )
+
+    assert plan.command_argv[0] == _absolute_preserving_symlink(venv_python)
+    assert plan.command_argv[0] != str(real_python.resolve(strict=False))
+
+
+def test_oauth_plan_preserves_hermes_python_symlink_identity(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    product_root = tmp_path / "pepper-agent"
+    product_root.mkdir()
+    venv_python, real_python = _symlinked_python(tmp_path)
+    monkeypatch.setenv("HERMES_PYTHON", str(venv_python))
+
+    plan = build_openai_codex_oauth_acquisition_plan(
+        product_root=product_root,
+        trusted_acquisition_root=tmp_path / "acquisition",
+    )
+
+    assert plan.command_argv[0] == _absolute_preserving_symlink(venv_python)
+    assert plan.command_argv[0] != str(real_python.resolve(strict=False))
 
 
 def test_oauth_plan_uses_valid_hermes_python_before_sys_executable(
@@ -87,7 +147,7 @@ def test_oauth_plan_uses_valid_hermes_python_before_sys_executable(
 ) -> None:
     product_root = tmp_path / "pepper-agent"
     product_root.mkdir()
-    authoritative_python = Path(sys.executable).resolve(strict=False)
+    authoritative_python = Path(sys.executable)
     monkeypatch.setenv("HERMES_PYTHON", str(authoritative_python))
 
     plan = build_openai_codex_oauth_acquisition_plan(
@@ -95,7 +155,7 @@ def test_oauth_plan_uses_valid_hermes_python_before_sys_executable(
         trusted_acquisition_root=tmp_path / "acquisition",
     )
 
-    assert plan.command_argv[0] == str(authoritative_python)
+    assert plan.command_argv[0] == _absolute_preserving_symlink(authoritative_python)
 
 
 def test_oauth_plan_ignores_ambient_path_python_when_selecting_child_interpreter(
@@ -117,9 +177,23 @@ def test_oauth_plan_ignores_ambient_path_python_when_selecting_child_interpreter
         trusted_acquisition_root=tmp_path / "acquisition",
     )
 
-    assert plan.command_argv[0] == str(Path(sys.executable).resolve(strict=False))
+    assert plan.command_argv[0] == _absolute_preserving_symlink(Path(sys.executable))
     assert plan.command_argv[0] != str(fake_python)
     assert plan.command_argv[0] != "python"
+
+
+def test_oauth_plan_invalid_explicit_python_fails_closed(tmp_path: Path) -> None:
+    product_root = tmp_path / "pepper-agent"
+    product_root.mkdir()
+
+    with pytest.raises(InvalidProviderCredentialOAuthPlanError) as exc_info:
+        build_openai_codex_oauth_acquisition_plan(
+            product_root=product_root,
+            trusted_acquisition_root=tmp_path / "acquisition",
+            python_executable=tmp_path / "missing-python",
+        )
+
+    assert exc_info.value.validation_category == "python_executable_invalid"
 
 
 def test_locked_hermes_cli_supports_exact_auth_add_openai_codex_argv() -> None:

@@ -99,12 +99,9 @@ def _resolved_python_candidate(value: object, *, base_dir: Path | None = None) -
         if not os.path.dirname(raw):
             return None
         candidate = (base_dir or Path.cwd()) / candidate
-    try:
-        resolved = candidate.resolve(strict=False)
-    except (OSError, RuntimeError):
-        return None
-    if resolved.is_file() and os.access(resolved, os.X_OK):
-        return str(resolved)
+    normalized = Path(os.path.abspath(os.fspath(candidate)))
+    if normalized.is_file() and os.access(normalized, os.X_OK):
+        return str(normalized)
     return None
 
 
