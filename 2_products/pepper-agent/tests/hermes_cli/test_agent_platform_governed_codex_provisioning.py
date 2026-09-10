@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,6 +20,7 @@ from hermes_cli.agent_platform.execution_profile_provisioning import (
     PEPPER_IMPLEMENTATION_PRODUCT_PROFILE_NAME,
 )
 from hermes_cli.agent_platform.provider_credentials.provisioning import (
+    GovernedCodexProvisioningError,
     OPENAI_CODEX_PRIMARY_PROVISION_COMMAND,
     provision_openai_codex_primary,
 )
@@ -105,6 +107,7 @@ def test_governed_provisioning_promotes_isolated_acquisition_to_primary_store(
     monkeypatch.setenv("HERMES_HOME", str(home))
     calls: list[tuple[tuple[str, ...], dict[str, str], Path]] = []
     acquired: dict[str, str] = {}
+    authoritative_python = Path(sys.executable).resolve(strict=False)
 
     def fake_executor(argv, env, cwd):
         calls.append((tuple(argv), dict(env), cwd))
@@ -114,6 +117,7 @@ def test_governed_provisioning_promotes_isolated_acquisition_to_primary_store(
     status = provision_openai_codex_primary(
         product_root=product_root,
         acquisition_root=tmp_path / "acquisition",
+        python_executable=authoritative_python,
         executor=fake_executor,
         protection_backend=FakeProtectionBackend(),
         now=NOW,
@@ -124,8 +128,8 @@ def test_governed_provisioning_promotes_isolated_acquisition_to_primary_store(
     entry = payload["credential_pool"]["openai-codex"][0]
 
     assert status.configured is True
-    assert calls[0][0] == (
-        "python",
+    assert calls[0][0][0] == str(authoritative_python)
+    assert calls[0][0][1:] == (
         "-m",
         "hermes_cli.main",
         "auth",
@@ -135,6 +139,17 @@ def test_governed_provisioning_promotes_isolated_acquisition_to_primary_store(
         "oauth",
     )
     assert calls[0][2] == product_root.resolve(strict=False)
+    assert calls[0][1]["HERMES_HOME"] == str(
+        (tmp_path / "acquisition").resolve(strict=False) / "home"
+    )
+    assert calls[0][1]["HOME"] == calls[0][1]["HERMES_HOME"]
+    assert calls[0][1]["USERPROFILE"] == calls[0][1]["HERMES_HOME"]
+    assert calls[0][1]["APPDATA"] == str(
+        (tmp_path / "acquisition").resolve(strict=False) / "appdata"
+    )
+    assert calls[0][1]["LOCALAPPDATA"] == str(
+        (tmp_path / "acquisition").resolve(strict=False) / "localappdata"
+    )
     assert not (home / "auth.json").exists()
     assert governed_auth_file.is_file()
     assert payload["providers"] == {}
@@ -144,6 +159,38 @@ def test_governed_provisioning_promotes_isolated_acquisition_to_primary_store(
     assert entry["label"] == OPENAI_CODEX_INTERNAL_LABEL
     assert entry["base_url"] == OPENAI_CODEX_PROVIDER_ENDPOINT
     assert entry["access_token"] == acquired["access_token"]
+
+
+def test_governed_provisioning_failure_remains_fail_closed_without_promotion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    product_root = tmp_path / "pepper-agent"
+    product_root.mkdir()
+    home = tmp_path / "hermes-home"
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    calls: list[tuple[tuple[str, ...], dict[str, str], Path]] = []
+    authoritative_python = Path(sys.executable).resolve(strict=False)
+
+    def failing_executor(argv, env, cwd):
+        calls.append((tuple(argv), dict(env), cwd))
+        return SimpleNamespace(returncode=17, stdout=b"token=redacted", stderr=b"")
+
+    with pytest.raises(GovernedCodexProvisioningError) as exc_info:
+        provision_openai_codex_primary(
+            product_root=product_root,
+            acquisition_root=tmp_path / "acquisition",
+            python_executable=authoritative_python,
+            executor=failing_executor,
+            protection_backend=FakeProtectionBackend(),
+            now=NOW,
+        )
+
+    governed_auth_file = default_openai_codex_credential_store_root() / "auth.json"
+    assert exc_info.value.validation_category == "oauth_acquisition_failed"
+    assert "token=redacted" not in str(exc_info.value)
+    assert calls[0][0][0] == str(authoritative_python)
+    assert not governed_auth_file.exists()
 
 
 def test_agent_platform_parser_accepts_only_governed_codex_profile() -> None:

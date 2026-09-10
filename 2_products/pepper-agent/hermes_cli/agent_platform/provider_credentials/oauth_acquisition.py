@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -88,10 +90,57 @@ def _validate_trusted_root(path: Path, *, category: str) -> Path:
     return resolved
 
 
+def _resolved_python_candidate(value: object, *, base_dir: Path | None = None) -> str | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    candidate = Path(raw).expanduser()
+    if not candidate.is_absolute():
+        if not os.path.dirname(raw):
+            return None
+        candidate = (base_dir or Path.cwd()) / candidate
+    try:
+        resolved = candidate.resolve(strict=False)
+    except (OSError, RuntimeError):
+        return None
+    if resolved.is_file() and os.access(resolved, os.X_OK):
+        return str(resolved)
+    return None
+
+
+def _authoritative_python_executable(
+    *,
+    product_dir: Path,
+    python_executable: str | Path | None = None,
+) -> str:
+    explicit = _resolved_python_candidate(python_executable, base_dir=product_dir)
+    if python_executable is not None:
+        if explicit is None:
+            raise InvalidProviderCredentialOAuthPlanError(
+                validation_category="python_executable_invalid"
+            )
+        return explicit
+
+    inherited = _resolved_python_candidate(
+        os.environ.get("HERMES_PYTHON"),
+        base_dir=product_dir,
+    )
+    if inherited is not None:
+        return inherited
+
+    current = _resolved_python_candidate(sys.executable, base_dir=product_dir)
+    if current is None:
+        raise InvalidProviderCredentialOAuthPlanError(
+            validation_category="python_executable_unavailable"
+        )
+    return current
+
+
 def build_openai_codex_oauth_acquisition_plan(
     *,
     product_root: Path,
     trusted_acquisition_root: Path,
+    python_executable: str | Path | None = None,
 ) -> ResolvedOpenAICodexOAuthAcquisition:
     """Build the only allowed Hermes command for Codex ChatGPT OAuth."""
 
@@ -107,9 +156,13 @@ def build_openai_codex_oauth_acquisition_plan(
         command_argv_suffix=_FIXED_ARGV_SUFFIX,
         environment_keys=_FIXED_ENVIRONMENT_KEYS,
     )
+    python = _authoritative_python_executable(
+        product_dir=product_dir,
+        python_executable=python_executable,
+    )
     return ResolvedOpenAICodexOAuthAcquisition(
         public_plan=public_plan,
-        command_argv=("python", *_FIXED_ARGV_SUFFIX),
+        command_argv=(python, *_FIXED_ARGV_SUFFIX),
         working_directory=product_dir,
         environment_items=(
             ("HERMES_HOME", str(isolated_home)),

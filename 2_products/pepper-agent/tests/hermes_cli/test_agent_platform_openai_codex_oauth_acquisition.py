@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
+import sys
 from types import SimpleNamespace
 
 from hermes_cli.agent_platform.provider_credentials.oauth_acquisition import (
@@ -23,7 +25,9 @@ AUTH_COMMANDS_PATH = PRODUCT_ROOT / "hermes_cli" / "auth_commands.py"
 
 def test_oauth_plan_uses_fixed_python_command_and_isolated_environment(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
+    monkeypatch.delenv("HERMES_PYTHON", raising=False)
     product_root = tmp_path / "pepper-agent"
     product_root.mkdir()
     acquisition_root = tmp_path / "acquisition"
@@ -32,8 +36,10 @@ def test_oauth_plan_uses_fixed_python_command_and_isolated_environment(
         trusted_acquisition_root=acquisition_root,
     )
 
-    assert plan.command_argv == (
-        "python",
+    assert plan.command_argv[0] == str(Path(sys.executable).resolve(strict=False))
+    assert plan.command_argv[0] != "python"
+    assert Path(plan.command_argv[0]).is_absolute()
+    assert plan.command_argv[1:] == (
         "-m",
         "hermes_cli.main",
         "auth",
@@ -48,9 +54,72 @@ def test_oauth_plan_uses_fixed_python_command_and_isolated_environment(
     assert env["HERMES_HOME"] == str(acquisition_root.resolve(strict=False) / "home")
     assert env["HOME"] == env["HERMES_HOME"]
     assert env["USERPROFILE"] == env["HERMES_HOME"]
+    assert env["APPDATA"] == str(acquisition_root.resolve(strict=False) / "appdata")
+    assert env["LOCALAPPDATA"] == str(
+        acquisition_root.resolve(strict=False) / "localappdata"
+    )
     assert env["PYTHONIOENCODING"] == "utf-8"
     assert env["PYTHONUTF8"] == "1"
     assert plan.working_directory == product_root.resolve(strict=False)
+
+
+def test_oauth_plan_uses_controlled_authoritative_python_path(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("HERMES_PYTHON", raising=False)
+    product_root = tmp_path / "pepper-agent"
+    product_root.mkdir()
+    authoritative_python = Path(sys.executable).resolve(strict=False)
+
+    plan = build_openai_codex_oauth_acquisition_plan(
+        product_root=product_root,
+        trusted_acquisition_root=tmp_path / "acquisition",
+        python_executable=authoritative_python,
+    )
+
+    assert plan.command_argv[0] == str(authoritative_python)
+
+
+def test_oauth_plan_uses_valid_hermes_python_before_sys_executable(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    product_root = tmp_path / "pepper-agent"
+    product_root.mkdir()
+    authoritative_python = Path(sys.executable).resolve(strict=False)
+    monkeypatch.setenv("HERMES_PYTHON", str(authoritative_python))
+
+    plan = build_openai_codex_oauth_acquisition_plan(
+        product_root=product_root,
+        trusted_acquisition_root=tmp_path / "acquisition",
+    )
+
+    assert plan.command_argv[0] == str(authoritative_python)
+
+
+def test_oauth_plan_ignores_ambient_path_python_when_selecting_child_interpreter(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    product_root = tmp_path / "pepper-agent"
+    product_root.mkdir()
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    fake_python = fake_bin / "python"
+    fake_python.write_text("#!/bin/sh\nexit 99\n", encoding="utf-8")
+    fake_python.chmod(0o755)
+    monkeypatch.setenv("PATH", str(fake_bin) + os.pathsep + os.environ.get("PATH", ""))
+    monkeypatch.setenv("HERMES_PYTHON", "python")
+
+    plan = build_openai_codex_oauth_acquisition_plan(
+        product_root=product_root,
+        trusted_acquisition_root=tmp_path / "acquisition",
+    )
+
+    assert plan.command_argv[0] == str(Path(sys.executable).resolve(strict=False))
+    assert plan.command_argv[0] != str(fake_python)
+    assert plan.command_argv[0] != "python"
 
 
 def test_locked_hermes_cli_supports_exact_auth_add_openai_codex_argv() -> None:
@@ -75,7 +144,9 @@ def test_locked_hermes_cli_supports_exact_auth_add_openai_codex_argv() -> None:
 
 def test_oauth_acquisition_default_is_dry_run_and_fake_executor_is_explicit(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
+    monkeypatch.delenv("HERMES_PYTHON", raising=False)
     product_root = tmp_path / "pepper-agent"
     product_root.mkdir()
     plan = build_openai_codex_oauth_acquisition_plan(
@@ -98,6 +169,36 @@ def test_oauth_acquisition_default_is_dry_run_and_fake_executor_is_explicit(
     assert calls == [
         (plan.command_argv, dict(plan.environment_items), plan.working_directory)
     ]
+
+
+def test_oauth_acquisition_result_and_plan_repr_do_not_leak_executor_output(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("HERMES_PYTHON", raising=False)
+    product_root = tmp_path / "pepper-agent"
+    product_root.mkdir()
+    plan = build_openai_codex_oauth_acquisition_plan(
+        product_root=product_root,
+        trusted_acquisition_root=tmp_path / "acquisition",
+    )
+    secret = "synthetic-refresh-token"
+
+    def fake_executor(_argv, _env, _cwd):
+        return SimpleNamespace(
+            returncode=1,
+            stdout=f"access_token={secret}".encode("utf-8"),
+            stderr=f"refresh_token={secret}".encode("utf-8"),
+        )
+
+    result = run_openai_codex_oauth_acquisition(plan, executor=fake_executor)
+
+    assert result.completed is False
+    assert result.stdout_bytes > 0
+    assert result.stderr_bytes > 0
+    assert secret not in repr(plan)
+    assert secret not in str(result)
+    assert secret not in repr(result)
 
 
 def test_oauth_acquisition_source_has_no_provider_call_or_shell_authority() -> None:

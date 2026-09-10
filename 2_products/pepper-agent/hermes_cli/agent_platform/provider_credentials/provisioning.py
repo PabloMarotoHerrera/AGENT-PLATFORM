@@ -91,6 +91,7 @@ def provision_openai_codex_primary(
     *,
     product_root: Path | None = None,
     acquisition_root: Path | None = None,
+    python_executable: str | Path | None = None,
     executor: OAuthExecutor | None = None,
     protection_backend: StoreProtectionBackend | None = None,
     now: Any = None,
@@ -102,6 +103,7 @@ def provision_openai_codex_primary(
             return _provision_openai_codex_primary_from_acquisition_root(
                 product_root=product_root,
                 acquisition_root=Path(tmp_dir),
+                python_executable=python_executable,
                 executor=executor,
                 protection_backend=protection_backend,
                 now=now,
@@ -109,6 +111,7 @@ def provision_openai_codex_primary(
     return _provision_openai_codex_primary_from_acquisition_root(
         product_root=product_root,
         acquisition_root=acquisition_root,
+        python_executable=python_executable,
         executor=executor,
         protection_backend=protection_backend,
         now=now,
@@ -119,6 +122,7 @@ def _provision_openai_codex_primary_from_acquisition_root(
     *,
     product_root: Path | None,
     acquisition_root: Path,
+    python_executable: str | Path | None,
     executor: OAuthExecutor | None,
     protection_backend: StoreProtectionBackend | None,
     now: Any,
@@ -126,6 +130,7 @@ def _provision_openai_codex_primary_from_acquisition_root(
     plan = build_openai_codex_oauth_acquisition_plan(
         product_root=product_root or _default_product_root(),
         trusted_acquisition_root=acquisition_root,
+        python_executable=python_executable,
     )
     result = run_openai_codex_oauth_acquisition(
         plan,
