@@ -211,6 +211,174 @@ def _synthetic_implementation_target(
     )
 
 
+def _synthetic_p99_revision_roadmap_items() -> tuple[dict[str, object], ...]:
+    return (
+        {
+            "ticket_id": "P99.1",
+            "ticket_title": "Synthetic Accepted Predecessor",
+            "authority_path": "synthetic-roadmap.md",
+            "authority_section": "Synthetic full-material roadmap",
+            "authority_type": "synthetic_test_roadmap",
+            "next_action_id": "GENERATE_P99_1_REQUIRES_SEPARATE_HUMAN_ACTION",
+            "dependency_ticket_ids": (),
+            "ticket_contract": _synthetic_implementation_contract("AcceptedPredecessor"),
+        },
+        {
+            "ticket_id": "P99.2",
+            "ticket_title": "Synthetic Full Material Successor",
+            "authority_path": "synthetic-roadmap.md",
+            "authority_section": "Synthetic full-material roadmap",
+            "authority_type": "synthetic_test_roadmap",
+            "next_action_id": "GENERATE_P99_2_REQUIRES_SEPARATE_HUMAN_ACTION",
+            "dependency_ticket_ids": ("P99.1",),
+            "ticket_contract": _synthetic_implementation_contract("FullMaterialSuccessor"),
+        },
+    )
+
+
+def _synthetic_p99_2_workflow() -> dict[str, object]:
+    return {
+        "project_id": "PEPPER",
+        "project_name": "Pepper",
+        "macroproject_id": "P99.0",
+        "macroproject_title": "Synthetic Full Material Macroproject",
+        "current_ticket_id": None,
+        "current_ticket_title": None,
+        "next_ticket_id": "P99.2",
+        "next_ticket_title": "Synthetic Full Material Successor",
+        "workflow_status": "completed",
+        "workflow_state": "P99.1-COMPLETED",
+        "closed_predecessor_ticket_id": "P99.1",
+        "P18_9_ready": True,
+        "next_action": {
+            "id": "GENERATE_P99_2_REQUIRES_SEPARATE_HUMAN_ACTION",
+            "label": "Generate governed P99.2 Synthetic Full Material Successor.",
+            "target_ticket_id": "P99.2",
+            "target_ticket_title": "Synthetic Full Material Successor",
+            "required_human_action": "ticket_generation",
+        },
+    }
+
+
+def _long_revision_entry(prefix: str, index: int, length: int) -> str:
+    marker = f"{prefix} {index:02d}: "
+    return marker + ("x" * max(1, length - len(marker)))
+
+
+def _full_material_revision_contract(
+    *,
+    ticket_id: str = "P99.2",
+    marker: str = "C27-FULL-MATERIAL",
+) -> dict[str, object]:
+    return {
+        "schema_version": bridge.TICKET_SPEC_MATERIAL_REVISION_CONTRACT_SCHEMA_VERSION,
+        "ticket_id": ticket_id,
+        "objective": _long_revision_entry(f"{marker} objective replacement", 1, 1100),
+        "context": [
+            _long_revision_entry(f"{marker} context replacement", index, 980)
+            for index in range(1, 9)
+        ],
+        "scope": {
+            "allowed_paths": [
+                "2_products/pepper-agent/tests/hermes_cli/**",
+                "2_products/pepper-agent/hermes_cli/agent_platform/workflow/**",
+            ],
+            "forbidden_paths": [
+                ".git/**",
+                ".opencode/**",
+                "graphify-out/**",
+                "4_external/sources/**",
+            ],
+            "allowed_actions": [
+                "Apply only the synthetic full-material TicketSpec correction.",
+                "Update focused non-executing regression tests for the generic harness.",
+            ],
+            "forbidden_actions": [
+                "Do not run git add.",
+                "Do not run git commit.",
+                "Do not run git push.",
+                "Do not run git reset.",
+                "Do not run git clean.",
+                "Do not run git stash.",
+                "Do not run git worktree.",
+                "Do not invoke Graphify.",
+                "Do not invoke Docker.",
+                "Do not perform provider dispatch.",
+                "Do not perform model inference.",
+                "Do not perform Kanban dispatch.",
+                "Do not perform worker execution.",
+                "Do not perform runtime execution.",
+            ],
+        },
+        "constraints": [
+            "Rollback plan: remove only the synthetic full-material correction if rejected.",
+            *[
+                _long_revision_entry(f"{marker} constraint replacement", index, 880)
+                for index in range(1, 5)
+            ],
+        ],
+        "tasks": [
+            _long_revision_entry(f"{marker} task replacement", index, 900)
+            for index in range(1, 5)
+        ],
+        "acceptance_criteria": [
+            _long_revision_entry(f"{marker} acceptance replacement", index, 900)
+            for index in range(1, 5)
+        ],
+        "validation_steps": [
+            {
+                "validation_id": f"V{index}",
+                "description": f"{marker} validation {index} confirms governed material replacement.",
+                "command": None,
+                "expected_result": _long_revision_entry(
+                    f"{marker} validation expected result", index, 760
+                ),
+            }
+            for index in range(1, 5)
+        ],
+        "dependencies": [],
+        "parallelization_hint": "parallel_candidate",
+        "response_contract": {
+            "required_sections": [
+                "Summary",
+                "Files inspected",
+                "Files modified",
+                "Tests/commands run",
+                "Decisions made",
+                "Limitations",
+            ],
+            "completion_verdict": "synthetic_full_material_revision_ready",
+            "include_files_inspected": True,
+            "include_files_modified": True,
+            "include_commands_run": True,
+            "include_tests_run": True,
+            "include_limitations": True,
+            "required_fields": ["revision_contract_sha256", "governed_successor_status"],
+            "structured_result_schema": {
+                "type": "object",
+                "required": ["revision_contract_sha256", "governed_successor_status"],
+                "properties": {
+                    "revision_contract_sha256": {"type": "string"},
+                    "governed_successor_status": {
+                        "type": "string",
+                        "enum": ["pending_human_approval"],
+                    },
+                },
+                "additionalProperties": False,
+            },
+        },
+        "governance_invariants": [
+            _long_revision_entry(f"{marker} governance invariant", index, 560)
+            for index in range(1, 3)
+        ],
+        "execution_requirements": [
+            _long_revision_entry(f"{marker} execution requirement", index, 560)
+            for index in range(1, 3)
+        ],
+        "recommended_commit_message": "P99.2 Apply synthetic full material revision",
+    }
+
+
 @pytest.fixture
 def bridge_home(tmp_path, monkeypatch):
     home = tmp_path / "hermes-home"
@@ -1322,6 +1490,196 @@ def test_response_contract_only_revision_overlays_rejected_predecessor_ticket_sp
     assert result["worker_execution"] is False
     assert result["Kanban_dispatch"] is False
     assert result["Git_mutation"] is False
+
+
+def test_generic_full_material_revision_contract_generates_valid_successor_over_budget(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        bridge,
+        "resolve_roadmap_ticket_authorities",
+        _synthetic_p99_revision_roadmap_items,
+    )
+    base_workflow = _synthetic_p99_2_workflow()
+    bridge.generate_current_ticket(workflow=base_workflow)
+    original = bridge.load_generation_record(ticket_id="P99.2")
+    assert original is not None
+    bridge.apply_ticket_approval_decision(
+        ticket_id="P99.2",
+        decision="reject",
+        actor="synthetic-human",
+    )
+    rejected_decision = bridge.load_approval_decision_record(
+        ticket_id="P99.2",
+        generation_record=original,
+    )
+    assert rejected_decision is not None
+    contract = _full_material_revision_contract()
+    target = bridge.resolve_generation_target_from_workflow(base_workflow)
+    normalized_contract = bridge.validate_ticket_spec_material_revision_contract(
+        contract,
+        target=target,
+    ).model_dump(mode="json")
+    contract_digest = bridge.ticket_spec_material_revision_contract_digest(contract)
+
+    result = bridge.revise_rejected_successor_ticket(
+        workflow=_rejected_successor_workflow(original, base_workflow),
+        human_authorization_text=(
+            "Authorize REVISE_P99_2 with the supplied synthetic full-material "
+            "revision contract for P99.2."
+        ),
+        revision_contract=contract,
+        authorizer_id="synthetic-human",
+        requested_project_id="PEPPER",
+        requested_ticket_id="P99.2",
+        requested_next_action_id="REVISE_P99_2",
+    )
+    revised = bridge.load_generation_record(ticket_id="P99.2")
+    assert revised is not None
+    ticket = revised["ticket_spec"]
+    work_packet = revised["work_packet_compilation_result"]["work_packet"]
+    publication = _publication(revised)
+    context_pack = revised["context_pack"]
+    context_items = {item["source_id"]: item for item in context_pack["items"]}
+    history = [
+        json.loads(line)
+        for line in bridge.rejected_successor_revision_history_path_for_ticket(
+            "P99.2"
+        ).read_text(encoding="utf-8").splitlines()
+    ]
+
+    assert result["revision_applied"] is True
+    assert result["revision_contract_SHA256"] == contract_digest
+    assert result["next_action"]["id"] == "APPROVE_P99_2"
+    assert result["pending_ticket_approval_count"] == 1
+    assert result["active_execution_count"] == 0
+    assert ticket["objective"] == normalized_contract["objective"]
+    assert ticket["scope"] == normalized_contract["scope"]
+    assert ticket["dependencies"] == []
+    assert ticket["parallelization_hint"] == "parallel_candidate"
+    assert ticket["context"][: len(normalized_contract["context"])] == normalized_contract[
+        "context"
+    ]
+    assert ticket["constraints"][: len(normalized_contract["constraints"])] == normalized_contract[
+        "constraints"
+    ]
+    assert ticket["tasks"][: len(normalized_contract["tasks"])] == normalized_contract[
+        "tasks"
+    ]
+    assert ticket["acceptance_criteria"][
+        : len(normalized_contract["acceptance_criteria"])
+    ] == normalized_contract["acceptance_criteria"]
+    assert ticket["validation_steps"][
+        : len(normalized_contract["validation_steps"])
+    ] == normalized_contract["validation_steps"]
+    assert ticket["response_contract"] == normalized_contract["response_contract"]
+    assert any(
+        item.startswith("Governance invariant: C27-FULL-MATERIAL governance invariant")
+        for item in ticket["constraints"]
+    )
+    assert any(
+        item.startswith("Execution requirement: C27-FULL-MATERIAL execution requirement")
+        for item in ticket["constraints"]
+    )
+    assert context_pack["policy"]["max_items"] == 8
+    assert context_pack["policy"]["max_item_characters"] == 32768
+    assert context_pack["policy"]["max_total_characters"] == 65536
+    assert context_items["CTX-TICKET-SPEC"]["included_character_count"] > 16384
+    assert context_pack["total_included_characters"] > 32768
+    assert revised["revision_authority"]["revision_contract"] == normalized_contract
+    assert revised["revision_contract_SHA256"] == contract_digest
+    assert revised["ticket_spec_SHA256"] != original["ticket_spec_SHA256"]
+    assert revised["dependency_plan_SHA256"] != original["dependency_plan_SHA256"]
+    assert revised["lint_report_SHA256"] != original["lint_report_SHA256"]
+    assert revised["work_packet_SHA256"] != original["work_packet_SHA256"]
+    assert publication["revision"] == _publication(original)["revision"] + 1
+    assert publication["supersedes_publication_id"] == _publication(original)["publication_id"]
+    assert work_packet["source_ticket"] == ticket
+    assert work_packet["response_contract"] == ticket["response_contract"]
+    assert work_packet["execution_ready"] is False
+    assert len(history) == 1
+    assert history[0]["historical_rejected_generation_record"] == original
+    assert history[0]["historical_rejected_approval_decision_record"] == rejected_decision
+    assert history[0]["new_generation_record"] == revised
+    assert bridge.load_approval_decision_record(
+        ticket_id="P99.2",
+        generation_record=revised,
+    ) is None
+    assert result["ticket_execution_authorized"] is False
+    assert result["WorkPacket_execution_authorized"] is False
+    assert result["worker_execution"] is False
+    assert result["Kanban_dispatch"] is False
+    assert result["Git_mutation"] is False
+
+
+def test_revision_generation_failure_envelope_preserves_original_sub_stage(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        bridge,
+        "resolve_roadmap_ticket_authorities",
+        _synthetic_p99_revision_roadmap_items,
+    )
+    base_workflow = _synthetic_p99_2_workflow()
+    bridge.generate_current_ticket(workflow=base_workflow)
+    original = bridge.load_generation_record(ticket_id="P99.2")
+    assert original is not None
+    bridge.apply_ticket_approval_decision(
+        ticket_id="P99.2",
+        decision="reject",
+        actor="synthetic-human",
+    )
+    rejected_decision = bridge.load_approval_decision_record(
+        ticket_id="P99.2",
+        generation_record=original,
+    )
+    assert rejected_decision is not None
+
+    def fail_context_pack(_request):
+        raise RuntimeError("required source exceeds assembly policy source_id=CTX-SYNTHETIC")
+
+    monkeypatch.setattr(bridge, "assemble_context_pack", fail_context_pack)
+
+    with pytest.raises(bridge.TicketArchitectBridgeGenerationError) as exc_info:
+        bridge.revise_rejected_successor_ticket(
+            workflow=_rejected_successor_workflow(original, base_workflow),
+            human_authorization_text=(
+                "Authorize REVISE_P99_2 with the supplied synthetic full-material "
+                "revision contract for P99.2."
+            ),
+            revision_contract=_full_material_revision_contract(),
+            authorizer_id="synthetic-human",
+            requested_project_id="PEPPER",
+            requested_ticket_id="P99.2",
+            requested_next_action_id="REVISE_P99_2",
+        )
+
+    failure = exc_info.value.failure_envelope
+    assert failure["failure_stage"] == "REVISION_CONTRACT_APPLIED"
+    assert failure["failure_classification"] == "successor_generation_failed"
+    assert failure["revision_authority_accepted"] is True
+    assert failure["revision_contract_supplied"] is True
+    assert failure["revision_contract_accepted"] is True
+    assert failure["revision_contract_recorded"] is False
+    assert failure["revision_contract_applied"] is False
+    assert failure["successor_publication_created"] is False
+    assert failure["successor_generated"] is False
+    assert failure["original_exception_class"] == "RuntimeError"
+    assert failure["original_error"] == (
+        "required source exceeds assembly policy source_id=CTX-SYNTHETIC"
+    )
+    assert failure["validation_schema_error"] == failure["original_error"]
+    assert failure["generation_sub_stage"] == "context_pack_assembly"
+    assert failure["field_path"] is None
+    assert failure["state_mutated"] is False
+    assert bridge.load_generation_record(ticket_id="P99.2") == original
+    assert bridge.load_approval_decision_record(
+        ticket_id="P99.2",
+        generation_record=original,
+    ) == rejected_decision
+    assert not bridge.rejected_successor_revision_history_path_for_ticket("P99.2").exists()
 
 
 def test_response_contract_revision_invalid_schema_fails_closed_with_stage_envelope(

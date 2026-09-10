@@ -220,6 +220,12 @@ _CONTRACT_SINGLE_FIELDS = frozenset(
     )
 )
 _MATERIAL_REVISION_CONTRACT_MAX_SERIALIZED_CHARS = 65536
+_DEFAULT_CONTEXT_PACK_MAX_ITEMS = 8
+_DEFAULT_CONTEXT_PACK_MAX_ITEM_CHARACTERS = 16384
+_DEFAULT_CONTEXT_PACK_MAX_TOTAL_CHARACTERS = 32768
+_MATERIAL_REVISION_CONTEXT_PACK_MAX_ITEMS = 8
+_MATERIAL_REVISION_CONTEXT_PACK_MAX_ITEM_CHARACTERS = 32768
+_MATERIAL_REVISION_CONTEXT_PACK_MAX_TOTAL_CHARACTERS = 65536
 StructuredRevisionText: TypeAlias = Annotated[
     str,
     Field(min_length=1, max_length=8192),
@@ -2779,17 +2785,83 @@ def _merge_revision_response_contract(
         ) from exc
 
 
-def _revision_error_schema_detail(exc: Exception) -> dict[str, Any]:
-    cause = getattr(exc, "__cause__", None)
-    errors = cause.errors() if hasattr(cause, "errors") else None
-    if errors:
+def _revision_exception_chain(exc: Exception) -> tuple[Exception, ...]:
+    chain: list[Exception] = []
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while isinstance(current, Exception) and id(current) not in seen:
+        chain.append(current)
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    return tuple(chain)
+
+
+def _safe_revision_error_text(value: object, *, fallback: str) -> str:
+    text = str(value or "").strip() or fallback
+    text = re.sub(r"[\x00-\x1f\x7f]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip() or fallback
+    if len(text) > 2048:
+        return text[:2033].rstrip() + "...[truncated]"
+    return text
+
+
+def _first_schema_error(chain: tuple[Exception, ...]) -> tuple[str | None, str | None]:
+    for item in chain:
+        errors = item.errors() if hasattr(item, "errors") else None
+        if not errors:
+            continue
         first = errors[0]
         loc = first.get("loc") or ()
-        return {
-            "message": str(first.get("msg") or str(exc)),
-            "field_path": ".".join(str(part) for part in loc) or None,
-        }
-    return {"message": str(exc) or exc.__class__.__name__, "field_path": None}
+        return (
+            _safe_revision_error_text(
+                first.get("msg") or str(item),
+                fallback=item.__class__.__name__,
+            ),
+            ".".join(str(part) for part in loc) or None,
+        )
+    return None, None
+
+
+def _revision_generation_sub_stage(chain: tuple[Exception, ...]) -> str | None:
+    for item in reversed(chain):
+        name = item.__class__.__name__.lower()
+        message = str(item).lower()
+        if "contextpack" in name or "source_id=ctx-" in message:
+            return "context_pack_assembly"
+        if "workpacket" in name or "workpacket" in message:
+            return "work_packet_compilation"
+        if "dependency plan" in message:
+            return "dependency_plan"
+        if "lint" in message:
+            return "lint"
+        if "publication" in message:
+            return "successor_publication"
+        if "ticketspec" in message or "ticket spec" in message:
+            return "ticket_spec_validation"
+        if "revision contract" in message:
+            return "material_revision_validation"
+        if "revision authority" in message:
+            return "revision_authority_validation"
+        if "generated authority" in message or "generation record" in message:
+            return "generation_record_validation"
+    return None
+
+
+def _revision_error_schema_detail(exc: Exception) -> dict[str, Any]:
+    chain = _revision_exception_chain(exc)
+    original = chain[-1] if chain else exc
+    schema_message, field_path = _first_schema_error(chain)
+    original_message = _safe_revision_error_text(
+        original,
+        fallback=original.__class__.__name__,
+    )
+    return {
+        "message": schema_message or original_message,
+        "field_path": field_path,
+        "original_exception_class": original.__class__.__name__,
+        "original_error": original_message,
+        "generation_sub_stage": _revision_generation_sub_stage(chain),
+    }
 
 
 def _revision_failure_classification(exc: Exception) -> str:
@@ -2833,6 +2905,9 @@ def _rejected_successor_revision_failure_envelope(
         "failure_classification": _revision_failure_classification(exc),
         "validation_schema_error": schema_detail["message"],
         "field_path": schema_detail["field_path"],
+        "original_exception_class": schema_detail["original_exception_class"],
+        "original_error": schema_detail["original_error"],
+        "generation_sub_stage": schema_detail["generation_sub_stage"],
         "revision_authority_accepted": revision_authority is not None,
         "revision_authority_recorded": False,
         "revision_contract_supplied": revision_contract_requested,
@@ -4193,12 +4268,25 @@ def _assemble_context_pack(
                 required=True,
             )
         )
+    policy = (
+        ContextAssemblyPolicy(
+            max_items=_MATERIAL_REVISION_CONTEXT_PACK_MAX_ITEMS,
+            max_item_characters=_MATERIAL_REVISION_CONTEXT_PACK_MAX_ITEM_CHARACTERS,
+            max_total_characters=_MATERIAL_REVISION_CONTEXT_PACK_MAX_TOTAL_CHARACTERS,
+        )
+        if revision_authority is not None
+        else ContextAssemblyPolicy(
+            max_items=_DEFAULT_CONTEXT_PACK_MAX_ITEMS,
+            max_item_characters=_DEFAULT_CONTEXT_PACK_MAX_ITEM_CHARACTERS,
+            max_total_characters=_DEFAULT_CONTEXT_PACK_MAX_TOTAL_CHARACTERS,
+        )
+    )
     return assemble_context_pack(
         ContextAssemblyRequest(
             project_spec=project_spec,
             ticket_spec=ticket_spec,
             sources=tuple(sources),
-            policy=ContextAssemblyPolicy(max_items=8, max_total_characters=32768),
+            policy=policy,
         )
     )
 
