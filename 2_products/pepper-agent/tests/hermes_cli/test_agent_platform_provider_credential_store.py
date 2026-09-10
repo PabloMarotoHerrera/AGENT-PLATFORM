@@ -24,6 +24,7 @@ from hermes_cli.agent_platform.provider_credentials.store import (
     default_openai_codex_credential_store_root,
     extract_openai_codex_oauth_credential_from_auth_store_payload,
     promote_openai_codex_oauth_credential,
+    provision_openai_codex_oauth_credential,
     read_openai_codex_credential_status,
     validate_windows_dacl_principals,
 )
@@ -40,8 +41,11 @@ SOURCE_PATH = (
 
 
 class FakeProtectionBackend:
-    def __init__(self, *, fail_stage_file: bool = False) -> None:
+    def __init__(
+        self, *, fail_stage_file: bool = False, fail_validate_file: bool = False
+    ) -> None:
         self.fail_stage_file = fail_stage_file
+        self.fail_validate_file = fail_validate_file
         self.calls: list[tuple[str, str]] = []
 
     def prepare_directory(self, path: Path):
@@ -67,6 +71,10 @@ class FakeProtectionBackend:
 
     def validate_file(self, path: Path):
         self.calls.append(("validate_file", path.name))
+        if self.fail_validate_file:
+            raise ProviderCredentialStoreProtectionError(
+                validation_category="synthetic_validate_file_failure"
+            )
         if not path.is_file():
             raise ProviderCredentialStoreProtectionError(
                 validation_category="missing_file"
@@ -74,32 +82,38 @@ class FakeProtectionBackend:
         return store.StoreProtectionReport("auth_file", "test", True)
 
 
-def synthetic_access_token(*, exp_delta: timedelta = timedelta(hours=1)) -> str:
+def synthetic_access_token(
+    *, issued_at: datetime = NOW, exp_delta: timedelta = timedelta(hours=1)
+) -> str:
     payload = {
-        "iat": int(NOW.timestamp()),
-        "exp": int((NOW + exp_delta).timestamp()),
+        "iat": int(issued_at.timestamp()),
+        "exp": int((issued_at + exp_delta).timestamp()),
     }
     return ".".join((_segment({"alg": "none"}), _segment(payload), "signature"))
 
 
 def _segment(payload: dict[str, object]) -> str:
     return (
-        base64.urlsafe_b64encode(
-            json.dumps(payload, separators=(",", ":")).encode("utf-8")
-        )
+        base64
+        .urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
         .decode("ascii")
         .rstrip("=")
     )
 
 
 def synthetic_credential(
-    *, expires_delta: timedelta = timedelta(hours=1)
+    *,
+    issued_at: datetime = NOW,
+    expires_delta: timedelta = timedelta(hours=1),
+    refresh_token: str = "synthetic-refresh-token",
 ) -> OpenAICodexOAuthCredential:
     return OpenAICodexOAuthCredential(
-        access_token=synthetic_access_token(exp_delta=expires_delta),
-        refresh_token="synthetic-refresh-token",
-        last_refresh_utc=NOW,
-        expires_at_utc=NOW + expires_delta,
+        access_token=synthetic_access_token(
+            issued_at=issued_at, exp_delta=expires_delta
+        ),
+        refresh_token=refresh_token,
+        last_refresh_utc=issued_at,
+        expires_at_utc=issued_at + expires_delta,
     )
 
 
@@ -342,6 +356,174 @@ def test_existing_durable_store_is_rejected_without_overwrite(tmp_path: Path) ->
         )
 
     assert auth_file.read_text(encoding="utf-8") == original
+
+
+def test_governed_provision_creates_missing_store_with_existing_promotion_path(
+    tmp_path: Path,
+) -> None:
+    trusted_root = tmp_path / "dedicated-store"
+
+    status = provision_openai_codex_oauth_credential(
+        trusted_root,
+        synthetic_credential(),
+        protection_backend=FakeProtectionBackend(),
+        now=NOW,
+    )
+
+    assert status.configured is True
+    assert (trusted_root / "auth.json").is_file()
+
+
+def test_expired_durable_store_rotates_with_atomic_replace(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trusted_root = tmp_path / "dedicated-store"
+    fake = FakeProtectionBackend()
+    promote_openai_codex_oauth_credential(
+        trusted_root,
+        synthetic_credential(),
+        protection_backend=fake,
+        now=NOW,
+    )
+    auth_file = trusted_root / "auth.json"
+    original = auth_file.read_text(encoding="utf-8")
+    replacement = synthetic_credential(
+        issued_at=NOW + timedelta(hours=2),
+        refresh_token="synthetic-refresh-token-rotated",
+    )
+    real_replace = store.os.replace
+    replace_calls: list[tuple[str, str]] = []
+
+    def spy_replace(source: str, target: str) -> None:
+        replace_calls.append((Path(source).name, Path(target).name))
+        assert auth_file.is_file()
+        assert auth_file.read_text(encoding="utf-8") == original
+        real_replace(source, target)
+
+    monkeypatch.setattr(store.os, "replace", spy_replace)
+
+    status = provision_openai_codex_oauth_credential(
+        trusted_root,
+        replacement,
+        protection_backend=fake,
+        now=NOW + timedelta(hours=2),
+    )
+    payload = json.loads(auth_file.read_text(encoding="utf-8"))
+    entry = payload["credential_pool"]["openai-codex"][0]
+
+    assert status.configured is True
+    assert status.durable_store_valid is True
+    assert status.client_token_status is not None
+    assert status.client_token_status.usable_for_bounded_lease is True
+    assert entry["refresh_token"] == "synthetic-refresh-token-rotated"
+    assert replace_calls == [("auth.json", "auth.json")]
+    assert not list(trusted_root.glob(".agent-platform-store-stage.*"))
+
+
+def test_valid_durable_store_is_not_rotated_or_overwritten(tmp_path: Path) -> None:
+    trusted_root = tmp_path / "dedicated-store"
+    fake = FakeProtectionBackend()
+    promote_openai_codex_oauth_credential(
+        trusted_root,
+        synthetic_credential(),
+        protection_backend=fake,
+        now=NOW,
+    )
+    auth_file = trusted_root / "auth.json"
+    original = auth_file.read_text(encoding="utf-8")
+    replacement = synthetic_credential(
+        issued_at=NOW,
+        expires_delta=timedelta(hours=2),
+        refresh_token="synthetic-refresh-token-valid-clobber",
+    )
+
+    with pytest.raises(ExistingProviderCredentialStoreError) as exc_info:
+        provision_openai_codex_oauth_credential(
+            trusted_root,
+            replacement,
+            protection_backend=fake,
+            now=NOW,
+        )
+
+    assert exc_info.value.validation_category == "durable_store_valid"
+    assert "synthetic-refresh-token-valid-clobber" not in str(exc_info.value)
+    assert auth_file.read_text(encoding="utf-8") == original
+    assert not list(trusted_root.glob(".agent-platform-store-stage.*"))
+
+
+def test_rotation_staging_validation_failure_preserves_expired_store(
+    tmp_path: Path,
+) -> None:
+    trusted_root = tmp_path / "dedicated-store"
+    fake = FakeProtectionBackend()
+    promote_openai_codex_oauth_credential(
+        trusted_root,
+        synthetic_credential(),
+        protection_backend=fake,
+        now=NOW,
+    )
+    auth_file = trusted_root / "auth.json"
+    original = auth_file.read_text(encoding="utf-8")
+
+    with pytest.raises(InvalidProviderCredentialStoreError) as exc_info:
+        provision_openai_codex_oauth_credential(
+            trusted_root,
+            synthetic_credential(refresh_token="synthetic-refresh-token-expired-stage"),
+            protection_backend=fake,
+            now=NOW + timedelta(hours=2),
+        )
+
+    assert exc_info.value.validation_category == "access_token_expired"
+    assert "synthetic-refresh-token-expired-stage" not in str(exc_info.value)
+    assert auth_file.read_text(encoding="utf-8") == original
+    assert not list(trusted_root.glob(".agent-platform-store-stage.*"))
+
+
+def test_corrupt_existing_store_fails_closed_without_rotation(tmp_path: Path) -> None:
+    trusted_root = tmp_path / "dedicated-store"
+    trusted_root.mkdir()
+    auth_file = trusted_root / "auth.json"
+    original = "not-json\n"
+    auth_file.write_text(original, encoding="utf-8")
+
+    with pytest.raises(InvalidProviderCredentialStoreError) as exc_info:
+        provision_openai_codex_oauth_credential(
+            trusted_root,
+            synthetic_credential(issued_at=NOW + timedelta(hours=2)),
+            protection_backend=FakeProtectionBackend(),
+            now=NOW + timedelta(hours=2),
+        )
+
+    assert exc_info.value.validation_category == "auth_store_unreadable"
+    assert auth_file.read_text(encoding="utf-8") == original
+    assert not list(trusted_root.glob(".agent-platform-store-stage.*"))
+
+
+def test_protection_invalid_existing_store_fails_closed_without_rotation(
+    tmp_path: Path,
+) -> None:
+    trusted_root = tmp_path / "dedicated-store"
+    promote_openai_codex_oauth_credential(
+        trusted_root,
+        synthetic_credential(),
+        protection_backend=FakeProtectionBackend(),
+        now=NOW,
+    )
+    auth_file = trusted_root / "auth.json"
+    original = auth_file.read_text(encoding="utf-8")
+
+    with pytest.raises(ProviderCredentialStoreProtectionError) as exc_info:
+        provision_openai_codex_oauth_credential(
+            trusted_root,
+            synthetic_credential(issued_at=NOW + timedelta(hours=2)),
+            protection_backend=FakeProtectionBackend(fail_validate_file=True),
+            now=NOW + timedelta(hours=2),
+        )
+
+    assert exc_info.value.validation_category == "synthetic_validate_file_failure"
+    assert auth_file.read_text(encoding="utf-8") == original
+    assert not list(trusted_root.glob(".agent-platform-store-stage.*"))
 
 
 def test_unrelated_singleton_and_multiple_codex_credentials_are_rejected(

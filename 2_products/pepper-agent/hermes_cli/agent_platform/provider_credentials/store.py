@@ -297,7 +297,7 @@ def _protection_backend(
     return backend if backend is not None else StoreProtectionBackend()
 
 
-def _load_json_auth_store(auth_file: Path) -> dict[str, Any]:
+def _load_json_auth_store_with_bytes(auth_file: Path) -> tuple[bytes, dict[str, Any]]:
     if not auth_file.exists():
         raise MissingProviderCredentialError(validation_category="auth_store_missing")
     try:
@@ -305,7 +305,12 @@ def _load_json_auth_store(auth_file: Path) -> dict[str, Any]:
             raise InvalidProviderCredentialStoreError(
                 validation_category="auth_store_too_large"
             )
-        raw = json.loads(auth_file.read_text(encoding="utf-8"))
+        auth_store_bytes = auth_file.read_bytes()
+        if len(auth_store_bytes) > _MAX_AUTH_STORE_BYTES:
+            raise InvalidProviderCredentialStoreError(
+                validation_category="auth_store_too_large"
+            )
+        raw = json.loads(auth_store_bytes.decode("utf-8"))
     except ProviderCredentialStoreError:
         raise
     except Exception as exc:
@@ -317,7 +322,11 @@ def _load_json_auth_store(auth_file: Path) -> dict[str, Any]:
         raise InvalidProviderCredentialStoreError(
             validation_category="auth_store_not_object"
         )
-    return raw
+    return auth_store_bytes, raw
+
+
+def _load_json_auth_store(auth_file: Path) -> dict[str, Any]:
+    return _load_json_auth_store_with_bytes(auth_file)[1]
 
 
 def _require_dict(value: Any, category: str) -> dict[str, Any]:
@@ -908,6 +917,16 @@ def _write_exclusive_file(path: Path, payload: str) -> None:
         ) from None
 
 
+def _replace_file_atomically(source: Path, target: Path) -> None:
+    try:
+        os.replace(str(source), str(target))
+    except Exception as exc:
+        raise ProviderCredentialStoreWriteError(
+            validation_category="replace_failed",
+            detail=exc.__class__.__name__,
+        ) from None
+
+
 def _remove_staging_dir(path: Path) -> None:
     if not path.exists():
         return
@@ -929,6 +948,26 @@ def _remove_staging_dir(path: Path) -> None:
             current.rmdir()
         except OSError:
             pass
+
+
+def _authorized_expired_store_bytes(
+    auth_file: Path,
+    backend: StoreProtectionBackend,
+    *,
+    now: datetime | None,
+) -> bytes:
+    backend.validate_directory(auth_file.parent)
+    backend.validate_file(auth_file)
+    auth_store_bytes, payload = _load_json_auth_store_with_bytes(auth_file)
+    try:
+        validate_openai_codex_auth_store_payload(payload, now=now)
+    except InvalidProviderCredentialStoreError as exc:
+        if exc.validation_category == "access_token_expired":
+            return auth_store_bytes
+        raise
+    raise ExistingProviderCredentialStoreError(
+        validation_category="durable_store_valid"
+    )
 
 
 def _status_from_valid_store(
@@ -1064,6 +1103,69 @@ def promote_openai_codex_oauth_credential(
         _remove_staging_dir(staging_dir)
 
 
+def provision_openai_codex_oauth_credential(
+    trusted_store_root: Path,
+    credential: OpenAICodexOAuthCredential,
+    *,
+    protection_backend: StoreProtectionBackend | None = None,
+    now: datetime | None = None,
+) -> ProviderCredentialStatus:
+    """Create the dedicated store or rotate an expired existing store."""
+
+    auth_file = _auth_file_for_root(trusted_store_root)
+    if not auth_file.exists():
+        return promote_openai_codex_oauth_credential(
+            trusted_store_root,
+            credential,
+            protection_backend=protection_backend,
+            now=now,
+        )
+    return _rotate_expired_openai_codex_oauth_credential(
+        trusted_store_root,
+        credential,
+        protection_backend=protection_backend,
+        now=now,
+    )
+
+
+def _rotate_expired_openai_codex_oauth_credential(
+    trusted_store_root: Path,
+    credential: OpenAICodexOAuthCredential,
+    *,
+    protection_backend: StoreProtectionBackend | None,
+    now: datetime | None,
+) -> ProviderCredentialStatus:
+    auth_file = _auth_file_for_root(trusted_store_root)
+    backend = _protection_backend(protection_backend)
+    authorized_bytes = _authorized_expired_store_bytes(auth_file, backend, now=now)
+    payload = json.dumps(_build_auth_store(credential), indent=2, sort_keys=True) + "\n"
+    staging_dir = auth_file.parent / f".agent-platform-store-stage.{uuid.uuid4().hex}"
+    try:
+        staging_dir.mkdir(mode=_POSIX_DIRECTORY_MODE)
+        backend.prepare_directory(staging_dir)
+        staging_file = staging_dir / _AUTH_FILE_NAME
+        _write_exclusive_file(staging_file, payload)
+        backend.prepare_file(staging_file)
+        validate_openai_codex_auth_store_payload(
+            _load_json_auth_store(staging_file), now=now
+        )
+        current_authorized_bytes = _authorized_expired_store_bytes(
+            auth_file, backend, now=now
+        )
+        if current_authorized_bytes != authorized_bytes:
+            raise ExistingProviderCredentialStoreError(
+                validation_category="durable_store_changed"
+            )
+        _replace_file_atomically(staging_file, auth_file)
+        return read_openai_codex_credential_status(
+            trusted_store_root,
+            protection_backend=backend,
+            now=now,
+        )
+    finally:
+        _remove_staging_dir(staging_dir)
+
+
 def clear_local_openai_codex_credential(
     trusted_store_root: Path,
     *,
@@ -1113,6 +1215,7 @@ __all__ = [
     "load_openai_codex_oauth_credential",
     "product_python_platform",
     "promote_openai_codex_oauth_credential",
+    "provision_openai_codex_oauth_credential",
     "read_openai_codex_credential_status",
     "validate_openai_codex_auth_store_payload",
     "validate_windows_dacl_principals",

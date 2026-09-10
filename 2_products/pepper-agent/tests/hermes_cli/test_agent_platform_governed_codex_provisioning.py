@@ -16,6 +16,7 @@ from hermes_cli.agent_platform.provider_credentials.contracts import (
     OPENAI_CODEX_CREDENTIAL_STORE_ID,
     OPENAI_CODEX_INTERNAL_LABEL,
     OPENAI_CODEX_PROVIDER_ENDPOINT,
+    OpenAICodexOAuthCredential,
 )
 from hermes_cli.agent_platform.execution_profile_provisioning import (
     PEPPER_IMPLEMENTATION_PRODUCT_PROFILE_NAME,
@@ -28,6 +29,7 @@ from hermes_cli.agent_platform.provider_credentials.provisioning import (
 from hermes_cli.agent_platform.provider_credentials.store import (
     StoreProtectionReport,
     default_openai_codex_credential_store_root,
+    promote_openai_codex_oauth_credential,
 )
 from hermes_cli.subcommands.agent_platform import build_agent_platform_parser
 
@@ -74,45 +76,70 @@ class FakeProtectionBackend:
         return StoreProtectionReport("auth_file", "test", True)
 
 
-def synthetic_access_token() -> str:
+def synthetic_access_token(
+    *, issued_at: datetime = NOW, exp_delta: timedelta = timedelta(hours=1)
+) -> str:
     payload = {
-        "iat": int(NOW.timestamp()),
-        "exp": int((NOW + timedelta(hours=1)).timestamp()),
+        "iat": int(issued_at.timestamp()),
+        "exp": int((issued_at + exp_delta).timestamp()),
     }
-    body = base64.urlsafe_b64encode(
-        json.dumps(payload, separators=(",", ":")).encode("utf-8")
-    ).decode("ascii").rstrip("=")
+    body = (
+        base64
+        .urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+        .decode("ascii")
+        .rstrip("=")
+    )
     return "header." + body + ".signature"
 
 
-def write_acquisition_payload(env: dict[str, str]) -> str:
-    access_token = synthetic_access_token()
+def synthetic_credential(
+    *,
+    issued_at: datetime = NOW,
+    expires_delta: timedelta = timedelta(hours=1),
+    refresh_token: str = "synthetic-refresh-token",
+) -> OpenAICodexOAuthCredential:
+    return OpenAICodexOAuthCredential(
+        access_token=synthetic_access_token(
+            issued_at=issued_at, exp_delta=expires_delta
+        ),
+        refresh_token=refresh_token,
+        last_refresh_utc=issued_at,
+        expires_at_utc=issued_at + expires_delta,
+    )
+
+
+def write_acquisition_payload(
+    env: dict[str, str],
+    *,
+    issued_at: datetime = NOW,
+    exp_delta: timedelta = timedelta(hours=1),
+    refresh_token: str = "synthetic-refresh-token",
+) -> str:
+    access_token = synthetic_access_token(issued_at=issued_at, exp_delta=exp_delta)
     acquisition_home = Path(env["HERMES_HOME"])
     acquisition_home.mkdir(parents=True, exist_ok=True)
     (acquisition_home / "auth.json").write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "active_provider": "openai-codex",
-                "providers": {},
-                "credential_pool": {
-                    "openai-codex": [
-                        {
-                            "id": "source",
-                            "label": "source-derived",
-                            "auth_type": "oauth",
-                            "priority": 0,
-                            "source": "manual:device_code",
-                            "access_token": access_token,
-                            "refresh_token": "synthetic-refresh-token",
-                            "base_url": OPENAI_CODEX_PROVIDER_ENDPOINT,
-                            "last_refresh": NOW.isoformat().replace("+00:00", "Z"),
-                        }
-                    ]
-                },
-                "updated_at": NOW.isoformat().replace("+00:00", "Z"),
-            }
-        ),
+        json.dumps({
+            "version": 1,
+            "active_provider": "openai-codex",
+            "providers": {},
+            "credential_pool": {
+                "openai-codex": [
+                    {
+                        "id": "source",
+                        "label": "source-derived",
+                        "auth_type": "oauth",
+                        "priority": 0,
+                        "source": "manual:device_code",
+                        "access_token": access_token,
+                        "refresh_token": refresh_token,
+                        "base_url": OPENAI_CODEX_PROVIDER_ENDPOINT,
+                        "last_refresh": issued_at.isoformat().replace("+00:00", "Z"),
+                    }
+                ]
+            },
+            "updated_at": issued_at.isoformat().replace("+00:00", "Z"),
+        }),
         encoding="utf-8",
     )
     return access_token
@@ -183,6 +210,52 @@ def test_governed_provisioning_promotes_isolated_acquisition_to_primary_store(
     assert entry["access_token"] == acquired["access_token"]
 
 
+def test_governed_provisioning_rotates_expired_primary_store(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    product_root = tmp_path / "pepper-agent"
+    product_root.mkdir()
+    home = tmp_path / "hermes-home"
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    governed_root = default_openai_codex_credential_store_root()
+    promote_openai_codex_oauth_credential(
+        governed_root,
+        synthetic_credential(refresh_token="synthetic-refresh-token-old"),
+        protection_backend=FakeProtectionBackend(),
+        now=NOW,
+    )
+    governed_auth_file = governed_root / "auth.json"
+    original = governed_auth_file.read_text(encoding="utf-8")
+    rotation_now = NOW + timedelta(hours=2)
+    acquired: dict[str, str] = {}
+
+    def fake_executor(_argv, env, _cwd):
+        acquired["access_token"] = write_acquisition_payload(
+            env,
+            issued_at=rotation_now,
+            refresh_token="synthetic-refresh-token-rotated",
+        )
+        return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+
+    status = provision_openai_codex_primary(
+        product_root=product_root,
+        acquisition_root=tmp_path / "acquisition",
+        python_executable=Path(sys.executable),
+        executor=fake_executor,
+        protection_backend=FakeProtectionBackend(),
+        now=rotation_now,
+    )
+    payload = json.loads(governed_auth_file.read_text(encoding="utf-8"))
+    entry = payload["credential_pool"]["openai-codex"][0]
+
+    assert original != governed_auth_file.read_text(encoding="utf-8")
+    assert status.configured is True
+    assert status.durable_store_valid is True
+    assert entry["access_token"] == acquired["access_token"]
+    assert entry["refresh_token"] == "synthetic-refresh-token-rotated"
+
+
 def test_governed_provisioning_failure_remains_fail_closed_without_promotion(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -215,14 +288,47 @@ def test_governed_provisioning_failure_remains_fail_closed_without_promotion(
     assert not governed_auth_file.exists()
 
 
+def test_governed_provisioning_failure_preserves_existing_durable_store(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    product_root = tmp_path / "pepper-agent"
+    product_root.mkdir()
+    home = tmp_path / "hermes-home"
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    governed_root = default_openai_codex_credential_store_root()
+    promote_openai_codex_oauth_credential(
+        governed_root,
+        synthetic_credential(refresh_token="synthetic-refresh-token-old"),
+        protection_backend=FakeProtectionBackend(),
+        now=NOW,
+    )
+    governed_auth_file = governed_root / "auth.json"
+    original = governed_auth_file.read_text(encoding="utf-8")
+
+    def failing_executor(_argv, _env, _cwd):
+        return SimpleNamespace(returncode=17, stdout=b"", stderr=b"")
+
+    with pytest.raises(GovernedCodexProvisioningError) as exc_info:
+        provision_openai_codex_primary(
+            product_root=product_root,
+            acquisition_root=tmp_path / "acquisition",
+            python_executable=Path(sys.executable),
+            executor=failing_executor,
+            protection_backend=FakeProtectionBackend(),
+            now=NOW + timedelta(hours=2),
+        )
+
+    assert exc_info.value.validation_category == "oauth_acquisition_failed"
+    assert governed_auth_file.read_text(encoding="utf-8") == original
+
+
 def test_agent_platform_parser_accepts_only_governed_codex_profile() -> None:
     parser = argparse.ArgumentParser(prog="hermes")
     subparsers = parser.add_subparsers(dest="command")
     build_agent_platform_parser(subparsers, cmd_agent_platform=agent_platform_command)
 
-    args = parser.parse_args(
-        ["agent-platform", "auth", "add", "openai-codex.primary"]
-    )
+    args = parser.parse_args(["agent-platform", "auth", "add", "openai-codex.primary"])
 
     assert args.command == "agent-platform"
     assert args.agent_platform_action == "auth"
@@ -238,14 +344,12 @@ def test_agent_platform_parser_accepts_governed_implementation_profile() -> None
     subparsers = parser.add_subparsers(dest="command")
     build_agent_platform_parser(subparsers, cmd_agent_platform=agent_platform_command)
 
-    args = parser.parse_args(
-        [
-            "agent-platform",
-            "profile",
-            "status",
-            "pepper-implementation-product",
-        ]
-    )
+    args = parser.parse_args([
+        "agent-platform",
+        "profile",
+        "status",
+        "pepper-implementation-product",
+    ])
 
     assert args.command == "agent-platform"
     assert args.agent_platform_action == "profile"

@@ -23,7 +23,7 @@ from hermes_cli.agent_platform.provider_credentials.store import (
     StoreProtectionBackend,
     default_openai_codex_credential_store_root,
     extract_openai_codex_oauth_credential_from_auth_store_payload,
-    promote_openai_codex_oauth_credential,
+    provision_openai_codex_oauth_credential,
     read_openai_codex_credential_status,
 )
 
@@ -150,13 +150,15 @@ def _provision_openai_codex_primary_from_acquisition_root(
             acquisition_auth_file.read_text(encoding="utf-8")
         )
     except Exception:
-        raise GovernedCodexProvisioningError("acquisition_auth_store_unreadable") from None
+        raise GovernedCodexProvisioningError(
+            "acquisition_auth_store_unreadable"
+        ) from None
 
     credential = extract_openai_codex_oauth_credential_from_auth_store_payload(
         acquisition_payload,
         now=now,
     )
-    return promote_openai_codex_oauth_credential(
+    return provision_openai_codex_oauth_credential(
         default_openai_codex_credential_store_root(),
         credential,
         protection_backend=protection_backend,
