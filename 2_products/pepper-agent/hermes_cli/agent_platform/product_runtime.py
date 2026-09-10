@@ -2725,9 +2725,12 @@ def _apply_pending_successor_approval_precedence(
     snapshot: dict[str, Any],
     remaining_blockers: list[dict[str, Any]],
 ) -> None:
-    if str(snapshot.get("current_ticket_id") or "").strip():
+    if _workflow_has_active_nonterminal_current_execution(snapshot):
         return
-    overlay, blocker = _pending_generated_successor_ticket_approval_overlay(snapshot)
+    overlay, blocker = _pending_generated_successor_ticket_approval_overlay(
+        snapshot,
+        allow_current_ticket_projection=True,
+    )
     if overlay is not None:
         snapshot.update(overlay)
     if blocker is not None:
@@ -2822,6 +2825,229 @@ def _pending_successor_approval_authority_blocker(
     }
 
 
+def _workflow_has_active_nonterminal_current_execution(workflow: dict[str, Any]) -> bool:
+    if not str(workflow.get("current_ticket_id") or "").strip():
+        return False
+    if int(workflow.get("active_execution_count") or 0) > 0:
+        return True
+    if workflow.get("execution_state") == "active_executions":
+        return True
+    if not bool(workflow.get("execution_started")):
+        return False
+    return str(workflow.get("workflow_status") or "").strip() not in {
+        "completed",
+        "execution_completed",
+        "review_accepted",
+        "review_accepted_pending_human_git_handoff",
+    }
+
+
+def _pending_successor_record_validation_workflow(
+    workflow: dict[str, Any],
+    record: dict[str, Any],
+) -> dict[str, Any]:
+    canonical = record.get("canonical_next_ticket_authority")
+    if not isinstance(canonical, dict):
+        canonical = {}
+    ticket_id = _safe_id(record.get("ticket_id"))
+    source = {
+        "project_id": record.get("project_id")
+        or canonical.get("project_id")
+        or workflow.get("project_id"),
+        "project_name": record.get("project_name")
+        or canonical.get("project_name")
+        or workflow.get("project_name"),
+        "macroproject_id": record.get("macroproject_id")
+        or canonical.get("macroproject_id")
+        or workflow.get("macroproject_id"),
+        "macroproject_title": record.get("macroproject_title")
+        or canonical.get("macroproject_title")
+        or workflow.get("macroproject_title"),
+        "current_ticket_id": None,
+        "next_ticket_id": ticket_id,
+        "next_ticket_title": record.get("ticket_title") or canonical.get("ticket_title"),
+    }
+    predecessor = _generated_record_predecessor_ticket_id(record)
+    if predecessor:
+        source["closed_predecessor_ticket_id"] = predecessor
+    return source
+
+
+def _generated_record_predecessor_ticket_id(record: dict[str, Any]) -> str:
+    canonical = record.get("canonical_next_ticket_authority")
+    if not isinstance(canonical, dict):
+        canonical = {}
+    predecessor = str(
+        record.get("predecessor_ticket_id")
+        or canonical.get("predecessor_ticket_id")
+        or ""
+    ).strip()
+    return predecessor if predecessor and _SAFE_ID.fullmatch(predecessor) else ""
+
+
+def _pending_ticket_approval_records_or_blocker() -> tuple[
+    list[dict[str, Any]],
+    dict[str, Any] | None,
+]:
+    try:
+        from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
+            CANONICAL_TICKET_ID,
+            approval_decision_record_path_for_ticket,
+            generation_record_path_for_ticket,
+            load_approval_decision_record,
+            load_generation_record,
+        )
+    except Exception:
+        return [], None
+
+    try:
+        store_dir = generation_record_path_for_ticket(CANONICAL_TICKET_ID).parent
+        if not store_dir.exists():
+            return [], None
+        records: list[dict[str, Any]] = []
+        for path in sorted(store_dir.glob("*.json")):
+            if path.name.endswith(".approval-decision.json"):
+                continue
+            ticket_id = _safe_id(path.name.removesuffix(".json"))
+            if not ticket_id:
+                continue
+            try:
+                record = load_generation_record(ticket_id=ticket_id)
+            except Exception as exc:
+                if approval_decision_record_path_for_ticket(ticket_id).exists():
+                    continue
+                try:
+                    raw_record = json.loads(path.read_text(encoding="utf-8"))
+                except Exception:
+                    raw_record = None
+                if (
+                    isinstance(raw_record, dict)
+                    and raw_record.get("human_ticket_approval_present") is not True
+                ):
+                    return [], _pending_successor_approval_authority_blocker(
+                        ticket_id,
+                        status="blocked_by_invalid_generated_successor_authority",
+                        evidence=exc,
+                    )
+                continue
+            if record is None or record.get("human_ticket_approval_present") is True:
+                continue
+            try:
+                decision = load_approval_decision_record(
+                    ticket_id=str(record["ticket_id"]),
+                    generation_record=record,
+                )
+            except Exception as exc:
+                return [], _pending_successor_approval_authority_blocker(
+                    ticket_id,
+                    status="blocked_by_invalid_pending_successor_approval_authority",
+                    evidence=exc,
+                )
+            if decision is None:
+                records.append(record)
+    except Exception:
+        return [], None
+    return records, None
+
+
+def _correction_successor_records_for_precedence() -> list[dict[str, Any]]:
+    try:
+        from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
+            generated_record_to_workflow_overlay,
+            load_generation_record,
+        )
+    except Exception:
+        return []
+
+    records: list[dict[str, Any]] = []
+    for ticket_id in reversed(_governed_authority_ticket_ids_from_records()):
+        try:
+            record = load_generation_record(
+                ticket_id=ticket_id,
+                allow_terminal_rejected_historical=True,
+            )
+        except Exception:
+            continue
+        if record is None:
+            continue
+        try:
+            overlay = generated_record_to_workflow_overlay(record)
+        except Exception:
+            continue
+        if overlay.get("workflow_status") == "awaiting_correction":
+            records.append(record)
+    return records
+
+
+def _generated_successor_record_for_precedence(
+    workflow: dict[str, Any],
+) -> tuple[
+    dict[str, Any] | None,
+    dict[str, Any] | None,
+    dict[str, Any] | None,
+    dict[str, Any] | None,
+]:
+    active_ticket_id = str(workflow.get("current_ticket_id") or "").strip()
+    pending_records, pending_blocker = _pending_ticket_approval_records_or_blocker()
+    if pending_blocker is not None:
+        return None, None, None, pending_blocker
+    if len(pending_records) > 1:
+        pending_ids = [_safe_id(item.get("ticket_id")) for item in pending_records]
+        return None, None, None, _pending_successor_approval_authority_blocker(
+            "SUCCESSOR",
+            status="blocked_by_ambiguous_pending_successor_approval_authority",
+            evidence=f"multiple pending ticket approvals are present: {pending_ids}",
+        )
+    if len(pending_records) == 1:
+        record = pending_records[0]
+        if _safe_id(record.get("ticket_id")) == active_ticket_id:
+            return None, None, None, None
+        if not _generated_record_predecessor_ticket_id(record):
+            return None, None, None, None
+        validation_workflow = _pending_successor_record_validation_workflow(
+            workflow,
+            record,
+        )
+        try:
+            canonical_next = resolve_canonical_next_ticket(validation_workflow)
+        except Exception as exc:
+            return None, None, None, _pending_successor_approval_authority_blocker(
+                _safe_id(record.get("ticket_id")),
+                status="blocked_by_invalid_pending_successor_approval_authority",
+                evidence=exc,
+            )
+        return record, canonical_next, validation_workflow, None
+
+    correction_records = _correction_successor_records_for_precedence()
+    if len(correction_records) > 1:
+        correction_ids = [_safe_id(item.get("ticket_id")) for item in correction_records]
+        return None, None, None, _pending_successor_approval_authority_blocker(
+            "SUCCESSOR",
+            status="blocked_by_ambiguous_generated_successor_revision_authority",
+            evidence=f"multiple rejected generated successors are present: {correction_ids}",
+        )
+    if len(correction_records) == 1:
+        record = correction_records[0]
+        if _safe_id(record.get("ticket_id")) == active_ticket_id:
+            return None, None, None, None
+        if not _generated_record_predecessor_ticket_id(record):
+            return None, None, None, None
+        validation_workflow = _pending_successor_record_validation_workflow(
+            workflow,
+            record,
+        )
+        try:
+            canonical_next = resolve_canonical_next_ticket(validation_workflow)
+        except Exception as exc:
+            return None, None, None, _pending_successor_approval_authority_blocker(
+                _safe_id(record.get("ticket_id")),
+                status="blocked_by_invalid_generated_successor_revision_authority",
+                evidence=exc,
+            )
+        return record, canonical_next, validation_workflow, None
+    return None, None, None, None
+
+
 def _execution_operational_summary() -> dict[str, Any]:
     try:
         source = build_execution_collection_source()
@@ -2888,20 +3114,36 @@ def _apply_current_projection_execution_lifecycle_overlay(
 
 def _pending_generated_successor_ticket_approval_overlay(
     workflow: dict[str, Any],
+    *,
+    allow_current_ticket_projection: bool = False,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     """Project a generated successor ticket lifecycle without starting execution."""
 
     active_ticket_id = str(workflow.get("current_ticket_id") or "").strip()
     if active_ticket_id:
-        return None, None
-    try:
-        canonical_next = resolve_canonical_next_ticket(workflow)
-    except Exception as exc:  # pragma: no cover - defensive live-state guard
-        return None, {
-            "id": "SUCCESSOR-TICKET-AUTHORITY",
-            "status": "blocked_by_unresolved_successor_authority",
-            "evidence": _safe_text(exc, limit=300),
-        }
+        if (
+            not allow_current_ticket_projection
+            or _workflow_has_active_nonterminal_current_execution(workflow)
+        ):
+            return None, None
+        record, canonical_next, authority_workflow, blocker = (
+            _generated_successor_record_for_precedence(workflow)
+        )
+        if blocker is not None:
+            return None, blocker
+        if record is None or canonical_next is None or authority_workflow is None:
+            return None, None
+    else:
+        record = None
+        authority_workflow = workflow
+        try:
+            canonical_next = resolve_canonical_next_ticket(workflow)
+        except Exception as exc:  # pragma: no cover - defensive live-state guard
+            return None, {
+                "id": "SUCCESSOR-TICKET-AUTHORITY",
+                "status": "blocked_by_unresolved_successor_authority",
+                "evidence": _safe_text(exc, limit=300),
+            }
     ticket_id = str(canonical_next.get("ticket_id") or "").strip()
     if not ticket_id:
         return None, None
@@ -2911,10 +3153,11 @@ def _pending_generated_successor_ticket_approval_overlay(
             load_generation_record,
         )
 
-        record = load_generation_record(
-            ticket_id=ticket_id,
-            allow_terminal_rejected_historical=True,
-        )
+        if record is None:
+            record = load_generation_record(
+                ticket_id=ticket_id,
+                allow_terminal_rejected_historical=True,
+            )
         if record is None:
             pending_records = _pending_ticket_approval_records()
             if pending_records:
@@ -2964,8 +3207,16 @@ def _pending_generated_successor_ticket_approval_overlay(
                     status="blocked_by_mismatched_pending_successor_approval_authority",
                     evidence="pending approval binding does not match generated successor authority",
                 )
+        if active_ticket_id:
+            authority_workflow = _pending_successor_record_validation_workflow(
+                workflow,
+                record,
+            )
         try:
-            load_pending_ticket_approval_generated_authority(ticket_id, workflow=workflow)
+            load_pending_ticket_approval_generated_authority(
+                ticket_id,
+                workflow=authority_workflow,
+            )
         except Exception as exc:
             return None, _pending_successor_approval_authority_blocker(
                 ticket_id,
@@ -3223,32 +3474,7 @@ def _p18_9_0_pending_ticket_approval_record() -> dict[str, Any] | None:
 
 
 def _pending_ticket_approval_records() -> list[dict[str, Any]]:
-    try:
-        from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
-            CANONICAL_TICKET_ID,
-            generation_record_path_for_ticket,
-            load_approval_decision_record,
-            load_generation_record,
-        )
-
-        store_dir = generation_record_path_for_ticket(CANONICAL_TICKET_ID).parent
-        records: list[dict[str, Any]] = []
-        for path in sorted(store_dir.glob("*.json")):
-            if path.name.endswith(".approval-decision.json"):
-                continue
-            try:
-                record = load_generation_record(ticket_id=path.name.removesuffix(".json"))
-            except Exception:
-                continue
-            if record is None or record.get("human_ticket_approval_present") is True:
-                continue
-            if load_approval_decision_record(
-                ticket_id=str(record["ticket_id"]),
-                generation_record=record,
-            ) is None:
-                records.append(record)
-    except Exception:
-        return []
+    records, _blocker = _pending_ticket_approval_records_or_blocker()
     return records
 
 
