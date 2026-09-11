@@ -41,9 +41,11 @@ from hermes_cli.agent_platform.ticket_factory import (
     TicketPublicationState,
     TicketResponseContractSpec,
     TicketSpec,
-    WaveDisposition,
     build_ticket_dependency_plan,
     lint_ticket_collection,
+)
+from hermes_cli.agent_platform.ticket_factory.dependency_planning import (
+    is_ticket_dependency_wave_ready,
 )
 from hermes_cli.agent_platform.ticket_factory.specs import (
     ProjectIdentifier,
@@ -1073,7 +1075,7 @@ def _validate_dependency_eligibility(
     )
     if target_wave is None:
         raise WorkPacketCompilerInputError("target ticket missing from dependency wave")
-    if target_wave.disposition is not WaveDisposition.DEPENDENCY_READY:
+    if not is_ticket_dependency_wave_ready(plan, ticket_id=ticket_id):
         raise WorkPacketCompilerInputError("target dependency wave is not ready")
 
 

@@ -605,6 +605,49 @@ def _plan_digest(
     return _sha256_text(_deterministic_json(record))
 
 
+_COMPILE_READY_WAVE_DISPOSITIONS = frozenset({
+    WaveDisposition.DEPENDENCY_READY,
+    WaveDisposition.SERIAL,
+})
+
+
+def is_single_ticket_dependency_plan_ready(
+    plan: TicketDependencyPlan,
+    *,
+    ticket_id: str,
+) -> bool:
+    """Return whether a one-ticket plan is unblocked and ready to compile."""
+
+    if plan.ticket_ids != (ticket_id,):
+        return False
+    return is_ticket_dependency_wave_ready(plan, ticket_id=ticket_id)
+
+
+def is_ticket_dependency_wave_ready(
+    plan: TicketDependencyPlan,
+    *,
+    ticket_id: str,
+) -> bool:
+    """Return whether one ticket's dependency wave is unblocked and compile-ready."""
+
+    if ticket_id not in plan.ticket_ids:
+        return False
+    if ticket_id in plan.blocked_ticket_ids:
+        return False
+    if any(blocker.ticket_id == ticket_id for blocker in plan.blockers):
+        return False
+    if ticket_id not in plan.topological_order:
+        return False
+    matching_waves = tuple(wave for wave in plan.waves if ticket_id in wave.ticket_ids)
+    if len(matching_waves) != 1:
+        return False
+    wave = matching_waves[0]
+    return (
+        wave.disposition in _COMPILE_READY_WAVE_DISPOSITIONS
+        and not wave.scope_collision_ids
+    )
+
+
 def _build_edges(tickets: tuple[TicketSpec, ...]) -> tuple[DependencyEdge, ...]:
     edges = tuple(
         DependencyEdge(

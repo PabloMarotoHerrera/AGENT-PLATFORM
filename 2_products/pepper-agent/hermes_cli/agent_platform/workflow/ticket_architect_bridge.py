@@ -66,6 +66,7 @@ from hermes_cli.agent_platform.ticket_factory import (
     build_ticket_dependency_plan,
     build_ticket_proposal,
     build_ticket_synthesis_review,
+    is_single_ticket_dependency_plan_ready,
     lint_ticket_collection,
     prepare_ticket_generator_assignments,
     publish_canonical_ticket,
@@ -4304,7 +4305,7 @@ def _validate_dependency_plan(
         )
     if plan.blocked_ticket_ids:
         raise TicketArchitectBridgeGenerationError(f"{target.ticket_id} dependency plan is blocked")
-    if len(plan.waves) != 1 or plan.waves[0].disposition.value != "dependency_ready":
+    if not is_single_ticket_dependency_plan_ready(plan, ticket_id=target.ticket_id):
         raise TicketArchitectBridgeGenerationError(
             f"{target.ticket_id} dependency plan must be dependency-ready"
         )

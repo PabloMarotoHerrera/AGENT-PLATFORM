@@ -67,6 +67,7 @@ from hermes_cli.agent_platform.ticket_factory import (
     build_ticket_dependency_plan,
     build_ticket_proposal,
     get_ticket_generator_role_profile,
+    is_single_ticket_dependency_plan_ready,
     list_ticket_generator_role_profiles,
     prepare_ticket_generator_assignments,
     validate_ticket_generator_proposal,
@@ -139,6 +140,7 @@ P16_3_EXPORTS = (
     "DependencyCollectionValidationError",
     "DependencyCycleError",
     "build_ticket_dependency_plan",
+    "is_single_ticket_dependency_plan_ready",
 )
 PUBLIC_MODELS = (
     ExternalDependencyResolution,
@@ -342,7 +344,7 @@ def annotation_contains_forbidden(annotation: object) -> bool:
 
 
 def test_package_imports_and_exports_p16_3_surface() -> None:
-    assert len(P16_3_EXPORTS) == 17
+    assert len(P16_3_EXPORTS) == 18
     assert isinstance(ticket_factory.__all__, tuple)
     assert len(ticket_factory.__all__) == len(set(ticket_factory.__all__))
     for expected in (P16_0_EXPORTS, P16_1_EXPORTS, P16_2_EXPORTS, P16_3_EXPORTS):
@@ -1058,6 +1060,44 @@ def test_serial_hint_creates_one_ticket_wave_and_isolates_ready_ticket() -> None
     assert generated.waves[0].ticket_ids == ("P16.1",)
     assert generated.waves[0].disposition is WaveDisposition.SERIAL
     assert generated.waves[1].ticket_ids == ("P16.2",)
+
+
+@pytest.mark.parametrize(
+    "hint, expected_disposition",
+    (
+        (ParallelizationHint.UNSPECIFIED, WaveDisposition.DEPENDENCY_READY),
+        (ParallelizationHint.PARALLEL_CANDIDATE, WaveDisposition.DEPENDENCY_READY),
+        (ParallelizationHint.SERIAL, WaveDisposition.SERIAL),
+    ),
+)
+def test_single_ticket_dependency_readiness_accepts_unblocked_ready_waves(
+    hint: ParallelizationHint,
+    expected_disposition: WaveDisposition,
+) -> None:
+    generated = plan(ticket("P16.1", hint=hint))
+
+    assert generated.waves[0].disposition is expected_disposition
+    assert is_single_ticket_dependency_plan_ready(generated, ticket_id="P16.1") is True
+
+
+def test_single_ticket_dependency_readiness_rejects_blocked_external_dependency() -> (
+    None
+):
+    generated = plan(
+        ticket(
+            "P16.1",
+            deps=(
+                dependency(
+                    "P15.1",
+                    dep_scope=DependencyScope.EXTERNAL_PROJECT,
+                    rationale="Synthetic external predecessor must be satisfied first.",
+                ),
+            ),
+        )
+    )
+
+    assert generated.blocked_ticket_ids == ("P16.1",)
+    assert is_single_ticket_dependency_plan_ready(generated, ticket_id="P16.1") is False
 
 
 def test_known_collision_separates_tickets() -> None:

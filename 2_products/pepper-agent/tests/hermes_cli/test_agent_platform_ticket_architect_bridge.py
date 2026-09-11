@@ -236,6 +236,14 @@ def _synthetic_p99_revision_roadmap_items() -> tuple[dict[str, object], ...]:
     )
 
 
+def _synthetic_p99_serial_revision_roadmap_items() -> tuple[dict[str, object], ...]:
+    items = [dict(item) for item in _synthetic_p99_revision_roadmap_items()]
+    ticket_contract = dict(_synthetic_implementation_contract("SerialSuccessor"))
+    ticket_contract["parallelization_hint"] = "serial"
+    items[1]["ticket_contract"] = ticket_contract
+    return tuple(items)
+
+
 def _synthetic_p99_2_workflow() -> dict[str, object]:
     return {
         "project_id": "PEPPER",
@@ -377,6 +385,41 @@ def _full_material_revision_contract(
         ],
         "recommended_commit_message": "P99.2 Apply synthetic full material revision",
     }
+
+
+def _blocking_external_dependency_revision_contract(
+    *,
+    ticket_id: str = "P99.2",
+) -> dict[str, object]:
+    return {
+        "schema_version": bridge.TICKET_SPEC_MATERIAL_REVISION_CONTRACT_SCHEMA_VERSION,
+        "ticket_id": ticket_id,
+        "dependencies": [
+            {
+                "ticket_id": "P100.1",
+                "kind": "hard_prerequisite",
+                "scope": "external_project",
+                "rationale": "Synthetic external predecessor lacks satisfied readiness evidence.",
+            }
+        ],
+    }
+
+
+def _dependency_plan_from_record(
+    record: dict[str, object],
+) -> bridge.TicketDependencyPlan:
+    return bridge.TicketDependencyPlan.model_validate(record["dependency_plan"])
+
+
+def _assert_single_ticket_dependency_ready(
+    record: dict[str, object],
+) -> bridge.TicketDependencyPlan:
+    plan = _dependency_plan_from_record(record)
+    assert bridge.is_single_ticket_dependency_plan_ready(
+        plan,
+        ticket_id=str(record["ticket_id"]),
+    )
+    return plan
 
 
 @pytest.fixture
@@ -1541,6 +1584,7 @@ def test_generic_full_material_revision_contract_generates_valid_successor_over_
     work_packet = revised["work_packet_compilation_result"]["work_packet"]
     publication = _publication(revised)
     context_pack = revised["context_pack"]
+    dependency_plan = _assert_single_ticket_dependency_ready(revised)
     context_items = {item["source_id"]: item for item in context_pack["items"]}
     history = [
         json.loads(line)
@@ -1558,6 +1602,7 @@ def test_generic_full_material_revision_contract_generates_valid_successor_over_
     assert ticket["scope"] == normalized_contract["scope"]
     assert ticket["dependencies"] == []
     assert ticket["parallelization_hint"] == "parallel_candidate"
+    assert dependency_plan.waves[0].disposition.value == "dependency_ready"
     assert ticket["context"][: len(normalized_contract["context"])] == normalized_contract[
         "context"
     ]
@@ -1611,6 +1656,282 @@ def test_generic_full_material_revision_contract_generates_valid_successor_over_
     assert result["worker_execution"] is False
     assert result["Kanban_dispatch"] is False
     assert result["Git_mutation"] is False
+
+def test_full_material_revision_with_serial_dependency_plan_succeeds(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        bridge,
+        "resolve_roadmap_ticket_authorities",
+        _synthetic_p99_revision_roadmap_items,
+    )
+    base_workflow = _synthetic_p99_2_workflow()
+    bridge.generate_current_ticket(workflow=base_workflow)
+    original = bridge.load_generation_record(ticket_id="P99.2")
+    assert original is not None
+    bridge.apply_ticket_approval_decision(
+        ticket_id="P99.2",
+        decision="reject",
+        actor="synthetic-human",
+    )
+    rejected_decision = bridge.load_approval_decision_record(
+        ticket_id="P99.2",
+        generation_record=original,
+    )
+    assert rejected_decision is not None
+    contract = _full_material_revision_contract(marker="C31-FULL-MATERIAL-SERIAL")
+    contract["parallelization_hint"] = "serial"
+    contract_digest = bridge.ticket_spec_material_revision_contract_digest(contract)
+
+    result = bridge.revise_rejected_successor_ticket(
+        workflow=_rejected_successor_workflow(original, base_workflow),
+        human_authorization_text=(
+            "Authorize REVISE_P99_2 with the supplied synthetic full-material "
+            "serial dependency revision contract for P99.2."
+        ),
+        revision_contract=contract,
+        authorizer_id="synthetic-human",
+        requested_project_id="PEPPER",
+        requested_ticket_id="P99.2",
+        requested_next_action_id="REVISE_P99_2",
+    )
+    revised = bridge.load_generation_record(ticket_id="P99.2")
+    assert revised is not None
+    dependency_plan = _assert_single_ticket_dependency_ready(revised)
+    history = [
+        json.loads(line)
+        for line in bridge
+        .rejected_successor_revision_history_path_for_ticket("P99.2")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+
+    assert result["revision_authority_accepted"] is True
+    assert result["revision_contract_accepted"] is True
+    assert result["revision_contract_applied"] is True
+    assert result["successor_generated"] is True
+    assert result["REVISION_CONTRACT_APPLIED"] is True
+    assert result["SUCCESSOR_GENERATED"] is True
+    assert result["revision_contract_SHA256"] == contract_digest
+    assert revised["ticket_spec"]["parallelization_hint"] == "serial"
+    assert dependency_plan.waves[0].disposition.value == "serial"
+    assert dependency_plan.blocked_ticket_ids == ()
+    assert (
+        revised["revision_authority"]["previous_ticket_spec_SHA256"]
+        == original["ticket_spec_SHA256"]
+    )
+    assert (
+        revised["revision_authority"]["revision_base_ticket_spec"]
+        == original["ticket_spec"]
+    )
+    assert revised["revision_authority"]["revision_contract_SHA256"] == contract_digest
+    assert history[0]["historical_rejected_generation_record"] == original
+    assert (
+        history[0]["historical_rejected_approval_decision_record"] == rejected_decision
+    )
+    assert history[0]["new_generation_record"] == revised
+    assert result["ticket_execution_authorized"] is False
+    assert result["WorkPacket_execution_authorized"] is False
+    assert result["worker_execution"] is False
+    assert result["Kanban_dispatch"] is False
+    assert result["Git_mutation"] is False
+    assert result["provider_dispatch_count"] == 0
+    assert result["model_inference_count"] == 0
+    assert result["Docker_commands_executed"] == 0
+    assert result["Graphify_commands_executed"] == 0
+
+
+def test_sparse_p99_material_revision_preserves_dependency_readiness(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        bridge,
+        "resolve_roadmap_ticket_authorities",
+        _synthetic_p99_revision_roadmap_items,
+    )
+    base_workflow = _synthetic_p99_2_workflow()
+    bridge.generate_current_ticket(workflow=base_workflow)
+    original = bridge.load_generation_record(ticket_id="P99.2")
+    assert original is not None
+    bridge.apply_ticket_approval_decision(
+        ticket_id="P99.2",
+        decision="reject",
+        actor="synthetic-human",
+    )
+    contract = {
+        "schema_version": bridge.TICKET_SPEC_MATERIAL_REVISION_CONTRACT_SCHEMA_VERSION,
+        "ticket_id": "P99.2",
+        "objective": "C31 sparse objective replacement keeps omitted material inherited.",
+    }
+
+    result = bridge.revise_rejected_successor_ticket(
+        workflow=_rejected_successor_workflow(original, base_workflow),
+        human_authorization_text=(
+            "Authorize REVISE_P99_2 with the supplied sparse material revision contract."
+        ),
+        revision_contract=contract,
+        authorizer_id="synthetic-human",
+        requested_project_id="PEPPER",
+        requested_ticket_id="P99.2",
+        requested_next_action_id="REVISE_P99_2",
+    )
+    revised = bridge.load_generation_record(ticket_id="P99.2")
+    assert revised is not None
+    dependency_plan = _assert_single_ticket_dependency_ready(revised)
+
+    assert result["revision_contract_applied"] is True
+    assert result["successor_generated"] is True
+    assert revised["ticket_spec"]["objective"] == contract["objective"]
+    assert (
+        revised["ticket_spec"]["tasks"][: len(original["ticket_spec"]["tasks"])]
+        == original["ticket_spec"]["tasks"]
+    )
+    assert (
+        revised["ticket_spec"]["acceptance_criteria"][
+            : len(original["ticket_spec"]["acceptance_criteria"])
+        ]
+        == original["ticket_spec"]["acceptance_criteria"]
+    )
+    assert dependency_plan.waves[0].disposition.value == "dependency_ready"
+    assert result["worker_execution"] is False
+    assert result["Kanban_dispatch"] is False
+    assert result["Git_mutation"] is False
+
+
+def test_non_ready_dependency_plan_failure_is_reentrant_and_side_effect_free(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        bridge,
+        "resolve_roadmap_ticket_authorities",
+        _synthetic_p99_revision_roadmap_items,
+    )
+    base_workflow = _synthetic_p99_2_workflow()
+    bridge.generate_current_ticket(workflow=base_workflow)
+    original = bridge.load_generation_record(ticket_id="P99.2")
+    assert original is not None
+    bridge.apply_ticket_approval_decision(
+        ticket_id="P99.2",
+        decision="reject",
+        actor="synthetic-human",
+    )
+    rejected_decision = bridge.load_approval_decision_record(
+        ticket_id="P99.2",
+        generation_record=original,
+    )
+    assert rejected_decision is not None
+    generation_path = bridge.generation_record_path_for_ticket("P99.2")
+    decision_path = bridge.approval_decision_record_path_for_ticket("P99.2")
+    original_generation_bytes = generation_path.read_bytes()
+    original_decision_bytes = decision_path.read_bytes()
+    failures: list[dict[str, object]] = []
+
+    for _attempt in range(2):
+        with pytest.raises(bridge.TicketArchitectBridgeGenerationError) as exc_info:
+            bridge.revise_rejected_successor_ticket(
+                workflow=_rejected_successor_workflow(original, base_workflow),
+                human_authorization_text=(
+                    "Authorize REVISE_P99_2 with the supplied blocked dependency "
+                    "revision contract."
+                ),
+                revision_contract=_blocking_external_dependency_revision_contract(),
+                authorizer_id="synthetic-human",
+                requested_project_id="PEPPER",
+                requested_ticket_id="P99.2",
+                requested_next_action_id="REVISE_P99_2",
+            )
+        failures.append(exc_info.value.failure_envelope)
+        assert generation_path.read_bytes() == original_generation_bytes
+        assert decision_path.read_bytes() == original_decision_bytes
+        assert bridge.load_generation_record(ticket_id="P99.2") == original
+        assert (
+            bridge.load_approval_decision_record(
+                ticket_id="P99.2",
+                generation_record=original,
+            )
+            == rejected_decision
+        )
+        assert not bridge.rejected_successor_revision_history_path_for_ticket(
+            "P99.2"
+        ).exists()
+
+    for failure in failures:
+        assert failure["failure_stage"] == "REVISION_CONTRACT_APPLIED"
+        assert failure["failure_classification"] == "successor_generation_failed"
+        assert failure["generation_sub_stage"] == "dependency_plan"
+        assert failure["original_error"] == "P99.2 dependency plan is blocked"
+        assert failure["revision_authority_accepted"] is True
+        assert failure["revision_contract_accepted"] is True
+        assert failure["revision_contract_applied"] is False
+        assert failure["successor_publication_created"] is False
+        assert failure["successor_publication_persisted"] is False
+        assert failure["state_mutated"] is False
+        assert failure["successor_generated"] is False
+        assert failure["worker_execution"] is False
+        assert failure["Kanban_dispatch"] is False
+        assert failure["Git_mutation"] is False
+        assert failure["provider_dispatch_count"] == 0
+        assert failure["model_inference_count"] == 0
+        assert failure["Docker_commands_executed"] == 0
+        assert failure["Graphify_commands_executed"] == 0
+    assert failures[0]["revision_sequence"] == failures[1]["revision_sequence"]
+
+
+def test_initial_and_rejected_successor_generation_share_dependency_readiness(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        bridge,
+        "resolve_roadmap_ticket_authorities",
+        _synthetic_p99_serial_revision_roadmap_items,
+    )
+    base_workflow = _synthetic_p99_2_workflow()
+    bridge.generate_current_ticket(workflow=base_workflow)
+    original = bridge.load_generation_record(ticket_id="P99.2")
+    assert original is not None
+    original_dependency_plan = _assert_single_ticket_dependency_ready(original)
+    bridge.apply_ticket_approval_decision(
+        ticket_id="P99.2",
+        decision="reject",
+        actor="synthetic-human",
+    )
+
+    result = bridge.revise_rejected_successor_ticket(
+        workflow=_rejected_successor_workflow(original, base_workflow),
+        human_authorization_text=(
+            "Authorize REVISE_P99_2 with the supplied sparse parity revision contract."
+        ),
+        revision_contract={
+            "schema_version": bridge.TICKET_SPEC_MATERIAL_REVISION_CONTRACT_SCHEMA_VERSION,
+            "ticket_id": "P99.2",
+            "objective": "C31 parity objective replacement preserves serial readiness.",
+        },
+        authorizer_id="synthetic-human",
+        requested_project_id="PEPPER",
+        requested_ticket_id="P99.2",
+        requested_next_action_id="REVISE_P99_2",
+    )
+    revised = bridge.load_generation_record(ticket_id="P99.2")
+    assert revised is not None
+    revised_dependency_plan = _assert_single_ticket_dependency_ready(revised)
+
+    assert original["ticket_spec"]["parallelization_hint"] == "serial"
+    assert revised["ticket_spec"]["parallelization_hint"] == "serial"
+    assert (
+        original_dependency_plan.waves[0].disposition
+        == revised_dependency_plan.waves[0].disposition
+    )
+    assert result["revision_contract_applied"] is True
+    assert result["successor_generated"] is True
+    assert result["worker_execution"] is False
+    assert result["Kanban_dispatch"] is False
+    assert result["Git_mutation"] is False
+
+
 
 
 def test_revision_generation_failure_envelope_preserves_original_sub_stage(

@@ -35,6 +35,7 @@ from hermes_cli.agent_platform.ticket_factory.dependency_planning import (
     TicketPlanningRequest,
     WaveDisposition,
     build_ticket_dependency_plan,
+    is_single_ticket_dependency_plan_ready,
 )
 
 from hermes_cli.agent_platform.ticket_factory.generator_roles import (
@@ -253,6 +254,7 @@ __all__ = (
     "DependencyCollectionValidationError",
     "DependencyCycleError",
     "build_ticket_dependency_plan",
+    "is_single_ticket_dependency_plan_ready",
     "MULTI_GENERATOR_SYNTHESIS_SCHEMA_VERSION",
     "TicketSynthesisField",
     "ProposalAgreementLevel",

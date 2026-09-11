@@ -548,6 +548,38 @@ def test_corpus_result_is_pass(
     assert regression_run.drifted_case_ids == ()
 
 
+@pytest.mark.parametrize(
+    "message, expected",
+    (
+        (
+            "see https://errors.pydantic.dev/2.13/v/literal_error for details",
+            "see https://errors.pydantic.dev/2.8/v/literal_error for details",
+        ),
+        (
+            "see https://errors.pydantic.dev/2.9/v/literal_error for details",
+            "see https://errors.pydantic.dev/2.8/v/literal_error for details",
+        ),
+        (
+            "see https://errors.pydantic.dev/3.0/v/literal_error for details",
+            "see https://errors.pydantic.dev/3.0/v/literal_error for details",
+        ),
+        (
+            "see https://errors.pydantic.dev/1.10/v/literal_error for details",
+            "see https://errors.pydantic.dev/1.10/v/literal_error for details",
+        ),
+        (
+            "see https://example.invalid/2.13/v/literal_error for details",
+            "see https://example.invalid/2.13/v/literal_error for details",
+        ),
+    ),
+)
+def test_pydantic_error_url_normalization_is_limited_to_minor_v2_drift(
+    message: str,
+    expected: str,
+) -> None:
+    assert historical_regression._bounded_exception_message(ValueError(message)) == expected
+
+
 def test_corpus_result_covers_all_cases(
     regression_run: historical_regression.HistoricalRegressionRun,
 ) -> None:

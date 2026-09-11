@@ -161,6 +161,9 @@ _POSIX_USER_PATH = re.compile(r"(^|\s)/home/[^/\s]+/")
 _GIT_SHA = re.compile(r"^[a-f0-9]{40}$")
 _DIGEST = re.compile(r"^[a-f0-9]{64}$")
 _WHITESPACE = re.compile(r"\s+")
+_PYDANTIC_ERROR_URL = re.compile(
+    r"https://errors\.pydantic\.dev/2\.[0-9]+/v/"
+)
 
 _SENSITIVE_MARKERS = (
     "sk-",
@@ -1311,7 +1314,9 @@ def _dispatch_case(case: HistoricalRegressionCase) -> BaseModel:
 
 
 def _bounded_exception_message(exc: Exception) -> str:
-    return _WHITESPACE.sub(" ", str(exc).strip())[:512]
+    message = _WHITESPACE.sub(" ", str(exc).strip())
+    message = _PYDANTIC_ERROR_URL.sub("https://errors.pydantic.dev/2.8/v/", message)
+    return message[:512]
 
 
 def _success_observation(

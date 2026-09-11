@@ -247,6 +247,7 @@ def ticket(
     ),
     validation_steps: tuple[TicketValidationStepSpec, ...] = (validation_step(),),
     deps: tuple[TicketDependencySpec, ...] = (),
+    hint: ParallelizationHint = ParallelizationHint.UNSPECIFIED,
 ) -> TicketSpec:
     return TicketSpec(
         project_id="P17",
@@ -257,7 +258,7 @@ def ticket(
         context=("Synthetic ticket context for compile-only behavior.",),
         authority_references=(authority(),),
         dependencies=deps,
-        parallelization_hint=ParallelizationHint.UNSPECIFIED,
+        parallelization_hint=hint,
         scope=ticket_scope or scope(),
         constraints=("Rollback by removing only P17.0 files.",),
         tasks=tasks,
@@ -984,6 +985,18 @@ def test_dependency_plan_recomputes_and_target_wave_ready(
     assert packet.ticket_id in plan.topological_order
     assert any(packet.ticket_id in wave.ticket_ids for wave in plan.waves)
     assert plan.waves[0].disposition is WaveDisposition.DEPENDENCY_READY
+
+
+def test_serial_dependency_wave_compiles_when_unblocked() -> None:
+    bundle = build_bundle(source_ticket=ticket(hint=ParallelizationHint.SERIAL))
+    result = bundle["result"]
+
+    assert result.dependency_plan.waves[0].disposition is WaveDisposition.SERIAL
+    assert result.work_packet.execution_ready is False
+    assert (
+        result.work_packet.authority_boundary
+        is WorkPacketAuthorityBoundary.COMPILE_ONLY
+    )
 
 
 def test_missing_planning_evidence_fails(bundle: dict[str, object]) -> None:
