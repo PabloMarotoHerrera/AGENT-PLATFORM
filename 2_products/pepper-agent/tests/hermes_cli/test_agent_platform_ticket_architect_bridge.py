@@ -7,7 +7,10 @@ import json
 import pytest
 
 from hermes_cli.agent_platform.workflow import ticket_architect_bridge as bridge
-from hermes_cli.agent_platform.ticket_factory import TicketLintDisposition
+from hermes_cli.agent_platform.ticket_factory import (
+    TicketLintDisposition,
+    TicketLintRuleCode,
+)
 from hermes_cli.agent_platform.workflow.governed_state_machine import GovernedWorkflowState
 
 
@@ -420,6 +423,79 @@ def _assert_single_ticket_dependency_ready(
         ticket_id=str(record["ticket_id"]),
     )
     return plan
+
+
+def _policy_invalid_lint_report_for_target(
+    target: bridge.GovernedTicketGenerationTarget,
+    *,
+    many_diagnostics: bool = False,
+) -> bridge.TicketLintReport:
+    project_spec = bridge._build_project_spec(target)
+    ticket_data = bridge._build_ticket_spec(target).model_dump(mode="json")
+    ticket_data["scope"]["allowed_paths"] = []
+    ticket_data["scope"]["allowed_actions"] = [
+        "Apply only synthetic lint failure fixture changes."
+    ]
+    ticket_data["scope"]["forbidden_actions"] = []
+    ticket_data["constraints"] = ["Synthetic constraint lacks reversal evidence."]
+    ticket_data["tasks"] = ["Synthetic task lacks reversal evidence."]
+    ticket_data["acceptance_criteria"] = [
+        "Synthetic acceptance lacks reversal evidence."
+    ]
+    ticket_data["response_contract"]["required_sections"] = ["Summary"]
+    if many_diagnostics:
+        ticket_data["validation_steps"] = [
+            {
+                "validation_id": f"V{index}",
+                "description": f"Synthetic forbidden validation command {index}.",
+                "command": "git add synthetic-target",
+                "expected_result": "The linter blocks the forbidden validation command.",
+                "required": True,
+            }
+            for index in range(1, 26)
+        ]
+    bad_ticket = bridge.TicketSpec.model_validate(ticket_data)
+    planning_request = bridge.TicketPlanningRequest(
+        project_spec=project_spec,
+        tickets=(bad_ticket,),
+        external_dependency_resolutions=(),
+        policy=bridge.ParallelPlanningPolicy(),
+    )
+    dependency_plan = bridge.build_ticket_dependency_plan(planning_request)
+    report = bridge.lint_ticket_collection(
+        bridge.TicketLintRequest(
+            project_spec=project_spec,
+            tickets=(bad_ticket,),
+            dependency_plan=dependency_plan,
+            collection_complete=False,
+        )
+    )
+    assert report.disposition is TicketLintDisposition.BLOCKED
+    return report
+
+
+def _expected_lint_diagnostic_projection(diagnostic) -> dict[str, object]:
+    return {
+        "diagnostic_id": diagnostic.diagnostic_id,
+        "code": diagnostic.code.value,
+        "severity": diagnostic.severity.value,
+        "scope": diagnostic.scope.value,
+        "ticket_id": diagnostic.ticket_id,
+        "field_path": diagnostic.field_path,
+        "message": diagnostic.message,
+        "blocking": diagnostic.blocking,
+    }
+
+
+def _stub_lint_report(monkeypatch, report: bridge.TicketLintReport) -> list[object]:
+    lint_calls: list[object] = []
+
+    def lint_stub(request):
+        lint_calls.append(request)
+        return report
+
+    monkeypatch.setattr(bridge, "lint_ticket_collection", lint_stub)
+    return lint_calls
 
 
 @pytest.fixture
@@ -1880,6 +1956,185 @@ def test_non_ready_dependency_plan_failure_is_reentrant_and_side_effect_free(
     assert failures[0]["revision_sequence"] == failures[1]["revision_sequence"]
 
 
+def test_initial_generation_lint_failure_envelope_preserves_bounded_diagnostics(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    target = bridge.p18_9_0_generation_target()
+    report = _policy_invalid_lint_report_for_target(target, many_diagnostics=True)
+    assert len(report.diagnostics) > bridge._LINT_FAILURE_DIAGNOSTIC_LIMIT
+    lint_calls = _stub_lint_report(monkeypatch, report)
+
+    with pytest.raises(bridge.TicketArchitectBridgeGenerationError) as exc_info:
+        bridge.generate_p18_9_0_ticket(workflow=_workflow())
+
+    failure = exc_info.value.failure_envelope
+    expected_diagnostics = [
+        _expected_lint_diagnostic_projection(diagnostic)
+        for diagnostic in report.diagnostics[: bridge._LINT_FAILURE_DIAGNOSTIC_LIMIT]
+    ]
+    assert len(lint_calls) == 1
+    assert failure["operation"] == "generate_current_ticket"
+    assert failure["failure_stage"] == "GENERATION_CONTRACT_APPLIED"
+    assert failure["failure_classification"] == "ticket_generation_failed"
+    assert failure["generation_sub_stage"] == "lint"
+    assert failure["original_error"] == "P18.9.0 TicketSpec lint must pass"
+    assert failure["lint_disposition"] == TicketLintDisposition.BLOCKED.value
+    assert failure["lint_report_SHA256"] == report.report_SHA256
+    assert failure["lint_summary"] == {
+        "diagnostic_count": report.summary.diagnostic_count,
+        "error_count": report.summary.error_count,
+        "warning_count": report.summary.warning_count,
+        "info_count": report.summary.info_count,
+        "blocked_ticket_ids": list(report.summary.blocked_ticket_ids),
+        "warning_ticket_ids": list(report.summary.warning_ticket_ids),
+        "collection_blocked": report.summary.collection_blocked,
+    }
+    assert failure["lint_diagnostics"] == expected_diagnostics
+    assert failure["lint_diagnostics_truncated"] is True
+    assert failure["lint_diagnostics_omitted_count"] == (
+        len(report.diagnostics) - bridge._LINT_FAILURE_DIAGNOSTIC_LIMIT
+    )
+    assert failure["ticket_publication_created"] is False
+    assert failure["ticket_publication_persisted"] is False
+    assert failure["state_mutated"] is False
+    assert failure["ticket_generated"] is False
+    assert failure["worker_execution"] is False
+    assert failure["Kanban_dispatch"] is False
+    assert failure["Git_mutation"] is False
+    assert failure["provider_dispatch_count"] == 0
+    assert failure["model_inference_count"] == 0
+    assert failure["Git_commands_executed"] == 0
+    assert failure["Docker_commands_executed"] == 0
+    assert failure["Graphify_commands_executed"] == 0
+    assert not bridge.generation_record_path_for_ticket("P18.9.0").exists()
+
+
+def test_rejected_successor_lint_failure_envelope_is_reentrant_and_side_effect_free(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        bridge,
+        "resolve_roadmap_ticket_authorities",
+        _synthetic_p99_revision_roadmap_items,
+    )
+    base_workflow = _synthetic_p99_2_workflow()
+    bridge.generate_current_ticket(workflow=base_workflow)
+    original = bridge.load_generation_record(ticket_id="P99.2")
+    assert original is not None
+    bridge.apply_ticket_approval_decision(
+        ticket_id="P99.2",
+        decision="reject",
+        actor="synthetic-human",
+    )
+    rejected_decision = bridge.load_approval_decision_record(
+        ticket_id="P99.2",
+        generation_record=original,
+    )
+    assert rejected_decision is not None
+    target = bridge.resolve_generation_target_from_workflow(base_workflow)
+    report = _policy_invalid_lint_report_for_target(target)
+    lint_calls = _stub_lint_report(monkeypatch, report)
+    generation_path = bridge.generation_record_path_for_ticket("P99.2")
+    decision_path = bridge.approval_decision_record_path_for_ticket("P99.2")
+    original_generation_bytes = generation_path.read_bytes()
+    original_decision_bytes = decision_path.read_bytes()
+    failures: list[dict[str, object]] = []
+
+    for _attempt in range(2):
+        with pytest.raises(bridge.TicketArchitectBridgeGenerationError) as exc_info:
+            bridge.revise_rejected_successor_ticket(
+                workflow=_rejected_successor_workflow(original, base_workflow),
+                human_authorization_text=(
+                    "Authorize REVISE_P99_2 with the supplied lint-failing revision "
+                    "contract."
+                ),
+                revision_contract=_full_material_revision_contract(),
+                authorizer_id="synthetic-human",
+                requested_project_id="PEPPER",
+                requested_ticket_id="P99.2",
+                requested_next_action_id="REVISE_P99_2",
+            )
+        failures.append(exc_info.value.failure_envelope)
+        assert generation_path.read_bytes() == original_generation_bytes
+        assert decision_path.read_bytes() == original_decision_bytes
+        assert bridge.load_generation_record(ticket_id="P99.2") == original
+        assert (
+            bridge.load_approval_decision_record(
+                ticket_id="P99.2",
+                generation_record=original,
+            )
+            == rejected_decision
+        )
+        assert not bridge.rejected_successor_revision_history_path_for_ticket(
+            "P99.2"
+        ).exists()
+
+    expected_diagnostics = [
+        _expected_lint_diagnostic_projection(diagnostic)
+        for diagnostic in report.diagnostics[: bridge._LINT_FAILURE_DIAGNOSTIC_LIMIT]
+    ]
+    assert len(lint_calls) == 2
+    for failure in failures:
+        assert failure["failure_stage"] == "REVISION_CONTRACT_APPLIED"
+        assert failure["failure_classification"] == "successor_generation_failed"
+        assert failure["generation_sub_stage"] == "lint"
+        assert failure["original_error"] == "P99.2 TicketSpec lint must pass"
+        assert failure["lint_disposition"] == TicketLintDisposition.BLOCKED.value
+        assert failure["lint_report_SHA256"] == report.report_SHA256
+        assert failure["lint_diagnostics"] == expected_diagnostics
+        assert failure["lint_diagnostics_truncated"] is False
+        assert failure["lint_diagnostics_omitted_count"] == 0
+        assert failure["revision_authority_accepted"] is True
+        assert failure["revision_contract_accepted"] is True
+        assert failure["revision_contract_applied"] is False
+        assert failure["successor_publication_created"] is False
+        assert failure["successor_publication_persisted"] is False
+        assert failure["state_mutated"] is False
+        assert failure["successor_generated"] is False
+        assert failure["worker_execution"] is False
+        assert failure["Kanban_dispatch"] is False
+        assert failure["Git_mutation"] is False
+        assert failure["provider_dispatch_count"] == 0
+        assert failure["model_inference_count"] == 0
+        assert failure["Git_commands_executed"] == 0
+        assert failure["Docker_commands_executed"] == 0
+        assert failure["Graphify_commands_executed"] == 0
+    assert failures[0]["revision_sequence"] == failures[1]["revision_sequence"]
+    assert failures[0]["lint_diagnostics"] == failures[1]["lint_diagnostics"]
+
+
+def test_lint_failure_metadata_redacts_sensitive_diagnostic_text() -> None:
+    report = _policy_invalid_lint_report_for_target(bridge.p18_9_0_generation_target())
+    secret_value = "sk-test1234567890abcdef"
+    secret_diagnostic = report.diagnostics[0].model_copy(
+        update={
+            "field_path": f"scope.forbidden_actions.OPENAI_API_KEY={secret_value}",
+            "message": f"Synthetic diagnostic leaked OPENAI_API_KEY={secret_value}",
+        }
+    )
+    secret_summary = report.summary.model_copy(
+        update={
+            "diagnostic_count": 1,
+            "error_count": 1,
+            "warning_count": 0,
+            "info_count": 0,
+        }
+    )
+    secret_report = report.model_copy(
+        update={"diagnostics": (secret_diagnostic,), "summary": secret_summary}
+    )
+
+    metadata = bridge._lint_failure_metadata(secret_report)
+    payload = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
+
+    assert secret_value not in payload
+    assert "OPENAI_API_KEY=" in payload
+    assert metadata["lint_diagnostics"][0]["diagnostic_id"] == "LINT-0001"
+    assert metadata["lint_diagnostics"][0]["code"] == report.diagnostics[0].code.value
+
+
 def test_initial_and_rejected_successor_generation_share_dependency_readiness(
     bridge_home,
     monkeypatch,
@@ -2542,6 +2797,68 @@ def test_chat_revise_generated_successor_ticket_uses_revision_backend_without_ex
     assert snapshot["worker_execution"] is False
     assert snapshot["Kanban_dispatch"] is False
     assert snapshot["Git_mutation"] is False
+
+
+def test_chat_generate_current_ticket_forwards_generation_failure_envelope(
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    envelope = {
+        "operation": "generate_current_ticket",
+        "ticket_id": "P18.9.0",
+        "failure_stage": "GENERATION_CONTRACT_APPLIED",
+        "failure_classification": "ticket_generation_failed",
+        "generation_sub_stage": "lint",
+        "lint_disposition": "blocked",
+        "lint_diagnostics": [
+            {
+                "diagnostic_id": "LINT-0001",
+                "code": TicketLintRuleCode.ALLOWED_PATHS_REQUIRED.value,
+                "severity": "error",
+                "scope": "ticket",
+                "ticket_id": "P18.9.0",
+                "field_path": "scope.allowed_paths",
+                "message": "Ticket scope must declare allowed_paths.",
+                "blocking": True,
+            }
+        ],
+        "worker_execution": False,
+        "Kanban_dispatch": False,
+        "Git_mutation": False,
+        "provider_dispatch_count": 0,
+        "model_inference_count": 0,
+        "Git_commands_executed": 0,
+        "Docker_commands_executed": 0,
+        "Graphify_commands_executed": 0,
+    }
+
+    def fail_generation(**_kwargs):
+        raise bridge.TicketArchitectBridgeGenerationError(
+            "P18.9.0 TicketSpec lint must pass",
+            failure_envelope=envelope,
+        )
+
+    monkeypatch.setattr(pr, "generate_current_governed_ticket", fail_generation)
+
+    result = _chat_tool_result(
+        "generate_current_ticket",
+        {"human_request_text": "Generate the current governed ticket."},
+    )
+
+    assert result["success"] is False
+    assert result["error"] == "P18.9.0 TicketSpec lint must pass"
+    assert result["generation_sub_stage"] == "lint"
+    assert result["lint_disposition"] == "blocked"
+    assert result["lint_diagnostics"] == envelope["lint_diagnostics"]
+    assert result["worker_execution"] is False
+    assert result["Kanban_dispatch"] is False
+    assert result["Git_mutation"] is False
+    assert result["provider_dispatch_count"] == 0
+    assert result["model_inference_count"] == 0
+    assert result["Git_commands_executed"] == 0
+    assert result["Docker_commands_executed"] == 0
+    assert result["Graphify_commands_executed"] == 0
 
 
 def test_revise_generated_successor_ticket_schema_exposes_bounded_revision_contract(

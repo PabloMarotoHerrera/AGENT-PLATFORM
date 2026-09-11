@@ -20,6 +20,7 @@ from typing import Annotated, Any, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
+from agent.redact import redact_sensitive_text
 from hermes_constants import get_hermes_home
 from hermes_cli.agent_platform.ticket_factory import (
     AuthorityReferenceKind,
@@ -165,6 +166,7 @@ _STORE_LOCK = threading.Lock()
 _P17_ACCEPTED_CLOSURE_SHA256 = hashlib.sha256(
     b"pepper-p17-accepted-work-packet-execution-mvp-closure-reused-for-p18-9-0"
 ).hexdigest()
+_LINT_FAILURE_DIAGNOSTIC_LIMIT = 20
 
 _REQUIRED_RESPONSE_SECTIONS = (
     "Summary",
@@ -1214,9 +1216,11 @@ class TicketArchitectBridgeError(ValueError):
         message: str = "",
         *,
         failure_envelope: dict[str, Any] | None = None,
+        failure_metadata: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(message)
         self.failure_envelope = failure_envelope
+        self.failure_metadata = failure_metadata
 
 
 class TicketArchitectBridgeInputError(TicketArchitectBridgeError):
@@ -2417,38 +2421,58 @@ def generate_current_ticket(
 ) -> dict[str, Any]:
     """Generate or replay the single canonical next governed ticket."""
 
-    resolved_target = target or resolve_generation_target_from_workflow(workflow)
-    eligible_workflow = (
-        workflow
-        if target is not None
-        else _workflow_bound_to_generation_target(workflow, target=resolved_target)
-    )
-    _validate_requested_identity(
-        requested_project_id=requested_project_id,
-        requested_ticket_id=requested_ticket_id,
-        requested_next_action_id=requested_next_action_id,
-        target=resolved_target,
-    )
-    with _STORE_LOCK:
-        existing = load_generation_record(
-            ticket_id=resolved_target.ticket_id,
+    resolved_target: GovernedTicketGenerationTarget | None = None
+    failure_stage = "GENERATION_REQUEST_ACCEPTED"
+    ticket_generated = False
+    state_mutated = False
+    try:
+        resolved_target = target or resolve_generation_target_from_workflow(workflow)
+        eligible_workflow = (
+            workflow
+            if target is not None
+            else _workflow_bound_to_generation_target(workflow, target=resolved_target)
+        )
+        _validate_requested_identity(
+            requested_project_id=requested_project_id,
+            requested_ticket_id=requested_ticket_id,
+            requested_next_action_id=requested_next_action_id,
             target=resolved_target,
         )
-        if existing is not None:
-            return _operational_result(existing, idempotent_replay=True)
+        with _STORE_LOCK:
+            existing = load_generation_record(
+                ticket_id=resolved_target.ticket_id,
+                target=resolved_target,
+            )
+            if existing is not None:
+                return _operational_result(existing, idempotent_replay=True)
 
-        _validate_workflow_eligibility(eligible_workflow, target=resolved_target)
-        try:
-            record = _build_generation_record(eligible_workflow, target=resolved_target)
-            validate_generation_record(record, target=resolved_target)
-            _persist_generation_record(record)
-        except TicketArchitectBridgeError:
-            raise
-        except Exception as exc:
-            raise TicketArchitectBridgeGenerationError(
-                f"{resolved_target.ticket_id} Ticket Architect bridge generation failed"
-            ) from exc
-    return _operational_result(record, idempotent_replay=False)
+            failure_stage = "WORKFLOW_ELIGIBILITY_ACCEPTED"
+            _validate_workflow_eligibility(eligible_workflow, target=resolved_target)
+            failure_stage = "GENERATION_CONTRACT_APPLIED"
+            try:
+                record = _build_generation_record(eligible_workflow, target=resolved_target)
+                ticket_generated = True
+                validate_generation_record(record, target=resolved_target)
+                _persist_generation_record(record)
+                state_mutated = True
+            except TicketArchitectBridgeError:
+                raise
+            except Exception as exc:
+                raise TicketArchitectBridgeGenerationError(
+                    f"{resolved_target.ticket_id} Ticket Architect bridge generation failed"
+                ) from exc
+        return _operational_result(record, idempotent_replay=False)
+    except TicketArchitectBridgeError as exc:
+        if getattr(exc, "failure_envelope", None) is None:
+            exc.failure_envelope = _current_ticket_generation_failure_envelope(
+                stage=failure_stage,
+                exc=exc,
+                target=resolved_target,
+                requested_ticket_id=requested_ticket_id,
+                ticket_generated=ticket_generated,
+                state_mutated=state_mutated,
+            )
+        raise
 
 
 def _workflow_bound_to_generation_target(
@@ -2806,6 +2830,84 @@ def _safe_revision_error_text(value: object, *, fallback: str) -> str:
     return text
 
 
+def _safe_lint_diagnostic_text(value: object, *, fallback: str) -> str:
+    text = _safe_revision_error_text(value, fallback=fallback)
+    redacted = redact_sensitive_text(text, force=True, redact_url_credentials=True)
+    return _safe_revision_error_text(redacted, fallback=fallback)
+
+
+def _enum_json_value(value: object) -> object:
+    if isinstance(value, Enum):
+        return value.value
+    return value
+
+
+def _lint_diagnostic_projection(diagnostic: object) -> dict[str, Any]:
+    diagnostic_id = str(getattr(diagnostic, "diagnostic_id", "") or "lint-diagnostic")
+    return {
+        "diagnostic_id": _safe_lint_diagnostic_text(
+            diagnostic_id,
+            fallback="lint-diagnostic",
+        ),
+        "code": _enum_json_value(getattr(diagnostic, "code", None)),
+        "severity": _enum_json_value(getattr(diagnostic, "severity", None)),
+        "scope": _enum_json_value(getattr(diagnostic, "scope", None)),
+        "ticket_id": getattr(diagnostic, "ticket_id", None),
+        "field_path": _safe_lint_diagnostic_text(
+            getattr(diagnostic, "field_path", None),
+            fallback=diagnostic_id,
+        ),
+        "message": _safe_lint_diagnostic_text(
+            getattr(diagnostic, "message", None),
+            fallback=diagnostic_id,
+        ),
+        "blocking": bool(getattr(diagnostic, "blocking", False)),
+    }
+
+
+def _lint_failure_metadata(report: TicketLintReport) -> dict[str, Any]:
+    diagnostics = [
+        _lint_diagnostic_projection(diagnostic)
+        for diagnostic in report.diagnostics[:_LINT_FAILURE_DIAGNOSTIC_LIMIT]
+    ]
+    omitted_count = max(0, len(report.diagnostics) - len(diagnostics))
+    return {
+        "generation_sub_stage": "lint",
+        "lint_disposition": report.disposition.value,
+        "lint_report_SHA256": report.report_SHA256,
+        "lint_policy_name": report.policy_name.value,
+        "lint_summary": {
+            "diagnostic_count": report.summary.diagnostic_count,
+            "error_count": report.summary.error_count,
+            "warning_count": report.summary.warning_count,
+            "info_count": report.summary.info_count,
+            "blocked_ticket_ids": list(report.summary.blocked_ticket_ids),
+            "warning_ticket_ids": list(report.summary.warning_ticket_ids),
+            "collection_blocked": report.summary.collection_blocked,
+        },
+        "lint_diagnostics": diagnostics,
+        "lint_diagnostics_truncated": omitted_count > 0,
+        "lint_diagnostics_omitted_count": omitted_count,
+    }
+
+
+def _bridge_failure_metadata(exc: Exception) -> dict[str, Any]:
+    for item in _revision_exception_chain(exc):
+        metadata = getattr(item, "failure_metadata", None)
+        if isinstance(metadata, dict):
+            return dict(metadata)
+    return {}
+
+
+def _failure_envelope_with_bridge_metadata(
+    envelope: dict[str, Any],
+    *,
+    exc: Exception,
+) -> dict[str, Any]:
+    envelope.update(_bridge_failure_metadata(exc))
+    return envelope
+
+
 def _first_schema_error(chain: tuple[Exception, ...]) -> tuple[str | None, str | None]:
     for item in chain:
         errors = item.errors() if hasattr(item, "errors") else None
@@ -2875,6 +2977,62 @@ def _revision_failure_classification(exc: Exception) -> str:
     return "governed_revision_failed"
 
 
+def _generation_failure_classification(exc: Exception) -> str:
+    if isinstance(exc, TicketArchitectBridgeInputError):
+        return "generation_request_invalid"
+    if isinstance(exc, TicketArchitectBridgeConflict):
+        return "governed_authority_conflict"
+    if isinstance(exc, TicketArchitectBridgeGenerationError):
+        return "ticket_generation_failed"
+    return "governed_generation_failed"
+
+
+def _current_ticket_generation_failure_envelope(
+    *,
+    stage: str,
+    exc: Exception,
+    target: GovernedTicketGenerationTarget | None,
+    requested_ticket_id: str | None,
+    ticket_generated: bool,
+    state_mutated: bool,
+) -> dict[str, Any]:
+    schema_detail = _revision_error_schema_detail(exc)
+    ticket_id = (
+        target.ticket_id if target is not None else str(requested_ticket_id or "").strip()
+    )
+    envelope = {
+        "schema_version": TICKET_ARCHITECT_BRIDGE_SCHEMA_VERSION,
+        "source_system": "pepper-ticket-architect-bridge",
+        "operation": "generate_current_ticket",
+        "ticket_id": ticket_id or None,
+        "generation_action_id": target.next_action_id if target is not None else None,
+        "failure_stage": stage,
+        "failure_classification": _generation_failure_classification(exc),
+        "validation_schema_error": schema_detail["message"],
+        "field_path": schema_detail["field_path"],
+        "original_exception_class": schema_detail["original_exception_class"],
+        "original_error": schema_detail["original_error"],
+        "generation_sub_stage": schema_detail["generation_sub_stage"],
+        "ticket_publication_created": ticket_generated,
+        "ticket_publication_persisted": False,
+        "state_mutated": state_mutated,
+        "ticket_generated": ticket_generated,
+        "recovery_next_action_hint": (
+            "Retry the governed current-ticket generation after correcting the generation "
+            "input; no fallback ticket was generated."
+        ),
+        "worker_execution": False,
+        "Kanban_dispatch": False,
+        "Git_mutation": False,
+        "provider_dispatch_count": 0,
+        "model_inference_count": 0,
+        "Git_commands_executed": 0,
+        "Docker_commands_executed": 0,
+        "Graphify_commands_executed": 0,
+    }
+    return _failure_envelope_with_bridge_metadata(envelope, exc=exc)
+
+
 def _rejected_successor_revision_failure_envelope(
     *,
     stage: str,
@@ -2889,8 +3047,10 @@ def _rejected_successor_revision_failure_envelope(
     state_mutated: bool,
 ) -> dict[str, Any]:
     schema_detail = _revision_error_schema_detail(exc)
-    ticket_id = target.ticket_id if target is not None else str(requested_ticket_id or "").strip()
-    return {
+    ticket_id = (
+        target.ticket_id if target is not None else str(requested_ticket_id or "").strip()
+    )
+    envelope = {
         "schema_version": TICKET_ARCHITECT_BRIDGE_SCHEMA_VERSION,
         "source_system": "pepper-ticket-architect-bridge",
         "operation": "revise_rejected_successor_ticket",
@@ -2937,6 +3097,7 @@ def _rejected_successor_revision_failure_envelope(
         "Docker_commands_executed": 0,
         "Graphify_commands_executed": 0,
     }
+    return _failure_envelope_with_bridge_metadata(envelope, exc=exc)
 
 
 def _revision_contract_from_authority(
@@ -4321,7 +4482,10 @@ def _validate_lint_report(
     if report.ticket_ids != (target.ticket_id,):
         raise TicketArchitectBridgeGenerationError(f"lint report must contain {target.ticket_id}")
     if report.disposition is not TicketLintDisposition.PASS:
-        raise TicketArchitectBridgeGenerationError(f"{target.ticket_id} TicketSpec lint must pass")
+        raise TicketArchitectBridgeGenerationError(
+            f"{target.ticket_id} TicketSpec lint must pass",
+            failure_metadata=_lint_failure_metadata(report),
+        )
 
 
 def _compile_work_packet(

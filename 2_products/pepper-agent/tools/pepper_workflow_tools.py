@@ -928,6 +928,13 @@ def _generate_current_ticket(args: dict[str, Any], **_kwargs) -> str:
             next_action_id=str(args.get("next_action_id") or "").strip() or None,
         )
     except Exception as exc:
+        failure_envelope = getattr(exc, "failure_envelope", None)
+        if isinstance(failure_envelope, dict):
+            return tool_error(
+                str(exc) or "current governed ticket generation failed",
+                success=False,
+                **failure_envelope,
+            )
         return tool_error(str(exc) or "current governed ticket generation failed")
     return _result({
         "source_tool": "generate_current_ticket",
