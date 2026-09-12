@@ -2671,6 +2671,42 @@ def _clear_stale_handoff_completion_projection_fields(snapshot: dict[str, Any]) 
     snapshot.pop("current_ticket_human_git_handoff_completion", None)
 
 
+def _clear_displaced_current_ticket_projection_fields(snapshot: dict[str, Any]) -> None:
+    for key in (
+        "current_ticket_authority_precedence",
+        "closed_predecessor_ticket_id",
+        "historical_terminal_completed_predecessor_traversal",
+        "kanban_projection_authority",
+        "worker_lifecycle",
+        "retry_state",
+        "retry_execution_count",
+        "terminal_outcome_class",
+        "validated_candidate_review_required",
+        "candidate_changes_available",
+        "candidate_changes_reference",
+        "review_prepare_authority",
+        "review_decision_recorded",
+        "review_decision_required",
+        "human_acceptance_required",
+        "human_acceptance_recorded",
+        "human_zero_change_attestation_required",
+        "zero_change_machine_authority_sufficient",
+        "zero_change_result",
+        "zero_change_authority_kind",
+        "zero_change_authority_SHA256",
+        "git_handoff_required",
+        "human_git_handoff_prepare_authority",
+        "current_ticket_human_git_handoff_prepare",
+        "human_git_handoff_completion_authority",
+        "current_ticket_human_git_handoff_completion",
+        "failure_category",
+        "failure_summary",
+    ):
+        snapshot.pop(key, None)
+    snapshot["handoff_completion_present"] = False
+    snapshot["ticket_closed"] = False
+
+
 def _apply_current_ticket_durable_completion_precedence(
     snapshot: dict[str, Any],
     remaining_blockers: list[dict[str, Any]],
@@ -2727,12 +2763,30 @@ def _apply_pending_successor_approval_precedence(
 ) -> None:
     if _workflow_has_active_nonterminal_current_execution(snapshot):
         return
+    previous_current_ticket_id = str(snapshot.get("current_ticket_id") or "").strip()
     overlay, blocker = _pending_generated_successor_ticket_approval_overlay(
         snapshot,
         allow_current_ticket_projection=True,
     )
     if overlay is not None:
+        next_current_ticket_id = str(overlay.get("current_ticket_id") or "").strip()
+        displaces_current_ticket = (
+            previous_current_ticket_id
+            and next_current_ticket_id != previous_current_ticket_id
+        )
+        if displaces_current_ticket:
+            _clear_displaced_current_ticket_projection_fields(snapshot)
         snapshot.update(overlay)
+        if displaces_current_ticket:
+            stale_blocker_ids = {
+                f"{previous_current_ticket_id}-CURRENT-PROJECTION-BINDING",
+                *_current_ticket_execution_lifecycle_blocker_ids(previous_current_ticket_id),
+            }
+            remaining_blockers[:] = [
+                item
+                for item in remaining_blockers
+                if item.get("id") not in stale_blocker_ids
+            ]
     if blocker is not None:
         _workflow_append_unique_blocker(remaining_blockers, blocker)
 
@@ -2979,6 +3033,64 @@ def _correction_successor_records_for_precedence() -> list[dict[str, Any]]:
     return records
 
 
+def _approved_successor_record_for_precedence(
+    workflow: dict[str, Any],
+) -> tuple[
+    dict[str, Any] | None,
+    dict[str, Any] | None,
+    dict[str, Any] | None,
+    dict[str, Any] | None,
+]:
+    try:
+        from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
+            generated_record_to_workflow_overlay,
+            load_generation_record,
+        )
+    except Exception:
+        return None, None, None, None
+
+    active_ticket_id = str(workflow.get("current_ticket_id") or "").strip()
+    active_ticket_key = _governed_ticket_sequence_key(active_ticket_id)
+    for ticket_id in reversed(_governed_authority_ticket_ids_from_records()):
+        if active_ticket_key and _governed_ticket_sequence_key(ticket_id) <= active_ticket_key:
+            continue
+        try:
+            record = load_generation_record(
+                ticket_id=ticket_id,
+                allow_terminal_rejected_historical=True,
+            )
+        except Exception:
+            continue
+        if record is None or _safe_id(record.get("ticket_id")) == active_ticket_id:
+            continue
+        if not _generated_record_predecessor_ticket_id(record):
+            continue
+        try:
+            overlay = generated_record_to_workflow_overlay(record)
+        except Exception as exc:
+            return None, None, None, _pending_successor_approval_authority_blocker(
+                _safe_id(record.get("ticket_id")) or ticket_id,
+                status="blocked_by_invalid_generated_successor_authority",
+                evidence=exc,
+            )
+        if overlay.get("workflow_status") != "ticket_approved":
+            continue
+        validation_workflow = _pending_successor_record_validation_workflow(
+            workflow,
+            record,
+        )
+        try:
+            canonical_next = resolve_canonical_next_ticket(validation_workflow)
+        except Exception as exc:
+            return None, None, None, _pending_successor_approval_authority_blocker(
+                _safe_id(record.get("ticket_id")) or ticket_id,
+                status="blocked_by_invalid_generated_successor_authority",
+                evidence=exc,
+            )
+        return record, canonical_next, validation_workflow, None
+    return None, None, None, None
+
+
 def _generated_successor_record_for_precedence(
     workflow: dict[str, Any],
 ) -> tuple[
@@ -3017,6 +3129,18 @@ def _generated_successor_record_for_precedence(
                 evidence=exc,
             )
         return record, canonical_next, validation_workflow, None
+
+    approved_record, approved_next, approved_workflow, approved_blocker = (
+        _approved_successor_record_for_precedence(workflow)
+    )
+    if approved_blocker is not None:
+        return None, None, None, approved_blocker
+    if (
+        approved_record is not None
+        and approved_next is not None
+        and approved_workflow is not None
+    ):
+        return approved_record, approved_next, approved_workflow, None
 
     correction_records = _correction_successor_records_for_precedence()
     if len(correction_records) > 1:

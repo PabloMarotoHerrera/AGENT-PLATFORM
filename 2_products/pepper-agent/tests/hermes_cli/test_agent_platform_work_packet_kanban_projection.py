@@ -1831,12 +1831,15 @@ def _patch_c9_synthetic_authority(
     lifecycle_overlay: dict[str, object] | None,
     completed_ticket_ids: tuple[str, ...] = ("P99.0", "P99.1"),
     authority_ticket_ids: tuple[str, ...] = ("P99.0", "P99.1", "P99.2"),
+    projected_ticket_ids: tuple[str, ...] | None = None,
     bootstrap_completed_ticket_id: str = "P99.1",
+    lifecycle_overlays_by_ticket: dict[str, dict[str, object] | None] | None = None,
     predecessor_overrides: dict[str, str] | None = None,
-) -> None:
+) -> SimpleNamespace:
     completed = set(completed_ticket_ids)
     records = {ticket_id: _c9_generation_record(ticket_id) for ticket_id in authority_ticket_ids}
-    projections = {ticket_id: _c9_projection_record(ticket_id) for ticket_id in authority_ticket_ids}
+    projected_ids = authority_ticket_ids if projected_ticket_ids is None else projected_ticket_ids
+    projections = {ticket_id: _c9_projection_record(ticket_id) for ticket_id in projected_ids}
     records.setdefault(current_ticket_id, _c9_generation_record(current_ticket_id))
     projections.setdefault(current_ticket_id, _c9_projection_record(current_ticket_id))
     for ticket_id, predecessor in (predecessor_overrides or {}).items():
@@ -1886,8 +1889,14 @@ def _patch_c9_synthetic_authority(
         return {"ticket_id": ticket_id} if ticket_id in completed else None
 
     def apply_lifecycle(overlay, projection):
-        if lifecycle_overlay is not None:
-            overlay.update(lifecycle_overlay)
+        ticket_id = str((projection or {}).get("ticket_id") or "")
+        selected_overlay = (
+            lifecycle_overlay
+            if lifecycle_overlays_by_ticket is None
+            else lifecycle_overlays_by_ticket.get(ticket_id, lifecycle_overlay)
+        )
+        if selected_overlay is not None:
+            overlay.update(selected_overlay)
         return None
 
     monkeypatch.setattr(pr, "resolve_canonical_next_ticket", canonical_next)
@@ -1938,6 +1947,7 @@ def _patch_c9_synthetic_authority(
     monkeypatch.setattr(pr, "_p18_9_0_review_prepare_overlay", lambda _p, completed_overlay: (None, None))
     monkeypatch.setattr(pr, "_current_ticket_review_decision_overlay", lambda _p: None)
     monkeypatch.setattr(pr, "_current_ticket_human_git_handoff_prepare_overlay", lambda _p: None)
+    return SimpleNamespace(records=records, projections=projections, completed=completed)
 
 
 def _c10_acceptance_contract(pr, projection_record: dict[str, object]) -> dict[str, object]:
@@ -9370,6 +9380,136 @@ def test_synthetic_c9_validated_review_ready_successor_dominates_bootstrap_compl
     assert snapshot["next_action"]["id"] == "PREPARE_P99_3_REVIEW"
     assert snapshot["next_action"]["target_ticket_id"] == "P99.3"
     assert snapshot["next_action"]["id"] != "GENERATE_P99_1"
+
+
+def _patch_c33_historical_review_pending_with_approved_successor(
+    monkeypatch,
+    pr,
+    *,
+    current_state: str = "validated_review_ready",
+    authority_ticket_ids: tuple[str, ...] = ("P99.0", "P99.1", "P99.2"),
+) -> SimpleNamespace:
+    state = _patch_c9_synthetic_authority(
+        monkeypatch,
+        pr,
+        current_ticket_id="P99.1",
+        lifecycle_overlay=None,
+        completed_ticket_ids=("P99.0",),
+        authority_ticket_ids=authority_ticket_ids,
+        projected_ticket_ids=("P99.1",),
+        bootstrap_completed_ticket_id="P99.0",
+        lifecycle_overlays_by_ticket={
+            "P99.1": _c9_lifecycle_overlay(pr, "P99.1", current_state),
+            "P99.2": None,
+        },
+    )
+    monkeypatch.setattr(pr, "_load_current_projection_record", lambda: _c9_projection_record("P99.1"))
+    monkeypatch.setattr(
+        pr,
+        "_current_ticket_zero_change_attestation_overlay",
+        lambda _p, completed_overlay: (None, None),
+    )
+    return state
+
+
+@pytest.mark.parametrize(
+    "authority_ticket_ids",
+    (
+        ("P99.0", "P99.1", "P99.2"),
+        ("P99.0", "P99.2", "P99.1"),
+    ),
+)
+def test_c33_approved_successor_preempts_historical_review_pending_authority(
+    monkeypatch,
+    authority_ticket_ids,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    state = _patch_c33_historical_review_pending_with_approved_successor(
+        monkeypatch,
+        pr,
+        authority_ticket_ids=authority_ticket_ids,
+    )
+    historical_generation = json.loads(json.dumps(state.records["P99.1"]))
+    historical_projection = json.loads(json.dumps(state.projections["P99.1"]))
+    stale_overlay = _c9_lifecycle_overlay(pr, "P99.1", "validated_review_ready")
+    assert stale_overlay is not None
+    assert stale_overlay["validation_state"] == "execution_completed_pending_validation"
+    assert stale_overlay["review_state"] == "ready_for_review_validation"
+    assert stale_overlay["queue_state"] == "kanban_retry_execution_terminal"
+
+    snapshot = pr.build_workflow_control_snapshot()
+    context = pr.build_lead_agent_operational_context()
+
+    assert snapshot["current_ticket_id"] == "P99.2"
+    assert snapshot["current_ticket_title"] == _c9_ticket_title("P99.2")
+    assert snapshot["workflow_status"] == "ticket_approved"
+    assert snapshot["workflow_state"] == "P99.2-TICKET-APPROVED"
+    assert snapshot["queue_state"] == "ticket_approved_not_queued"
+    assert snapshot["validation_state"] == "ticket_approved_compile_only_not_executed"
+    assert snapshot["review_state"] == "human_ticket_approval_recorded"
+    assert snapshot["validation_state"] != "execution_completed_pending_validation"
+    assert snapshot["review_state"] != "ready_for_review_validation"
+    assert snapshot["next_action"]["id"] == "P99_2_APPROVED_NO_EXECUTION"
+    assert snapshot["next_action"]["target_ticket_id"] == "P99.2"
+    assert snapshot["generated_successor_ticket_id"] == "P99.2"
+    assert snapshot["pending_ticket_approval_count"] == 0
+    assert snapshot["active_execution_count"] == 0
+    assert snapshot["execution_state"] == "no_active_executions"
+    assert snapshot["ticket_execution_authorized"] is False
+    assert snapshot["WorkPacket_execution_authorized"] is False
+    assert snapshot["runtime_execution_authorized"] is False
+    assert snapshot["worker_execution"] is False
+    assert snapshot["Kanban_dispatch"] is False
+    assert snapshot["Git_mutation"] is False
+    assert snapshot["handoff_completion_present"] is False
+    assert snapshot["ticket_closed"] is False
+    assert "kanban_projection_authority" not in snapshot
+    assert "current_ticket_authority_precedence" not in snapshot
+    assert not pr.execution_start_record_path_for_ticket("P99.2").exists()
+    assert not any(
+        blocker.get("id") == "P99.1-CURRENT-PROJECTION-BINDING"
+        for blocker in snapshot.get("remaining_blockers", [])
+    )
+    assert context["current_ticket_id"] == "P99.2"
+    assert context["workflow_control"]["current_ticket_id"] == "P99.2"
+    assert context["workflow_status"] == "ticket_approved"
+    assert context["workflow_control"]["validation_state"] == (
+        "ticket_approved_compile_only_not_executed"
+    )
+    assert context["workflow_control"]["review_state"] == "human_ticket_approval_recorded"
+    assert context["next_action"]["id"] == "P99_2_APPROVED_NO_EXECUTION"
+    assert context["pending_ticket_approval_count"] == 0
+    assert context["active_execution_count"] == 0
+    assert context["workflow_control"]["next_action"] == context["next_action"]
+    assert state.records["P99.1"] == historical_generation
+    assert state.projections["P99.1"] == historical_projection
+
+
+def test_c33_active_execution_precedence_is_preserved_over_approved_successor(
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _patch_c33_historical_review_pending_with_approved_successor(
+        monkeypatch,
+        pr,
+        current_state="executing",
+    )
+
+    snapshot = pr.build_workflow_control_snapshot()
+
+    assert snapshot["current_ticket_id"] == "P99.1"
+    assert snapshot["workflow_status"] == "executing"
+    assert snapshot["workflow_state"] == "P99.1-EXECUTING"
+    assert snapshot["execution_state"] == "active_executions"
+    assert snapshot["active_execution_count"] == 1
+    assert snapshot["next_action"]["id"] == "MONITOR_P99_1_EXECUTION"
+    assert snapshot["next_action"]["target_ticket_id"] == "P99.1"
+    assert snapshot["worker_execution"] is True
+    assert snapshot["Kanban_dispatch"] is True
+    assert snapshot["Git_mutation"] is False
+    assert snapshot.get("generated_successor_ticket_id") != "P99.2"
 
 
 def test_synthetic_c9_only_durable_completion_clears_current_successor_authority(
