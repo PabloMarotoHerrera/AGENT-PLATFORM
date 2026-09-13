@@ -1204,10 +1204,7 @@ def governed_ticket_recovery_authorization_text(ticket_id: str) -> str:
 def governed_ticket_zero_change_attestation_text(ticket_id: str) -> str:
     """Return the exact human attestation phrase for zero-change review prep."""
 
-    return (
-        f"I explicitly attest that {ticket_id} current terminal result contains no source "
-        "changes and no Git mutation for review preparation."
-    )
+    return f"ATTEST {ticket_id} ZERO CHANGE FOR REVIEW PREPARE"
 
 
 def _int_or_none(value: object) -> int | None:
@@ -2774,6 +2771,12 @@ def _apply_pending_successor_approval_precedence(
             previous_current_ticket_id
             and next_current_ticket_id != previous_current_ticket_id
         )
+        if displaces_current_ticket and _workflow_has_invalid_current_completion_authority(
+            snapshot,
+            remaining_blockers,
+            previous_current_ticket_id,
+        ):
+            return
         if displaces_current_ticket:
             _clear_displaced_current_ticket_projection_fields(snapshot)
         snapshot.update(overlay)
@@ -2789,6 +2792,24 @@ def _apply_pending_successor_approval_precedence(
             ]
     if blocker is not None:
         _workflow_append_unique_blocker(remaining_blockers, blocker)
+
+
+def _workflow_has_invalid_current_completion_authority(
+    snapshot: dict[str, Any],
+    remaining_blockers: list[dict[str, Any]],
+    ticket_id: str,
+) -> bool:
+    if snapshot.get("workflow_status") == "blocked_invalid_human_git_handoff_completion_authority":
+        return True
+    blocker_id = (
+        f"{governed_ticket_lifecycle_hyphen_token(ticket_id)}-"
+        "HUMAN-GIT-HANDOFF-COMPLETION-AUTHORITY"
+    )
+    return any(
+        blocker.get("id") == blocker_id
+        or blocker.get("status") == "blocked_by_invalid_human_git_handoff_completion_authority"
+        for blocker in remaining_blockers
+    )
 
 
 def _completed_predecessor_handoff_completion_overlay(
@@ -27523,6 +27544,8 @@ def _completion_current_terminal_run_authority_blocker(
 ) -> tuple[str, str] | None:
     identity = _current_kanban_terminal_run_identity(projection)
     if identity is None:
+        if _completion_matches_current_governed_terminal_source(projection, completion):
+            return None
         return (
             unavailable_code,
             "canonical Kanban current terminal run authority is unavailable",
@@ -27550,6 +27573,63 @@ def _completion_current_terminal_run_authority_blocker(
             "completion run_outcome does not match the current terminal Kanban run",
         )
     return None
+
+
+def _completion_matches_current_governed_terminal_source(
+    projection: dict[str, Any],
+    completion: dict[str, Any],
+) -> bool:
+    if not isinstance(completion, dict):
+        return False
+    detail_sources = completion.get("completion_detail_sources")
+    if not isinstance(detail_sources, list) or (
+        "governed_autonomy_runtime_terminal_reconciliation" not in detail_sources
+    ):
+        return False
+    observed_digest = str(completion.get("kanban_completion_result_SHA256") or "").strip()
+    if not _SAFE_SHA256.fullmatch(observed_digest):
+        return False
+    try:
+        if _kanban_completion_result_digest(completion) != observed_digest:
+            return False
+        current = _governed_autonomy_current_review_round_completion_source(projection)
+    except Exception:
+        return False
+    if not isinstance(current, dict):
+        return False
+    current_digest = str(current.get("kanban_completion_result_SHA256") or "").strip()
+    if not _SAFE_SHA256.fullmatch(current_digest):
+        return False
+    try:
+        if _kanban_completion_result_digest(current) != current_digest:
+            return False
+    except Exception:
+        return False
+    if current_digest != observed_digest:
+        return False
+    identity_keys = (
+        "project_id",
+        "ticket_id",
+        "ticket_spec_SHA256",
+        "work_packet_id",
+        "work_packet_SHA256",
+        "projection_SHA256",
+        "kanban_board_slug",
+        "kanban_task_id",
+        "run_id",
+        "run_status",
+        "run_outcome",
+        "run_ended_at",
+        "candidate_changes_reference",
+        "candidate_changes_available",
+        "source_materialization_reference",
+        "terminal_outcome_class",
+        "review_required",
+        "review_boundary_kind",
+        "terminal_outcome_authority",
+        "kanban_block_kind",
+    )
+    return all(current.get(key) == completion.get(key) for key in identity_keys)
 
 
 def _completion_has_positive_mutation_evidence(completion: dict[str, Any]) -> bool:
@@ -27743,17 +27823,36 @@ def _governed_autonomy_current_review_round_completion_source(
         projection_record=projection,
         effective_authority=effective_authority,
     )
-    if terminal is None or terminal.get("validated_candidate_review_required") is not True:
+    if terminal is None or terminal.get("blocker_code"):
         return None
     candidate_changes = terminal.get("candidate_changes_reference")
-    if not _governed_autonomy_candidate_changes_available(candidate_changes):
+    candidate_changes_available = _governed_autonomy_candidate_changes_available(candidate_changes)
+    validated_review_required = terminal.get("validated_candidate_review_required") is True
+    terminal_completed_no_candidate = (
+        not validated_review_required
+        and not candidate_changes_available
+        and terminal.get("governed_autonomy_runtime_status") == "direct_execution_terminal_completed"
+    )
+    if not (
+        (validated_review_required and candidate_changes_available)
+        or terminal_completed_no_candidate
+    ):
         return None
     run_id = _int_or_none(terminal.get("terminal_run_id"))
     if run_id is None:
         return None
+    validation_observation = terminal.get("validation_observation_reference")
+    if not isinstance(validation_observation, dict):
+        validation_observation = None
     source = {
         "blocker_code": None,
         "blocker_detail": None,
+        "project_id": projection.get("project_id"),
+        "ticket_id": projection.get("ticket_id"),
+        "ticket_spec_SHA256": projection.get("ticket_spec_SHA256"),
+        "work_packet_id": projection.get("work_packet_id"),
+        "work_packet_SHA256": projection.get("work_packet_SHA256"),
+        "projection_SHA256": projection.get("projection_SHA256"),
         "kanban_board_slug": _normalize_board(str(projection["kanban_board_slug"])),
         "kanban_task_id": projection["kanban_task_id"],
         "kanban_task_status": None,
@@ -27767,7 +27866,8 @@ def _governed_autonomy_current_review_round_completion_source(
         "run_profile": runtime.get("selected_profile") or projection.get("selected_profile"),
         "run_started_at": None,
         "run_ended_at": terminal.get("terminal_run_ended_at"),
-        "run_summary": terminal.get("terminal_run_failure_summary"),
+        "run_summary": terminal.get("terminal_run_failure_summary")
+        or (validation_observation or {}).get("error_excerpt"),
         "run_metadata": None,
         "task_result": None,
         "completion_detail_sources": [
@@ -27778,16 +27878,19 @@ def _governed_autonomy_current_review_round_completion_source(
         "task_run_count": None,
         "Kanban_SQLite_canonical_authority": False,
         "logs_parsed_for_completion_authority": False,
-        "terminal_outcome_class": "validated_review_required",
-        "review_required": True,
-        "review_boundary_kind": "human_code_review",
-        "terminal_outcome_authority": "governed_autonomy_runtime_terminal_reconciliation",
-        "kanban_block_kind": None,
-        "validation_observation_reference": terminal["validation_observation_reference"],
-        "source_materialization_reference": terminal["source_materialization_reference"],
+        "validation_observation_reference": terminal.get("validation_observation_reference"),
+        "source_materialization_reference": terminal.get("source_materialization_reference"),
         "candidate_changes_reference": candidate_changes,
-        "candidate_changes_available": True,
+        "candidate_changes_available": candidate_changes_available,
     }
+    if validated_review_required:
+        source.update({
+            "terminal_outcome_class": "validated_review_required",
+            "review_required": True,
+            "review_boundary_kind": "human_code_review",
+            "terminal_outcome_authority": "governed_autonomy_runtime_terminal_reconciliation",
+            "kanban_block_kind": None,
+        })
     source["kanban_completion_result_SHA256"] = _kanban_completion_result_digest(source)
     return source
 
@@ -28736,6 +28839,18 @@ def _current_ticket_zero_change_attestation_overlay(
             "human_git_handoff_required": False,
             "git_handoff_required": False,
             "git_handoff_state": "not_required_for_ticket_result",
+            "dispatch_performed": False,
+            "execution_started": False,
+            "worker_execution": False,
+            "worker_process_started": False,
+            "Kanban_dispatch": False,
+            "Git_mutation": False,
+            "canonical_source_mutation_by_Pepper": False,
+            "auto_retry": False,
+            "auto_rollback": False,
+            "automatic_git_add": False,
+            "automatic_git_commit": False,
+            "automatic_git_push": False,
             "next_action": {
                 "id": binding.review_prepare_next_action_id,
                 "label": f"{binding.ticket_id} zero-change authority is current; prepare review validation.",
@@ -28747,7 +28862,7 @@ def _current_ticket_zero_change_attestation_overlay(
     if authority.get("human_zero_change_attestation_required") is not True:
         return None, None
     return {
-        "workflow_state": f"{binding.ticket_id}-EXECUTION-COMPLETED-PENDING-ZERO-CHANGE-ATTESTATION",
+        "workflow_state": "execution_completed_pending_zero_change_attestation",
         "workflow_status": "execution_completed_pending_zero_change_attestation",
         "queue_state": completed_overlay.get("queue_state", "kanban_execution_terminal"),
         "execution_state": "no_active_executions",
@@ -28769,6 +28884,18 @@ def _current_ticket_zero_change_attestation_overlay(
         "git_handoff_state": "not_required_for_ticket_result",
         "human_acceptance_required": False,
         "human_acceptance_recorded": False,
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "worker_process_started": False,
+        "Kanban_dispatch": False,
+        "Git_mutation": False,
+        "canonical_source_mutation_by_Pepper": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+        "automatic_git_add": False,
+        "automatic_git_commit": False,
+        "automatic_git_push": False,
         "next_action": _zero_change_attestation_next_action(binding),
     }, None
 

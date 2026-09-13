@@ -2684,7 +2684,7 @@ def _patch_c10_governed_terminal_review_round(
     monkeypatch.setattr(
         pr,
         "_governed_autonomy_runtime_terminal_reconciliation",
-        lambda _runtime, *, effective_authority=None: terminal,
+        lambda _runtime, *, projection_record=None, effective_authority=None: terminal,
     )
 
 
@@ -2913,8 +2913,8 @@ def _install_c11_historical_authority_context(monkeypatch, pr):
         item = records.get(str((projection_record or {}).get("ticket_id") or ""))
         return item["runtime"] if item is not None else None
 
-    def terminal_reconciliation(runtime, *, effective_authority=None):
-        _ = effective_authority
+    def terminal_reconciliation(runtime, *, projection_record=None, effective_authority=None):
+        _ = projection_record, effective_authority
         item = records.get(str((runtime or {}).get("ticket_id") or ""))
         return item["terminal"] if item is not None else None
 
@@ -9510,6 +9510,61 @@ def test_c33_active_execution_precedence_is_preserved_over_approved_successor(
     assert snapshot["Kanban_dispatch"] is True
     assert snapshot["Git_mutation"] is False
     assert snapshot.get("generated_successor_ticket_id") != "P99.2"
+
+
+def test_c34_pending_successor_does_not_mask_invalid_current_completion_authority(
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    snapshot = {
+        "current_ticket_id": "P99.1",
+        "current_ticket_title": _c9_ticket_title("P99.1"),
+        "workflow_status": "blocked_invalid_human_git_handoff_completion_authority",
+        "execution_state": "no_active_executions",
+        "active_execution_count": 0,
+        "handoff_completion_present": False,
+        "ticket_closed": False,
+        "next_action": {
+            "id": "P99_1_HUMAN_GIT_HANDOFF_COMPLETION_AUTHORITY_REPAIR_REQUIRED",
+            "target_ticket_id": "P99.1",
+        },
+    }
+    blockers = [{
+        "id": "P99-1-HUMAN-GIT-HANDOFF-COMPLETION-AUTHORITY",
+        "status": "blocked_by_invalid_human_git_handoff_completion_authority",
+        "evidence": "synthetic invalid completion authority",
+    }]
+    successor_overlay = {
+        "current_ticket_id": "P99.2",
+        "current_ticket_title": _c9_ticket_title("P99.2"),
+        "workflow_status": "ticket_approved",
+        "workflow_state": "P99.2-TICKET-APPROVED",
+        "queue_state": "ticket_approved_not_queued",
+        "next_action": {
+            "id": "P99_2_APPROVED_NO_EXECUTION",
+            "target_ticket_id": "P99.2",
+        },
+    }
+    monkeypatch.setattr(
+        pr,
+        "_pending_generated_successor_ticket_approval_overlay",
+        lambda _snapshot, allow_current_ticket_projection=False: (successor_overlay, None),
+    )
+
+    pr._apply_pending_successor_approval_precedence(snapshot, blockers)
+
+    assert snapshot["current_ticket_id"] == "P99.1"
+    assert snapshot["workflow_status"] == (
+        "blocked_invalid_human_git_handoff_completion_authority"
+    )
+    assert snapshot["next_action"]["target_ticket_id"] == "P99.1"
+    assert snapshot.get("generated_successor_ticket_id") is None
+    assert blockers == [{
+        "id": "P99-1-HUMAN-GIT-HANDOFF-COMPLETION-AUTHORITY",
+        "status": "blocked_by_invalid_human_git_handoff_completion_authority",
+        "evidence": "synthetic invalid completion authority",
+    }]
 
 
 def test_synthetic_c9_only_durable_completion_clears_current_successor_authority(
@@ -17605,6 +17660,602 @@ def test_c19_legacy_semantic_noop_requires_human_attestation_before_validation(
     assert workflow["next_action"]["required_human_attestation_text"] == (
         pr.governed_ticket_zero_change_attestation_text(fixture.ticket_id)
     )
+
+
+def _c34_projection(pr, ticket_id: str) -> dict[str, object]:
+    return _c11_projection_record(pr, ticket_id)
+
+
+def _c34_candidate_terminal(
+    pr,
+    projection_record: dict[str, object],
+    *,
+    run_id: int,
+    label: str,
+) -> dict[str, object]:
+    candidate_reference = _c11_candidate_reference(label)
+    return {
+        "terminal_run_reconciled": True,
+        "governed_autonomy_runtime_status": "direct_execution_terminal_validated_review_required",
+        "terminal_run_id": run_id,
+        "terminal_run_status": "blocked",
+        "terminal_run_outcome": "blocked",
+        "terminal_run_ended_at": 1_766_100_000 + run_id,
+        "terminal_run_failure_category": None,
+        "terminal_run_failure_summary": f"synthetic {label} current governed terminal source",
+        "validation_infrastructure_failure": False,
+        "validation_observation_reference": {
+            "tool_name": "workpacket_validation",
+            "infrastructure_failure": False,
+            "validation_passed": True,
+            "validated_candidate_review_required": True,
+            "error_excerpt": f"synthetic {label} candidate validated for review",
+        },
+        "source_materialization_reference": {
+            "available": True,
+            "manifest_path": f"/tmp/{projection_record['ticket_id']}/{label}/manifest.json",
+        },
+        "candidate_changes_reference": candidate_reference,
+        "candidate_changes_available": True,
+        "validated_candidate_review_required": True,
+        "blocker_code": None,
+        "blocker_detail": None,
+        "next_autonomous_action": None,
+        "next_human_action": "prepare governed review validation",
+        "next_action": {
+            "id": pr.governed_ticket_lifecycle_action_ids(str(projection_record["ticket_id"]))[
+                "review_prepare"
+            ],
+            "target_ticket_id": projection_record["ticket_id"],
+            "required_human_action": "review_validation_preparation_and_human_git_handoff",
+        },
+    }
+
+
+def _c34_no_candidate_terminal(
+    pr,
+    projection_record: dict[str, object],
+    *,
+    run_id: int,
+    label: str,
+) -> dict[str, object]:
+    return {
+        "terminal_run_reconciled": True,
+        "governed_autonomy_runtime_status": "direct_execution_terminal_completed",
+        "terminal_run_id": run_id,
+        "terminal_run_status": "done",
+        "terminal_run_outcome": "completed",
+        "terminal_run_ended_at": 1_766_200_000 + run_id,
+        "terminal_run_failure_category": None,
+        "terminal_run_failure_summary": f"synthetic {label} no-candidate terminal completion",
+        "validation_infrastructure_failure": False,
+        "validation_observation_reference": {
+            "tool_name": "workpacket_validation",
+            "infrastructure_failure": False,
+            "validation_passed": True,
+            "validated_candidate_review_required": False,
+            "error_excerpt": f"synthetic {label} no-candidate terminal completion",
+        },
+        "source_materialization_reference": None,
+        "candidate_changes_reference": None,
+        "candidate_changes_available": False,
+        "validated_candidate_review_required": False,
+        "blocker_code": None,
+        "blocker_detail": None,
+        "next_autonomous_action": "prepare governed review validation from terminal completion evidence",
+        "next_human_action": None,
+        "next_action": {
+            "id": pr.governed_ticket_lifecycle_action_ids(str(projection_record["ticket_id"]))[
+                "review_prepare"
+            ],
+            "target_ticket_id": projection_record["ticket_id"],
+            "required_human_action": "review_validation_preparation",
+        },
+    }
+
+
+def _install_c34_governed_terminal_source(
+    monkeypatch,
+    pr,
+    projection_record: dict[str, object],
+    terminal: dict[str, object] | None,
+    *,
+    runtime_current: bool = True,
+) -> None:
+    from hermes_cli import kanban_db
+
+    kanban_db.create_board(str(projection_record["kanban_board_slug"]))
+    projection_sha = str(projection_record["projection_SHA256"])
+    activation = {
+        "activation_action_SHA256": hashlib.sha256(
+            f"{projection_sha}:activation".encode(),
+        ).hexdigest(),
+        "governed_autonomy_envelope_SHA256": hashlib.sha256(
+            f"{projection_sha}:envelope".encode(),
+        ).hexdigest(),
+    }
+    runtime = {
+        "ticket_id": projection_record["ticket_id"],
+        "governed_autonomy_runtime_status": (
+            terminal or {}
+        ).get("governed_autonomy_runtime_status", "direct_execution_terminal_completed"),
+        "runtime_state_SHA256": hashlib.sha256(
+            f"{projection_sha}:runtime".encode(),
+        ).hexdigest(),
+        "workspace_path": f"/tmp/c34/{projection_record['ticket_id']}",
+        "selected_profile": _IMPLEMENTATION_PROFILE,
+    }
+
+    def load_activation(*, projection_record=None):
+        if projection_record is None:
+            return None
+        if projection_record.get("projection_SHA256") != projection_sha:
+            return None
+        return activation
+
+    def load_runtime(*, projection_record=None, activation_record=None):
+        if not runtime_current or activation_record != activation or projection_record is None:
+            return None
+        if projection_record.get("projection_SHA256") != projection_sha:
+            return None
+        return runtime
+
+    def resolve_effective(**_kwargs):
+        return {
+            "authority_revalidated": True,
+            "continuation_eligible": True,
+            "diagnostics": {},
+            "owned_lineage_state": {
+                "owned_governed_run_id": (terminal or {}).get("terminal_run_id"),
+            },
+            "current_execution_state": {},
+        }
+
+    def require_current(**kwargs):
+        observed = (kwargs.get("projection") or {}).get("projection_SHA256")
+        if observed != projection_sha:
+            raise pr.ProductRuntimeConflict("synthetic C34 projection mismatch")
+
+    def terminal_reconciliation(runtime_record, *, projection_record=None, effective_authority=None):
+        _ = effective_authority
+        if terminal is None or runtime_record != runtime or projection_record is None:
+            return None
+        if projection_record.get("projection_SHA256") != projection_sha:
+            return None
+        return dict(terminal)
+
+    monkeypatch.setattr(pr, "load_current_ticket_governed_autonomy_activation_record", load_activation)
+    monkeypatch.setattr(pr, "load_current_ticket_governed_autonomy_runtime_state", load_runtime)
+    monkeypatch.setattr(pr, "_resolve_effective_current_governed_autonomy_authority", resolve_effective)
+    monkeypatch.setattr(pr, "_require_current_governed_autonomy_authority_match", require_current)
+    monkeypatch.setattr(pr, "_governed_autonomy_runtime_terminal_reconciliation", terminal_reconciliation)
+
+
+def _c34_unavailable_blocker(pr, projection_record: dict[str, object], completion: dict[str, object]):
+    return pr._completion_current_terminal_run_authority_blocker(
+        projection_record,
+        completion,
+        unavailable_code="C34_CURRENT_RUN_AUTHORITY_UNAVAILABLE",
+        mismatch_code="C34_CURRENT_RUN_MISMATCH",
+    )
+
+
+def test_c34_fallback_accepts_exact_current_governed_terminal_source(
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    projection_record = _c34_projection(pr, "P99.271")
+    terminal = _c34_candidate_terminal(
+        pr,
+        projection_record,
+        run_id=271,
+        label="c34-current",
+    )
+    _install_c34_governed_terminal_source(monkeypatch, pr, projection_record, terminal)
+    monkeypatch.setattr(pr, "_current_kanban_terminal_run_identity", lambda _projection: None)
+
+    completion = pr._governed_autonomy_current_review_round_completion_source(
+        projection_record,
+    )
+
+    assert completion is not None
+    assert completion["project_id"] == projection_record["project_id"]
+    assert completion["ticket_id"] == projection_record["ticket_id"]
+    assert completion["work_packet_SHA256"] == projection_record["work_packet_SHA256"]
+    assert completion["projection_SHA256"] == projection_record["projection_SHA256"]
+    assert completion["run_id"] == 271
+    assert completion["candidate_changes_available"] is True
+    assert pr._review_prepare_human_git_handoff_required(completion) is True
+    assert pr.resolve_zero_change_authority(
+        projection_record,
+        completion,
+    )["human_zero_change_attestation_required"] is False
+    assert _c34_unavailable_blocker(pr, projection_record, completion) is None
+
+
+def test_c34_fallback_rejects_stale_terminal_run(
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    projection_record = _c34_projection(pr, "P99.272")
+    stale_terminal = _c34_candidate_terminal(
+        pr,
+        projection_record,
+        run_id=271,
+        label="c34-stale",
+    )
+    _install_c34_governed_terminal_source(monkeypatch, pr, projection_record, stale_terminal)
+    stale_completion = pr._governed_autonomy_current_review_round_completion_source(
+        projection_record,
+    )
+    current_terminal = _c34_candidate_terminal(
+        pr,
+        projection_record,
+        run_id=272,
+        label="c34-current",
+    )
+    _install_c34_governed_terminal_source(monkeypatch, pr, projection_record, current_terminal)
+    monkeypatch.setattr(pr, "_current_kanban_terminal_run_identity", lambda _projection: None)
+
+    assert stale_completion is not None
+    assert _c34_unavailable_blocker(pr, projection_record, stale_completion) == (
+        "C34_CURRENT_RUN_AUTHORITY_UNAVAILABLE",
+        "canonical Kanban current terminal run authority is unavailable",
+    )
+
+
+def test_c34_fallback_rejects_different_ticket_completion(
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    other_projection = _c34_projection(pr, "P99.273")
+    other_terminal = _c34_candidate_terminal(
+        pr,
+        other_projection,
+        run_id=273,
+        label="c34-other-ticket",
+    )
+    _install_c34_governed_terminal_source(monkeypatch, pr, other_projection, other_terminal)
+    other_completion = pr._governed_autonomy_current_review_round_completion_source(
+        other_projection,
+    )
+    current_projection = _c34_projection(pr, "P99.274")
+    current_terminal = _c34_candidate_terminal(
+        pr,
+        current_projection,
+        run_id=274,
+        label="c34-current-ticket",
+    )
+    _install_c34_governed_terminal_source(monkeypatch, pr, current_projection, current_terminal)
+    monkeypatch.setattr(pr, "_current_kanban_terminal_run_identity", lambda _projection: None)
+
+    assert other_completion is not None
+    assert _c34_unavailable_blocker(pr, current_projection, other_completion) == (
+        "C34_CURRENT_RUN_AUTHORITY_UNAVAILABLE",
+        "canonical Kanban current terminal run authority is unavailable",
+    )
+
+
+def test_c34_fallback_rejects_different_current_projection(
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    authority_a = _c34_projection(pr, "P99.275")
+    terminal_a = _c34_candidate_terminal(
+        pr,
+        authority_a,
+        run_id=275,
+        label="c34-projection-a",
+    )
+    _install_c34_governed_terminal_source(monkeypatch, pr, authority_a, terminal_a)
+    completion_a = pr._governed_autonomy_current_review_round_completion_source(authority_a)
+    authority_b = dict(authority_a)
+    authority_b["projection_SHA256"] = hashlib.sha256(b"P99.275:projection-b").hexdigest()
+    terminal_b = _c34_candidate_terminal(
+        pr,
+        authority_b,
+        run_id=275,
+        label="c34-projection-a",
+    )
+    _install_c34_governed_terminal_source(monkeypatch, pr, authority_b, terminal_b)
+    monkeypatch.setattr(pr, "_current_kanban_terminal_run_identity", lambda _projection: None)
+
+    assert completion_a is not None
+    assert completion_a["projection_SHA256"] != authority_b["projection_SHA256"]
+    assert _c34_unavailable_blocker(pr, authority_b, completion_a) == (
+        "C34_CURRENT_RUN_AUTHORITY_UNAVAILABLE",
+        "canonical Kanban current terminal run authority is unavailable",
+    )
+
+
+def test_c34_fallback_rejects_tampered_completion_identity(
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    projection_record = _c34_projection(pr, "P99.276")
+    terminal = _c34_candidate_terminal(
+        pr,
+        projection_record,
+        run_id=276,
+        label="c34-tamper",
+    )
+    _install_c34_governed_terminal_source(monkeypatch, pr, projection_record, terminal)
+    monkeypatch.setattr(pr, "_current_kanban_terminal_run_identity", lambda _projection: None)
+    completion = pr._governed_autonomy_current_review_round_completion_source(
+        projection_record,
+    )
+    tampered = dict(completion)
+    tampered["run_id"] = 277
+
+    assert completion is not None
+    assert tampered["kanban_completion_result_SHA256"] == completion[
+        "kanban_completion_result_SHA256"
+    ]
+    assert _c34_unavailable_blocker(pr, projection_record, tampered) == (
+        "C34_CURRENT_RUN_AUTHORITY_UNAVAILABLE",
+        "canonical Kanban current terminal run authority is unavailable",
+    )
+
+
+def test_c34_fallback_rejects_missing_current_governed_source(
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    projection_record = _c34_projection(pr, "P99.277")
+    completion = {
+        "project_id": projection_record["project_id"],
+        "ticket_id": projection_record["ticket_id"],
+        "ticket_spec_SHA256": projection_record["ticket_spec_SHA256"],
+        "work_packet_id": projection_record["work_packet_id"],
+        "work_packet_SHA256": projection_record["work_packet_SHA256"],
+        "projection_SHA256": projection_record["projection_SHA256"],
+        "kanban_board_slug": projection_record["kanban_board_slug"],
+        "kanban_task_id": projection_record["kanban_task_id"],
+        "run_id": 277,
+        "run_status": "blocked",
+        "run_outcome": "blocked",
+        "run_ended_at": 1_766_100_277,
+        "completion_detail_sources": [
+            "governed_autonomy_runtime_terminal_reconciliation",
+        ],
+        "candidate_changes_reference": _c11_candidate_reference("c34-missing-source"),
+        "candidate_changes_available": True,
+    }
+    completion["kanban_completion_result_SHA256"] = pr._kanban_completion_result_digest(
+        completion,
+    )
+    _install_c34_governed_terminal_source(
+        monkeypatch,
+        pr,
+        projection_record,
+        terminal=None,
+        runtime_current=False,
+    )
+    monkeypatch.setattr(pr, "_current_kanban_terminal_run_identity", lambda _projection: None)
+
+    assert _c34_unavailable_blocker(pr, projection_record, completion) == (
+        "C34_CURRENT_RUN_AUTHORITY_UNAVAILABLE",
+        "canonical Kanban current terminal run authority is unavailable",
+    )
+
+
+def test_c34_fallback_rejects_historical_terminal_completion(
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    projection_record = _c34_projection(pr, "P99.278")
+    historical_terminal = _c34_candidate_terminal(
+        pr,
+        projection_record,
+        run_id=277,
+        label="c34-historical",
+    )
+    _install_c34_governed_terminal_source(monkeypatch, pr, projection_record, historical_terminal)
+    historical_completion = pr._governed_autonomy_current_review_round_completion_source(
+        projection_record,
+    )
+    assert historical_completion is not None
+    historical_completion = dict(historical_completion)
+    historical_completion["historical_terminal_completed_predecessor_traversal"] = {
+        "ticket_id": projection_record["ticket_id"],
+        "terminal_run_id": 277,
+        "current_actionable_authority": False,
+    }
+    historical_completion["kanban_completion_result_SHA256"] = pr._kanban_completion_result_digest(
+        historical_completion,
+    )
+    current_terminal = _c34_candidate_terminal(
+        pr,
+        projection_record,
+        run_id=278,
+        label="c34-current-after-historical",
+    )
+    _install_c34_governed_terminal_source(monkeypatch, pr, projection_record, current_terminal)
+    monkeypatch.setattr(pr, "_current_kanban_terminal_run_identity", lambda _projection: None)
+
+    assert _c34_unavailable_blocker(pr, projection_record, historical_completion) == (
+        "C34_CURRENT_RUN_AUTHORITY_UNAVAILABLE",
+        "canonical Kanban current terminal run authority is unavailable",
+    )
+
+
+def test_c34_governed_terminal_completed_no_candidate_requires_zero_change_attestation(
+    projection_home,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _ = projection_home
+    ticket_id = "P99.271"
+    run_id = 271
+    projection_record = _c9_projection_record(ticket_id)
+    terminal = {
+        "terminal_run_reconciled": True,
+        "governed_autonomy_runtime_status": "direct_execution_terminal_completed",
+        "terminal_run_id": run_id,
+        "terminal_run_status": "done",
+        "terminal_run_outcome": "completed",
+        "terminal_run_ended_at": 1_766_000_271,
+        "terminal_run_failure_category": None,
+        "terminal_run_failure_summary": "synthetic terminal completion with no candidate authority",
+        "validation_infrastructure_failure": False,
+        "validation_observation_reference": {
+            "tool_name": "workpacket_validation",
+            "infrastructure_failure": False,
+            "validation_passed": True,
+            "validated_candidate_review_required": False,
+            "error_excerpt": "synthetic terminal completion with no candidate authority",
+        },
+        "source_materialization_reference": None,
+        "candidate_changes_reference": None,
+        "candidate_changes_available": False,
+        "validated_candidate_review_required": False,
+        "blocker_code": None,
+        "blocker_detail": None,
+        "next_autonomous_action": "prepare governed review validation from terminal completion evidence",
+        "next_human_action": None,
+        "next_action": {
+            "id": pr.governed_ticket_lifecycle_action_ids(ticket_id)["review_prepare"],
+            "target_ticket_id": ticket_id,
+            "required_human_action": "review_validation_preparation",
+        },
+    }
+    monkeypatch.setattr(pr, "_load_current_projection_record", lambda: projection_record)
+    monkeypatch.setattr(pr, "_current_projection_record_for_binding", lambda: projection_record)
+    monkeypatch.setattr(
+        pr,
+        "load_current_ticket_governed_autonomy_activation_record",
+        lambda *, projection_record=None: {
+            "activation_action_SHA256": "a" * 64,
+            "governed_autonomy_envelope_SHA256": "b" * 64,
+        },
+    )
+    monkeypatch.setattr(
+        pr,
+        "load_current_ticket_governed_autonomy_runtime_state",
+        lambda *, projection_record=None, activation_record=None: {
+            "ticket_id": ticket_id,
+            "governed_autonomy_runtime_status": "direct_execution_terminal_completed",
+            "runtime_state_SHA256": "c" * 64,
+            "workspace_path": str(tmp_path),
+            "selected_profile": _IMPLEMENTATION_PROFILE,
+        },
+    )
+    monkeypatch.setattr(
+        pr,
+        "_resolve_effective_current_governed_autonomy_authority",
+        lambda **_kwargs: {"current_execution_state": {}},
+    )
+    monkeypatch.setattr(
+        pr,
+        "_require_current_governed_autonomy_authority_match",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        pr,
+        "_governed_autonomy_runtime_terminal_reconciliation",
+        lambda _runtime, *, projection_record=None, effective_authority=None: terminal,
+    )
+    _install_c19_current_terminal_run_authority(
+        projection_record,
+        {
+            "run_id": run_id,
+            "run_status": "done",
+            "run_outcome": "completed",
+            "run_started_at": 1_766_000_200,
+            "run_ended_at": terminal["terminal_run_ended_at"],
+            "run_summary": terminal["terminal_run_failure_summary"],
+            "run_metadata": {},
+            "kanban_task_workspace_path": str(tmp_path),
+        },
+    )
+
+    completion = pr._governed_autonomy_current_review_round_completion_source(
+        projection_record,
+    )
+    monkeypatch.setattr(pr, "_current_kanban_terminal_run_identity", lambda _projection: None)
+    authority = pr.resolve_zero_change_authority(projection_record, completion)
+    overlay, blocker = pr._current_ticket_zero_change_attestation_overlay(
+        projection_record,
+        completed_overlay={
+            "workflow_status": "execution_completed",
+            "queue_state": "governed_autonomy_kanban_execution_terminal",
+        },
+    )
+
+    assert completion is not None
+    assert completion["ticket_id"] == projection_record["ticket_id"]
+    assert completion["work_packet_SHA256"] == projection_record["work_packet_SHA256"]
+    assert completion["projection_SHA256"] == projection_record["projection_SHA256"]
+    assert completion["candidate_changes_available"] is False
+    assert completion["candidate_changes_reference"] is None
+    assert completion.get("terminal_outcome_class") != "validated_review_required"
+    assert _c34_unavailable_blocker(pr, projection_record, completion) is None
+    assert authority["zero_change_result"] is False
+    assert authority["zero_change_machine_authority_sufficient"] is False
+    assert authority["human_zero_change_attestation_required"] is True
+    assert blocker is None
+    assert overlay is not None
+    assert overlay["workflow_status"] == "execution_completed_pending_zero_change_attestation"
+    assert overlay["workflow_state"] == "execution_completed_pending_zero_change_attestation"
+    assert overlay["validation_state"] == "execution_completed_pending_zero_change_attestation"
+    assert overlay["review_state"] == "zero_change_attestation_required"
+    assert overlay["candidate_changes_available"] is False
+    assert overlay["human_git_handoff_required"] is False
+    assert overlay["git_handoff_required"] is False
+    assert overlay["human_zero_change_attestation_required"] is True
+    assert overlay["zero_change_machine_authority_sufficient"] is False
+    assert overlay["next_action"]["id"] == (
+        pr.governed_ticket_lifecycle_action_ids(ticket_id)["zero_change_attestation"]
+    )
+    assert overlay["next_action"]["required_human_action"] == (
+        "human_zero_change_review_preparation_attestation"
+    )
+    assert overlay["next_action"]["required_human_attestation_text"] == (
+        "ATTEST P99.271 ZERO CHANGE FOR REVIEW PREPARE"
+    )
+    assert overlay["dispatch_performed"] is False
+    assert overlay["execution_started"] is False
+    assert overlay["worker_execution"] is False
+    assert overlay["Kanban_dispatch"] is False
+    assert overlay["Git_mutation"] is False
+
+
+def test_c34_human_attestation_routes_to_prepare_without_implicit_validation(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _c18_v2_synthetic_noop_review_ready_fixture(
+        monkeypatch,
+        ticket_id="P99.279",
+        completion_mutator=_c19_legacy_semantic_noop_mutator,
+    )
+    pr = fixture.pr
+
+    attested = _record_c19_zero_change_attestation(fixture)
+    workflow = pr.build_workflow_control_snapshot()
+
+    assert attested["zero_change_attestation_status"] == "attested"
+    assert attested["review_prepare_eligible_result"] is True
+    assert attested["reviewable_result"] is False
+    assert attested["validation_contract_satisfied"] is False
+    assert attested["next_action"]["id"] == pr.governed_ticket_lifecycle_action_ids(
+        fixture.ticket_id,
+    )["review_prepare"]
+    assert workflow["workflow_status"] == "execution_completed"
+    assert workflow["validation_contract_satisfied"] is False
+    assert workflow["next_action"]["id"] == pr.governed_ticket_lifecycle_action_ids(
+        fixture.ticket_id,
+    )["review_prepare"]
+    assert not pr.review_prepare_record_path_for_ticket(fixture.ticket_id).exists()
 
 
 @pytest.mark.parametrize(
