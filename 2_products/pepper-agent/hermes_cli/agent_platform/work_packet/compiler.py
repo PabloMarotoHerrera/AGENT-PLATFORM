@@ -23,6 +23,7 @@ from pydantic import (
     StrictBool,
     StringConstraints,
     field_validator,
+    model_serializer,
     model_validator,
 )
 
@@ -41,6 +42,7 @@ from hermes_cli.agent_platform.ticket_factory import (
     TicketPublicationState,
     TicketResponseContractSpec,
     TicketSpec,
+    TicketValidationCommandAuthoritySpec,
     build_ticket_dependency_plan,
     lint_ticket_collection,
 )
@@ -56,6 +58,7 @@ from hermes_cli.agent_platform.ticket_factory.specs import (
 WORK_PACKET_SCHEMA_VERSION = 1
 WORK_PACKET_COMPILER_SCHEMA_VERSION = 1
 WORK_PACKET_COMPILER_POLICY_ID = "pepper-work-packet-compiler-policy-v1"
+WORK_PACKET_VALIDATION_COMMAND_AUTHORITY_SCHEMA_VERSION = 1
 
 AUTHORIZATION_DIGEST_ALGORITHM = (
     "agent-platform-work-packet-compilation-authorization-sha256-v1"
@@ -66,6 +69,9 @@ REPOSITORY_SCOPE_DIGEST_ALGORITHM = (
 TASK_STEP_DIGEST_ALGORITHM = "agent-platform-work-packet-task-step-sha256-v1"
 VALIDATION_STEP_DIGEST_ALGORITHM = (
     "agent-platform-work-packet-validation-step-sha256-v1"
+)
+VALIDATION_COMMAND_AUTHORITY_DIGEST_ALGORITHM = (
+    "agent-platform-work-packet-validation-command-authority-sha256-v1"
 )
 PROJECT_SPEC_DIGEST_ALGORITHM = "agent-platform-work-packet-project-spec-sha256-v1"
 SOURCE_TICKET_DIGEST_ALGORITHM = "agent-platform-work-packet-source-ticket-sha256-v1"
@@ -327,6 +333,52 @@ class WorkPacketTaskStep(_WorkPacketModel):
         return self
 
 
+class WorkPacketValidationCommandAuthority(_WorkPacketModel):
+    schema_version: Literal[1] = WORK_PACKET_VALIDATION_COMMAND_AUTHORITY_SCHEMA_VERSION
+    authority_kind: Literal["governed_validation_command"] = "governed_validation_command"
+    command_family: Literal["package_script"] = "package_script"
+    validation_id: BoundedText
+    source_command: BoundedText
+    package_manager: Literal["npm"] = "npm"
+    package_relative_path: RepositoryPathPattern
+    command_argv: tuple[BoundedText, ...] = Field(min_length=2, max_length=32)
+    timeout_seconds: int = Field(default=120, ge=1, le=600, strict=True)
+    expected_exit_codes: tuple[int, ...] = Field(default=(0,), min_length=1, max_length=8)
+    source_ticket_command_authority_id: BoundedText
+    source_ticket_command_authority_SHA256: DigestText
+    command_authority_id: BoundedText
+    command_authority_SHA256: DigestText
+
+    @field_validator("package_relative_path", mode="after")
+    @classmethod
+    def _validate_concrete_package_path(cls, value: str) -> str:
+        if any(token in value for token in ("*", "?")) or value.endswith("/**"):
+            raise ValueError("package_relative_path must identify one package directory")
+        return value
+
+    @field_validator("command_argv", mode="after")
+    @classmethod
+    def _validate_command_argv(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _validate_validation_command_argv(value)
+
+    @field_validator("expected_exit_codes", mode="before")
+    @classmethod
+    def _coerce_expected_exit_codes(cls, value: object) -> tuple[int, ...]:
+        return _normalize_exit_codes(value)
+
+    @model_validator(mode="after")
+    def _validate_command_authority(self) -> WorkPacketValidationCommandAuthority:
+        if _normalize_validation_command_text(self.source_command) != " ".join(self.command_argv):
+            raise ValueError("source_command must match command_argv")
+        expected_sha = _work_packet_validation_command_authority_digest(self)
+        expected_id = _work_packet_validation_command_authority_id(expected_sha)
+        if self.command_authority_SHA256 != expected_sha:
+            raise ValueError("command_authority_SHA256 must match command authority digest")
+        if self.command_authority_id != expected_id:
+            raise ValueError("command_authority_id must match command authority digest")
+        return self
+
+
 class WorkPacketValidationStep(_WorkPacketModel):
     validation_id: BoundedText
     ordinal: int = Field(ge=1, strict=True)
@@ -335,7 +387,8 @@ class WorkPacketValidationStep(_WorkPacketModel):
     command: BoundedText | None
     expected_result: BoundedText
     required: StrictBool
-    command_execution_authorized: Literal[False] = False
+    command_execution_authorized: StrictBool = False
+    command_authority: WorkPacketValidationCommandAuthority | None = None
     step_SHA256: DigestText
 
     @model_validator(mode="after")
@@ -347,9 +400,28 @@ class WorkPacketValidationStep(_WorkPacketModel):
         )
         if self.kind is not expected_kind:
             raise ValueError("validation kind must match command presence")
+        if self.command_authority is None:
+            if self.command_execution_authorized is not False:
+                raise ValueError("validation command execution authority is missing")
+        else:
+            if self.command is None:
+                raise ValueError("command_authority requires a command validation step")
+            if self.command_execution_authorized is not True:
+                raise ValueError("command_authority requires command execution authorization")
+            if self.command_authority.validation_id != self.validation_id:
+                raise ValueError("command_authority validation_id must match validation step")
+            if _normalize_validation_command_text(self.command_authority.source_command) != _normalize_validation_command_text(self.command):
+                raise ValueError("command_authority source_command must match validation command")
         if self.step_SHA256 != _validation_step_digest(self):
             raise ValueError("step_SHA256 must match validation step digest")
         return self
+
+    @model_serializer(mode="wrap")
+    def _serialize_validation_step(self, handler):
+        data = handler(self)
+        if self.command_authority is None:
+            data.pop("command_authority", None)
+        return data
 
 
 class WorkPacketDownstreamRequirement(_WorkPacketModel):
@@ -690,6 +762,87 @@ def _normalize_text(value: str) -> str:
     return _WHITESPACE_PATTERN.sub(" ", value.strip()).casefold()
 
 
+def _normalize_validation_command_text(value: object) -> str:
+    return " ".join(str(value or "").strip().split())
+
+
+def _looks_like_env_assignment_token(token: str) -> bool:
+    if "=" not in token:
+        return False
+    name = token.split("=", 1)[0]
+    return bool(name) and (name[0].isalpha() or name[0] == "_") and all(
+        ch.isalnum() or ch == "_" for ch in name
+    )
+
+
+def _normalize_exit_codes(value: object) -> tuple[int, ...]:
+    if value is None or value == "":
+        parsed = (0,)
+    elif isinstance(value, tuple | list):
+        parsed = tuple(_strict_exit_code(item) for item in value)
+    else:
+        parsed = (_strict_exit_code(value),)
+    if not parsed:
+        raise ValueError("expected_exit_codes must not be empty")
+    if len(parsed) != len(frozenset(parsed)):
+        raise ValueError("expected_exit_codes must be unique")
+    return parsed
+
+
+def _strict_exit_code(value: object) -> int:
+    if isinstance(value, bool):
+        raise ValueError("expected_exit_codes must be integers")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("expected_exit_codes must be integers") from exc
+    if parsed < 0 or parsed > 255:
+        raise ValueError("expected_exit_codes must be between 0 and 255")
+    return parsed
+
+
+def _validate_validation_command_argv(tokens: tuple[str, ...]) -> tuple[str, ...]:
+    forbidden_markers = ("||", "&&", "<<", ">>", "$(", "${")
+    forbidden_tokens = ("|", "&", ";", ">", "<", "`")
+    if any(not str(token).strip() for token in tokens):
+        raise ValueError("command argv tokens must be non-empty")
+    for token in tokens:
+        if any(marker in token for marker in forbidden_markers) or token in forbidden_tokens:
+            raise ValueError("command argv must not contain shell syntax")
+        if "\\" in token or "\x00" in token:
+            raise ValueError("command argv must use safe forward-slash tokens")
+        if token.startswith("/") or token.startswith("../") or token in {".", ".."}:
+            raise ValueError("command argv must not contain absolute or traversal paths")
+    lowered = tuple(token.casefold() for token in tokens)
+    if any(token in {"git", "docker", "graphify", "pnpm", "yarn", "corepack", "npx"} for token in lowered):
+        raise ValueError("command argv contains a forbidden executable")
+    if _package_script_request(tokens) is None:
+        raise ValueError("command argv must be an npm package-script command")
+    return tokens
+
+
+def _package_script_request(tokens: tuple[str, ...]) -> tuple[str, tuple[str, ...]] | None:
+    if tokens[:2] == ("npm", "test"):
+        script_name = "test"
+        args = _tokens_after_optional_separator(tokens[2:])
+    elif len(tokens) >= 3 and tokens[:2] == ("npm", "run"):
+        script_name = tokens[2]
+        args = _tokens_after_optional_separator(tokens[3:])
+    else:
+        return None
+    if script_name in {"", "install", "exec", "x"}:
+        return None
+    if any(_looks_like_env_assignment_token(token) for token in args):
+        return None
+    return script_name, args
+
+
+def _tokens_after_optional_separator(tokens: tuple[str, ...]) -> tuple[str, ...]:
+    if tokens and tokens[0] == "--":
+        return tokens[1:]
+    return tokens
+
+
 def _is_shadow_identifier(value: str) -> bool:
     return value.upper().startswith("SHADOW-") or value.casefold().startswith("shadow-")
 
@@ -748,7 +901,30 @@ def _validation_step_digest(step: WorkPacketValidationStep) -> str:
 
 
 def _validation_step_digest_from_record(record: dict[str, object]) -> str:
-    return _digest(VALIDATION_STEP_DIGEST_ALGORITHM, record)
+    prepared = {key: _dump_value(value) for key, value in record.items()}
+    return _digest(VALIDATION_STEP_DIGEST_ALGORITHM, prepared)
+
+
+def _work_packet_validation_command_authority_digest(
+    authority: WorkPacketValidationCommandAuthority,
+) -> str:
+    return _work_packet_validation_command_authority_digest_from_record(
+        authority.model_dump(
+            mode="json",
+            exclude={"command_authority_id", "command_authority_SHA256"},
+        )
+    )
+
+
+def _work_packet_validation_command_authority_digest_from_record(
+    record: dict[str, object],
+) -> str:
+    prepared = {key: _dump_value(value) for key, value in record.items()}
+    return _digest(VALIDATION_COMMAND_AUTHORITY_DIGEST_ALGORITHM, prepared)
+
+
+def _work_packet_validation_command_authority_id(digest: str) -> str:
+    return f"GVCMD-AUTH-{digest[:12]}"
 
 
 def _project_spec_digest(project_spec: ProjectSpec) -> str:
@@ -981,6 +1157,7 @@ def _compile_validation_steps(
     compiled: list[WorkPacketValidationStep] = []
     for index, step in enumerate(validation_steps, start=1):
         command = step.command
+        command_authority = _compile_validation_command_authority(step)
         data = {
             "validation_id": step.validation_id,
             "ordinal": index,
@@ -991,8 +1168,10 @@ def _compile_validation_steps(
             "command": command,
             "expected_result": step.expected_result,
             "required": step.required,
-            "command_execution_authorized": False,
+            "command_execution_authorized": command_authority is not None,
         }
+        if command_authority is not None:
+            data["command_authority"] = command_authority
         compiled.append(
             WorkPacketValidationStep(
                 **data,
@@ -1000,6 +1179,39 @@ def _compile_validation_steps(
             )
         )
     return tuple(compiled)
+
+
+def _compile_validation_command_authority(
+    step: object,
+) -> WorkPacketValidationCommandAuthority | None:
+    source = getattr(step, "command_authority", None)
+    if source is None:
+        return None
+    try:
+        source_authority = TicketValidationCommandAuthoritySpec.model_validate(source)
+    except ValueError as exc:
+        raise WorkPacketCompilerInputError(
+            "validation command authority is invalid"
+        ) from exc
+    source_record = source_authority.model_dump(mode="json")
+    source_id = str(source_record.pop("command_authority_id"))
+    source_sha = str(source_record.pop("command_authority_SHA256"))
+    data = {
+        **source_record,
+        "source_ticket_command_authority_id": source_id,
+        "source_ticket_command_authority_SHA256": source_sha,
+    }
+    command_sha = _work_packet_validation_command_authority_digest_from_record(data)
+    try:
+        return WorkPacketValidationCommandAuthority(
+            **data,
+            command_authority_id=_work_packet_validation_command_authority_id(command_sha),
+            command_authority_SHA256=command_sha,
+        )
+    except ValueError as exc:
+        raise WorkPacketCompilerInputError(
+            "validation command authority cannot compile"
+        ) from exc
 
 
 def _canonical_downstream_requirements() -> tuple[WorkPacketDownstreamRequirement, ...]:
@@ -1157,8 +1369,11 @@ def _validate_work_packet_integrity(
         error_type=error_type,
     )
     for step in packet.validation_steps:
-        if step.command_execution_authorized is not False:
-            raise error_type("validation command execution must be false")
+        if step.command_authority is None:
+            if step.command_execution_authorized is not False:
+                raise error_type("validation command execution authority mismatch")
+        elif step.command_execution_authorized is not True:
+            raise error_type("validation command execution authority mismatch")
         if step.step_SHA256 != _validation_step_digest(step):
             raise error_type("validation step digest mismatch")
     if packet.downstream_requirements != _canonical_downstream_requirements():

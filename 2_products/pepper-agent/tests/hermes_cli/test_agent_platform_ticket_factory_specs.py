@@ -13,6 +13,7 @@ from hermes_cli.agent_platform import ticket_factory
 from hermes_cli.agent_platform.ticket_factory import (
     PROJECT_SPEC_SCHEMA_VERSION,
     TICKET_SPEC_SCHEMA_VERSION,
+    VALIDATION_COMMAND_AUTHORITY_SCHEMA_VERSION,
     AuthorityReferenceKind,
     AuthorityReferenceSpec,
     DependencyKind,
@@ -24,6 +25,7 @@ from hermes_cli.agent_platform.ticket_factory import (
     TicketResponseContractSpec,
     TicketSpec,
     TicketType,
+    TicketValidationCommandAuthoritySpec,
     TicketValidationStepSpec,
 )
 
@@ -31,6 +33,7 @@ from hermes_cli.agent_platform.ticket_factory import (
 EXPECTED_EXPORTS = (
     "PROJECT_SPEC_SCHEMA_VERSION",
     "TICKET_SPEC_SCHEMA_VERSION",
+    "VALIDATION_COMMAND_AUTHORITY_SCHEMA_VERSION",
     "TicketType",
     "DependencyKind",
     "DependencyScope",
@@ -39,6 +42,7 @@ EXPECTED_EXPORTS = (
     "AuthorityReferenceSpec",
     "TicketDependencySpec",
     "RepositoryScopeSpec",
+    "TicketValidationCommandAuthoritySpec",
     "TicketValidationStepSpec",
     "TicketResponseContractSpec",
     "ProjectSpec",
@@ -49,6 +53,7 @@ PUBLIC_MODELS = (
     AuthorityReferenceSpec,
     TicketDependencySpec,
     RepositoryScopeSpec,
+    TicketValidationCommandAuthoritySpec,
     TicketValidationStepSpec,
     TicketResponseContractSpec,
     ProjectSpec,
@@ -95,6 +100,25 @@ def validation_step(**overrides: object) -> TicketValidationStepSpec:
     }
     data.update(overrides)
     return TicketValidationStepSpec.model_validate(data)
+
+
+def command_authority(**overrides: object) -> TicketValidationCommandAuthoritySpec:
+    data = {
+        "validation_id": "V1",
+        "source_command": "npm run test -- src/agent-platform/p99.test.tsx",
+        "package_relative_path": "2_products/pepper-agent/web",
+        "command_argv": (
+            "npm",
+            "run",
+            "test",
+            "--",
+            "src/agent-platform/p99.test.tsx",
+        ),
+        "timeout_seconds": 180,
+        "expected_exit_codes": (0,),
+    }
+    data.update(overrides)
+    return TicketValidationCommandAuthoritySpec.model_validate(data)
 
 
 def dependency(**overrides: object) -> TicketDependencySpec:
@@ -236,6 +260,13 @@ def test_project_spec_schema_version_defaults_to_one() -> None:
 def test_ticket_spec_schema_version_defaults_to_one() -> None:
     assert TICKET_SPEC_SCHEMA_VERSION == 1
     assert ticket().schema_version == 1
+
+
+def test_validation_command_authority_schema_version_defaults_to_one() -> None:
+    authority = command_authority()
+
+    assert VALIDATION_COMMAND_AUTHORITY_SCHEMA_VERSION == 1
+    assert authority.schema_version == 1
 
 
 def test_alternative_schema_versions_are_rejected() -> None:
@@ -486,6 +517,54 @@ def test_inert_command_text_round_trips_without_execution(
         == command
     )
     assert called is False
+
+
+def test_validation_step_without_command_authority_omits_legacy_field() -> None:
+    payload = validation_step().model_dump(mode="json")
+
+    assert "command_authority" not in payload
+    assert "command_authority" not in validation_step().model_dump_json()
+
+
+def test_validation_command_authority_round_trips_with_stable_digest() -> None:
+    authority = command_authority()
+    step = validation_step(
+        command=authority.source_command,
+        command_authority=authority,
+    )
+    round_tripped = TicketValidationStepSpec.model_validate_json(step.model_dump_json())
+
+    assert authority.command_authority_id.startswith("GVCMD-AUTH-")
+    assert len(authority.command_authority_SHA256) == 64
+    assert round_tripped == step
+    assert round_tripped.command_authority == authority
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    (
+        {"source_command": "npm run typecheck"},
+        {"command_argv": ("npx", "vitest", "run")},
+        {"command_argv": ("npm", "run", "test", "--", "src/a.test.tsx", "|", "cat")},
+        {"package_relative_path": "2_products/pepper-agent/web/**"},
+        {"expected_exit_codes": (0, 0)},
+    ),
+)
+def test_validation_command_authority_rejects_unsafe_or_mismatched_shapes(
+    overrides: dict[str, object],
+) -> None:
+    assert_validation_fails(lambda: command_authority(**overrides))
+
+
+def test_validation_step_command_authority_must_match_step_identity() -> None:
+    authority = command_authority()
+
+    assert_validation_fails(
+        lambda: validation_step(validation_id="V2", command=authority.source_command, command_authority=authority)
+    )
+    assert_validation_fails(
+        lambda: validation_step(command=None, command_authority=authority)
+    )
 
 
 def test_project_spec_json_round_trip() -> None:

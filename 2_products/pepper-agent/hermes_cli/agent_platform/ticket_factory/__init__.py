@@ -58,6 +58,7 @@ from hermes_cli.agent_platform.ticket_factory.generator_roles import (
 from hermes_cli.agent_platform.ticket_factory.specs import (
     PROJECT_SPEC_SCHEMA_VERSION,
     TICKET_SPEC_SCHEMA_VERSION,
+    VALIDATION_COMMAND_AUTHORITY_SCHEMA_VERSION,
     AuthorityReferenceKind,
     AuthorityReferenceSpec,
     DependencyKind,
@@ -67,6 +68,7 @@ from hermes_cli.agent_platform.ticket_factory.specs import (
     RepositoryScopeSpec,
     StructuredResultSchemaSpec,
     TicketDependencySpec,
+    TicketValidationCommandAuthoritySpec,
     TicketResponseContractSpec,
     TicketSpec,
     TicketType,
@@ -196,6 +198,7 @@ from hermes_cli.agent_platform.ticket_factory.shadow_pilot import (
 __all__ = (
     "PROJECT_SPEC_SCHEMA_VERSION",
     "TICKET_SPEC_SCHEMA_VERSION",
+    "VALIDATION_COMMAND_AUTHORITY_SCHEMA_VERSION",
     "CONTEXT_PACK_SCHEMA_VERSION",
     "TicketType",
     "DependencyKind",
@@ -209,6 +212,7 @@ __all__ = (
     "AuthorityReferenceSpec",
     "TicketDependencySpec",
     "RepositoryScopeSpec",
+    "TicketValidationCommandAuthoritySpec",
     "TicketValidationStepSpec",
     "StructuredResultSchemaSpec",
     "TicketResponseContractSpec",

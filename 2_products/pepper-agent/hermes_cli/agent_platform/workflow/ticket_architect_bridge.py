@@ -1070,7 +1070,13 @@ def _json_ready_contract(contract: dict[str, Any]) -> dict[str, Any]:
     ready: dict[str, Any] = {}
     for key, value in sorted(contract.items()):
         field_name = _normalize_contract_field(key)
-        if field_name in _CONTRACT_LIST_FIELDS:
+        if field_name == "validation_steps":
+            ready[field_name] = [
+                dict(item) if isinstance(item, dict) else str(item).strip()
+                for item in value or ()
+                if isinstance(item, dict) or str(item).strip()
+            ]
+        elif field_name in _CONTRACT_LIST_FIELDS:
             ready[field_name] = [str(item).strip() for item in value or () if str(item).strip()]
         elif field_name in _CONTRACT_SINGLE_FIELDS:
             ready[field_name] = str(value or "").strip()
@@ -4260,8 +4266,8 @@ def _contract_validation_steps(
     target: GovernedTicketGenerationTarget,
     contract: dict[str, Any],
 ) -> tuple[TicketValidationStepSpec, ...]:
-    steps = _contract_items(contract, "validation_steps")
-    if not steps:
+    raw_steps = contract.get("validation_steps")
+    if not isinstance(raw_steps, list | tuple) or not raw_steps:
         return (
             TicketValidationStepSpec(
                 validation_id="V1",
@@ -4274,8 +4280,16 @@ def _contract_validation_steps(
             ),
         )
     parsed: list[TicketValidationStepSpec] = []
-    for index, raw_step in enumerate(steps, start=1):
-        description, expected_result = _parse_contract_validation_step(raw_step)
+    for index, raw_step in enumerate(raw_steps, start=1):
+        if isinstance(raw_step, dict):
+            try:
+                parsed.append(TicketValidationStepSpec.model_validate(raw_step))
+            except ValueError as exc:
+                raise TicketArchitectBridgeInputError(
+                    "roadmap ticket contract contains invalid validation step"
+                ) from exc
+            continue
+        description, expected_result = _parse_contract_validation_step(str(raw_step))
         parsed.append(
             TicketValidationStepSpec(
                 validation_id=f"V{index}",

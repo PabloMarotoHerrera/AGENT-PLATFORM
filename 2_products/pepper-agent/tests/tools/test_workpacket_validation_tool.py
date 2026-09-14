@@ -24,6 +24,9 @@ class _Step:
     description: str
     expected_result: str
     command: str | None = None
+    command_execution_authorized: bool = False
+    command_authority: dict[str, object] | None = None
+    step_SHA256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -80,6 +83,33 @@ def _workpacket_with_steps(*steps: _Step) -> _WorkPacket:
 def _write(path: Path, text: str = "") -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+
+
+def _package_command_authority(
+    *,
+    validation_id: str,
+    source_command: str,
+    command_argv: tuple[str, ...],
+    package_relative_path: str = "2_products/pepper-agent/web",
+    command_sha: str = "e" * 64,
+    source_sha: str = "d" * 64,
+) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "authority_kind": "governed_validation_command",
+        "command_family": "package_script",
+        "validation_id": validation_id,
+        "source_command": source_command,
+        "package_manager": "npm",
+        "package_relative_path": package_relative_path,
+        "command_argv": command_argv,
+        "timeout_seconds": 180,
+        "expected_exit_codes": [0],
+        "source_ticket_command_authority_id": "GVCMD-AUTH-source",
+        "source_ticket_command_authority_SHA256": source_sha,
+        "command_authority_id": "GVCMD-AUTH-workpacket",
+        "command_authority_SHA256": command_sha,
+    }
 
 
 def _install_review_prepare_current_run_authority(
@@ -246,17 +276,7 @@ def _passing_result(
         "work_packet_id": contract["work_packet_id"],
         "work_packet_SHA256": contract["work_packet_SHA256"],
         "ticket_id": contract["ticket_id"],
-        "command": {
-            "command_id": spec.command_id,
-            "validation_id": spec.validation_id,
-            "source": spec.source,
-            "source_command": spec.source_command,
-            "working_directory": spec.working_directory,
-            "timeout_seconds": spec.timeout_seconds,
-            "expected_exit_codes": list(spec.expected_exit_codes),
-            "runtime_available": True,
-            "runtime_unavailable_reason": None,
-        },
+        "command": tool._public_command(spec),
         "disposition": "passed",
         "failure_reason": "none",
         "exit_code": 0,
@@ -1569,6 +1589,264 @@ def test_review_prepare_validation_api_preserves_not_applicable_evidence(
     assert result["validation_command_results"][0]["command"]["source_command"] == command
 
 
+def test_review_prepare_validation_result_requires_matching_command_authority() -> None:
+    command = "npm run typecheck"
+    command_authority = _package_command_authority(
+        validation_id="V2",
+        source_command=command,
+        command_argv=("npm", "run", "typecheck"),
+    )
+    _projection, contract, _completion = _review_prepare_projection_contract_completion([
+        {
+            "validation_id": "V2",
+            "command": command,
+            "expected_exit_codes": [0],
+            "command_authority": command_authority,
+        },
+    ])
+    requirement = tool.review_prepare_validation_requirements(contract)[0]
+    spec = tool.GovernedValidationCommandSpec(
+        command_id="GVCMD-001",
+        validation_id="V2",
+        source="workpacket.validation_steps.command_authority",
+        source_command=command,
+        effective_argv=("node", "tsc.js", "-p", ".", "--noEmit"),
+        working_directory="/workspace/2_products/pepper-agent/web",
+        timeout_seconds=180,
+        expected_exit_codes=(0,),
+        command_authority_kind="governed_validation_command",
+        command_authority_id="GVCMD-AUTH-workpacket",
+        command_authority_SHA256="e" * 64,
+        source_ticket_command_authority_SHA256="d" * 64,
+        command_family="package_script",
+        package_relative_path="2_products/pepper-agent/web",
+        command_argv=("npm", "run", "typecheck"),
+    )
+    passed = _passing_result(contract, spec)
+    tampered = json.loads(json.dumps(passed))
+    tampered["command"]["command_authority_SHA256"] = "0" * 64
+
+    assert tool.review_prepare_validation_result_matches_requirement(
+        passed,
+        requirement,
+        acceptance_contract=contract,
+    ) is True
+    assert tool.review_prepare_validation_result_matches_requirement(
+        tampered,
+        requirement,
+        acceptance_contract=contract,
+    ) is False
+
+
+@pytest.mark.parametrize(
+    (
+        "validation_id",
+        "source_command",
+        "command_argv",
+        "scripts",
+        "entries",
+        "expected_plans",
+    ),
+    (
+        (
+            "V1",
+            "npm run test -- src/agent-platform/approval-inbox/approval-inbox.test.tsx",
+            (
+                "npm",
+                "run",
+                "test",
+                "--",
+                "src/agent-platform/approval-inbox/approval-inbox.test.tsx",
+            ),
+            {"test": "vitest run"},
+            {"vitest/vitest.mjs": "vitest.mjs"},
+            (("vitest.mjs", "run", "src/agent-platform/approval-inbox/approval-inbox.test.tsx"),),
+        ),
+        (
+            "V2",
+            "npm run typecheck",
+            ("npm", "run", "typecheck"),
+            {"typecheck": "tsc -p . --noEmit"},
+            {"typescript/lib/tsc.js": "tsc.js"},
+            (("tsc.js", "-p", ".", "--noEmit"),),
+        ),
+        (
+            "V3",
+            "npm run build",
+            ("npm", "run", "build"),
+            {"build": "tsc -b && vite build"},
+            {"typescript/lib/tsc.js": "tsc.js", "vite/bin/vite.js": "vite.js"},
+            (("tsc.js", "-b"), ("vite.js", "build")),
+        ),
+    ),
+)
+def test_explicit_workpacket_package_command_authority_derives_shell_free_plan(
+    tmp_path,
+    monkeypatch,
+    validation_id,
+    source_command,
+    command_argv,
+    scripts,
+    entries,
+    expected_plans,
+) -> None:
+    workspace = tmp_path / "workspace"
+    package_dir = workspace / "2_products/pepper-agent/web"
+    _write(package_dir / "package.json", json.dumps({"scripts": scripts}))
+    _write(
+        workspace / "2_products/pepper-agent/web/src/agent-platform/approval-inbox/approval-inbox.test.tsx",
+        "test('synthetic', () => {})\n",
+    )
+    node = tmp_path / "node"
+    _write(node, "")
+    entry_paths = {}
+    for module_entry, filename in entries.items():
+        entry_path = tmp_path / filename
+        _write(entry_path, "")
+        entry_paths[module_entry] = entry_path
+    authority = _authority(
+        workspace,
+        allowed_paths=("2_products/pepper-agent/web/src/agent-platform/approval-inbox/**",),
+    )
+    command_authority = _package_command_authority(
+        validation_id=validation_id,
+        source_command=source_command,
+        command_argv=command_argv,
+    )
+    work_packet = _workpacket_with_steps(
+        _Step(
+            validation_id,
+            "Run structured package command.",
+            "The structured package command passes.",
+            command=source_command,
+            command_execution_authorized=True,
+            command_authority=command_authority,
+            step_SHA256="f" * 64,
+        ),
+    )
+    monkeypatch.setattr(tool, "_resolve_node_executable", lambda: node)
+    monkeypatch.setattr(
+        tool,
+        "_resolve_node_module_entry",
+        lambda _workspace, _package, entry: entry_paths.get(entry),
+    )
+
+    specs = tool.build_governed_validation_command_specs(authority, work_packet)
+
+    assert len(specs) == 1
+    spec = specs[0]
+    assert spec.source == "workpacket.validation_steps.command_authority"
+    assert spec.acceptance_authorized is True
+    assert spec.source_command == source_command
+    assert spec.command_authority_SHA256 == "e" * 64
+    assert spec.source_ticket_command_authority_SHA256 == "d" * 64
+    assert spec.package_relative_path == "2_products/pepper-agent/web"
+    assert spec.command_argv == command_argv
+    assert spec.timeout_seconds == 180
+    assert len(spec.execution_plan) == len(expected_plans)
+    for plan_step, expected in zip(spec.execution_plan, expected_plans, strict=True):
+        expected_entry, *tail = expected
+        assert tuple(plan_step["effective_argv"]) == (
+            node.as_posix(),
+            (tmp_path / expected_entry).as_posix(),
+            *tail,
+        )
+        assert plan_step["timeout_seconds"] == 180
+
+
+def test_explicit_package_command_authority_rejects_wrong_package(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    package_dir = workspace / "2_products/pepper-agent/apps/desktop"
+    _write(package_dir / "package.json", json.dumps({"scripts": {"typecheck": "tsc -p . --noEmit"}}))
+    command = "npm run typecheck"
+    authority = _authority(
+        workspace,
+        allowed_paths=("2_products/pepper-agent/web/src/agent-platform/approval-inbox/**",),
+    )
+    work_packet = _workpacket_with_steps(
+        _Step(
+            "V2",
+            "Run wrong package command.",
+            "The wrong package command is not authorized.",
+            command=command,
+            command_execution_authorized=True,
+            command_authority=_package_command_authority(
+                validation_id="V2",
+                source_command=command,
+                command_argv=("npm", "run", "typecheck"),
+                package_relative_path="2_products/pepper-agent/apps/desktop",
+            ),
+        ),
+    )
+
+    assert tool.build_governed_validation_command_specs(authority, work_packet) == ()
+
+
+def test_legacy_bare_npm_package_command_fails_closed_without_authority(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    package_dir = workspace / "2_products/pepper-agent/web"
+    _write(package_dir / "package.json", json.dumps({"scripts": {"test": "vitest run"}}))
+    _write(
+        workspace / "2_products/pepper-agent/web/src/agent-platform/approval-inbox/approval-inbox.test.tsx",
+        "test('synthetic', () => {})\n",
+    )
+    authority = _authority(
+        workspace,
+        allowed_paths=("2_products/pepper-agent/web/src/agent-platform/approval-inbox/**",),
+    )
+    work_packet = _workpacket_with_steps(
+        _Step(
+            "V1",
+            "Run bare package command.",
+            "Bare package command is not durable authority.",
+            command="npm run test -- src/agent-platform/approval-inbox/approval-inbox.test.tsx",
+        ),
+    )
+
+    assert tool.build_governed_validation_command_specs(authority, work_packet) == ()
+
+
+def test_capability_discovered_vitest_command_is_not_review_prepare_authority(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    package_dir = workspace / "2_products/pepper-agent/web"
+    _write(package_dir / "package.json", json.dumps({"scripts": {"test": "vitest run"}}))
+    _write(
+        workspace / "2_products/pepper-agent/web/src/agent-platform/approval-inbox/approval-inbox.test.tsx",
+        "test('synthetic', () => {})\n",
+    )
+    node = tmp_path / "node"
+    vitest = tmp_path / "vitest.mjs"
+    _write(node, "")
+    _write(vitest, "")
+    authority = _authority(
+        workspace,
+        allowed_paths=("2_products/pepper-agent/web/src/agent-platform/approval-inbox/**",),
+    )
+    work_packet = _WorkPacket(validation_steps=())
+    monkeypatch.setattr(tool, "_resolve_node_executable", lambda: node)
+    monkeypatch.setattr(
+        tool,
+        "_resolve_node_module_entry",
+        lambda _workspace, _package, entry: vitest if entry == "vitest/vitest.mjs" else None,
+    )
+
+    specs = tool.build_governed_validation_command_specs(authority, work_packet)
+    assert len(specs) == 1
+    capability_spec = specs[0]
+    requirement = {
+        "validation_id": capability_spec.validation_id,
+        "source_command": capability_spec.source_command,
+        "expected_exit_codes": (0,),
+    }
+
+    assert capability_spec.acceptance_authorized is False
+    assert capability_spec.command_authority_kind == "capability_discovery"
+    assert tool._review_prepare_validation_spec_for_requirement(specs, requirement) is None
+
+
 def test_workpacket_frontend_package_command_uses_exact_workpacket_source(
     tmp_path,
     monkeypatch,
@@ -1841,6 +2119,27 @@ def test_frontend_package_script_must_be_safe_vitest_run(tmp_path) -> None:
     specs = tool.build_governed_validation_command_specs(authority, work_packet)
 
     assert specs == ()
+
+
+def test_legacy_package_command_does_not_infer_unrecognized_script_alias(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    package_dir = workspace / "2_products/pepper-agent/web"
+    _write(package_dir / "package.json", json.dumps({"scripts": {"test": "vitest"}}))
+    test_file = "2_products/pepper-agent/web/src/agent-platform/approval-inbox/approval-inbox.test.tsx"
+    _write(workspace / test_file, "test('synthetic', () => {})\n")
+    authority = _authority(
+        workspace,
+        allowed_paths=("2_products/pepper-agent/web/src/agent-platform/approval-inbox/**",),
+    )
+    command = (
+        "cd 2_products/pepper-agent/web && npm run test -- "
+        "src/agent-platform/approval-inbox/approval-inbox.test.tsx"
+    )
+    work_packet = _workpacket_with_steps(
+        _Step("V1", "Run legacy package command.", "The command is not inferred.", command=command),
+    )
+
+    assert tool.build_governed_validation_command_specs(authority, work_packet) == ()
 
 
 def test_pepper_validation_toolset_is_not_a_core_terminal_surface() -> None:

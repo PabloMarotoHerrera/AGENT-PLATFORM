@@ -973,6 +973,50 @@ def test_p18_9_1_materializes_implementation_contract_into_ticket_and_work_packe
     assert "P18.9.12 - Pepper Visual Identity and Design System" in contract_text
 
 
+def test_contract_validation_steps_preserve_structured_command_authority(
+    bridge_home,
+) -> None:
+    command = "npm run typecheck"
+    contract = _synthetic_implementation_contract("Authority")
+    contract["allowed_paths"] = [
+        "2_products/pepper-agent/web/src/agent-platform/approval-inbox/**",
+    ]
+    contract["validation_steps"] = [
+        {
+            "validation_id": "V1",
+            "description": "Run the governed package typecheck command.",
+            "command": command,
+            "expected_result": "The package typecheck passes.",
+            "command_authority": {
+                "validation_id": "V1",
+                "source_command": command,
+                "package_relative_path": "2_products/pepper-agent/web",
+                "command_argv": ["npm", "run", "typecheck"],
+                "timeout_seconds": 180,
+                "expected_exit_codes": [0],
+            },
+        },
+    ]
+    normalized_contract = bridge._contract_from_authority_item({"ticket_contract": contract})
+    target = _synthetic_implementation_target(
+        "P99.3",
+        "Synthetic Command Authority",
+        contract=normalized_contract,
+    )
+
+    ticket = bridge._build_ticket_spec(target).model_dump(mode="json")
+    step = ticket["validation_steps"][0]
+    authority = step["command_authority"]
+
+    assert step["command"] == command
+    assert authority["authority_kind"] == "governed_validation_command"
+    assert authority["command_family"] == "package_script"
+    assert authority["package_relative_path"] == "2_products/pepper-agent/web"
+    assert authority["command_argv"] == ["npm", "run", "typecheck"]
+    assert authority["command_authority_id"].startswith("GVCMD-AUTH-")
+    assert len(authority["command_authority_SHA256"]) == 64
+
+
 def test_p18_9_0_preserves_architecture_inventory_ia_acceptance_contract(bridge_home) -> None:
     bridge.generate_p18_9_0_ticket(workflow=_workflow())
     record = bridge.load_p18_9_0_generation_record()

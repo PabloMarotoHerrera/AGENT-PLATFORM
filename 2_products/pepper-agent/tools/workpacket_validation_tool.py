@@ -97,6 +97,18 @@ class GovernedValidationCommandSpec:
     runtime_unavailable_reason: str | None = None
     execution_plan: tuple[dict[str, Any], ...] = ()
     execution_plan_SHA256: str | None = None
+    acceptance_authorized: bool = True
+    command_authority_kind: str | None = None
+    command_authority_id: str | None = None
+    command_authority_SHA256: str | None = None
+    source_ticket_command_authority_SHA256: str | None = None
+    ticket_spec_SHA256: str | None = None
+    work_packet_id: str | None = None
+    work_packet_SHA256: str | None = None
+    work_packet_validation_step_SHA256: str | None = None
+    command_family: str | None = None
+    package_relative_path: str | None = None
+    command_argv: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -216,8 +228,13 @@ def build_governed_validation_command_specs(
     """Build exact command specs from WorkPacket and repository package authority."""
 
     specs: list[GovernedValidationCommandSpec] = []
+    command_steps = tuple(
+        step
+        for step in tuple(getattr(work_packet, "validation_steps", ()) or ())
+        if _step_command(step)
+    )
     specs.extend(_workpacket_command_step_specs(authority, work_packet))
-    if not specs:
+    if not specs and not command_steps:
         specs.extend(_frontend_package_test_specs(authority, work_packet))
     return _finalize_command_specs(tuple(specs))
 
@@ -299,6 +316,8 @@ def review_prepare_validation_result_matches_requirement(
     observed_validation_id = command.get("validation_id") or result.get("validation_id")
     if expected_validation_id and observed_validation_id != expected_validation_id:
         return False
+    if not _public_command_matches_requirement_authority(command, requirement):
+        return False
     for key in ("ticket_id", "work_packet_id", "work_packet_SHA256"):
         expected = acceptance_contract.get(key)
         if expected is not None and result.get(key) != expected:
@@ -314,6 +333,32 @@ def review_prepare_validation_result_matches_requirement(
     exit_code = _int_or_none(result.get("exit_code"))
     expected_exit_codes = tuple(requirement.get("expected_exit_codes") or (0,))
     return exit_code in expected_exit_codes
+
+
+def _public_command_matches_requirement_authority(
+    command: Mapping[str, Any],
+    requirement: Mapping[str, Any],
+) -> bool:
+    for key in (
+        "source_ticket_command_authority_SHA256",
+        "command_family",
+        "package_relative_path",
+    ):
+        expected = str(requirement.get(key) or "").strip()
+        if expected and expected != str(command.get(key) or "").strip():
+            return False
+    expected_command_sha = str(requirement.get("command_authority_SHA256") or "").strip()
+    if expected_command_sha and expected_command_sha not in {
+        str(command.get("command_authority_SHA256") or "").strip(),
+        str(command.get("source_ticket_command_authority_SHA256") or "").strip(),
+    }:
+        return False
+    expected_argv = tuple(str(item) for item in (requirement.get("command_argv") or ()))
+    if expected_argv:
+        observed_argv = tuple(str(item) for item in (command.get("command_argv") or ()))
+        if observed_argv != expected_argv:
+            return False
+    return True
 
 
 def review_prepare_validation_contract_satisfied(
@@ -821,6 +866,14 @@ def review_prepare_validation_requirement_public(
         "source_key": requirement.get("source_key"),
         "not_applicable": bool(requirement.get("not_applicable")),
         "manual": bool(requirement.get("manual")),
+        "command_authority_id": requirement.get("command_authority_id"),
+        "command_authority_SHA256": requirement.get("command_authority_SHA256"),
+        "source_ticket_command_authority_SHA256": requirement.get(
+            "source_ticket_command_authority_SHA256"
+        ),
+        "command_family": requirement.get("command_family"),
+        "package_relative_path": requirement.get("package_relative_path"),
+        "command_argv": list(requirement.get("command_argv") or ()),
     }
 
 
@@ -926,6 +979,18 @@ def _command_manifest_entry(command: GovernedValidationCommandSpec) -> dict[str,
         "source_command": command.source_command,
         "working_directory": command.working_directory,
         "expected_exit_codes": list(command.expected_exit_codes),
+        "acceptance_authorized": command.acceptance_authorized,
+        "command_authority_kind": command.command_authority_kind,
+        "command_authority_id": command.command_authority_id,
+        "command_authority_SHA256": command.command_authority_SHA256,
+        "source_ticket_command_authority_SHA256": command.source_ticket_command_authority_SHA256,
+        "ticket_spec_SHA256": command.ticket_spec_SHA256,
+        "work_packet_id": command.work_packet_id,
+        "work_packet_SHA256": command.work_packet_SHA256,
+        "work_packet_validation_step_SHA256": command.work_packet_validation_step_SHA256,
+        "command_family": command.command_family,
+        "package_relative_path": command.package_relative_path,
+        "command_argv": list(command.command_argv),
         "execution_plan_SHA256": command.execution_plan_SHA256,
         "execution_plan": [_public_plan_step(step) for step in _command_plan(command)],
     }
@@ -1156,7 +1221,7 @@ def _review_validation_requirement_from_step(
         return None
     if source_command.casefold().replace("-", "_").replace(" ", "_") == "not_applicable":
         not_applicable = True
-    return {
+    requirement = {
         "validation_id": validation_id or None,
         "source_command": source_command,
         "expected_exit_codes": expected_exit_codes,
@@ -1164,6 +1229,22 @@ def _review_validation_requirement_from_step(
         "manual": manual,
         "source_key": source_key,
     }
+    command_authority = step.get("command_authority") if isinstance(step, Mapping) else None
+    if isinstance(command_authority, Mapping):
+        requirement.update({
+            "command_authority_id": command_authority.get("command_authority_id"),
+            "command_authority_SHA256": command_authority.get("command_authority_SHA256"),
+            "source_ticket_command_authority_SHA256": command_authority.get(
+                "source_ticket_command_authority_SHA256"
+            ),
+            "command_family": command_authority.get("command_family"),
+            "package_relative_path": command_authority.get("package_relative_path"),
+            "command_argv": tuple(command_authority.get("command_argv") or ()),
+        })
+        requirement["expected_exit_codes"] = _command_authority_expected_exit_codes(
+            command_authority
+        )
+    return requirement
 
 
 def _review_prepare_validation_spec_for_requirement(
@@ -1173,13 +1254,46 @@ def _review_prepare_validation_spec_for_requirement(
     if requirement.get("manual") or requirement.get("not_applicable"):
         return None
     for spec in specs:
+        if not spec.acceptance_authorized:
+            continue
         if _normalized_validation_command(spec.source_command) != requirement["source_command"]:
             continue
         expected_validation_id = requirement.get("validation_id")
         if expected_validation_id and spec.validation_id != expected_validation_id:
             continue
+        if tuple(spec.expected_exit_codes) != tuple(requirement.get("expected_exit_codes") or (0,)):
+            continue
+        if not _validation_spec_matches_requirement_authority(spec, requirement):
+            continue
         return spec
     return None
+
+
+def _validation_spec_matches_requirement_authority(
+    spec: GovernedValidationCommandSpec,
+    requirement: Mapping[str, Any],
+) -> bool:
+    expected_command_sha = str(requirement.get("command_authority_SHA256") or "").strip()
+    if expected_command_sha and expected_command_sha not in {
+        str(spec.command_authority_SHA256 or ""),
+        str(spec.source_ticket_command_authority_SHA256 or ""),
+    }:
+        return False
+    expected_source_sha = str(
+        requirement.get("source_ticket_command_authority_SHA256") or ""
+    ).strip()
+    if expected_source_sha and expected_source_sha != str(
+        spec.source_ticket_command_authority_SHA256 or ""
+    ):
+        return False
+    for key in ("command_family", "package_relative_path"):
+        expected = str(requirement.get(key) or "").strip()
+        if expected and expected != str(getattr(spec, key) or "").strip():
+            return False
+    expected_argv = tuple(str(item) for item in (requirement.get("command_argv") or ()))
+    if expected_argv and expected_argv != tuple(spec.command_argv):
+        return False
+    return True
 
 
 def _workpacket_package_command_step_spec(
@@ -1212,6 +1326,69 @@ def _workpacket_package_command_step_spec(
         runtime_available=runtime_reason is None,
         runtime_unavailable_reason=runtime_reason,
         execution_plan=plan,
+    )
+
+
+def _workpacket_explicit_command_step_spec(
+    authority: file_guard.WorkPacketFileAuthority,
+    step: Any,
+    *,
+    index: int,
+) -> GovernedValidationCommandSpec | None:
+    command_authority = _step_command_authority(step)
+    if command_authority is None:
+        return None
+    if _step_command_execution_authorized(step) is not True:
+        return None
+    command = _step_command(step)
+    validation_id = _step_validation_id(step, index=index)
+    source_command = _normalized_validation_command(
+        command_authority.get("source_command") or command
+    )
+    if not command or source_command != command:
+        return None
+    if str(command_authority.get("validation_id") or "").strip() != validation_id:
+        return None
+    if str(command_authority.get("authority_kind") or "") != "governed_validation_command":
+        return None
+    if str(command_authority.get("command_family") or "") != "package_script":
+        return None
+    if str(command_authority.get("package_manager") or "") != "npm":
+        return None
+    parsed = _workpacket_structured_package_command_plan(authority, command_authority)
+    if parsed is None:
+        return None
+    plan, working_directory, runtime_reason = parsed
+    first_argv = tuple(plan[0]["effective_argv"]) if plan else ()
+    expected_exit_codes = _command_authority_expected_exit_codes(command_authority)
+    return GovernedValidationCommandSpec(
+        command_id="",
+        validation_id=validation_id,
+        source="workpacket.validation_steps.command_authority",
+        source_command=command,
+        effective_argv=first_argv,
+        working_directory=working_directory,
+        timeout_seconds=_int_or_none(command_authority.get("timeout_seconds"))
+        or _DEFAULT_TIMEOUT_SECONDS,
+        expected_exit_codes=expected_exit_codes,
+        runtime_available=runtime_reason is None,
+        runtime_unavailable_reason=runtime_reason,
+        execution_plan=plan,
+        acceptance_authorized=True,
+        command_authority_kind=str(command_authority.get("authority_kind") or ""),
+        command_authority_id=str(command_authority.get("command_authority_id") or "") or None,
+        command_authority_SHA256=str(command_authority.get("command_authority_SHA256") or "") or None,
+        source_ticket_command_authority_SHA256=str(
+            command_authority.get("source_ticket_command_authority_SHA256") or ""
+        )
+        or None,
+        ticket_spec_SHA256=authority.ticket_spec_SHA256,
+        work_packet_id=authority.work_packet_id,
+        work_packet_SHA256=authority.work_packet_SHA256,
+        work_packet_validation_step_SHA256=str(_step_digest(step) or "") or None,
+        command_family="package_script",
+        package_relative_path=str(command_authority.get("package_relative_path") or ""),
+        command_argv=tuple(str(item) for item in command_authority.get("command_argv") or ()),
     )
 
 
@@ -1282,6 +1459,64 @@ def _workpacket_package_command_plan(
     return plan, working_directory_path.as_posix(), runtime_reason
 
 
+def _workpacket_structured_package_command_plan(
+    authority: file_guard.WorkPacketFileAuthority,
+    command_authority: Mapping[str, Any],
+) -> tuple[tuple[dict[str, Any], ...], str, str | None] | None:
+    package_rel = _safe_relative_command_path(command_authority.get("package_relative_path"))
+    package_targets = {package_rel for _name, package_rel in _PACKAGE_TARGETS}
+    if package_rel is None or package_rel not in package_targets:
+        return None
+    workspace_root = Path(authority.resolved_workspace_root).resolve()
+    working_directory_path = (workspace_root / package_rel).resolve()
+    try:
+        working_directory_path.relative_to(workspace_root)
+    except ValueError:
+        return None
+    if not working_directory_path.is_dir():
+        return None
+    if not _package_path_in_workpacket_scope(authority, package_rel):
+        return None
+    command_argv = tuple(str(item) for item in command_authority.get("command_argv") or ())
+    if _normalized_validation_command(command_authority.get("source_command")) != " ".join(command_argv):
+        return None
+    requested = _package_script_request(command_argv)
+    if requested is None:
+        return None
+    script_name, extra_args = requested
+    script = _package_script(working_directory_path, script_name)
+    if script is None:
+        return None
+    node_path = _resolve_node_executable()
+    timeout_seconds = _int_or_none(command_authority.get("timeout_seconds")) or _DEFAULT_TIMEOUT_SECONDS
+    plan = _package_script_execution_plan(
+        authority,
+        workspace_root,
+        package_rel,
+        working_directory_path,
+        script_name=script_name,
+        script=script,
+        extra_args=extra_args,
+        expected_exit_codes=_command_authority_expected_exit_codes(command_authority),
+        node_path=node_path,
+        timeout_seconds=timeout_seconds,
+    )
+    if plan is None:
+        return None
+    runtime_reason = None
+    if node_path is None:
+        runtime_reason = "node executable not found"
+    else:
+        missing_entries = [
+            str(step.get("cli_entry") or "package CLI")
+            for step in plan
+            if step.get("runtime_unavailable_reason")
+        ]
+        if missing_entries:
+            runtime_reason = f"package CLI entry not found: {', '.join(missing_entries[:3])}"
+    return plan, working_directory_path.as_posix(), runtime_reason
+
+
 def _package_script_request(tokens: tuple[str, ...]) -> tuple[str, tuple[str, ...]] | None:
     if not _package_command_tokens_shell_safe(tokens):
         return None
@@ -1311,6 +1546,7 @@ def _package_script_execution_plan(
     extra_args: tuple[str, ...],
     expected_exit_codes: tuple[int, ...],
     node_path: Path | None,
+    timeout_seconds: int = _DEFAULT_TIMEOUT_SECONDS,
 ) -> tuple[dict[str, Any], ...] | None:
     segments = _package_script_segments(script)
     if segments is None:
@@ -1331,6 +1567,7 @@ def _package_script_execution_plan(
             expected_exit_codes=expected_exit_codes,
             node_path=node_path,
             package_script_identity=package_script_identity,
+            timeout_seconds=timeout_seconds,
         )
         if step is None:
             return None
@@ -1378,6 +1615,7 @@ def _package_script_segment_plan(
     expected_exit_codes: tuple[int, ...],
     node_path: Path | None,
     package_script_identity: dict[str, Any],
+    timeout_seconds: int = _DEFAULT_TIMEOUT_SECONDS,
 ) -> dict[str, Any] | None:
     if not segment:
         return None
@@ -1418,7 +1656,7 @@ def _package_script_segment_plan(
             *argv_tail,
         ),
         "working_directory": package_dir.as_posix(),
-        "timeout_seconds": _DEFAULT_TIMEOUT_SECONDS,
+        "timeout_seconds": timeout_seconds,
         "expected_exit_codes": list(expected_exit_codes),
         "cli_entry": module_entry,
         "runtime_unavailable_reason": runtime_reason,
@@ -1657,6 +1895,10 @@ def _workpacket_command_step_specs(
         command = _step_command(step)
         if not command:
             continue
+        explicit_spec = _workpacket_explicit_command_step_spec(authority, step, index=index)
+        if explicit_spec is not None:
+            specs.append(explicit_spec)
+            continue
         package_spec = _workpacket_package_command_step_spec(authority, step, index=index)
         if package_spec is not None:
             specs.append(package_spec)
@@ -1692,6 +1934,39 @@ def _step_command(step: Any) -> str:
     return _normalized_validation_command(value)
 
 
+def _step_command_authority(step: Any) -> Mapping[str, Any] | None:
+    if isinstance(step, Mapping):
+        value = step.get("command_authority") or step.get("governed_validation_command")
+    else:
+        value = getattr(step, "command_authority", None)
+    if value is None:
+        return None
+    if isinstance(value, Mapping):
+        return value
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        dumped = model_dump(mode="json")
+        return dumped if isinstance(dumped, Mapping) else None
+    return None
+
+
+def _step_command_execution_authorized(step: Any) -> bool | None:
+    if isinstance(step, Mapping):
+        value = step.get("command_execution_authorized")
+    else:
+        value = getattr(step, "command_execution_authorized", None)
+    return _strict_bool_metadata_value(value)
+
+
+def _step_digest(step: Any) -> str | None:
+    if isinstance(step, Mapping):
+        value = step.get("step_SHA256")
+    else:
+        value = getattr(step, "step_SHA256", None)
+    text = str(value or "").strip()
+    return text or None
+
+
 def _step_validation_id(step: Any, *, index: int) -> str:
     if isinstance(step, Mapping):
         value = step.get("validation_id") or step.get("id")
@@ -1699,6 +1974,20 @@ def _step_validation_id(step: Any, *, index: int) -> str:
         value = getattr(step, "validation_id", None)
     text = str(value or "").strip()
     return text or f"validation:{index}"
+
+
+def _command_authority_expected_exit_codes(authority: Mapping[str, Any]) -> tuple[int, ...]:
+    value = authority.get("expected_exit_codes") or authority.get("expected_exit_code")
+    parsed: tuple[int, ...] = ()
+    if isinstance(value, list | tuple):
+        parsed = tuple(
+            item for item in (_int_or_none(candidate) for candidate in value) if item is not None
+        )
+    else:
+        parsed_value = _int_or_none(value)
+        if parsed_value is not None:
+            parsed = (parsed_value,)
+    return parsed or (0,)
 
 
 def _step_expected_exit_codes(step: Any) -> tuple[int, ...]:
@@ -1765,6 +2054,11 @@ def _frontend_package_test_specs(
                 timeout_seconds=_DEFAULT_TIMEOUT_SECONDS,
                 runtime_available=runtime_reason is None,
                 runtime_unavailable_reason=runtime_reason,
+                acceptance_authorized=False,
+                command_authority_kind="capability_discovery",
+                command_family="package_script",
+                package_relative_path=package_rel,
+                command_argv=("vitest", "run", *test_args),
             )
         )
     return tuple(specs)
@@ -2035,6 +2329,18 @@ def _public_command(command: GovernedValidationCommandSpec) -> dict[str, Any]:
         "expected_exit_codes": list(command.expected_exit_codes),
         "runtime_available": command.runtime_available,
         "runtime_unavailable_reason": command.runtime_unavailable_reason,
+        "acceptance_authorized": command.acceptance_authorized,
+        "command_authority_kind": command.command_authority_kind,
+        "command_authority_id": command.command_authority_id,
+        "command_authority_SHA256": command.command_authority_SHA256,
+        "source_ticket_command_authority_SHA256": command.source_ticket_command_authority_SHA256,
+        "ticket_spec_SHA256": command.ticket_spec_SHA256,
+        "work_packet_id": command.work_packet_id,
+        "work_packet_SHA256": command.work_packet_SHA256,
+        "work_packet_validation_step_SHA256": command.work_packet_validation_step_SHA256,
+        "command_family": command.command_family,
+        "package_relative_path": command.package_relative_path,
+        "command_argv": list(command.command_argv),
         "execution_plan_SHA256": command.execution_plan_SHA256,
         "execution_plan_kind": "sequential" if command.execution_plan else "single",
         "subcommand_count": len(_command_plan(command)),

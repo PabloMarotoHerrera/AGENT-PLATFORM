@@ -8,6 +8,7 @@ or execute validation commands.
 from __future__ import annotations
 
 from enum import Enum
+import hashlib
 import json
 import re
 from typing import Annotated, Literal, TypeAlias
@@ -28,6 +29,10 @@ from pydantic import (
 
 PROJECT_SPEC_SCHEMA_VERSION = 1
 TICKET_SPEC_SCHEMA_VERSION = 1
+VALIDATION_COMMAND_AUTHORITY_SCHEMA_VERSION = 1
+VALIDATION_COMMAND_AUTHORITY_DIGEST_ALGORITHM = (
+    "agent-platform-ticket-validation-command-authority-sha256-v1"
+)
 _NUMERIC_PROJECT_IDENTIFIER_PATTERN = r"P[1-9][0-9]{0,3}"
 _P_NUMERIC_SHAPED_IDENTIFIER_PATTERN = r"P[0-9]+"
 _PRODUCT_PROJECT_IDENTIFIER_PATTERN = r"[A-Z][A-Z0-9_]{1,31}"
@@ -111,6 +116,10 @@ LongText: TypeAlias = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=8192),
     AfterValidator(_reject_nul),
+]
+DigestText: TypeAlias = Annotated[
+    str,
+    StringConstraints(min_length=64, max_length=64, pattern=r"^[a-f0-9]{64}$"),
 ]
 VerdictToken: TypeAlias = Annotated[
     str,
@@ -207,6 +216,97 @@ def _reject_duplicate_authority_references(
         )
 
 
+def _deterministic_json(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+
+
+def _digest_payload(algorithm: str, payload: dict[str, object]) -> str:
+    return hashlib.sha256(
+        _deterministic_json({"algorithm": algorithm, **payload}).encode("utf-8")
+    ).hexdigest()
+
+
+def _normalized_validation_command_text(value: object) -> str:
+    return " ".join(str(value or "").strip().split())
+
+
+def _looks_like_env_assignment_token(token: str) -> bool:
+    if "=" not in token:
+        return False
+    name = token.split("=", 1)[0]
+    return bool(name) and (name[0].isalpha() or name[0] == "_") and all(
+        ch.isalnum() or ch == "_" for ch in name
+    )
+
+
+def _normalize_exit_codes(value: object) -> tuple[int, ...]:
+    if value is None or value == "":
+        parsed = (0,)
+    elif isinstance(value, tuple | list):
+        parsed = tuple(_strict_exit_code(item) for item in value)
+    else:
+        parsed = (_strict_exit_code(value),)
+    if not parsed:
+        raise ValueError("expected_exit_codes must not be empty")
+    if len(parsed) != len(frozenset(parsed)):
+        raise ValueError("expected_exit_codes must be unique")
+    return parsed
+
+
+def _strict_exit_code(value: object) -> int:
+    if isinstance(value, bool):
+        raise ValueError("expected_exit_codes must be integers")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("expected_exit_codes must be integers") from exc
+    if parsed < 0 or parsed > 255:
+        raise ValueError("expected_exit_codes must be between 0 and 255")
+    return parsed
+
+
+def _validate_validation_command_argv(tokens: tuple[str, ...]) -> tuple[str, ...]:
+    forbidden_markers = ("||", "&&", "<<", ">>", "$(", "${")
+    forbidden_tokens = ("|", "&", ";", ">", "<", "`")
+    if any(not str(token).strip() for token in tokens):
+        raise ValueError("command argv tokens must be non-empty")
+    for token in tokens:
+        if any(marker in token for marker in forbidden_markers) or token in forbidden_tokens:
+            raise ValueError("command argv must not contain shell syntax")
+        if "\\" in token or "\x00" in token:
+            raise ValueError("command argv must use safe forward-slash tokens")
+        if token.startswith("/") or token.startswith("../") or token in {".", ".."}:
+            raise ValueError("command argv must not contain absolute or traversal paths")
+    lowered = tuple(token.casefold() for token in tokens)
+    if any(token in {"git", "docker", "graphify", "pnpm", "yarn", "corepack", "npx"} for token in lowered):
+        raise ValueError("command argv contains a forbidden executable")
+    if _package_script_request(tokens) is None:
+        raise ValueError("command argv must be an npm package-script command")
+    return tokens
+
+
+def _package_script_request(tokens: tuple[str, ...]) -> tuple[str, tuple[str, ...]] | None:
+    if tokens[:2] == ("npm", "test"):
+        script_name = "test"
+        args = _tokens_after_optional_separator(tokens[2:])
+    elif len(tokens) >= 3 and tokens[:2] == ("npm", "run"):
+        script_name = tokens[2]
+        args = _tokens_after_optional_separator(tokens[3:])
+    else:
+        return None
+    if script_name in {"", "install", "exec", "x"}:
+        return None
+    if any(_looks_like_env_assignment_token(token) for token in args):
+        return None
+    return script_name, args
+
+
+def _tokens_after_optional_separator(tokens: tuple[str, ...]) -> tuple[str, ...]:
+    if tokens and tokens[0] == "--":
+        return tokens[1:]
+    return tokens
+
+
 class AuthorityReferenceSpec(_TicketFactoryModel):
     kind: AuthorityReferenceKind
     value: ShortText
@@ -246,12 +346,97 @@ class RepositoryScopeSpec(_TicketFactoryModel):
         return self
 
 
+class TicketValidationCommandAuthoritySpec(_TicketFactoryModel):
+    schema_version: Literal[1] = VALIDATION_COMMAND_AUTHORITY_SCHEMA_VERSION
+    authority_kind: Literal["governed_validation_command"] = "governed_validation_command"
+    command_family: Literal["package_script"] = "package_script"
+    validation_id: ValidationIdentifier
+    source_command: LongText
+    package_manager: Literal["npm"] = "npm"
+    package_relative_path: RepositoryPathPattern
+    command_argv: tuple[ShortText, ...] = Field(min_length=2, max_length=32)
+    timeout_seconds: int = Field(default=120, ge=1, le=600, strict=True)
+    expected_exit_codes: tuple[int, ...] = Field(default=(0,), min_length=1, max_length=8)
+    command_authority_id: ShortText | None = None
+    command_authority_SHA256: DigestText | None = None
+
+    @field_validator("package_relative_path", mode="after")
+    @classmethod
+    def _validate_concrete_package_path(cls, value: str) -> str:
+        if any(token in value for token in ("*", "?")) or value.endswith("/**"):
+            raise ValueError("package_relative_path must identify one package directory")
+        return value
+
+    @field_validator("command_argv", mode="after")
+    @classmethod
+    def _validate_command_argv(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _validate_validation_command_argv(value)
+
+    @field_validator("expected_exit_codes", mode="before")
+    @classmethod
+    def _coerce_expected_exit_codes(cls, value: object) -> tuple[int, ...]:
+        return _normalize_exit_codes(value)
+
+    @model_validator(mode="after")
+    def _validate_command_authority(self) -> TicketValidationCommandAuthoritySpec:
+        if _normalized_validation_command_text(self.source_command) != " ".join(self.command_argv):
+            raise ValueError("source_command must match command_argv")
+        expected_sha = ticket_validation_command_authority_digest(self)
+        expected_id = _validation_command_authority_id(expected_sha)
+        if self.command_authority_SHA256 not in {None, expected_sha}:
+            raise ValueError("command_authority_SHA256 must match command authority digest")
+        if self.command_authority_id not in {None, expected_id}:
+            raise ValueError("command_authority_id must match command authority digest")
+        object.__setattr__(self, "command_authority_SHA256", expected_sha)
+        object.__setattr__(self, "command_authority_id", expected_id)
+        return self
+
+
+def ticket_validation_command_authority_digest(
+    authority: TicketValidationCommandAuthoritySpec,
+) -> str:
+    return _validation_command_authority_digest_from_record(
+        authority.model_dump(
+            mode="json",
+            exclude={"command_authority_id", "command_authority_SHA256"},
+        )
+    )
+
+
+def _validation_command_authority_digest_from_record(record: dict[str, object]) -> str:
+    return _digest_payload(VALIDATION_COMMAND_AUTHORITY_DIGEST_ALGORITHM, record)
+
+
+def _validation_command_authority_id(digest: str) -> str:
+    return f"GVCMD-AUTH-{digest[:12]}"
+
+
 class TicketValidationStepSpec(_TicketFactoryModel):
     validation_id: ValidationIdentifier
     description: ShortText
     command: LongText | None
     expected_result: LongText
     required: StrictBool = True
+    command_authority: TicketValidationCommandAuthoritySpec | None = None
+
+    @model_validator(mode="after")
+    def _validate_step_command_authority(self) -> TicketValidationStepSpec:
+        if self.command_authority is None:
+            return self
+        if self.command is None:
+            raise ValueError("command_authority requires a validation command")
+        if self.command_authority.validation_id != self.validation_id:
+            raise ValueError("command_authority validation_id must match validation step")
+        if _normalized_validation_command_text(self.command_authority.source_command) != _normalized_validation_command_text(self.command):
+            raise ValueError("command_authority source_command must match validation command")
+        return self
+
+    @model_serializer(mode="wrap")
+    def _serialize_validation_step(self, handler):
+        data = handler(self)
+        if self.command_authority is None:
+            data.pop("command_authority", None)
+        return data
 
 
 StructuredResultPropertyType: TypeAlias = Literal[

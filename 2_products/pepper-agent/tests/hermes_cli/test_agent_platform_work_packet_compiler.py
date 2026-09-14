@@ -44,6 +44,7 @@ from hermes_cli.agent_platform.ticket_factory import (
     TicketSpec,
     TicketSynthesisRequest,
     TicketType,
+    TicketValidationCommandAuthoritySpec,
     TicketValidationStepSpec,
     WaveDisposition,
     assemble_context_pack,
@@ -77,6 +78,7 @@ from hermes_cli.agent_platform.work_packet import (
     WorkPacketGitAuthority,
     WorkPacketRepositoryScope,
     WorkPacketTaskStep,
+    WorkPacketValidationCommandAuthority,
     WorkPacketValidationKind,
     WorkPacketValidationStep,
     build_work_packet_compilation_authorization,
@@ -98,6 +100,7 @@ EXPECTED_EXPORTS = (
     "WorkPacketCompilationAuthorization",
     "WorkPacketRepositoryScope",
     "WorkPacketTaskStep",
+    "WorkPacketValidationCommandAuthority",
     "WorkPacketValidationStep",
     "WorkPacketDownstreamRequirement",
     "WorkPacketCompilationRequest",
@@ -116,6 +119,7 @@ PUBLIC_MODELS = (
     WorkPacketCompilationAuthorization,
     WorkPacketRepositoryScope,
     WorkPacketTaskStep,
+    WorkPacketValidationCommandAuthority,
     WorkPacketValidationStep,
     WorkPacketDownstreamRequirement,
     WorkPacketCompilationRequest,
@@ -197,6 +201,7 @@ def validation_step(
     *,
     command: str | None = "python -m pytest synthetic_work_packet_tests.py",
     required: bool = True,
+    command_authority: TicketValidationCommandAuthoritySpec | None = None,
 ) -> TicketValidationStepSpec:
     return TicketValidationStepSpec(
         validation_id=validation_id,
@@ -204,7 +209,42 @@ def validation_step(
         command=command,
         expected_result=f"Synthetic validation {validation_id} passes.",
         required=required,
+        command_authority=command_authority,
     )
+
+
+def command_authority(
+    validation_id: str = "V1",
+    *,
+    source_command: str = "npm run test -- src/agent-platform/p99.test.tsx",
+    command_argv: tuple[str, ...] = (
+        "npm",
+        "run",
+        "test",
+        "--",
+        "src/agent-platform/p99.test.tsx",
+    ),
+) -> TicketValidationCommandAuthoritySpec:
+    return TicketValidationCommandAuthoritySpec(
+        validation_id=validation_id,
+        source_command=source_command,
+        package_relative_path="2_products/pepper-agent/web",
+        command_argv=command_argv,
+        timeout_seconds=180,
+        expected_exit_codes=(0,),
+    )
+
+
+def compiled_command_authority_sample() -> WorkPacketValidationCommandAuthority:
+    authority = command_authority()
+    source_step = validation_step(
+        command=authority.source_command,
+        command_authority=authority,
+    )
+    result = build_bundle(source_ticket=ticket(validation_steps=(source_step,)))["result"]
+    compiled_authority = result.work_packet.validation_steps[0].command_authority
+    assert compiled_authority is not None
+    return compiled_authority
 
 
 def project() -> ProjectSpec:
@@ -514,6 +554,7 @@ def test_unknown_fields_are_rejected(model: type, bundle: dict[str, object]) -> 
         WorkPacketCompilationEvidence: bundle["result"].evidence,
         WorkPacketRepositoryScope: bundle["result"].work_packet.repository_scope,
         WorkPacketTaskStep: bundle["result"].work_packet.tasks[0],
+        WorkPacketValidationCommandAuthority: compiled_command_authority_sample(),
         WorkPacketValidationStep: bundle["result"].work_packet.validation_steps[0],
         WorkPacketDownstreamRequirement: bundle[
             "result"
@@ -850,6 +891,64 @@ def test_validation_step_digest_and_command_execution_tampering_fail(
             WorkPacketValidationStep.model_validate(data)
 
 
+def test_validation_command_authority_compiles_from_ticket_spec_to_workpacket() -> None:
+    source_authority = command_authority()
+    source_step = validation_step(
+        command=source_authority.source_command,
+        command_authority=source_authority,
+    )
+    result = build_bundle(source_ticket=ticket(validation_steps=(source_step,)))["result"]
+    compiled = result.work_packet.validation_steps[0]
+
+    assert compiled.command_execution_authorized is True
+    assert compiled.command == source_authority.source_command
+    assert compiled.command_authority is not None
+    assert compiled.command_authority.command_family == "package_script"
+    assert compiled.command_authority.package_relative_path == "2_products/pepper-agent/web"
+    assert compiled.command_authority.command_argv == source_authority.command_argv
+    assert compiled.command_authority.timeout_seconds == 180
+    assert compiled.command_authority.source_ticket_command_authority_id == source_authority.command_authority_id
+    assert (
+        compiled.command_authority.source_ticket_command_authority_SHA256
+        == source_authority.command_authority_SHA256
+    )
+    assert compiled.command_authority.command_authority_SHA256 != source_authority.command_authority_SHA256
+    validate_work_packet(result.work_packet)
+
+
+def test_validation_command_authority_digest_tampering_fails() -> None:
+    source_authority = command_authority()
+    source_step = validation_step(
+        command=source_authority.source_command,
+        command_authority=source_authority,
+    )
+    compiled = build_bundle(source_ticket=ticket(validation_steps=(source_step,)))[
+        "result"
+    ].work_packet.validation_steps[0]
+    assert compiled.command_authority is not None
+
+    for update in (
+        {"command_execution_authorized": False},
+        {"command_authority": None},
+        {
+            "command_authority": {
+                **compiled.command_authority.model_dump(mode="json"),
+                "package_relative_path": "2_products/pepper-agent/apps/desktop",
+            }
+        },
+        {
+            "command_authority": {
+                **compiled.command_authority.model_dump(mode="json"),
+                "source_ticket_command_authority_SHA256": "0" * 64,
+            }
+        },
+    ):
+        data = compiled.model_dump(mode="json")
+        data.update(update)
+        with pytest.raises(ValidationError):
+            WorkPacketValidationStep.model_validate(data)
+
+
 def test_downstream_requirements_are_exact(result: WorkPacketCompilationResult) -> None:
     requirements = result.work_packet.downstream_requirements
     assert tuple((item.capability, item.owner_ticket) for item in requirements) == (
@@ -1150,6 +1249,7 @@ def test_public_models_json_round_trip(model: type, bundle: dict[str, object]) -
         WorkPacketCompilationEvidence: bundle["result"].evidence,
         WorkPacketRepositoryScope: bundle["result"].work_packet.repository_scope,
         WorkPacketTaskStep: bundle["result"].work_packet.tasks[0],
+        WorkPacketValidationCommandAuthority: compiled_command_authority_sample(),
         WorkPacketValidationStep: bundle["result"].work_packet.validation_steps[0],
         WorkPacketDownstreamRequirement: bundle[
             "result"
