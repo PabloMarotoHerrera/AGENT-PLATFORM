@@ -9567,6 +9567,86 @@ def test_c34_pending_successor_does_not_mask_invalid_current_completion_authorit
     }]
 
 
+def test_c35_pending_successor_completed_zero_change_boundary_preempts_review_prepare(
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    ticket_id = "P99.2"
+    snapshot = {
+        "current_ticket_id": "P99.1",
+        "workflow_status": "execution_completed",
+        "execution_state": "no_active_executions",
+        "active_execution_count": 0,
+        "next_action": {"id": "PREPARE_P99_1_REVIEW", "target_ticket_id": "P99.1"},
+    }
+    blockers = [
+        {"id": "P99.1-CURRENT-PROJECTION-BINDING", "status": "stale"},
+        {"id": "P99-1-WORKER-LIFECYCLE", "status": "stale"},
+    ]
+    successor_overlay = dict(_c9_lifecycle_overlay(pr, ticket_id, "validated_review_ready"))
+    successor_overlay.update({
+        "current_ticket_id": ticket_id,
+        "current_ticket_title": _c9_ticket_title(ticket_id),
+        "candidate_changes_available": False,
+        "git_handoff_required": False,
+    })
+    calls = []
+
+    def zero_change_boundary(projection, *, completed_overlay):
+        calls.append(projection["ticket_id"])
+        assert completed_overlay["next_action"]["id"] == "PREPARE_P99_2_REVIEW"
+        return {
+            "workflow_status": "execution_completed_pending_zero_change_attestation",
+            "validation_state": "execution_completed_pending_zero_change_attestation",
+            "review_state": "zero_change_attestation_required",
+            "candidate_changes_available": False,
+            "git_handoff_required": False,
+            "human_zero_change_attestation_required": True,
+            "next_action": {
+                "id": pr.governed_ticket_lifecycle_action_ids(ticket_id)[
+                    "zero_change_attestation"
+                ],
+                "target_ticket_id": ticket_id,
+                "required_human_attestation_text": (
+                    pr.governed_ticket_zero_change_attestation_text(ticket_id)
+                ),
+            },
+        }, None
+
+    monkeypatch.setattr(
+        pr,
+        "_pending_generated_successor_ticket_approval_overlay",
+        lambda _snapshot, allow_current_ticket_projection=False: (successor_overlay, None),
+    )
+    monkeypatch.setattr(
+        pr,
+        "_load_current_projection_record",
+        lambda: _c9_projection_record(ticket_id),
+    )
+    monkeypatch.setattr(
+        pr,
+        "_current_ticket_zero_change_attestation_overlay",
+        zero_change_boundary,
+    )
+
+    pr._apply_pending_successor_approval_precedence(snapshot, blockers)
+
+    assert calls == [ticket_id]
+    assert snapshot["current_ticket_id"] == ticket_id
+    assert snapshot["workflow_status"] == "execution_completed_pending_zero_change_attestation"
+    assert snapshot["review_state"] == "zero_change_attestation_required"
+    assert snapshot["validation_state"] == "execution_completed_pending_zero_change_attestation"
+    assert snapshot["human_zero_change_attestation_required"] is True
+    assert snapshot["candidate_changes_available"] is False
+    assert snapshot["git_handoff_required"] is False
+    assert snapshot["next_action"]["id"] == "ATTEST_P99_2_ZERO_CHANGE_FOR_REVIEW_PREPARE"
+    assert snapshot["next_action"]["required_human_attestation_text"] == (
+        "ATTEST P99.2 ZERO CHANGE FOR REVIEW PREPARE"
+    )
+    assert blockers == []
+
+
 def test_synthetic_c9_only_durable_completion_clears_current_successor_authority(
     monkeypatch,
 ) -> None:

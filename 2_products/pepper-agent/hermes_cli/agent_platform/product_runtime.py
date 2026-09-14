@@ -2543,6 +2543,31 @@ def _historical_predecessor_outside_lineage_scope(
     return not _historical_predecessor_matches_lineage_scope(evidence, lineage_scope)
 
 
+def _apply_completed_current_ticket_review_boundary_overlays(
+    overlay: dict[str, Any],
+    projection: dict[str, Any],
+) -> dict[str, Any] | None:
+    if overlay.get("workflow_status") != "execution_completed":
+        return None
+    zero_change_overlay, zero_change_blocker = _current_ticket_zero_change_attestation_overlay(
+        projection,
+        completed_overlay=overlay,
+    )
+    if zero_change_overlay is not None:
+        overlay.update(zero_change_overlay)
+    if zero_change_blocker is not None:
+        return zero_change_blocker
+    if overlay.get("workflow_status") != "execution_completed":
+        return None
+    review_prepare_overlay, review_prepare_blocker = _p18_9_0_review_prepare_overlay(
+        projection,
+        completed_overlay=overlay,
+    )
+    if review_prepare_overlay is not None:
+        overlay.update(review_prepare_overlay)
+    return review_prepare_blocker
+
+
 def _completed_predecessor_successor_lifecycle_overlay(
     workflow: dict[str, Any],
     *,
@@ -2568,6 +2593,24 @@ def _completed_predecessor_successor_lifecycle_overlay(
     )
     if successor_overlay is not None:
         overlay.update(successor_overlay)
+        if successor_blocker is None and overlay.get("workflow_status") == "execution_completed":
+            current_ticket_id = str(overlay.get("current_ticket_id") or "").strip()
+            if current_ticket_id:
+                try:
+                    projection = _load_current_projection_record()
+                    if str(projection.get("ticket_id") or "").strip() == current_ticket_id:
+                        boundary_blocker = _apply_completed_current_ticket_review_boundary_overlays(
+                            overlay,
+                            projection,
+                        )
+                        if boundary_blocker is not None:
+                            successor_blocker = boundary_blocker
+                except Exception as exc:  # pragma: no cover - defensive live-state guard
+                    successor_blocker = {
+                        "id": _review_prepare_authority_blocker_id(current_ticket_id),
+                        "status": "blocked_by_invalid_completed_successor_review_boundary_authority",
+                        "evidence": _safe_text(exc, limit=300),
+                    }
     return overlay, successor_blocker
 
 
@@ -2780,6 +2823,25 @@ def _apply_pending_successor_approval_precedence(
         if displaces_current_ticket:
             _clear_displaced_current_ticket_projection_fields(snapshot)
         snapshot.update(overlay)
+        if snapshot.get("workflow_status") == "execution_completed" and next_current_ticket_id:
+            try:
+                projection = _load_current_projection_record()
+                if str(projection.get("ticket_id") or "").strip() == next_current_ticket_id:
+                    boundary_blocker = _apply_completed_current_ticket_review_boundary_overlays(
+                        snapshot,
+                        projection,
+                    )
+                    if boundary_blocker is not None:
+                        _workflow_append_unique_blocker(remaining_blockers, boundary_blocker)
+            except Exception as exc:  # pragma: no cover - defensive live-state guard
+                _workflow_append_unique_blocker(
+                    remaining_blockers,
+                    {
+                        "id": _review_prepare_authority_blocker_id(next_current_ticket_id),
+                        "status": "blocked_by_invalid_completed_successor_review_boundary_authority",
+                        "evidence": _safe_text(exc, limit=300),
+                    },
+                )
         if displaces_current_ticket:
             stale_blocker_ids = {
                 f"{previous_current_ticket_id}-CURRENT-PROJECTION-BINDING",
