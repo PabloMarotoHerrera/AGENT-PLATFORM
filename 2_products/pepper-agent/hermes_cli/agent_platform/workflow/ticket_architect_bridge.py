@@ -1848,6 +1848,39 @@ def load_historical_approved_predecessor_generation_authority(
 ) -> dict[str, dict[str, Any]] | None:
     """Load historical generated+approved evidence for terminal-completion proof."""
 
+    return _load_immutable_approved_ticket_authority(
+        ticket_id=ticket_id,
+        require_approved_decision=True,
+        missing_decision_message="historical approved predecessor decision is absent",
+        not_approved_message="historical predecessor decision is not approved",
+        not_approved_status_message="historical predecessor decision status is not approved",
+    )
+
+
+def load_immutable_approved_current_ticket_authority(
+    *,
+    ticket_id: str,
+    require_approved_decision: bool = False,
+) -> dict[str, dict[str, Any]] | None:
+    """Load approved current-ticket base authority without current roadmap reconstruction."""
+
+    return _load_immutable_approved_ticket_authority(
+        ticket_id=ticket_id,
+        require_approved_decision=require_approved_decision,
+        missing_decision_message=f"{_safe_ticket_id(ticket_id)} approved ticket decision is absent",
+        not_approved_message=f"{_safe_ticket_id(ticket_id)} current ticket is not approved",
+        not_approved_status_message=f"{_safe_ticket_id(ticket_id)} current ticket approval status mismatch",
+    )
+
+
+def _load_immutable_approved_ticket_authority(
+    *,
+    ticket_id: str,
+    require_approved_decision: bool,
+    missing_decision_message: str,
+    not_approved_message: str,
+    not_approved_status_message: str,
+) -> dict[str, dict[str, Any]] | None:
     safe_ticket_id = _safe_ticket_id(ticket_id)
     path = generation_record_path_for_ticket(safe_ticket_id)
     if not path.exists():
@@ -1857,16 +1890,32 @@ def load_historical_approved_predecessor_generation_authority(
     )
     decision = _read_approval_decision_record_unvalidated(safe_ticket_id)
     if decision is None:
+        if require_approved_decision:
+            raise TicketArchitectBridgeConflict(missing_decision_message)
+        return None
+    if decision.get("decision") != HumanApprovalDecision.APPROVE.value:
+        if require_approved_decision:
+            raise TicketArchitectBridgeConflict(not_approved_message)
+        return None
+    if decision.get("status") != "approved":
+        if require_approved_decision:
+            raise TicketArchitectBridgeConflict(not_approved_status_message)
+        return None
+    try:
+        approved_decision = _validate_approval_decision_record_with_generation(
+            decision,
+            ticket_id=safe_ticket_id,
+            generation=generation,
+        )
+    except TicketArchitectBridgeConflict:
+        if require_approved_decision:
+            raise
         raise TicketArchitectBridgeConflict(
-            "historical approved predecessor decision is absent"
+            f"{safe_ticket_id} approved ticket decision is invalid"
         )
     return {
         "generation_record": generation,
-        "approval_decision_record": validate_historical_approved_predecessor_approval_decision_record(
-            decision,
-            ticket_id=safe_ticket_id,
-            generation_record=generation,
-        ),
+        "approval_decision_record": approved_decision,
     }
 
 
@@ -2438,12 +2487,21 @@ def revise_current_ticket_for_material_contract_failure(
     history_entry: dict[str, Any] | None = None
     validated_revision_contract: TicketSpecMaterialRevisionContract | None = None
     with _STORE_LOCK:
-        current_generation = load_generation_record(ticket_id=safe_ticket_id)
-        if current_generation is None:
+        approved_authority = load_immutable_approved_current_ticket_authority(
+            ticket_id=safe_ticket_id,
+            require_approved_decision=False,
+        )
+        if approved_authority is None:
+            if not generation_record_path_for_ticket(safe_ticket_id).exists():
+                raise TicketArchitectBridgeConflict(
+                    f"{safe_ticket_id} has no current generated ticket to revise"
+                )
             raise TicketArchitectBridgeConflict(
-                f"{safe_ticket_id} has no current generated ticket to revise"
+                f"{safe_ticket_id} approved ticket decision is absent"
             )
-        target = _target_from_record(current_generation)
+        current_generation = approved_authority["generation_record"]
+        approved_decision = approved_authority["approval_decision_record"]
+        target = _historical_target_from_record(current_generation)
         _validate_revision_requested_identity(
             requested_project_id=requested_project_id,
             requested_ticket_id=requested_ticket_id,
@@ -2466,18 +2524,6 @@ def revise_current_ticket_for_material_contract_failure(
             target=target,
         )
         authorizer_id = _reviewer_id_from_actor(authorizer_id)
-        approved_decision = load_approval_decision_record(
-            ticket_id=target.ticket_id,
-            generation_record=current_generation,
-        )
-        if approved_decision is None:
-            raise TicketArchitectBridgeConflict(
-                f"{target.ticket_id} approved ticket decision is absent"
-            )
-        if approved_decision.get("decision") != HumanApprovalDecision.APPROVE.value:
-            raise TicketArchitectBridgeConflict(
-                f"{target.ticket_id} current ticket is not approved"
-            )
         revision_authority = _build_current_ticket_material_revision_authority(
             current_generation=current_generation,
             approved_decision=approved_decision,
@@ -6125,6 +6171,7 @@ __all__ = (
     "load_p18_9_0_generation_record",
     "load_approval_decision_record",
     "load_p18_9_0_approval_decision_record",
+    "load_immutable_approved_current_ticket_authority",
     "validate_generation_record",
     "validate_p18_9_0_generation_record",
     "validate_approval_decision_record",

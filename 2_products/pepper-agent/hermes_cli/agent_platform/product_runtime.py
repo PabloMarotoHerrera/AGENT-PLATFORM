@@ -2190,27 +2190,25 @@ def _normal_current_approved_ticket_authority_bundle(
     ticket_id: str,
 ) -> dict[str, dict[str, Any]] | None:
     from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
-        load_approval_decision_record,
-        load_generation_record,
+        load_immutable_approved_current_ticket_authority,
     )
     from hermes_cli.agent_platform.workflow.work_packet_kanban_projection import (
         load_kanban_projection_record,
     )
 
     safe_ticket_id = _safe_id(ticket_id)
-    generation = load_generation_record(ticket_id=safe_ticket_id)
-    if generation is None:
-        return None
-    decision = load_approval_decision_record(
+    authority = load_immutable_approved_current_ticket_authority(
         ticket_id=safe_ticket_id,
-        generation_record=generation,
     )
-    if decision is None or decision.get("decision") != "approve":
+    if authority is None:
         return None
+    generation = authority["generation_record"]
+    decision = authority["approval_decision_record"]
     projection = load_kanban_projection_record(
         ticket_id=safe_ticket_id,
         generation_record=generation,
         decision_record=decision,
+        allow_terminal_completed_predecessor_historical=True,
     )
     if projection is None:
         return None
