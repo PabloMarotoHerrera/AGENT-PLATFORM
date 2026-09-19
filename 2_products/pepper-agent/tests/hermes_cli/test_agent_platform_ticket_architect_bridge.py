@@ -390,6 +390,71 @@ def _full_material_revision_contract(
     }
 
 
+def _current_material_failure_record(generation: dict) -> dict[str, object]:
+    payload = {
+        "ticket_id": generation["ticket_id"],
+        "ticket_spec_SHA256": generation["ticket_spec_SHA256"],
+        "work_packet_id": generation["work_packet_id"],
+        "work_packet_SHA256": generation["work_packet_SHA256"],
+        "projection_SHA256": hashlib.sha256(
+            f"{generation['ticket_id']}:projection".encode()
+        ).hexdigest(),
+        "blocker_code": "REVIEW_PREPARE_VALIDATION_INCOMPLETE",
+    }
+    failure_sha = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return {
+        **payload,
+        "project_id": generation["project_id"],
+        "macroproject_id": generation["macroproject_id"],
+        "ticket_title": generation["ticket_title"],
+        "review_prepare_failure_SHA256": failure_sha,
+        "review_prepare_validation_result_SHA256": hashlib.sha256(
+            f"{failure_sha}:validation".encode()
+        ).hexdigest(),
+        "review_prepare_resolution": "MATERIAL_REVISION_REQUIRED",
+        "material_revision_required": True,
+        "failure_classification": "material_contract_defect",
+    }
+
+
+def _current_material_revision_workflow(
+    generation: dict,
+    failure_record: dict[str, object],
+) -> dict[str, object]:
+    return {
+        "project_id": generation["project_id"],
+        "project_name": generation["project_name"],
+        "macroproject_id": generation["macroproject_id"],
+        "macroproject_title": generation["macroproject_title"],
+        "current_ticket_id": generation["ticket_id"],
+        "current_ticket_title": generation["ticket_title"],
+        "next_ticket_id": None,
+        "next_ticket_title": None,
+        "workflow_status": "awaiting_material_revision",
+        "workflow_state": f"{generation['ticket_id']}-AWAITING-MATERIAL-REVISION",
+        "validation_state": "review_prepare_blocked_material_revision_required",
+        "review_state": "material_revision_required",
+        "material_revision_required": True,
+        "pending_ticket_approval_count": 0,
+        "active_execution_count": 0,
+        "review_prepare_failure_authority": {
+            "review_prepare_failure_SHA256": failure_record[
+                "review_prepare_failure_SHA256"
+            ],
+            "material_revision_required": True,
+        },
+        "next_action": {
+            "id": bridge.revise_action_id(str(generation["ticket_id"])),
+            "label": "Synthetic material revision required.",
+            "target_ticket_id": generation["ticket_id"],
+            "target_ticket_title": generation["ticket_title"],
+            "required_human_action": "ticket_material_revision",
+        },
+    }
+
+
 def _blocking_external_dependency_revision_contract(
     *,
     ticket_id: str = "P99.2",
@@ -1777,6 +1842,165 @@ def test_generic_full_material_revision_contract_generates_valid_successor_over_
     assert result["Kanban_dispatch"] is False
     assert result["Git_mutation"] is False
 
+
+def test_current_ticket_material_revision_creates_next_revision_pending_approval(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        bridge,
+        "resolve_roadmap_ticket_authorities",
+        _synthetic_p99_revision_roadmap_items,
+    )
+    base_workflow = _synthetic_p99_2_workflow()
+    bridge.generate_current_ticket(workflow=base_workflow)
+    original = bridge.load_generation_record(ticket_id="P99.2")
+    assert original is not None
+    approved = bridge.apply_ticket_approval_decision(
+        ticket_id="P99.2",
+        decision="approve",
+        actor="synthetic-human",
+    )
+    approved_decision = bridge.load_approval_decision_record(
+        ticket_id="P99.2",
+        generation_record=original,
+    )
+    assert approved_decision is not None
+    failure_record = _current_material_failure_record(original)
+    workflow = _current_material_revision_workflow(original, failure_record)
+    contract = _full_material_revision_contract(marker="C37-CURRENT-MATERIAL")
+    contract_digest = bridge.ticket_spec_material_revision_contract_digest(contract)
+
+    result = bridge.revise_current_ticket_for_material_contract_failure(
+        workflow=workflow,
+        review_prepare_failure_record=failure_record,
+        human_authorization_text="I explicitly authorize revision of P99.2.",
+        revision_contract=contract,
+        authorizer_id="synthetic-human",
+        requested_project_id="PEPPER",
+        requested_ticket_id="P99.2",
+        requested_next_action_id="REVISE_P99_2",
+    )
+    revised = bridge.load_generation_record(ticket_id="P99.2")
+    assert revised is not None
+    history = [
+        json.loads(line)
+        for line in bridge.current_ticket_material_revision_history_path_for_ticket(
+            "P99.2"
+        ).read_text(encoding="utf-8").splitlines()
+    ]
+
+    assert approved["decision"] == "approve"
+    assert result["revision_applied"] is True
+    assert result["material_revision_authority_type"] == "current_ticket_material_contract_revision"
+    assert result["revision_contract_SHA256"] == contract_digest
+    assert result["next_action"]["id"] == "APPROVE_P99_2"
+    assert result["pending_ticket_approval_count"] == 1
+    assert result["active_execution_count"] == 0
+    assert revised["revision_authority"]["authority_type"] == "current_ticket_material_contract_revision"
+    assert revised["revision_authority"]["review_prepare_failure_SHA256"] == failure_record[
+        "review_prepare_failure_SHA256"
+    ]
+    assert revised["revision_contract_SHA256"] == contract_digest
+    assert revised["ticket_spec_SHA256"] != original["ticket_spec_SHA256"]
+    assert revised["work_packet_id"] != original["work_packet_id"]
+    assert _publication(revised)["revision"] == _publication(original)["revision"] + 1
+    assert _publication(revised)["supersedes_publication_id"] == _publication(original)[
+        "publication_id"
+    ]
+    assert bridge.load_approval_decision_record(
+        ticket_id="P99.2",
+        generation_record=revised,
+    ) is None
+    assert len(history) == 1
+    assert history[0]["historical_current_generation_record"] == original
+    assert history[0]["historical_approved_decision_record"] == approved_decision
+    assert history[0]["historical_review_prepare_failure_record"] == failure_record
+    assert history[0]["new_generation_record"] == revised
+    assert result["ticket_execution_authorized"] is False
+    assert result["WorkPacket_execution_authorized"] is False
+    assert result["worker_execution"] is False
+    assert result["Kanban_dispatch"] is False
+    assert result["Git_mutation"] is False
+
+
+@pytest.mark.parametrize(
+    "human_authorization_text",
+    ("", "Should we revise P99.2?", "Maybe revise P99.2."),
+)
+def test_current_ticket_material_revision_requires_explicit_human_authorization(
+    bridge_home,
+    monkeypatch,
+    human_authorization_text,
+) -> None:
+    monkeypatch.setattr(
+        bridge,
+        "resolve_roadmap_ticket_authorities",
+        _synthetic_p99_revision_roadmap_items,
+    )
+    base_workflow = _synthetic_p99_2_workflow()
+    bridge.generate_current_ticket(workflow=base_workflow)
+    original = bridge.load_generation_record(ticket_id="P99.2")
+    assert original is not None
+    bridge.apply_ticket_approval_decision(
+        ticket_id="P99.2",
+        decision="approve",
+        actor="synthetic-human",
+    )
+    failure_record = _current_material_failure_record(original)
+
+    with pytest.raises(bridge.TicketArchitectBridgeInputError):
+        bridge.revise_current_ticket_for_material_contract_failure(
+            workflow=_current_material_revision_workflow(original, failure_record),
+            review_prepare_failure_record=failure_record,
+            human_authorization_text=human_authorization_text,
+            revision_contract=_full_material_revision_contract(marker="C37-AUTH"),
+            authorizer_id="synthetic-human",
+            requested_project_id="PEPPER",
+            requested_ticket_id="P99.2",
+            requested_next_action_id="REVISE_P99_2",
+        )
+
+    assert bridge.load_generation_record(ticket_id="P99.2") == original
+
+
+def test_current_ticket_material_revision_rejects_stale_failure_authority(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        bridge,
+        "resolve_roadmap_ticket_authorities",
+        _synthetic_p99_revision_roadmap_items,
+    )
+    base_workflow = _synthetic_p99_2_workflow()
+    bridge.generate_current_ticket(workflow=base_workflow)
+    original = bridge.load_generation_record(ticket_id="P99.2")
+    assert original is not None
+    bridge.apply_ticket_approval_decision(
+        ticket_id="P99.2",
+        decision="approve",
+        actor="synthetic-human",
+    )
+    failure_record = _current_material_failure_record(original)
+    stale_failure = dict(failure_record)
+    stale_failure["work_packet_SHA256"] = "0" * 64
+
+    with pytest.raises(bridge.TicketArchitectBridgeInputError):
+        bridge.revise_current_ticket_for_material_contract_failure(
+            workflow=_current_material_revision_workflow(original, failure_record),
+            review_prepare_failure_record=stale_failure,
+            human_authorization_text="I explicitly authorize revision of P99.2.",
+            revision_contract=_full_material_revision_contract(marker="C37-STALE"),
+            authorizer_id="synthetic-human",
+            requested_project_id="PEPPER",
+            requested_ticket_id="P99.2",
+            requested_next_action_id="REVISE_P99_2",
+        )
+
+    assert bridge.load_generation_record(ticket_id="P99.2") == original
+
+
 def test_full_material_revision_with_serial_dependency_plan_succeeds(
     bridge_home,
     monkeypatch,
@@ -2843,6 +3067,121 @@ def test_chat_revise_generated_successor_ticket_uses_revision_backend_without_ex
     assert snapshot["Git_mutation"] is False
 
 
+def test_chat_revise_current_ticket_material_revision_uses_current_backend_without_execution(
+    bridge_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    contract = _full_material_revision_contract(
+        ticket_id="P99.185",
+        marker="C37-TOOL-CURRENT-MATERIAL",
+    )
+    contract_digest = bridge.ticket_spec_material_revision_contract_digest(contract)
+    initial_context = {
+        "current_ticket_id": "P99.185",
+        "workflow_status": "awaiting_material_revision",
+        "next_action": {
+            "id": "REVISE_P99_185",
+            "target_ticket_id": "P99.185",
+            "required_human_action": "ticket_material_revision",
+        },
+        "workflow_control": {
+            "current_ticket_id": "P99.185",
+            "workflow_status": "awaiting_material_revision",
+            "review_state": "material_revision_required",
+            "next_action": {
+                "id": "REVISE_P99_185",
+                "target_ticket_id": "P99.185",
+                "required_human_action": "ticket_material_revision",
+            },
+        },
+    }
+    updated_context = {
+        "current_ticket_id": "P99.185",
+        "next_ticket_id": None,
+        "next_ticket_title": None,
+        "workflow_state": "P99.185-AWAITING-APPROVAL",
+        "workflow_status": "awaiting_ticket_approval",
+        "approval_state": "pending_ticket_approval",
+        "pending_approval_count": 1,
+        "pending_ticket_approval_count": 1,
+        "queue_state": "not_queued",
+        "execution_state": "not_started",
+        "active_execution_count": 0,
+        "next_action": {
+            "id": "APPROVE_P99_185",
+            "target_ticket_id": "P99.185",
+            "required_human_action": "ticket_approval",
+        },
+        "workflow_control": {},
+    }
+    contexts = [initial_context, updated_context]
+    context_calls: list[int] = []
+    observed: dict[str, object] = {}
+
+    def build_context() -> dict[str, object]:
+        index = min(len(context_calls), len(contexts) - 1)
+        context_calls.append(index)
+        return contexts[index]
+
+    def revise_current_ticket_for_material_contract_failure(**kwargs):
+        observed["revision_kwargs"] = kwargs
+        return {
+            "revision_applied": True,
+            "material_revision_authority_type": "current_ticket_material_contract_revision",
+            "revision_contract_SHA256": contract_digest,
+            "pending_ticket_approval_count": 1,
+            "active_execution_count": 0,
+            "ticket_execution_authorized": False,
+            "WorkPacket_execution_authorized": False,
+            "worker_execution": False,
+            "Kanban_dispatch": False,
+            "Git_mutation": False,
+        }
+
+    monkeypatch.setattr(pr, "build_lead_agent_operational_context", build_context)
+    monkeypatch.setattr(
+        pr,
+        "revise_current_ticket_for_material_contract_failure",
+        revise_current_ticket_for_material_contract_failure,
+    )
+
+    result = _chat_tool_result(
+        "revise_current_ticket_for_material_contract_failure",
+        {
+            "human_authorization_text": "Authorize REVISE_P99_185 to revise P99.185.",
+            "revision_contract": contract,
+            "project_id": "PEPPER",
+            "ticket_id": "P99.185",
+            "next_action_id": "REVISE_P99_185",
+        },
+    )
+    kwargs = observed["revision_kwargs"]
+
+    assert result["success"] is True
+    assert result["source_tool"] == "revise_current_ticket_for_material_contract_failure"
+    assert result["revision_applied"] is True
+    assert result["material_revision_authority_type"] == "current_ticket_material_contract_revision"
+    assert result["revision_contract_SHA256"] == contract_digest
+    assert result["workflow_status"] == "awaiting_ticket_approval"
+    assert result["pending_ticket_approval_count"] == 1
+    assert result["active_execution_count"] == 0
+    assert result["next_action"]["id"] == "APPROVE_P99_185"
+    assert result["ticket_execution_authorized"] is False
+    assert result["WorkPacket_execution_authorized"] is False
+    assert result["runtime_execution_authorized"] is False
+    assert result["worker_execution"] is False
+    assert result["Kanban_dispatch"] is False
+    assert result["Git_mutation"] is False
+    assert result["auto_approval"] is False
+    assert result["auto_execution"] is False
+    assert kwargs["revision_contract"] == contract
+    assert kwargs["project_id"] == "PEPPER"
+    assert kwargs["ticket_id"] == "P99.185"
+    assert kwargs["next_action_id"] == "REVISE_P99_185"
+
+
 def test_chat_generate_current_ticket_forwards_generation_failure_envelope(
     monkeypatch,
 ) -> None:
@@ -2937,6 +3276,28 @@ def test_revise_generated_successor_ticket_schema_exposes_bounded_revision_contr
     assert "governance_invariants" in contract["properties"]
     assert "execution_requirements" in contract["properties"]
     assert "project_id" not in contract["properties"]
+    assert "execution_authority" not in contract["properties"]
+
+
+def test_revise_current_ticket_material_revision_schema_requires_contract(
+    bridge_home,
+) -> None:
+    import tools.pepper_workflow_tools  # noqa: F401
+    from tools.registry import registry
+
+    schema = registry.get_schema("revise_current_ticket_for_material_contract_failure")
+    assert schema is not None
+    params = schema["parameters"]
+    contract = params["properties"]["revision_contract"]
+
+    assert params["required"] == ["human_authorization_text", "revision_contract"]
+    assert params["additionalProperties"] is False
+    assert "active current ticket" in params["properties"]["ticket_id"]["description"]
+    assert "rejected-successor" in contract["description"]
+    assert contract["additionalProperties"] is False
+    assert contract["required"] == ["schema_version", "ticket_id"]
+    assert contract["properties"]["scope"]["additionalProperties"] is False
+    assert contract["properties"]["validation_steps"]["maxItems"] == 32
     assert "execution_authority" not in contract["properties"]
 
 

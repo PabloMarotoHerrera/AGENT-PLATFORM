@@ -21,7 +21,7 @@ import subprocess
 import time
 import unicodedata
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -144,6 +144,16 @@ PEPPER_REVIEW_PREPARE_ACTION_SCHEMA_VERSION = 1
 PEPPER_REVIEW_PREPARE_ACTION_POLICY_ID = "pepper-p18-9-0-review-prepare-action-v1"
 PEPPER_REVIEW_PREPARE_ACTION_DIGEST_ALGORITHM = (
     "agent-platform-pepper-p18-9-0-review-prepare-action-sha256-v1"
+)
+PEPPER_REVIEW_PREPARE_FAILURE_SCHEMA_VERSION = 1
+PEPPER_REVIEW_PREPARE_FAILURE_POLICY_ID = (
+    "pepper-current-ticket-review-prepare-failure-v1"
+)
+PEPPER_REVIEW_PREPARE_FAILURE_SOURCE_SYSTEM = (
+    "pepper-current-ticket-review-prepare-failure"
+)
+PEPPER_REVIEW_PREPARE_FAILURE_DIGEST_ALGORITHM = (
+    "agent-platform-pepper-current-ticket-review-prepare-failure-sha256-v1"
 )
 PEPPER_REVIEW_PREPARE_PACKAGE_DIGEST_ALGORITHM = (
     "agent-platform-pepper-p18-9-0-review-package-sha256-v1"
@@ -358,6 +368,14 @@ _GOVERNED_TICKET_AUTHORITY_PATH_SPECS = {
     "review_prepare_history": (
         _GOVERNED_TICKET_REVIEW_PREPARE_STORE_DIR,
         "review-prepare.history.jsonl",
+    ),
+    "review_prepare_failure": (
+        _GOVERNED_TICKET_REVIEW_PREPARE_STORE_DIR,
+        "review-prepare-failure.json",
+    ),
+    "review_prepare_failure_history": (
+        _GOVERNED_TICKET_REVIEW_PREPARE_STORE_DIR,
+        "review-prepare-failure.history.jsonl",
     ),
     "zero_change_attestation": (
         _GOVERNED_TICKET_ZERO_CHANGE_ATTESTATION_STORE_DIR,
@@ -3022,6 +3040,15 @@ def _generated_record_predecessor_ticket_id(record: dict[str, Any]) -> str:
     return predecessor if predecessor and _SAFE_ID.fullmatch(predecessor) else ""
 
 
+def _is_current_ticket_material_revision_generation(record: dict[str, Any]) -> bool:
+    revision_authority = record.get("revision_authority")
+    return (
+        isinstance(revision_authority, dict)
+        and revision_authority.get("authority_type")
+        == "current_ticket_material_contract_revision"
+    )
+
+
 def _pending_ticket_approval_records_or_blocker() -> tuple[
     list[dict[str, Any]],
     dict[str, Any] | None,
@@ -3528,10 +3555,14 @@ def _current_incomplete_ticket_authority_overlay() -> tuple[
                 overlay = generated_record_to_workflow_overlay(generation)
             except Exception:
                 continue
+            current_ticket_material_revision_pending_approval = (
+                overlay.get("workflow_status") == "awaiting_ticket_approval"
+                and _is_current_ticket_material_revision_generation(generation)
+            )
             if overlay.get("workflow_status") in {
                 "awaiting_ticket_approval",
                 "awaiting_correction",
-            }:
+            } and not current_ticket_material_revision_pending_approval:
                 continue
             if not str(overlay.get("current_ticket_id") or "").strip():
                 continue
@@ -3540,18 +3571,19 @@ def _current_incomplete_ticket_authority_overlay() -> tuple[
             )
             if not predecessor_valid:
                 continue
-            try:
-                projection = _projection_record_for_generated_ticket(generation)
-                if projection is not None:
-                    if _projection_has_terminal_ticket_completion(projection):
-                        continue
-                    overlay.update(_projection_overlay_for_record(projection))
-            except Exception as exc:  # pragma: no cover - defensive live-state guard
-                projection_blocker = {
-                    "id": f"{ticket_id}-SUCCESSOR-KANBAN-PROJECTION-AUTHORITY",
-                    "status": "blocked_by_invalid_generated_successor_projection_authority",
-                    "evidence": _safe_text(exc, limit=300),
-                }
+            if not current_ticket_material_revision_pending_approval:
+                try:
+                    projection = _projection_record_for_generated_ticket(generation)
+                    if projection is not None:
+                        if _projection_has_terminal_ticket_completion(projection):
+                            continue
+                        overlay.update(_projection_overlay_for_record(projection))
+                except Exception as exc:  # pragma: no cover - defensive live-state guard
+                    projection_blocker = {
+                        "id": f"{ticket_id}-SUCCESSOR-KANBAN-PROJECTION-AUTHORITY",
+                        "status": "blocked_by_invalid_generated_successor_projection_authority",
+                        "evidence": _safe_text(exc, limit=300),
+                    }
             if projection is not None:
                 lifecycle_blocker = _apply_current_projection_execution_lifecycle_overlay(
                     overlay,
@@ -5114,6 +5146,42 @@ def revise_generated_successor_ticket(
     )
 
 
+def revise_current_ticket_for_material_contract_failure(
+    *,
+    human_authorization_text: str,
+    revision_contract: dict[str, Any],
+    authorizer_id: str = "pepper-chat-human",
+    project_id: str | None = None,
+    ticket_id: str | None = None,
+    next_action_id: str | None = None,
+) -> dict[str, Any]:
+    """Revise the active current ticket after durable material review-prep failure."""
+
+    from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
+        revise_current_ticket_for_material_contract_failure as revise_current_ticket,
+    )
+
+    projection = _load_current_projection_record()
+    failure_record = load_current_ticket_review_prepare_failure_record(
+        projection_record=projection,
+    )
+    if failure_record is None:
+        raise ProductRuntimeConflict("current ticket material revision authority is absent")
+    if failure_record.get("review_prepare_resolution") != "MATERIAL_REVISION_REQUIRED":
+        raise ProductRuntimeConflict("current review-prepare failure does not authorize material revision")
+    workflow = build_workflow_control_snapshot()
+    return revise_current_ticket(
+        workflow=workflow,
+        review_prepare_failure_record=failure_record,
+        human_authorization_text=human_authorization_text,
+        revision_contract=revision_contract,
+        authorizer_id=authorizer_id,
+        requested_project_id=project_id,
+        requested_ticket_id=ticket_id,
+        requested_next_action_id=next_action_id,
+    )
+
+
 def reconcile_invalid_current_generation_authority(
     *,
     project_id: str | None = None,
@@ -5276,6 +5344,24 @@ def review_prepare_history_path_for_ticket(ticket_id: str) -> Path:
 
     return governed_ticket_lifecycle_authority_path(
         "review_prepare_history",
+        ticket_id=ticket_id,
+    )
+
+
+def review_prepare_failure_record_path_for_ticket(ticket_id: str) -> Path:
+    """Return the current review-preparation failure authority path."""
+
+    return governed_ticket_lifecycle_authority_path(
+        "review_prepare_failure",
+        ticket_id=ticket_id,
+    )
+
+
+def review_prepare_failure_history_path_for_ticket(ticket_id: str) -> Path:
+    """Return the append-only review-preparation failure authority history path."""
+
+    return governed_ticket_lifecycle_authority_path(
+        "review_prepare_failure_history",
         ticket_id=ticket_id,
     )
 
@@ -5720,6 +5806,37 @@ def load_current_ticket_review_prepare_record(
         return validated
     except ProductRuntimeConflict:
         if allow_historical_mismatch and _review_prepare_superseded_by_current_round(
+            record,
+            projection=projection,
+        ):
+            return None
+        raise
+
+
+def load_current_ticket_review_prepare_failure_record(
+    *,
+    projection_record: dict[str, Any] | None = None,
+    allow_historical_mismatch: bool = False,
+) -> dict[str, Any] | None:
+    """Load and validate the active review-preparation failure record."""
+
+    projection = projection_record if projection_record is not None else _load_current_projection_record()
+    path = review_prepare_failure_record_path_for_ticket(str(projection["ticket_id"]))
+    if not path.exists():
+        return None
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ProductRuntimeConflict(
+            f"{projection['ticket_id']} review-preparation failure record is unreadable"
+        ) from exc
+    try:
+        return validate_current_ticket_review_prepare_failure_record(
+            record,
+            projection_record=projection,
+        )
+    except ProductRuntimeConflict:
+        if allow_historical_mismatch and not _review_prepare_failure_record_is_current(
             record,
             projection=projection,
         ):
@@ -9268,6 +9385,137 @@ def validate_p18_9_0_review_prepare_record(
     return record
 
 
+def validate_current_ticket_review_prepare_failure_record(
+    record: dict[str, Any],
+    *,
+    projection_record: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Validate persisted review-preparation failure authority."""
+
+    if not isinstance(record, dict):
+        raise ProductRuntimeConflict("review-preparation failure record must be an object")
+    if record.get("review_prepare_failure_SHA256") != _review_prepare_failure_record_digest(record):
+        raise ProductRuntimeConflict("review-preparation failure record digest mismatch")
+    projection = projection_record if projection_record is not None else _load_current_projection_record()
+    _validate_execution_start_authority(projection)
+    completion = _current_review_round_completion_source(projection)
+    if completion.get("blocker_code"):
+        raise ProductRuntimeConflict(str(completion["blocker_code"]))
+    acceptance_contract = _acceptance_contract_for_review_projection(projection)
+    zero_change_authority = resolve_zero_change_authority(
+        projection,
+        completion,
+        allow_historical_mismatch=True,
+    )
+    binding, identity = _current_ticket_identity_fields(projection)
+    expected = {
+        "schema_version": PEPPER_REVIEW_PREPARE_FAILURE_SCHEMA_VERSION,
+        "policy_id": PEPPER_REVIEW_PREPARE_FAILURE_POLICY_ID,
+        "source_system": PEPPER_REVIEW_PREPARE_FAILURE_SOURCE_SYSTEM,
+        **identity,
+        "approval_publication_SHA256": projection["approval_publication_SHA256"],
+        "dependency_plan_SHA256": projection["dependency_plan_SHA256"],
+        "projection_SHA256": projection["projection_SHA256"],
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+        "successful_run_id": completion["run_id"],
+        "successful_run_status": str(completion.get("run_status") or "done"),
+        "successful_run_outcome": str(completion.get("run_outcome") or "completed"),
+        "kanban_completion_result_SHA256": completion["kanban_completion_result_SHA256"],
+        "acceptance_contract_SHA256": acceptance_contract["acceptance_contract_SHA256"],
+        "criteria_revision_SHA256": acceptance_contract["criteria_revision_SHA256"],
+        "zero_change_authority_kind": zero_change_authority.get("authority_kind"),
+        "zero_change_authority_SHA256": zero_change_authority.get("authority_SHA256"),
+        "review_prepare_status": "blocked",
+        "target_ticket_id": binding.ticket_id,
+        "revision_action_id": binding.revise_next_action_id,
+    }
+    for key, value in expected.items():
+        if record.get(key) != value:
+            raise ProductRuntimeConflict(f"review-preparation failure record {key} mismatch")
+    resolution = str(record.get("review_prepare_resolution") or "")
+    if resolution not in {"RETRY_REVIEW_PREPARE", "MATERIAL_REVISION_REQUIRED"}:
+        raise ProductRuntimeConflict("review-preparation failure resolution is invalid")
+    material_required = resolution == "MATERIAL_REVISION_REQUIRED"
+    if bool(record.get("material_revision_required")) is not material_required:
+        raise ProductRuntimeConflict("review-preparation failure material-resolution mismatch")
+    expected_classification = (
+        "material_contract_defect"
+        if material_required
+        else "retryable_review_prepare_failure"
+    )
+    if record.get("failure_classification") != expected_classification:
+        raise ProductRuntimeConflict("review-preparation failure classification mismatch")
+    if not str(record.get("blocker_code") or "").strip():
+        raise ProductRuntimeConflict("review-preparation failure blocker code is absent")
+    if not str(record.get("blocker_detail") or "").strip():
+        raise ProductRuntimeConflict("review-preparation failure blocker detail is absent")
+    requirements = _review_prepare_validation_requirements_public(acceptance_contract)
+    if record.get("validation_requirements") != requirements:
+        raise ProductRuntimeConflict("review-preparation failure requirements mismatch")
+    validation_result = record.get("review_prepare_validation_result")
+    if not isinstance(validation_result, dict):
+        raise ProductRuntimeConflict("review-preparation failure validation result missing")
+    if record.get("review_prepare_validation_result_SHA256") != _review_prepare_failure_validation_digest(
+        validation_result
+    ):
+        raise ProductRuntimeConflict("review-preparation failure validation result digest mismatch")
+    if material_required and not record.get("missing_or_invalid_validation_authorities"):
+        raise ProductRuntimeConflict("material review-preparation failure lacks authority evidence")
+    return record
+
+
+def _review_prepare_failure_record_is_current(
+    record: dict[str, Any],
+    *,
+    projection: dict[str, Any],
+) -> bool:
+    if not isinstance(record, dict):
+        return False
+    if record.get("review_prepare_failure_SHA256") != _review_prepare_failure_record_digest(record):
+        return False
+    keys = (
+        "project_id",
+        "macroproject_id",
+        "ticket_id",
+        "ticket_title",
+        "ticket_spec_SHA256",
+        "work_packet_id",
+        "work_packet_SHA256",
+        "WorkPacket_compilation_count",
+        "approval_publication_SHA256",
+        "dependency_plan_SHA256",
+        "projection_SHA256",
+        "kanban_board_slug",
+        "kanban_task_id",
+    )
+    binding, identity = _current_ticket_identity_fields(projection)
+    expected = {
+        **identity,
+        "approval_publication_SHA256": projection.get("approval_publication_SHA256"),
+        "dependency_plan_SHA256": projection.get("dependency_plan_SHA256"),
+        "projection_SHA256": projection.get("projection_SHA256"),
+        "kanban_board_slug": projection.get("kanban_board_slug"),
+        "kanban_task_id": projection.get("kanban_task_id"),
+    }
+    if any(record.get(key) != expected.get(key) for key in keys):
+        return False
+    if record.get("target_ticket_id") != binding.ticket_id:
+        return False
+    if record.get("revision_action_id") != binding.revise_next_action_id:
+        return False
+    try:
+        completion = _current_review_round_completion_source(projection)
+        acceptance_contract = _acceptance_contract_for_review_projection(projection)
+    except Exception:
+        return False
+    return (
+        record.get("successful_run_id") == completion.get("run_id")
+        and record.get("kanban_completion_result_SHA256") == completion.get("kanban_completion_result_SHA256")
+        and record.get("acceptance_contract_SHA256") == acceptance_contract.get("acceptance_contract_SHA256")
+    )
+
+
 def validate_p18_9_0_review_acceptance_record(
     record: dict[str, Any],
     *,
@@ -9950,7 +10198,19 @@ def prepare_current_ticket_review(
     if validation_attempt.get("blocker_code"):
         if zero_change_authority.get("authority_kind") != "human_zero_change_attestation":
             zero_change_authority = resolve_zero_change_authority(projection, completion)
-        return _blocked_current_review_prepare_result(
+        failure_record = _build_review_prepare_failure_record(
+            request=request,
+            projection=projection,
+            workflow=workflow,
+            completion=completion,
+            acceptance_contract=acceptance_contract,
+            zero_change_authority=zero_change_authority,
+            blocker_code=str(validation_attempt["blocker_code"]),
+            blocker_detail=str(validation_attempt["blocker_detail"]),
+            validation=validation_attempt.get("review_prepare_validation_result"),
+        )
+        _persist_review_prepare_failure_record(failure_record)
+        blocked = _blocked_current_review_prepare_result(
             projection,
             request=request,
             blocker_code=str(validation_attempt["blocker_code"]),
@@ -9959,6 +10219,14 @@ def prepare_current_ticket_review(
             acceptance_contract=acceptance_contract,
             zero_change_authority=zero_change_authority,
         )
+        blocked.update({
+            "review_prepare_failure_recorded": True,
+            "review_prepare_failure_SHA256": failure_record["review_prepare_failure_SHA256"],
+            "failure_classification": failure_record["failure_classification"],
+            "review_prepare_resolution": failure_record["review_prepare_resolution"],
+            "material_revision_required": failure_record["material_revision_required"],
+        })
+        return blocked
     if zero_change_authority.get("authority_kind") != "human_zero_change_attestation":
         zero_change_authority = resolve_zero_change_authority(projection, completion)
     zero_change_blocker = _zero_change_authority_prepare_blocker(zero_change_authority)
@@ -22863,6 +23131,24 @@ def _review_prepare_record_digest(record: dict[str, Any]) -> str:
     return _digest_payload(PEPPER_REVIEW_PREPARE_ACTION_DIGEST_ALGORITHM, payload)
 
 
+def _review_prepare_failure_record_digest(record: dict[str, Any]) -> str:
+    payload = {
+        key: value
+        for key, value in record.items()
+        if key != "review_prepare_failure_SHA256"
+    }
+    return _digest_payload(PEPPER_REVIEW_PREPARE_FAILURE_DIGEST_ALGORITHM, payload)
+
+
+def _review_prepare_failure_validation_digest(validation: Mapping[str, Any] | None) -> str | None:
+    if not isinstance(validation, Mapping):
+        return None
+    return _digest_payload(
+        f"{PEPPER_REVIEW_PREPARE_FAILURE_DIGEST_ALGORITHM}:validation-result-v1",
+        dict(validation),
+    )
+
+
 def _review_acceptance_record_digest(record: dict[str, Any]) -> str:
     payload = {
         key: value
@@ -23417,6 +23703,34 @@ def _review_prepare_authority_projection(record: dict[str, Any]) -> dict[str, An
         "human_git_handoff_required": bool(record.get("human_git_handoff_required")),
         "human_acceptance_required": True,
         "human_acceptance_recorded": False,
+    }
+
+
+def _review_prepare_failure_authority_projection(record: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "policy_id": record["policy_id"],
+        "review_prepare_failure_SHA256": record["review_prepare_failure_SHA256"],
+        "review_prepare_validation_result_SHA256": record.get(
+            "review_prepare_validation_result_SHA256"
+        ),
+        "review_prepare_validation_authority_SHA256": record.get(
+            "review_prepare_validation_authority_SHA256"
+        ),
+        "ticket_spec_SHA256": record["ticket_spec_SHA256"],
+        "work_packet_id": record["work_packet_id"],
+        "work_packet_SHA256": record["work_packet_SHA256"],
+        "projection_SHA256": record["projection_SHA256"],
+        "kanban_completion_result_SHA256": record["kanban_completion_result_SHA256"],
+        "acceptance_contract_SHA256": record["acceptance_contract_SHA256"],
+        "criteria_revision_SHA256": record["criteria_revision_SHA256"],
+        "successful_run_id": record["successful_run_id"],
+        "zero_change_authority_kind": record.get("zero_change_authority_kind"),
+        "zero_change_authority_SHA256": record.get("zero_change_authority_SHA256"),
+        "blocker_code": record["blocker_code"],
+        "failure_classification": record["failure_classification"],
+        "review_prepare_resolution": record["review_prepare_resolution"],
+        "material_revision_required": bool(record.get("material_revision_required")),
+        "revision_action_id": record["revision_action_id"],
     }
 
 
@@ -27068,6 +27382,17 @@ def _review_acceptance_contract_validation_requirements(
     return validation_tool.review_prepare_validation_requirements(acceptance_contract)
 
 
+def _review_prepare_validation_requirements_public(
+    acceptance_contract: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    from tools import workpacket_validation_tool as validation_tool
+
+    return [
+        validation_tool.review_prepare_validation_requirement_public(item)
+        for item in _review_acceptance_contract_validation_requirements(acceptance_contract)
+    ]
+
+
 def _review_completion_validation_result_records(
     completion: dict[str, Any],
 ) -> tuple[dict[str, Any], ...]:
@@ -27171,19 +27496,22 @@ def _review_prepare_validate_completion_if_required(
             "completion": updated_completion,
             "blocker_code": None,
             "blocker_detail": None,
+            "review_prepare_validation_result": validation,
         }
     if validation.get("validation_passed") is False:
         return {
-            "completion": updated_completion,
+            "completion": completion,
             "blocker_code": "REVIEW_PREPARE_VALIDATION_FAILED",
             "blocker_detail": validation.get("failure_detail")
             or "review-preparation validation command failed",
+            "review_prepare_validation_result": validation,
         }
     return {
-        "completion": updated_completion,
+        "completion": completion,
         "blocker_code": "REVIEW_PREPARE_VALIDATION_INCOMPLETE",
         "blocker_detail": validation.get("failure_detail")
         or "review-preparation validation did not cover all acceptance-contract commands",
+        "review_prepare_validation_result": validation,
     }
 
 
@@ -28123,6 +28451,206 @@ def _kanban_completion_result_source(projection: dict[str, Any]) -> dict[str, An
         conn.close()
 
 
+def _review_prepare_missing_authority_evidence(
+    validation: Mapping[str, Any] | None,
+) -> list[dict[str, Any]]:
+    if not isinstance(validation, Mapping):
+        return []
+    missing = validation.get("missing_requirements")
+    if not isinstance(missing, list):
+        return []
+    authority = validation.get("review_prepare_validation_authority")
+    capability_manifest = []
+    authorized_manifest = []
+    if isinstance(authority, Mapping):
+        capability_manifest = authority.get("workpacket_capability_manifest") or []
+        authorized_manifest = authority.get("review_prepare_authorized_command_manifest") or []
+    evidence: list[dict[str, Any]] = []
+    for requirement in missing:
+        if not isinstance(requirement, Mapping):
+            continue
+        if requirement.get("manual") or requirement.get("not_applicable"):
+            continue
+        source_command = str(requirement.get("source_command") or "").strip()
+        validation_id = str(requirement.get("validation_id") or "").strip()
+        if not source_command:
+            continue
+        matching_capability = [
+            dict(item)
+            for item in capability_manifest
+            if isinstance(item, Mapping)
+            and str(item.get("source_command") or "").strip() == source_command
+            and (not validation_id or str(item.get("validation_id") or "").strip() == validation_id)
+        ]
+        matching_authorized = [
+            dict(item)
+            for item in authorized_manifest
+            if isinstance(item, Mapping)
+            and str(item.get("source_command") or "").strip() == source_command
+            and (not validation_id or str(item.get("validation_id") or "").strip() == validation_id)
+            and item.get("acceptance_authorized") is True
+        ]
+        requirement_has_structured_authority = any(
+            str(requirement.get(key) or "").strip()
+            for key in (
+                "command_authority_id",
+                "command_authority_SHA256",
+                "source_ticket_command_authority_SHA256",
+            )
+        )
+        if matching_authorized:
+            continue
+        evidence.append({
+            "validation_id": validation_id or None,
+            "source_command": source_command,
+            "requirement_has_structured_command_authority": requirement_has_structured_authority,
+            "matching_capability_count": len(matching_capability),
+            "matching_acceptance_authorized_count": len(matching_authorized),
+            "matching_capability_specs": matching_capability,
+            "authority_gap": (
+                "required_validation_command_authority_structurally_absent"
+                if not requirement_has_structured_authority
+                else "required_validation_command_authority_not_authorized_by_workpacket"
+            ),
+        })
+    return evidence
+
+
+def _classify_review_prepare_failure(
+    *,
+    blocker_code: str,
+    validation: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    missing_authority = _review_prepare_missing_authority_evidence(validation)
+    material = (
+        blocker_code == "REVIEW_PREPARE_VALIDATION_INCOMPLETE"
+        and bool(missing_authority)
+    )
+    return {
+        "failure_classification": (
+            "material_contract_defect" if material else "retryable_review_prepare_failure"
+        ),
+        "review_prepare_resolution": (
+            "MATERIAL_REVISION_REQUIRED" if material else "RETRY_REVIEW_PREPARE"
+        ),
+        "material_revision_required": material,
+        "missing_or_invalid_validation_authorities": missing_authority,
+    }
+
+
+def _build_review_prepare_failure_record(
+    *,
+    request: CurrentTicketReviewPrepareRequest,
+    projection: dict[str, Any],
+    workflow: dict[str, Any],
+    completion: dict[str, Any],
+    acceptance_contract: dict[str, Any],
+    zero_change_authority: dict[str, Any],
+    blocker_code: str,
+    blocker_detail: str,
+    validation: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
+    classification = _classify_review_prepare_failure(
+        blocker_code=blocker_code,
+        validation=validation,
+    )
+    validation_result = dict(validation) if isinstance(validation, Mapping) else {}
+    run_status = str(completion.get("run_status") or "done")
+    run_outcome = str(completion.get("run_outcome") or "completed")
+    record = {
+        "schema_version": PEPPER_REVIEW_PREPARE_FAILURE_SCHEMA_VERSION,
+        "policy_id": PEPPER_REVIEW_PREPARE_FAILURE_POLICY_ID,
+        "source_system": PEPPER_REVIEW_PREPARE_FAILURE_SOURCE_SYSTEM,
+        "recorded_at": _utc_now_iso(),
+        **_current_ticket_projection_identity_fields(projection),
+        "approval_publication_SHA256": projection["approval_publication_SHA256"],
+        "dependency_plan_SHA256": projection["dependency_plan_SHA256"],
+        "projection_SHA256": projection["projection_SHA256"],
+        "execution_start_authority_SHA256": workflow.get("execution_start_authority", {}).get(
+            "start_authorization_SHA256"
+        ),
+        "retry_start_authority_SHA256": workflow.get("retry_start_authority", {}).get(
+            "retry_start_authorization_SHA256"
+        ),
+        "kanban_board_slug": projection["kanban_board_slug"],
+        "kanban_task_id": projection["kanban_task_id"],
+        "successful_run_id": completion["run_id"],
+        "successful_run_status": run_status,
+        "successful_run_outcome": run_outcome,
+        "kanban_completion_result_SHA256": completion["kanban_completion_result_SHA256"],
+        "acceptance_contract_SHA256": acceptance_contract["acceptance_contract_SHA256"],
+        "criteria_revision_SHA256": acceptance_contract["criteria_revision_SHA256"],
+        "validation_requirements": _review_prepare_validation_requirements_public(
+            acceptance_contract
+        ),
+        "missing_requirements": list(validation_result.get("missing_requirements") or ()),
+        "review_prepare_validation_result": validation_result,
+        "review_prepare_validation_result_SHA256": _review_prepare_failure_validation_digest(
+            validation_result
+        ),
+        "review_prepare_validation_authority_SHA256": validation_result.get(
+            "review_prepare_validation_authority_SHA256"
+        ),
+        "zero_change_result": zero_change_authority.get("zero_change_result") is True,
+        "zero_change_authority_kind": zero_change_authority.get("authority_kind"),
+        "zero_change_authority_SHA256": zero_change_authority.get("authority_SHA256"),
+        "zero_change_authority": zero_change_authority.get("authority_record"),
+        "human_zero_change_attestation_SHA256": (
+            zero_change_authority.get("authority_SHA256")
+            if zero_change_authority.get("authority_kind") == "human_zero_change_attestation"
+            else None
+        ),
+        "zero_change_machine_authority_sufficient": zero_change_authority.get(
+            "zero_change_machine_authority_sufficient"
+        ) is True,
+        "human_zero_change_attestation_required": zero_change_authority.get(
+            "human_zero_change_attestation_required"
+        ) is True,
+        "review_prepare_status": "blocked",
+        "blocker_code": blocker_code,
+        "blocker_detail": _safe_text(blocker_detail, limit=300),
+        "target_ticket_id": binding.ticket_id,
+        "target_ticket_title": binding.ticket_title,
+        "revision_action_id": binding.revise_next_action_id,
+        "requested_project_id": request.project_id,
+        "requested_ticket_id": request.ticket_id,
+        "requested_next_action_id": request.next_action_id,
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "worker_process_started": False,
+        "Kanban_dispatch": False,
+        "retry_execution_started": False,
+        "automatic_retry_count": 0,
+        "automatic_requeue_count": 0,
+        "Git_commands_executed": 0,
+        "Docker_commands_executed": 0,
+        "Graphify_commands_executed": 0,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+        **classification,
+    }
+    record["review_prepare_failure_SHA256"] = _review_prepare_failure_record_digest(record)
+    return record
+
+
+def _persist_review_prepare_failure_record(record: dict[str, Any]) -> None:
+    validate_current_ticket_review_prepare_failure_record(record)
+    ticket_id = str(record["ticket_id"])
+    path = review_prepare_failure_record_path_for_ticket(ticket_id)
+    _archive_existing_authority_record(
+        path,
+        review_prepare_failure_history_path_for_ticket(ticket_id),
+        reason="replaced_by_current_review_prepare_failure",
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+
 def _build_review_prepare_record(
     *,
     request: CurrentTicketReviewPrepareRequest,
@@ -29015,6 +29543,69 @@ def _blocked_current_review_acceptance_result(
     }
 
 
+def _review_prepare_material_revision_required_overlay(
+    binding: GovernedTicketLifecycleBinding,
+    record: dict[str, Any],
+    *,
+    completed_overlay: dict[str, Any],
+) -> dict[str, Any]:
+    next_action = {
+        "id": binding.revise_next_action_id,
+        "label": (
+            f"{binding.ticket_id} review preparation exposed a material contract defect; "
+            "revise the current ticket with explicit human authorization."
+        ),
+        "target_ticket_id": binding.ticket_id,
+        "target_ticket_title": binding.ticket_title,
+        "required_human_action": "ticket_material_revision",
+    }
+    return {
+        "readiness": "material_revision_required",
+        "workflow_state": f"{binding.ticket_id}-AWAITING-MATERIAL-REVISION",
+        "workflow_status": "awaiting_material_revision",
+        "queue_state": completed_overlay.get("queue_state", "kanban_execution_terminal"),
+        "execution_state": "no_active_executions",
+        "validation_state": "review_prepare_blocked_material_revision_required",
+        "review_state": "material_revision_required",
+        "recovery_state": "not_required",
+        "review_prepare_failure_authority": _review_prepare_failure_authority_projection(record),
+        "review_prepare_failure_SHA256": record["review_prepare_failure_SHA256"],
+        "review_prepare_resolution": record["review_prepare_resolution"],
+        "failure_classification": record["failure_classification"],
+        "material_revision_required": True,
+        "zero_change_result": bool(record.get("zero_change_result")),
+        "zero_change_authority_kind": record.get("zero_change_authority_kind"),
+        "zero_change_authority_SHA256": record.get("zero_change_authority_SHA256"),
+        "human_zero_change_attestation_SHA256": record.get(
+            "human_zero_change_attestation_SHA256"
+        ),
+        "zero_change_machine_authority_sufficient": record.get(
+            "zero_change_machine_authority_sufficient"
+        ) is True,
+        "human_zero_change_attestation_required": False,
+        "validation_contract_satisfied": False,
+        "review_prepare_eligible_result": True,
+        "reviewable_result": False,
+        "validated_noop_result": False,
+        "candidate_changes_available": bool(completed_overlay.get("candidate_changes_available")),
+        "human_git_handoff_required": False,
+        "git_handoff_required": False,
+        "git_handoff_state": "not_required_for_ticket_result",
+        "review_decision_required": False,
+        "human_acceptance_required": False,
+        "human_acceptance_recorded": False,
+        "dispatch_performed": False,
+        "execution_started": False,
+        "worker_execution": False,
+        "worker_process_started": False,
+        "Kanban_dispatch": False,
+        "Git_mutation": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+        "next_action": next_action,
+    }
+
+
 def _p18_9_0_review_prepare_overlay(
     projection: dict[str, Any],
     *,
@@ -29035,6 +29626,34 @@ def _p18_9_0_review_prepare_overlay(
             "evidence": _safe_text(exc, limit=300),
         }
     if record is None:
+        try:
+            failure_record = load_current_ticket_review_prepare_failure_record(
+                projection_record=projection,
+                allow_historical_mismatch=True,
+            )
+        except Exception as exc:  # pragma: no cover - defensive live-state guard
+            return None, {
+                "id": _review_prepare_authority_blocker_id(binding.ticket_id),
+                "status": "blocked_by_invalid_review_prepare_failure_authority",
+                "evidence": _safe_text(exc, limit=300),
+            }
+        if (
+            failure_record is not None
+            and failure_record.get("review_prepare_resolution") == "MATERIAL_REVISION_REQUIRED"
+            and failure_record.get("material_revision_required") is True
+        ):
+            return _review_prepare_material_revision_required_overlay(
+                binding,
+                failure_record,
+                completed_overlay=completed_overlay,
+            ), {
+                "id": f"{binding.ticket_hyphen_token}-REVIEW-PREPARE-MATERIAL-REVISION",
+                "status": "material_revision_required",
+                "evidence": failure_record["blocker_detail"],
+                "review_prepare_failure_SHA256": failure_record[
+                    "review_prepare_failure_SHA256"
+                ],
+            }
         return None, None
     if completed_overlay.get("workflow_status") != "execution_completed":
         return None, {
@@ -30900,6 +31519,13 @@ def build_lead_agent_operational_context() -> dict[str, Any]:
         "validation_state": _workflow_value(workflow, "validation_state", "unavailable"),
         "review_state": _workflow_value(workflow, "review_state", "unavailable"),
         "review_prepare_authority": workflow.get("review_prepare_authority"),
+        "review_prepare_failure_authority": workflow.get(
+            "review_prepare_failure_authority"
+        ),
+        "review_prepare_failure_SHA256": workflow.get("review_prepare_failure_SHA256"),
+        "review_prepare_resolution": workflow.get("review_prepare_resolution"),
+        "failure_classification": workflow.get("failure_classification"),
+        "material_revision_required": bool(workflow.get("material_revision_required")),
         "zero_change_result": bool(workflow.get("zero_change_result")),
         "zero_change_authority_kind": workflow.get("zero_change_authority_kind"),
         "zero_change_authority_SHA256": workflow.get("zero_change_authority_SHA256"),

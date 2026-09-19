@@ -853,12 +853,18 @@ def _get_review_status(args: dict[str, Any], **_kwargs) -> str:
     return _result({
         "source_tool": "get_review_status",
         "source_system": ctx["source_system"],
+        "workflow_status": ctx["workflow_status"],
         "validation_state": ctx["validation_state"],
         "review_state": ctx["review_state"],
         "recovery_state": ctx["recovery_state"],
         "failure_category": ctx.get("failure_category"),
         "failure_summary": ctx.get("failure_summary"),
         "review_prepare_authority": ctx.get("review_prepare_authority"),
+        "review_prepare_failure_authority": ctx.get("review_prepare_failure_authority"),
+        "review_prepare_failure_SHA256": ctx.get("review_prepare_failure_SHA256"),
+        "review_prepare_resolution": ctx.get("review_prepare_resolution"),
+        "failure_classification": ctx.get("failure_classification"),
+        "material_revision_required": ctx.get("material_revision_required"),
         "zero_change_result": ctx.get("zero_change_result"),
         "zero_change_authority_kind": ctx.get("zero_change_authority_kind"),
         "zero_change_authority_SHA256": ctx.get("zero_change_authority_SHA256"),
@@ -986,6 +992,76 @@ def _revise_generated_successor_ticket(args: dict[str, Any], **_kwargs) -> str:
         return tool_error(str(exc) or "generated successor revision failed", success=False)
     return _result({
         "source_tool": "revise_generated_successor_ticket",
+        "human_authorization_text": human_authorization_text,
+        **result,
+        "current_ticket_id": updated_context.get("current_ticket_id"),
+        "next_ticket_id": updated_context.get("next_ticket_id"),
+        "next_ticket_title": updated_context.get("next_ticket_title"),
+        "workflow_state": updated_context.get("workflow_state"),
+        "workflow_status": updated_context.get("workflow_status"),
+        "approval_state": updated_context.get("approval_state"),
+        "pending_approval_count": updated_context.get("pending_approval_count"),
+        "pending_ticket_approval_count": updated_context.get("pending_ticket_approval_count"),
+        "queue_state": updated_context.get("queue_state"),
+        "execution_state": updated_context.get("execution_state"),
+        "active_execution_count": updated_context.get("active_execution_count"),
+        "next_action": updated_context.get("next_action"),
+        "ticket_execution_authorized": False,
+        "WorkPacket_execution_authorized": False,
+        "runtime_execution_authorized": False,
+        "worker_execution": False,
+        "Kanban_dispatch": False,
+        "Git_mutation": False,
+        "auto_approval": False,
+        "auto_execution": False,
+        "auto_retry": False,
+        "auto_rollback": False,
+    })
+
+
+def _revise_current_ticket_for_material_contract_failure(args: dict[str, Any], **_kwargs) -> str:
+    pr = _runtime()
+    try:
+        context = pr.build_lead_agent_operational_context()
+        workflow_control = _workflow_control_context(context)
+        next_action = context.get("next_action")
+        if not isinstance(next_action, dict):
+            next_action = workflow_control.get("next_action")
+        if not isinstance(next_action, dict):
+            raise ValueError("current next action is unavailable")
+        ticket_id = str(
+            args.get("ticket_id")
+            or workflow_control.get("current_ticket_id")
+            or context.get("current_ticket_id")
+            or next_action.get("target_ticket_id")
+            or ""
+        ).strip()
+        next_action_id = str(next_action.get("id") or "").strip()
+        human_authorization_text = _validate_explicit_successor_revision_request(
+            _revision_authorization_text_from_args_or_user_task(args, _kwargs),
+            rejected_ticket_id=ticket_id,
+            next_action_id=next_action_id,
+        )
+        result = pr.revise_current_ticket_for_material_contract_failure(
+            human_authorization_text=human_authorization_text,
+            revision_contract=args.get("revision_contract"),
+            authorizer_id="pepper-chat-human",
+            project_id=str(args.get("project_id") or "").strip() or None,
+            ticket_id=str(args.get("ticket_id") or "").strip() or None,
+            next_action_id=str(args.get("next_action_id") or "").strip() or None,
+        )
+        updated_context = pr.build_lead_agent_operational_context()
+    except Exception as exc:
+        failure_envelope = getattr(exc, "failure_envelope", None)
+        if isinstance(failure_envelope, dict):
+            return tool_error(
+                str(exc) or "current ticket material revision failed",
+                success=False,
+                **failure_envelope,
+            )
+        return tool_error(str(exc) or "current ticket material revision failed", success=False)
+    return _result({
+        "source_tool": "revise_current_ticket_for_material_contract_failure",
         "human_authorization_text": human_authorization_text,
         **result,
         "current_ticket_id": updated_context.get("current_ticket_id"),
@@ -1848,6 +1924,29 @@ _REVISE_GENERATED_SUCCESSOR_TICKET_SCHEMA = {
     "required": ["human_authorization_text"],
     "additionalProperties": False,
 }
+
+_REVISE_CURRENT_TICKET_MATERIAL_REVISION_SCHEMA = json.loads(
+    json.dumps(_REVISE_GENERATED_SUCCESSOR_TICKET_SCHEMA)
+)
+_REVISE_CURRENT_TICKET_MATERIAL_REVISION_SCHEMA["properties"][
+    "human_authorization_text"
+]["description"] = (
+    "Exact user phrase explicitly authorizing material revision of the active current ticket."
+)
+_REVISE_CURRENT_TICKET_MATERIAL_REVISION_SCHEMA["properties"][
+    "revision_contract"
+]["description"] = (
+    "Required bounded structured TicketSpec material revision overlay for the active current ticket. "
+    "It supplies the material change only; it grants no approval, execution, Git, Docker, Graphify, "
+    "or rejected-successor correction authority."
+)
+_REVISE_CURRENT_TICKET_MATERIAL_REVISION_SCHEMA["properties"]["ticket_id"][
+    "description"
+] = "Optional governed ticket guard. Must equal the active current ticket if supplied."
+_REVISE_CURRENT_TICKET_MATERIAL_REVISION_SCHEMA["required"] = [
+    "human_authorization_text",
+    "revision_contract",
+]
 
 
 _RECONCILE_INVALID_CURRENT_GENERATION_AUTHORITY_SCHEMA = {
@@ -2839,6 +2938,25 @@ registry.register(
     },
     handler=_revise_generated_successor_ticket,
     emoji="C",
+    max_result_size_chars=32000,
+)
+
+
+registry.register(
+    name="revise_current_ticket_for_material_contract_failure",
+    toolset=TOOLSET,
+    schema={
+        "name": "revise_current_ticket_for_material_contract_failure",
+        "description": (
+            "Apply explicit human material-revision authorization for only the active current "
+            "ticket when review preparation is durably blocked by a material contract defect. "
+            "Regenerates the same ticket into pending approval; no approval, execution, Kanban "
+            "dispatch, Docker, Graphify, Git, or rejected-successor correction."
+        ),
+        "parameters": _REVISE_CURRENT_TICKET_MATERIAL_REVISION_SCHEMA,
+    },
+    handler=_revise_current_ticket_for_material_contract_failure,
+    emoji="M",
     max_result_size_chars=32000,
 )
 

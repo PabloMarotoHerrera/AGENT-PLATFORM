@@ -2367,8 +2367,8 @@ def _install_c19_current_terminal_run_authority(
             """
             INSERT INTO tasks (
                 id, title, assignee, status, created_at, completed_at,
-                workspace_kind, workspace_path, current_run_id
-            ) VALUES (?, ?, ?, ?, ?, ?, 'dir', ?, ?)
+                workspace_kind, workspace_path, current_run_id, body
+            ) VALUES (?, ?, ?, ?, ?, ?, 'dir', ?, ?, ?)
             """,
             (
                 task_id,
@@ -2379,6 +2379,12 @@ def _install_c19_current_terminal_run_authority(
                 now if (task_status or completion.get("kanban_task_status")) == "done" else None,
                 str(completion.get("kanban_task_workspace_path") or "."),
                 task_current_run_id,
+                json.dumps({
+                    "ticket_id": projection_record.get("ticket_id"),
+                    "WorkPacket_ID": projection_record.get("work_packet_id"),
+                    "WorkPacket_SHA256": projection_record.get("work_packet_SHA256"),
+                    "TicketSpec_SHA256": projection_record.get("ticket_spec_SHA256"),
+                }),
             ),
         )
         for run in runs:
@@ -2449,6 +2455,23 @@ def _install_c19_review_prepare_validation_tool_stub(
             "HERMES_AGENT_PLATFORM_GENERATION_RECORD_PATH": "/tmp/c19-generation.json",
             "HERMES_AGENT_PLATFORM_APPROVAL_DECISION_RECORD_PATH": "/tmp/c19-approval.json",
             "HERMES_AGENT_PLATFORM_KANBAN_PROJECTION_RECORD_PATH": "/tmp/c19-projection.json",
+        },
+    )
+    monkeypatch.setattr(
+        pr,
+        "_review_prepare_validation_context",
+        lambda projection, completion: {
+            "worker_env": {
+                **pr._pepper_governed_worker_env_overlay(projection),
+                "HERMES_KANBAN_WORKSPACE": "/tmp/synthetic-workspace",
+                "TERMINAL_CWD": "/tmp/synthetic-workspace",
+            },
+            "validation_context": {
+                "validation_origin": "synthetic_review_prepare_validation_context",
+                "workspace_path": "/tmp/synthetic-workspace",
+                "terminal_workspace_path": completion.get("kanban_task_workspace_path"),
+                "terminal_workspace_available": False,
+            },
         },
     )
 
@@ -4635,6 +4658,59 @@ def _synthetic_workflow_for_target(target) -> dict:
             "target_ticket_id": target.ticket_id,
             "target_ticket_title": target.ticket_title,
         },
+    }
+
+
+def _c37_authority_isolation_target(ticket_id: str = "P99.188"):
+    command = "npm run test -- src/synthetic/c37-authority-isolation.test.tsx"
+    contract = _synthetic_implementation_contract("C37AuthorityIsolation")
+    contract["validation_steps"] = [
+        {
+            "validation_id": "V1",
+            "description": "Run the C37 authority-isolation validation command.",
+            "command": command,
+            "expected_result": "The authority-isolation validation passes.",
+        }
+    ]
+    return bridge.GovernedTicketGenerationTarget(
+        project_id="PEPPER",
+        project_name="Pepper",
+        macroproject_id="P99.0",
+        macroproject_title="Synthetic Implementation Macroproject",
+        ticket_id=ticket_id,
+        ticket_title="Synthetic C37 Authority Isolation",
+        next_action_id=bridge.canonical_generation_action_id(ticket_id),
+        approval_next_action_id=bridge.approval_action_id(ticket_id),
+        approved_no_execution_next_action_id=bridge.approved_no_execution_action_id(ticket_id),
+        revise_next_action_id=bridge.revise_action_id(ticket_id),
+        canonical_roadmap_authority="synthetic_c37_authority_isolation_roadmap",
+        roadmap_authority_path="synthetic-c37-authority-isolation-roadmap.md",
+        roadmap_authority_section="Synthetic C37 authority isolation",
+        dependency_ticket_ids=(),
+        predecessor_ticket_id=None,
+        readiness_state="synthetic_ready",
+        authority_source="synthetic_c37_authority_isolation_fixture",
+        ticket_contract=contract,
+    )
+
+
+def _c37_authority_isolation_revision_contract(ticket_id: str) -> dict[str, object]:
+    return {
+        "schema_version": bridge.TICKET_SPEC_MATERIAL_REVISION_CONTRACT_SCHEMA_VERSION,
+        "ticket_id": ticket_id,
+        "objective": (
+            "Revise the synthetic C37 ticket so the missing review-prepare "
+            "validation authority is corrected by a new pending approval revision."
+        ),
+        "tasks": [
+            "Replace the defective synthetic validation contract with revised governed scope.",
+            "Preserve the human approval boundary before any new execution authority exists.",
+        ],
+        "acceptance_criteria": [
+            "The revised ticket is pending human approval.",
+            "No prior review-preparation, zero-change, or execution authority is current.",
+        ],
+        "recommended_commit_message": f"{ticket_id} revise synthetic C37 authority isolation contract",
     }
 
 
@@ -17650,7 +17726,7 @@ def test_validated_noop_prepare_requires_exact_contract_validation_evidence(
         next_action_id=action,
     )
 
-    assert result["review_prepare_status"] == "blocked"
+    assert result["review_prepare_status"] == "blocked", result
     assert result["blocker_code"] in {
         "REVIEW_PREPARE_VALIDATION_FAILED",
         "REVIEW_PREPARE_VALIDATION_INCOMPLETE",
@@ -19207,7 +19283,7 @@ def test_c19_prepare_runs_exact_v1_v2_v3_validation_for_legacy_semantic_noop(
     pr = fixture.pr
     observed_commands: list[str] = []
     attestation = _record_c19_zero_change_attestation(fixture)
-    assert attestation["zero_change_attestation_status"] == "attested"
+    assert attestation["zero_change_attestation_status"] == "attested", attestation
     _install_c19_review_prepare_validation_tool_stub(
         monkeypatch,
         pr,
@@ -19375,6 +19451,378 @@ def test_c19_acceptance_only_validation_requirement_creates_no_review_authority(
     assert result["validation_contract_satisfied"] is False
     assert observed_commands == []
     assert not pr.review_prepare_record_path_for_ticket(fixture.ticket_id).exists()
+
+
+def test_c37_material_contract_defect_persists_and_projects_revision_action(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _c18_v2_synthetic_noop_review_ready_fixture(
+        monkeypatch,
+        ticket_id="P99.185",
+        completion_mutator=_c19_legacy_semantic_noop_mutator,
+    )
+    pr = fixture.pr
+    fixture.contract["validation_steps"] = [
+        {
+            "validation_id": "V1",
+            "command": "npm run test -- src/synthetic/material-authority.test.tsx",
+            "expected_exit_codes": [0],
+        }
+    ]
+    fixture.contract["criteria_revision_SHA256"] = pr._criteria_revision_digest(
+        fixture.contract,
+    )
+    fixture.contract["acceptance_contract_SHA256"] = pr._acceptance_contract_digest(
+        fixture.contract,
+    )
+    _record_c19_zero_change_attestation(fixture)
+    _install_c19_review_prepare_validation_tool_stub(
+        monkeypatch,
+        pr,
+        fixture.contract,
+        observed_commands=[],
+        omitted_validation_ids={"V1"},
+    )
+
+    result = pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id=fixture.ticket_id,
+        next_action_id=pr.governed_ticket_lifecycle_action_ids(fixture.ticket_id)[
+            "review_prepare"
+        ],
+    )
+    workflow = pr.build_workflow_control_snapshot()
+    from tools import pepper_workflow_tools as pepper_tools
+
+    review_status = json.loads(pepper_tools._get_review_status({}))
+    record = pr.load_current_ticket_review_prepare_failure_record(
+        projection_record=fixture.projection_record,
+    )
+
+    assert result["review_prepare_status"] == "blocked"
+    assert result["blocker_code"] == "REVIEW_PREPARE_VALIDATION_INCOMPLETE"
+    assert result["review_prepare_failure_recorded"] is True
+    assert result["review_prepare_resolution"] == "MATERIAL_REVISION_REQUIRED"
+    assert result["material_revision_required"] is True
+    assert record is not None
+    assert record["failure_classification"] == "material_contract_defect"
+    assert record["missing_or_invalid_validation_authorities"][0]["authority_gap"] == (
+        "required_validation_command_authority_structurally_absent"
+    )
+    assert workflow["current_ticket_id"] == fixture.ticket_id
+    assert workflow["workflow_status"] == "awaiting_material_revision"
+    assert workflow["workflow_state"] == f"{fixture.ticket_id}-AWAITING-MATERIAL-REVISION"
+    assert workflow["validation_state"] == "review_prepare_blocked_material_revision_required"
+    assert workflow["review_state"] == "material_revision_required"
+    assert workflow["next_action"]["id"] == "REVISE_P99_185"
+    assert workflow["next_action"]["target_ticket_id"] == fixture.ticket_id
+    assert workflow["next_action"]["required_human_action"] == "ticket_material_revision"
+    assert review_status["workflow_status"] == "awaiting_material_revision"
+    assert review_status["review_state"] == "material_revision_required"
+    assert review_status["material_revision_required"] is True
+    assert review_status["review_prepare_failure_SHA256"] == record[
+        "review_prepare_failure_SHA256"
+    ]
+    assert review_status["review_prepare_failure_authority"][
+        "review_prepare_resolution"
+    ] == "MATERIAL_REVISION_REQUIRED"
+    assert review_status["next_action"]["required_human_action"] == "ticket_material_revision"
+    assert any(
+        blocker.get("status") == "material_revision_required"
+        for blocker in workflow["remaining_blockers"]
+    )
+
+
+def test_c37_transient_review_prepare_failure_does_not_project_material_revision(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _c18_v2_synthetic_noop_review_ready_fixture(
+        monkeypatch,
+        ticket_id="P99.186",
+        completion_mutator=_c19_legacy_semantic_noop_mutator,
+    )
+    pr = fixture.pr
+    _record_c19_zero_change_attestation(fixture)
+    _install_c19_review_prepare_validation_tool_stub(
+        monkeypatch,
+        pr,
+        fixture.contract,
+        observed_commands=[],
+        failing_validation_id="V1",
+    )
+
+    result = pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id=fixture.ticket_id,
+        next_action_id=pr.governed_ticket_lifecycle_action_ids(fixture.ticket_id)[
+            "review_prepare"
+        ],
+    )
+    workflow = pr.build_workflow_control_snapshot()
+    record = pr.load_current_ticket_review_prepare_failure_record(
+        projection_record=fixture.projection_record,
+    )
+
+    assert result["review_prepare_status"] == "blocked"
+    assert result["blocker_code"] == "REVIEW_PREPARE_VALIDATION_FAILED"
+    assert result["review_prepare_resolution"] == "RETRY_REVIEW_PREPARE"
+    assert result["material_revision_required"] is False
+    assert record["failure_classification"] == "retryable_review_prepare_failure"
+    assert workflow["workflow_status"] == "execution_completed"
+    assert workflow["review_state"] == "ready_for_review_validation"
+    assert workflow["next_action"]["id"] == "PREPARE_P99_186_REVIEW"
+    assert workflow.get("material_revision_required") is not True
+
+
+def test_c37_stale_review_prepare_failure_record_is_not_current_authority(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _c18_v2_synthetic_noop_review_ready_fixture(
+        monkeypatch,
+        ticket_id="P99.187",
+        completion_mutator=_c19_legacy_semantic_noop_mutator,
+    )
+    pr = fixture.pr
+    fixture.contract["validation_steps"] = [
+        {
+            "validation_id": "V1",
+            "command": "npm run test -- src/synthetic/stale-authority.test.tsx",
+            "expected_exit_codes": [0],
+        }
+    ]
+    fixture.contract["criteria_revision_SHA256"] = pr._criteria_revision_digest(
+        fixture.contract,
+    )
+    fixture.contract["acceptance_contract_SHA256"] = pr._acceptance_contract_digest(
+        fixture.contract,
+    )
+    _record_c19_zero_change_attestation(fixture)
+    _install_c19_review_prepare_validation_tool_stub(
+        monkeypatch,
+        pr,
+        fixture.contract,
+        observed_commands=[],
+        omitted_validation_ids={"V1"},
+    )
+    pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id=fixture.ticket_id,
+        next_action_id=pr.governed_ticket_lifecycle_action_ids(fixture.ticket_id)[
+            "review_prepare"
+        ],
+    )
+    stale_projection = dict(fixture.projection_record)
+    stale_projection["work_packet_SHA256"] = "0" * 64
+
+    assert pr.load_current_ticket_review_prepare_failure_record(
+        projection_record=stale_projection,
+        allow_historical_mismatch=True,
+    ) is None
+    with pytest.raises(pr.ProductRuntimeConflict):
+        pr.load_current_ticket_review_prepare_failure_record(
+            projection_record=stale_projection,
+        )
+
+
+def test_c37_material_revision_makes_prior_review_execution_authorities_stale(
+    projection_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+    from tools import workpacket_validation_tool as validation_tool
+
+    _install_implementation_profile(monkeypatch, projection_home)
+    target = _c37_authority_isolation_target()
+    bridge.generate_current_ticket(
+        workflow=_synthetic_workflow_for_target(target),
+        target=target,
+    )
+    original_generation = bridge.load_generation_record(ticket_id=target.ticket_id)
+    assert original_generation is not None
+    approved_decision = bridge.apply_ticket_approval_decision(
+        ticket_id=target.ticket_id,
+        decision="approve",
+        actor="synthetic-human",
+    )
+    assert approved_decision["decision"] == "approve"
+    approved_workflow = {
+        **_synthetic_workflow_for_target(target),
+        **bridge.generated_record_to_workflow_overlay(original_generation),
+        "active_execution_count": 0,
+        "execution_state": "no_active_executions",
+    }
+    projection.project_current_approved_workpacket_to_kanban(
+        workflow=approved_workflow,
+        requested_project_id="PEPPER",
+        requested_ticket_id=target.ticket_id,
+        requested_next_action_id=target.approved_no_execution_next_action_id,
+    )
+    projection_record = projection.load_kanban_projection_record(ticket_id=target.ticket_id)
+    assert projection_record is not None
+    acceptance_contract = pr._acceptance_contract_for_review_projection(projection_record)
+    completion = _c18_validated_noop_review_round_completion(
+        pr,
+        projection_record,
+        run_id=37,
+        acceptance_contract=acceptance_contract,
+    )
+    _c19_legacy_semantic_noop_mutator(completion, acceptance_contract)
+    completion["kanban_completion_result_SHA256"] = pr._kanban_completion_result_digest(
+        completion,
+    )
+    _persist_started_execution_record(pr, projection_record, run_id=37)
+    _install_c19_current_terminal_run_authority(projection_record, completion)
+    terminal_completion = pr._current_review_round_completion_source(projection_record)
+    assert "run_id" in terminal_completion, terminal_completion
+    attestation_request = pr.CurrentTicketZeroChangeAttestationRequest(
+        human_attestation_text=pr.governed_ticket_zero_change_attestation_text(target.ticket_id),
+        reviewer_id="synthetic-human",
+        project_id="PEPPER",
+        ticket_id=target.ticket_id,
+        next_action_id=pr.governed_ticket_lifecycle_action_ids(target.ticket_id)[
+            "zero_change_attestation"
+        ],
+    )
+    attestation = pr._build_zero_change_attestation_record(
+        request=attestation_request,
+        projection=projection_record,
+        completion=terminal_completion,
+    )
+    pr._persist_zero_change_attestation_record(attestation)
+
+    original_validation_context = pr._review_prepare_validation_context
+    original_worker_env_overlay = pr._pepper_governed_worker_env_overlay
+    original_validation_runner = validation_tool.run_review_prepare_validation_commands
+    _install_c19_review_prepare_validation_tool_stub(
+        monkeypatch,
+        pr,
+        acceptance_contract,
+        observed_commands=[],
+        omitted_validation_ids={"V1"},
+    )
+    result = pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id=target.ticket_id,
+        next_action_id=pr.governed_ticket_lifecycle_action_ids(target.ticket_id)[
+            "review_prepare"
+        ],
+    )
+    material_workflow = pr.build_workflow_control_snapshot()
+    failure_record = pr.load_current_ticket_review_prepare_failure_record(
+        projection_record=projection_record,
+    )
+    assert result["review_prepare_status"] == "blocked", result
+    assert result.get("blocker_code") == "REVIEW_PREPARE_VALIDATION_INCOMPLETE", (
+        result.get("blocker_code"),
+        result.get("blocker_detail"),
+    )
+    assert "review_prepare_resolution" in result, result
+    assert result["review_prepare_resolution"] == "MATERIAL_REVISION_REQUIRED"
+    assert failure_record is not None
+    assert material_workflow["workflow_status"] == "awaiting_material_revision"
+    assert material_workflow["review_state"] == "material_revision_required"
+    assert material_workflow["next_action"]["id"] == target.revise_next_action_id
+
+    revision_contract = _c37_authority_isolation_revision_contract(target.ticket_id)
+    revision_result = pr.revise_current_ticket_for_material_contract_failure(
+        human_authorization_text=(
+            f"Authorize {target.revise_next_action_id} to revise {target.ticket_id}."
+        ),
+        revision_contract=revision_contract,
+        authorizer_id="synthetic-human",
+        project_id="PEPPER",
+        ticket_id=target.ticket_id,
+        next_action_id=target.revise_next_action_id,
+    )
+    monkeypatch.setattr(pr, "_review_prepare_validation_context", original_validation_context)
+    monkeypatch.setattr(pr, "_pepper_governed_worker_env_overlay", original_worker_env_overlay)
+    monkeypatch.setattr(
+        validation_tool,
+        "run_review_prepare_validation_commands",
+        original_validation_runner,
+    )
+    revised_generation = bridge.load_generation_record(ticket_id=target.ticket_id)
+    assert revised_generation is not None
+    post_workflow = pr.build_workflow_control_snapshot()
+    post_context = pr.build_lead_agent_operational_context()
+
+    assert revision_result["revision_status"] == "awaiting_ticket_approval"
+    assert revised_generation["ticket_spec_SHA256"] != original_generation["ticket_spec_SHA256"]
+    assert revised_generation["work_packet_id"] != original_generation["work_packet_id"]
+    assert revised_generation["work_packet_SHA256"] != original_generation["work_packet_SHA256"]
+    assert failure_record["ticket_spec_SHA256"] == original_generation["ticket_spec_SHA256"]
+    assert failure_record["ticket_spec_SHA256"] != revised_generation["ticket_spec_SHA256"]
+    assert failure_record["work_packet_id"] != revised_generation["work_packet_id"]
+    assert failure_record["work_packet_SHA256"] != revised_generation["work_packet_SHA256"]
+    assert attestation["ticket_spec_SHA256"] == original_generation["ticket_spec_SHA256"]
+    assert attestation["ticket_spec_SHA256"] != revised_generation["ticket_spec_SHA256"]
+    assert terminal_completion["kanban_completion_result_SHA256"] == failure_record[
+        "kanban_completion_result_SHA256"
+    ]
+
+    assert post_workflow["current_ticket_id"] == target.ticket_id
+    assert post_workflow["workflow_status"] == "awaiting_ticket_approval"
+    assert post_workflow["approval_state"] == "pending_ticket_approval"
+    assert post_workflow["pending_ticket_approval_count"] == 1
+    assert post_workflow["next_action"]["id"] == target.approval_next_action_id
+    assert post_workflow["next_action"]["target_ticket_id"] == target.ticket_id
+    assert post_workflow["workflow_status"] != "awaiting_material_revision"
+    assert post_workflow["review_state"] != "material_revision_required"
+    assert post_workflow.get("material_revision_required") is not True
+    assert post_workflow["next_action"]["id"] != target.revise_next_action_id
+    assert post_workflow.get("review_prepare_failure_authority") is None
+    assert post_workflow.get("zero_change_result") is not True
+    assert post_workflow.get("zero_change_authority_kind") != "human_zero_change_attestation"
+    assert post_workflow["validation_state"] == "ticket_generated_compile_only_not_executed"
+    assert post_workflow["review_state"] == "awaiting_human_ticket_approval"
+    assert post_workflow.get("review_decision_required") is not True
+    assert post_workflow.get("human_acceptance_recorded") is not True
+    assert post_workflow.get("git_handoff_required") is not True
+    assert post_context["workflow_status"] == "awaiting_ticket_approval"
+    assert post_context["approval_state"] == "pending_ticket_approval"
+    assert post_context["pending_ticket_approval_count"] == 1
+    assert post_context["next_action"]["id"] == target.approval_next_action_id
+    assert post_context.get("material_revision_required") is not True
+
+    assert pr.review_prepare_failure_record_path_for_ticket(target.ticket_id).exists()
+    assert pr.zero_change_attestation_record_path_for_ticket(target.ticket_id).exists()
+    assert projection.kanban_projection_record_path_for_ticket(target.ticket_id).exists()
+
+    approved_revision = bridge.apply_ticket_approval_decision(
+        ticket_id=target.ticket_id,
+        decision="approve",
+        actor="synthetic-human",
+    )
+    assert approved_revision["decision"] == "approve"
+    approved_workflow_after_revision = pr.build_workflow_control_snapshot()
+
+    assert approved_workflow_after_revision["current_ticket_id"] == target.ticket_id
+    assert approved_workflow_after_revision["workflow_status"] == "ticket_approved"
+    assert approved_workflow_after_revision["workflow_state"] == (
+        f"{target.ticket_id}-TICKET-APPROVED"
+    )
+    assert approved_workflow_after_revision["next_action"]["id"] == (
+        target.approved_no_execution_next_action_id
+    )
+    assert approved_workflow_after_revision["next_action"]["id"] != target.revise_next_action_id
+    assert approved_workflow_after_revision["next_action"]["id"] != (
+        pr.governed_ticket_lifecycle_action_ids(target.ticket_id)["review_prepare"]
+    )
+    assert approved_workflow_after_revision["next_action"]["id"] != (
+        pr.governed_ticket_lifecycle_action_ids(target.ticket_id)[
+            "zero_change_attestation"
+        ]
+    )
+    assert approved_workflow_after_revision["validation_state"] == (
+        "ticket_approved_compile_only_not_executed"
+    )
+    assert approved_workflow_after_revision["review_state"] == "human_ticket_approval_recorded"
+    assert approved_workflow_after_revision.get("review_prepare_failure_authority") is None
+    assert approved_workflow_after_revision.get("zero_change_result") is not True
+    assert approved_workflow_after_revision.get("git_handoff_required") is not True
 
 
 def test_c19_same_ticket_superseded_prepare_record_does_not_block_new_eligible_round(

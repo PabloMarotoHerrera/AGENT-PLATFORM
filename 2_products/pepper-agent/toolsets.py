@@ -245,6 +245,7 @@ TOOLSETS = {
             "get_next_action",
             "reconcile_invalid_current_generation_authority",
             "revise_generated_successor_ticket",
+            "revise_current_ticket_for_material_contract_failure",
             "generate_current_ticket",
             "prepare_current_ticket_execution",
             "start_current_ticket_execution",
