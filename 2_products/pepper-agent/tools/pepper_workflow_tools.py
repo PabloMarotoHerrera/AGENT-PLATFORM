@@ -1707,6 +1707,48 @@ _GENERATE_CURRENT_TICKET_SCHEMA = {
 }
 
 
+_VALIDATION_COMMAND_AUTHORITY_SCHEMA = {
+    "type": "object",
+    "description": (
+        "Structured governed validation command authority. Omit authority_kind, "
+        "command_family, package_manager, command_authority_id, and "
+        "command_authority_SHA256; the backend canonical model supplies or derives them."
+    ),
+    "required": [
+        "validation_id",
+        "source_command",
+        "package_relative_path",
+        "command_argv",
+        "timeout_seconds",
+        "expected_exit_codes",
+    ],
+    "properties": {
+        "validation_id": {
+            "type": "string",
+            "pattern": r"^V[1-9][0-9]*$",
+            "minLength": 2,
+            "maxLength": 32,
+        },
+        "source_command": {"type": "string", "minLength": 1, "maxLength": 8192},
+        "package_relative_path": {"type": "string", "minLength": 1, "maxLength": 512},
+        "command_argv": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 32,
+            "items": {"type": "string", "minLength": 1, "maxLength": 512},
+        },
+        "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 600},
+        "expected_exit_codes": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 8,
+            "items": {"type": "integer"},
+        },
+    },
+    "additionalProperties": False,
+}
+
+
 _REVISE_GENERATED_SUCCESSOR_TICKET_SCHEMA = {
     "type": "object",
     "properties": {
@@ -1817,6 +1859,7 @@ _REVISE_GENERATED_SUCCESSOR_TICKET_SCHEMA = {
                             },
                             "expected_result": {"type": "string", "minLength": 1, "maxLength": 8192},
                             "required": {"type": "boolean"},
+                            "command_authority": _VALIDATION_COMMAND_AUTHORITY_SCHEMA,
                         },
                         "additionalProperties": False,
                     },

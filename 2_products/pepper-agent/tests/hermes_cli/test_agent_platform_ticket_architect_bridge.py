@@ -3262,6 +3262,19 @@ def test_revise_generated_successor_ticket_schema_exposes_bounded_revision_contr
     assert contract["properties"]["objective"]["maxLength"] == 8192
     assert contract["properties"]["context"]["maxItems"] == 32
     assert contract["properties"]["validation_steps"]["maxItems"] == 32
+    command_authority = contract["properties"]["validation_steps"]["items"][
+        "properties"
+    ]["command_authority"]
+    assert command_authority["required"] == [
+        "validation_id",
+        "source_command",
+        "package_relative_path",
+        "command_argv",
+        "timeout_seconds",
+        "expected_exit_codes",
+    ]
+    assert "command_authority_id" not in command_authority["properties"]
+    assert "command_authority_SHA256" not in command_authority["properties"]
     assert contract["properties"]["scope"]["additionalProperties"] is False
     assert contract["properties"]["dependencies"]["maxItems"] == 32
     assert contract["properties"]["parallelization_hint"]["enum"] == [
@@ -3298,6 +3311,9 @@ def test_revise_current_ticket_material_revision_schema_requires_contract(
     assert contract["required"] == ["schema_version", "ticket_id"]
     assert contract["properties"]["scope"]["additionalProperties"] is False
     assert contract["properties"]["validation_steps"]["maxItems"] == 32
+    assert "command_authority" in contract["properties"]["validation_steps"]["items"][
+        "properties"
+    ]
     assert "execution_authority" not in contract["properties"]
 
 

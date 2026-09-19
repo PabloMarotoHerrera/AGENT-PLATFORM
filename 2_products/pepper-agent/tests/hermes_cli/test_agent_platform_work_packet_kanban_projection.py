@@ -4806,6 +4806,119 @@ def _c42_structured_validation_authority_revision_contract(ticket_id: str) -> di
     }
 
 
+def _c42_material_revision_ready_fixture(
+    projection_home: Path,
+    monkeypatch,
+    *,
+    ticket_id: str = "P99.208",
+    run_id: int = 42,
+) -> SimpleNamespace:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _install_implementation_profile(monkeypatch, projection_home)
+    target = _c42_r0005_equivalent_target(ticket_id=ticket_id)
+    bridge.generate_current_ticket(
+        workflow=_synthetic_workflow_for_target(target),
+        target=target,
+    )
+    original_generation = bridge.load_generation_record(ticket_id=target.ticket_id)
+    assert original_generation is not None
+    original_ticket = original_generation["ticket_spec"]
+    assert all("command_authority" not in step for step in original_ticket["validation_steps"][:3])
+    approved = bridge.apply_ticket_approval_decision(
+        ticket_id=target.ticket_id,
+        decision="approve",
+        actor="synthetic-human",
+    )
+    assert approved["decision"] == "approve"
+    approved_decision = bridge.load_approval_decision_record(
+        ticket_id=target.ticket_id,
+        generation_record=original_generation,
+    )
+    assert approved_decision is not None
+    approved_workflow = {
+        **_synthetic_workflow_for_target(target),
+        **bridge.generated_record_to_workflow_overlay(original_generation),
+        "active_execution_count": 0,
+        "execution_state": "no_active_executions",
+    }
+    projection.project_current_approved_workpacket_to_kanban(
+        workflow=approved_workflow,
+        requested_project_id="PEPPER",
+        requested_ticket_id=target.ticket_id,
+        requested_next_action_id=target.approved_no_execution_next_action_id,
+    )
+    projection_record = projection.load_kanban_projection_record(ticket_id=target.ticket_id)
+    assert projection_record is not None
+    acceptance_contract = pr._acceptance_contract_for_review_projection(projection_record)
+    completion = _c18_validated_noop_review_round_completion(
+        pr,
+        projection_record,
+        run_id=run_id,
+        acceptance_contract=acceptance_contract,
+    )
+    _c19_legacy_semantic_noop_mutator(completion, acceptance_contract)
+    completion["kanban_completion_result_SHA256"] = pr._kanban_completion_result_digest(
+        completion,
+    )
+    _persist_started_execution_record(pr, projection_record, run_id=run_id)
+    _install_c19_current_terminal_run_authority(projection_record, completion)
+    terminal_completion = pr._current_review_round_completion_source(projection_record)
+    attestation_request = pr.CurrentTicketZeroChangeAttestationRequest(
+        human_attestation_text=pr.governed_ticket_zero_change_attestation_text(
+            target.ticket_id,
+        ),
+        reviewer_id="synthetic-human",
+        project_id="PEPPER",
+        ticket_id=target.ticket_id,
+        next_action_id=pr.governed_ticket_lifecycle_action_ids(target.ticket_id)[
+            "zero_change_attestation"
+        ],
+    )
+    attestation = pr._build_zero_change_attestation_record(
+        request=attestation_request,
+        projection=projection_record,
+        completion=terminal_completion,
+    )
+    pr._persist_zero_change_attestation_record(attestation)
+    _install_c19_review_prepare_validation_tool_stub(
+        monkeypatch,
+        pr,
+        acceptance_contract,
+        observed_commands=[],
+        omitted_validation_ids={"V1", "V2", "V3"},
+        missing_validation_passed=False,
+    )
+    prepare_result = pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id=target.ticket_id,
+        next_action_id=pr.governed_ticket_lifecycle_action_ids(target.ticket_id)[
+            "review_prepare"
+        ],
+    )
+    material_workflow = pr.build_workflow_control_snapshot()
+    failure_record = pr.load_current_ticket_review_prepare_failure_record(
+        projection_record=projection_record,
+    )
+    assert prepare_result["blocker_code"] == "REVIEW_PREPARE_VALIDATION_INCOMPLETE"
+    assert prepare_result["review_prepare_resolution"] == "MATERIAL_REVISION_REQUIRED"
+    assert failure_record is not None
+    assert material_workflow["workflow_status"] == "awaiting_material_revision"
+    assert material_workflow["next_action"]["id"] == target.revise_next_action_id
+    return SimpleNamespace(
+        pr=pr,
+        target=target,
+        original_generation=original_generation,
+        original_ticket=original_ticket,
+        approved_decision=approved_decision,
+        projection_record=projection_record,
+        acceptance_contract=acceptance_contract,
+        terminal_completion=terminal_completion,
+        failure_record=failure_record,
+        material_workflow=material_workflow,
+    )
+
+
 def _project_via_runtime():
     from hermes_cli.agent_platform import product_runtime as pr
 
@@ -20563,98 +20676,13 @@ def test_c42_material_revision_uses_immutable_approved_base_when_roadmap_drifted
     projection_home,
     monkeypatch,
 ) -> None:
-    from hermes_cli.agent_platform import product_runtime as pr
-
-    _install_implementation_profile(monkeypatch, projection_home)
-    target = _c42_r0005_equivalent_target()
-    bridge.generate_current_ticket(
-        workflow=_synthetic_workflow_for_target(target),
-        target=target,
-    )
-    original_generation = bridge.load_generation_record(ticket_id=target.ticket_id)
-    assert original_generation is not None
-    original_ticket = original_generation["ticket_spec"]
-    assert all("command_authority" not in step for step in original_ticket["validation_steps"][:3])
-    approved = bridge.apply_ticket_approval_decision(
-        ticket_id=target.ticket_id,
-        decision="approve",
-        actor="synthetic-human",
-    )
-    assert approved["decision"] == "approve"
-    approved_decision = bridge.load_approval_decision_record(
-        ticket_id=target.ticket_id,
-        generation_record=original_generation,
-    )
-    assert approved_decision is not None
-    approved_workflow = {
-        **_synthetic_workflow_for_target(target),
-        **bridge.generated_record_to_workflow_overlay(original_generation),
-        "active_execution_count": 0,
-        "execution_state": "no_active_executions",
-    }
-    projection.project_current_approved_workpacket_to_kanban(
-        workflow=approved_workflow,
-        requested_project_id="PEPPER",
-        requested_ticket_id=target.ticket_id,
-        requested_next_action_id=target.approved_no_execution_next_action_id,
-    )
-    projection_record = projection.load_kanban_projection_record(ticket_id=target.ticket_id)
-    assert projection_record is not None
-    acceptance_contract = pr._acceptance_contract_for_review_projection(projection_record)
-    completion = _c18_validated_noop_review_round_completion(
-        pr,
-        projection_record,
-        run_id=42,
-        acceptance_contract=acceptance_contract,
-    )
-    _c19_legacy_semantic_noop_mutator(completion, acceptance_contract)
-    completion["kanban_completion_result_SHA256"] = pr._kanban_completion_result_digest(
-        completion,
-    )
-    _persist_started_execution_record(pr, projection_record, run_id=42)
-    _install_c19_current_terminal_run_authority(projection_record, completion)
-    terminal_completion = pr._current_review_round_completion_source(projection_record)
-    attestation_request = pr.CurrentTicketZeroChangeAttestationRequest(
-        human_attestation_text=pr.governed_ticket_zero_change_attestation_text(
-            target.ticket_id,
-        ),
-        reviewer_id="synthetic-human",
-        project_id="PEPPER",
-        ticket_id=target.ticket_id,
-        next_action_id=pr.governed_ticket_lifecycle_action_ids(target.ticket_id)[
-            "zero_change_attestation"
-        ],
-    )
-    attestation = pr._build_zero_change_attestation_record(
-        request=attestation_request,
-        projection=projection_record,
-        completion=terminal_completion,
-    )
-    pr._persist_zero_change_attestation_record(attestation)
-    _install_c19_review_prepare_validation_tool_stub(
-        monkeypatch,
-        pr,
-        acceptance_contract,
-        observed_commands=[],
-        omitted_validation_ids={"V1", "V2", "V3"},
-        missing_validation_passed=False,
-    )
-    prepare_result = pr.prepare_current_ticket_review(
-        project_id="PEPPER",
-        ticket_id=target.ticket_id,
-        next_action_id=pr.governed_ticket_lifecycle_action_ids(target.ticket_id)[
-            "review_prepare"
-        ],
-    )
-    material_workflow = pr.build_workflow_control_snapshot()
-    failure_record = pr.load_current_ticket_review_prepare_failure_record(
-        projection_record=projection_record,
-    )
-    assert prepare_result["blocker_code"] == "REVIEW_PREPARE_VALIDATION_INCOMPLETE"
-    assert prepare_result["review_prepare_resolution"] == "MATERIAL_REVISION_REQUIRED"
-    assert failure_record is not None
-    assert material_workflow["workflow_status"] == "awaiting_material_revision"
-    assert material_workflow["next_action"]["id"] == target.revise_next_action_id
+    fixture = _c42_material_revision_ready_fixture(projection_home, monkeypatch)
+    pr = fixture.pr
+    target = fixture.target
+    original_generation = fixture.original_generation
+    original_ticket = fixture.original_ticket
+    approved_decision = fixture.approved_decision
+    failure_record = fixture.failure_record
 
     original_bridge_load_generation = bridge.load_generation_record
     original_projection_load_generation = projection.load_generation_record
@@ -20777,6 +20805,119 @@ def test_c42_material_revision_uses_immutable_approved_base_when_roadmap_drifted
             "command_authority_SHA256"
         ]
         assert compiled_authority["command_argv"] == list(argv)
+
+
+def test_c43_material_revision_tool_schema_preserves_structured_command_authority(
+    projection_home,
+    monkeypatch,
+) -> None:
+    import tools.pepper_workflow_tools  # noqa: F401
+    from model_tools import handle_function_call
+    from tools.registry import registry
+
+    fixture = _c42_material_revision_ready_fixture(
+        projection_home,
+        monkeypatch,
+        ticket_id="P99.209",
+        run_id=43,
+    )
+    pr = fixture.pr
+    target = fixture.target
+    contract = _c42_structured_validation_authority_revision_contract(target.ticket_id)
+    schema = registry.get_schema("revise_current_ticket_for_material_contract_failure")
+    assert schema is not None
+    validation_step_schema = schema["parameters"]["properties"]["revision_contract"][
+        "properties"
+    ]["validation_steps"]["items"]
+    command_authority_schema = validation_step_schema["properties"]["command_authority"]
+    assert command_authority_schema["required"] == [
+        "validation_id",
+        "source_command",
+        "package_relative_path",
+        "command_argv",
+        "timeout_seconds",
+        "expected_exit_codes",
+    ]
+    assert "command_authority_id" not in command_authority_schema["properties"]
+    assert "command_authority_SHA256" not in command_authority_schema["properties"]
+
+    observed: dict[str, object] = {}
+    original_revise = pr.revise_current_ticket_for_material_contract_failure
+
+    def observe_revise_current_ticket_for_material_contract_failure(**kwargs):
+        observed["kwargs"] = kwargs
+        return original_revise(**kwargs)
+
+    monkeypatch.setattr(
+        pr,
+        "revise_current_ticket_for_material_contract_failure",
+        observe_revise_current_ticket_for_material_contract_failure,
+    )
+    result = json.loads(
+        handle_function_call(
+            "revise_current_ticket_for_material_contract_failure",
+            {
+                "human_authorization_text": (
+                    f"Authorize {target.revise_next_action_id} to revise {target.ticket_id}."
+                ),
+                "revision_contract": contract,
+                "project_id": "PEPPER",
+                "ticket_id": target.ticket_id,
+                "next_action_id": target.revise_next_action_id,
+            },
+        ),
+    )
+    revised_generation = bridge.load_generation_record(ticket_id=target.ticket_id)
+    assert revised_generation is not None
+    revised_ticket = revised_generation["ticket_spec"]
+    revised_work_packet = revised_generation["work_packet_compilation_result"]["work_packet"]
+
+    assert result["success"] is True
+    assert result["source_tool"] == "revise_current_ticket_for_material_contract_failure"
+    assert result["workflow_status"] == "awaiting_ticket_approval"
+    assert result["next_action"]["id"] == target.approval_next_action_id
+    assert result["ticket_execution_authorized"] is False
+    assert result["WorkPacket_execution_authorized"] is False
+    assert result["runtime_execution_authorized"] is False
+    assert result["worker_execution"] is False
+    assert result["Kanban_dispatch"] is False
+    assert result["Git_mutation"] is False
+    assert observed["kwargs"]["revision_contract"] == contract
+    assert observed["kwargs"]["project_id"] == "PEPPER"
+    assert observed["kwargs"]["ticket_id"] == target.ticket_id
+    assert observed["kwargs"]["next_action_id"] == target.revise_next_action_id
+    assert bridge.load_approval_decision_record(
+        ticket_id=target.ticket_id,
+        generation_record=revised_generation,
+    ) is None
+
+    for step, work_packet_step, (validation_id, command, argv) in zip(
+        revised_ticket["validation_steps"][:3],
+        revised_work_packet["validation_steps"][:3],
+        _c42_validation_command_specs(),
+        strict=True,
+    ):
+        assert "command_authority" not in step["description"]
+        assert "command_authority" not in step["expected_result"]
+        authority = step["command_authority"]
+        compiled_authority = work_packet_step["command_authority"]
+        assert authority["validation_id"] == validation_id
+        assert authority["source_command"] == command
+        assert authority["package_relative_path"] == "2_products/pepper-agent/web"
+        assert authority["command_argv"] == list(argv)
+        assert authority["timeout_seconds"] == 180
+        assert authority["expected_exit_codes"] == [0]
+        assert authority["authority_kind"] == "governed_validation_command"
+        assert authority["command_family"] == "package_script"
+        assert authority["package_manager"] == "npm"
+        assert authority["command_authority_id"].startswith("GVCMD-AUTH-")
+        assert len(authority["command_authority_SHA256"]) == 64
+        assert work_packet_step["command_execution_authorized"] is True
+        assert compiled_authority["source_ticket_command_authority_SHA256"] == authority[
+            "command_authority_SHA256"
+        ]
+        assert compiled_authority["command_authority_id"].startswith("GVCMD-AUTH-")
+        assert len(compiled_authority["command_authority_SHA256"]) == 64
 
 
 def test_c37_transient_review_prepare_failure_does_not_project_material_revision(
