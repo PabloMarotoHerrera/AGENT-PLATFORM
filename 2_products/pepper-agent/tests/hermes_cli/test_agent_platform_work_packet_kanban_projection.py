@@ -2436,6 +2436,7 @@ def _install_c19_review_prepare_validation_tool_stub(
     observed_commands: list[str],
     failing_validation_id: str | None = None,
     omitted_validation_ids: set[str] | None = None,
+    missing_validation_passed: bool | None = None,
     command_mismatch_validation_id: str | None = None,
     identity_mismatch_validation_id: str | None = None,
 ) -> None:
@@ -2509,7 +2510,7 @@ def _install_c19_review_prepare_validation_tool_stub(
             return {
                 "validation_executed": False,
                 "validation_complete": False,
-                "validation_passed": None,
+                "validation_passed": missing_validation_passed,
                 "validation_command_results": [],
                 "review_prepare_validation_authority": authority_record,
                 "review_prepare_validation_authority_SHA256": authority_record[
@@ -20318,6 +20319,123 @@ def test_c37_material_contract_defect_persists_and_projects_revision_action(
         blocker.get("status") == "material_revision_required"
         for blocker in workflow["remaining_blockers"]
     )
+
+
+def test_c41_structurally_absent_validation_command_authority_requires_material_revision(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _c18_v2_synthetic_noop_review_ready_fixture(
+        monkeypatch,
+        ticket_id="P99.207",
+        completion_mutator=_c19_legacy_semantic_noop_mutator,
+    )
+    pr = fixture.pr
+    fixture.contract["validation_steps"] = []
+    fixture.contract["work_packet_validation_steps"] = [
+        {
+            "validation_id": "V1",
+            "command": "npm run test -- src/agent-platform/approval-inbox/approval-inbox.test.tsx",
+            "expected_exit_codes": [0],
+        },
+        {
+            "validation_id": "V2",
+            "command": "npm run typecheck",
+            "expected_exit_codes": [0],
+        },
+        {
+            "validation_id": "V3",
+            "command": "npm run build",
+            "expected_exit_codes": [0],
+        },
+    ]
+    fixture.contract["criteria_revision_SHA256"] = pr._criteria_revision_digest(
+        fixture.contract,
+    )
+    fixture.contract["acceptance_contract_SHA256"] = pr._acceptance_contract_digest(
+        fixture.contract,
+    )
+    observed_commands: list[str] = []
+    _record_c19_zero_change_attestation(fixture)
+    _install_c19_review_prepare_validation_tool_stub(
+        monkeypatch,
+        pr,
+        fixture.contract,
+        observed_commands=observed_commands,
+        omitted_validation_ids={"V1", "V2", "V3"},
+        missing_validation_passed=False,
+    )
+
+    result = pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id=fixture.ticket_id,
+        next_action_id=pr.governed_ticket_lifecycle_action_ids(fixture.ticket_id)[
+            "review_prepare"
+        ],
+    )
+    workflow = pr.build_workflow_control_snapshot()
+    record = pr.load_current_ticket_review_prepare_failure_record(
+        projection_record=fixture.projection_record,
+    )
+
+    assert observed_commands == []
+    assert result["review_prepare_status"] == "blocked"
+    assert result["blocker_code"] == "REVIEW_PREPARE_VALIDATION_INCOMPLETE"
+    assert result["review_prepare_resolution"] == "MATERIAL_REVISION_REQUIRED"
+    assert result["material_revision_required"] is True
+    assert record is not None
+    assert record["failure_classification"] == "material_contract_defect"
+    assert record["review_prepare_resolution"] == "MATERIAL_REVISION_REQUIRED"
+    assert record["material_revision_required"] is True
+    assert record["missing_or_invalid_validation_authorities"] == [
+        {
+            "validation_id": "V1",
+            "source_command": (
+                "npm run test -- src/agent-platform/approval-inbox/approval-inbox.test.tsx"
+            ),
+            "requirement_has_structured_command_authority": False,
+            "matching_capability_count": 0,
+            "matching_acceptance_authorized_count": 0,
+            "matching_capability_specs": [],
+            "authority_gap": "required_validation_command_authority_structurally_absent",
+        },
+        {
+            "validation_id": "V2",
+            "source_command": "npm run typecheck",
+            "requirement_has_structured_command_authority": False,
+            "matching_capability_count": 0,
+            "matching_acceptance_authorized_count": 0,
+            "matching_capability_specs": [],
+            "authority_gap": "required_validation_command_authority_structurally_absent",
+        },
+        {
+            "validation_id": "V3",
+            "source_command": "npm run build",
+            "requirement_has_structured_command_authority": False,
+            "matching_capability_count": 0,
+            "matching_acceptance_authorized_count": 0,
+            "matching_capability_specs": [],
+            "authority_gap": "required_validation_command_authority_structurally_absent",
+        },
+    ]
+    assert [item["validation_id"] for item in record["missing_requirements"]] == [
+        "V1",
+        "V2",
+        "V3",
+    ]
+    assert all(
+        item["command_argv"] == []
+        and item["command_authority_id"] is None
+        and item["command_authority_SHA256"] is None
+        and item["command_family"] is None
+        and item["package_relative_path"] is None
+        for item in record["missing_requirements"]
+    )
+    assert workflow["workflow_status"] == "awaiting_material_revision"
+    assert workflow["workflow_state"] == f"{fixture.ticket_id}-AWAITING-MATERIAL-REVISION"
+    assert workflow["validation_state"] == "review_prepare_blocked_material_revision_required"
+    assert workflow["review_state"] == "material_revision_required"
+    assert workflow["next_action"]["id"] == "REVISE_P99_207"
 
 
 def test_c37_transient_review_prepare_failure_does_not_project_material_revision(

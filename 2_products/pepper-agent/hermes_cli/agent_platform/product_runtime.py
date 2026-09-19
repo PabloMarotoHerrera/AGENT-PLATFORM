@@ -28017,7 +28017,10 @@ def _review_prepare_validate_completion_if_required(
             "blocker_detail": None,
             "review_prepare_validation_result": validation,
         }
-    if validation.get("validation_passed") is False:
+    has_structural_authority_absence = (
+        _review_prepare_validation_has_structural_authority_absence(validation)
+    )
+    if validation.get("validation_passed") is False and not has_structural_authority_absence:
         return {
             "completion": completion,
             "blocker_code": "REVIEW_PREPARE_VALIDATION_FAILED",
@@ -29061,6 +29064,20 @@ def _review_prepare_missing_authority_evidence(
             ),
         })
     return evidence
+
+
+def _review_prepare_validation_has_structural_authority_absence(
+    validation: Mapping[str, Any] | None,
+) -> bool:
+    if not isinstance(validation, Mapping):
+        return False
+    if validation.get("validation_executed") is not False:
+        return False
+    return any(
+        item.get("authority_gap")
+        == "required_validation_command_authority_structurally_absent"
+        for item in _review_prepare_missing_authority_evidence(validation)
+    )
 
 
 def _classify_review_prepare_failure(
