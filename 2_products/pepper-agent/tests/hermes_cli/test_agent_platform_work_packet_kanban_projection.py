@@ -10290,6 +10290,134 @@ def test_c39_handoff_completion_is_ticket_clearance_authority(monkeypatch) -> No
     assert overlay is None
 
 
+def test_c40_canonical_current_authority_resolver_feeds_selector_projection_and_review_prepare(
+    projection_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _install_implementation_profile(monkeypatch, projection_home)
+    target = _c37_authority_isolation_target(ticket_id="P99.206")
+    bridge.generate_current_ticket(
+        workflow=_synthetic_workflow_for_target(target),
+        target=target,
+    )
+    generation = bridge.load_generation_record(ticket_id=target.ticket_id)
+    assert generation is not None
+    decision = bridge.apply_ticket_approval_decision(
+        ticket_id=target.ticket_id,
+        decision="approve",
+        actor="synthetic-human",
+    )
+    assert decision["decision"] == "approve"
+    decision_record = bridge.load_approval_decision_record(
+        ticket_id=target.ticket_id,
+        generation_record=generation,
+    )
+    assert decision_record is not None
+    approved_workflow = {
+        **_synthetic_workflow_for_target(target),
+        **bridge.generated_record_to_workflow_overlay(generation),
+        "active_execution_count": 0,
+        "execution_state": "no_active_executions",
+    }
+    projection.project_current_approved_workpacket_to_kanban(
+        workflow=approved_workflow,
+        requested_project_id="PEPPER",
+        requested_ticket_id=target.ticket_id,
+        requested_next_action_id=target.approved_no_execution_next_action_id,
+    )
+    projection_record = projection.load_kanban_projection_record(ticket_id=target.ticket_id)
+    assert projection_record is not None
+    contract = pr._acceptance_contract_for_review_projection(projection_record)
+    completion = _c18_validated_noop_review_round_completion(
+        pr,
+        projection_record,
+        run_id=40,
+        acceptance_contract=contract,
+    )
+    _c19_legacy_semantic_noop_mutator(completion, contract)
+    completion["kanban_completion_result_SHA256"] = pr._kanban_completion_result_digest(
+        completion,
+    )
+    _persist_started_execution_record(pr, projection_record, run_id=40)
+    _install_c19_current_terminal_run_authority(projection_record, completion)
+    monkeypatch.setattr(
+        pr,
+        "_current_review_round_completion_source",
+        lambda _projection: completion,
+    )
+    attestation_request = pr.CurrentTicketZeroChangeAttestationRequest(
+        human_attestation_text=pr.governed_ticket_zero_change_attestation_text(
+            target.ticket_id,
+        ),
+        reviewer_id="synthetic-human",
+        project_id="PEPPER",
+        ticket_id=target.ticket_id,
+        next_action_id=pr.governed_ticket_lifecycle_action_ids(target.ticket_id)[
+            "zero_change_attestation"
+        ],
+    )
+    attestation = pr._build_zero_change_attestation_record(
+        request=attestation_request,
+        projection=projection_record,
+        completion=completion,
+    )
+    pr._persist_zero_change_attestation_record(attestation)
+    observed_commands: list[str] = []
+    _install_c19_review_prepare_validation_tool_stub(
+        monkeypatch,
+        pr,
+        contract,
+        observed_commands=observed_commands,
+        omitted_validation_ids={"V1"},
+    )
+
+    original_bridge_load_generation = bridge.load_generation_record
+    original_projection_load_generation = projection.load_generation_record
+
+    def drifted_load_generation(*, ticket_id, **kwargs):
+        if ticket_id == target.ticket_id:
+            raise bridge.TicketArchitectBridgeConflict(
+                "TicketSpec conflicts with roadmap contract",
+            )
+        return original_bridge_load_generation(ticket_id=ticket_id, **kwargs)
+
+    def drifted_projection_generation(*, ticket_id, **kwargs):
+        if ticket_id == target.ticket_id:
+            raise bridge.TicketArchitectBridgeConflict(
+                "TicketSpec conflicts with roadmap contract",
+            )
+        return original_projection_load_generation(ticket_id=ticket_id, **kwargs)
+
+    monkeypatch.setattr(bridge, "load_generation_record", drifted_load_generation)
+    monkeypatch.setattr(projection, "load_generation_record", drifted_projection_generation)
+
+    bundle = pr._load_current_approved_ticket_authority_bundle()
+    selected_ticket_id = pr._current_projected_ticket_id_from_records()
+    loaded_projection = pr._load_current_projection_record()
+    result = pr.prepare_current_ticket_review(
+        project_id="PEPPER",
+        ticket_id=target.ticket_id,
+        next_action_id=pr.governed_ticket_lifecycle_action_ids(target.ticket_id)[
+            "review_prepare"
+        ],
+    )
+
+    assert bundle["generation_record"] == generation
+    assert bundle["approval_decision_record"] == decision_record
+    assert bundle["projection_record"] == projection_record
+    assert selected_ticket_id == target.ticket_id
+    assert loaded_projection == projection_record
+    assert result["review_prepare_status"] == "blocked"
+    assert result["blocker_code"] == "REVIEW_PREPARE_VALIDATION_INCOMPLETE"
+    assert "TicketSpec conflicts with roadmap contract" not in json.dumps(
+        result,
+        sort_keys=True,
+    )
+    assert observed_commands == []
+
+
 def test_c38_stale_projection_only_candidate_requires_predecessor_authority(
     monkeypatch,
 ) -> None:
