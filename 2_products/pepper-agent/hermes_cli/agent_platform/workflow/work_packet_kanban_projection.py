@@ -1020,11 +1020,23 @@ def _profile_disables_required_toolsets(
     )
 
 
-def kanban_projection_to_workflow_overlay(record: dict[str, Any]) -> dict[str, Any]:
+def kanban_projection_to_workflow_overlay(
+    record: dict[str, Any],
+    *,
+    generation_record: dict[str, Any] | None = None,
+    decision_record: dict[str, Any] | None = None,
+    allow_terminal_completed_predecessor_historical: bool = False,
+) -> dict[str, Any]:
     """Return workflow-control fields implied by a validated Kanban projection."""
 
     ticket_id = _safe_ticket_id(record.get("ticket_id"))
-    validated = validate_kanban_projection_record(record, ticket_id=ticket_id)
+    validated = validate_kanban_projection_record(
+        record,
+        ticket_id=ticket_id,
+        generation_record=generation_record,
+        decision_record=decision_record,
+        allow_terminal_completed_predecessor_historical=allow_terminal_completed_predecessor_historical,
+    )
     return {
         "current_ticket_id": ticket_id,
         "current_ticket_title": validated["ticket_title"],

@@ -9818,6 +9818,478 @@ def test_c38_latest_projected_current_ticket_survives_incomplete_predecessor_tra
     assert snapshot["next_action"]["id"] != "PREPARE_P99_2_REVIEW"
 
 
+def _install_c39_v1_projection_selector_fixture(
+    projection_home: Path,
+    monkeypatch,
+    pr,
+    *,
+    ticket_ids: tuple[str, ...],
+    closed_ticket_ids: tuple[str, ...] = (),
+    generation_load_fail_ids: tuple[str, ...] = (),
+    historical_authority_ids: tuple[str, ...] = (),
+    projected_ticket_ids: tuple[str, ...] | None = None,
+    decision_by_ticket_id: dict[str, str | None] | None = None,
+) -> SimpleNamespace:
+    root = projection_home / "agent-platform" / "c39-v1-projections"
+    root.mkdir(parents=True, exist_ok=True)
+    canonical_path = root / "P18.9.0.kanban-projection.json"
+    projected_ids = set(ticket_ids if projected_ticket_ids is None else projected_ticket_ids)
+    for ticket_id in ticket_ids:
+        if ticket_id not in projected_ids:
+            continue
+        path = canonical_path if ticket_id == "P18.9.0" else root / f"{ticket_id}.json"
+        path.write_text("{}\n", encoding="utf-8")
+    records = {ticket_id: _c9_generation_record(ticket_id) for ticket_id in ticket_ids}
+    projections = {ticket_id: _c9_projection_record(ticket_id) for ticket_id in projected_ids}
+    decision_overrides = decision_by_ticket_id or {}
+    decisions = {}
+    for index, ticket_id in enumerate(ticket_ids):
+        decision = decision_overrides.get(ticket_id, "approve")
+        records[ticket_id]["human_ticket_approval_present"] = decision is not None
+        if decision is None:
+            continue
+        decisions[ticket_id] = {
+            "ticket_id": ticket_id,
+            "decision": decision,
+            "status": "approved" if decision == "approve" else "rejected",
+            "approval_publication_SHA256": f"{index + 1:064x}",
+        }
+    closed = set(closed_ticket_ids)
+    generation_failures = set(generation_load_fail_ids)
+    historical = set(historical_authority_ids)
+
+    def load_generation_record(*, ticket_id, **_kwargs):
+        if ticket_id in generation_failures:
+            raise bridge.TicketArchitectBridgeConflict(
+                "TicketSpec conflicts with roadmap contract",
+            )
+        return records.get(ticket_id)
+
+    def load_approval_decision_record(*, ticket_id, **_kwargs):
+        return decisions.get(ticket_id)
+
+    def load_kanban_projection_record(*, ticket_id, **_kwargs):
+        return projections.get(ticket_id)
+
+    def load_historical_authority(*, ticket_id, **_kwargs):
+        if ticket_id not in historical:
+            return None
+        decision = decisions.get(ticket_id)
+        if decision is None or decision.get("decision") != "approve":
+            return None
+        return {
+            "generation_record": records[ticket_id],
+            "approval_decision_record": decision,
+        }
+
+    def resolve_canonical_next_ticket(workflow=None):
+        source = workflow or {}
+        ticket_id = str(source.get("next_ticket_id") or "").strip()
+        predecessor = str(source.get("closed_predecessor_ticket_id") or "").strip()
+        if not ticket_id:
+            raise AssertionError("synthetic C39 successor ticket is unavailable")
+        if predecessor.startswith("P99."):
+            expected = f"P99.{int(predecessor.rsplit('.', 1)[1]) + 1}"
+            if ticket_id != expected:
+                raise AssertionError("synthetic C39 successor is not canonical")
+        return {
+            "ticket_id": ticket_id,
+            "ticket_title": _c9_ticket_title(ticket_id),
+            "next_action_id": pr.governed_ticket_lifecycle_action_ids(ticket_id)["generate"],
+            "canonical_roadmap_authority": "synthetic-c39-roadmap",
+            "roadmap_authority_path": "tests/synthetic-c39-roadmap.md",
+            "roadmap_authority_section": ticket_id,
+            "dependency_ticket_ids": (predecessor,) if predecessor else (),
+            "roadmap_purpose": "Synthetic C39 successor precedence.",
+            "predecessor_ticket_id": predecessor or None,
+            "readiness_state": "synthetic",
+            "authority_source": "synthetic_c39",
+            "ticket_contract": {},
+        }
+
+    monkeypatch.setattr(projection, "kanban_projection_record_path", lambda: canonical_path)
+    monkeypatch.setattr(projection, "load_kanban_projection_record", load_kanban_projection_record)
+    monkeypatch.setattr(bridge, "load_generation_record", load_generation_record)
+    monkeypatch.setattr(bridge, "load_approval_decision_record", load_approval_decision_record)
+    monkeypatch.setattr(
+        bridge,
+        "load_historical_approved_predecessor_generation_authority",
+        load_historical_authority,
+    )
+    monkeypatch.setattr(
+        bridge,
+        "resolve_roadmap_ticket_authorities",
+        lambda: [{"ticket_id": ticket_id} for ticket_id in ticket_ids],
+    )
+    monkeypatch.setattr(pr, "_governed_authority_ticket_ids_from_records", lambda: ticket_ids)
+    monkeypatch.setattr(pr, "resolve_canonical_next_ticket", resolve_canonical_next_ticket)
+    monkeypatch.setattr(
+        pr,
+        "_projection_has_completed_predecessor_evidence",
+        lambda projection_record: str((projection_record or {}).get("ticket_id") or "") in closed,
+    )
+    return SimpleNamespace(
+        records=records,
+        projections=projections,
+        decisions=decisions,
+        closed=closed,
+        projected=projected_ids,
+    )
+
+
+def test_c39_v1_all_closed_projections_do_not_resurrect_latest(
+    projection_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _install_c39_v1_projection_selector_fixture(
+        projection_home,
+        monkeypatch,
+        pr,
+        ticket_ids=("P99.4", "P99.5"),
+        closed_ticket_ids=("P99.4", "P99.5"),
+    )
+
+    assert pr._current_projected_ticket_id_from_records() is None
+    with pytest.raises(pr.ProductRuntimeNotFound):
+        pr._load_current_projection_record()
+
+
+def test_c39_v1_closed_latest_projection_does_not_override_older_open(
+    projection_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    state = _install_c39_v1_projection_selector_fixture(
+        projection_home,
+        monkeypatch,
+        pr,
+        ticket_ids=("P99.4", "P99.5"),
+        closed_ticket_ids=("P99.5",),
+    )
+
+    assert pr._current_projected_ticket_id_from_records() == "P99.4"
+    assert pr._load_current_projection_record() == state.projections["P99.4"]
+
+
+def test_c39_approved_generation_projection_drift_terminal_execution_remains_current(
+    projection_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _install_implementation_profile(monkeypatch, projection_home)
+    target = _c37_authority_isolation_target(ticket_id="P99.205")
+    bridge.generate_current_ticket(
+        workflow=_synthetic_workflow_for_target(target),
+        target=target,
+    )
+    generation = bridge.load_generation_record(ticket_id=target.ticket_id)
+    assert generation is not None
+    decision = bridge.apply_ticket_approval_decision(
+        ticket_id=target.ticket_id,
+        decision="approve",
+        actor="synthetic-human",
+    )
+    assert decision["decision"] == "approve"
+    approved_workflow = {
+        **_synthetic_workflow_for_target(target),
+        **bridge.generated_record_to_workflow_overlay(generation),
+        "active_execution_count": 0,
+        "execution_state": "no_active_executions",
+    }
+    projection.project_current_approved_workpacket_to_kanban(
+        workflow=approved_workflow,
+        requested_project_id="PEPPER",
+        requested_ticket_id=target.ticket_id,
+        requested_next_action_id=target.approved_no_execution_next_action_id,
+    )
+    projection_record = projection.load_kanban_projection_record(ticket_id=target.ticket_id)
+    assert projection_record is not None
+    acceptance_contract = pr._acceptance_contract_for_review_projection(projection_record)
+    completion = _c18_validated_noop_review_round_completion(
+        pr,
+        projection_record,
+        run_id=39,
+        acceptance_contract=acceptance_contract,
+    )
+    _c19_legacy_semantic_noop_mutator(completion, acceptance_contract)
+    completion["kanban_completion_result_SHA256"] = pr._kanban_completion_result_digest(
+        completion,
+    )
+    _persist_started_execution_record(pr, projection_record, run_id=39)
+    _install_c19_current_terminal_run_authority(projection_record, completion)
+    terminal_completion = pr._current_review_round_completion_source(projection_record)
+    attestation_request = pr.CurrentTicketZeroChangeAttestationRequest(
+        human_attestation_text=pr.governed_ticket_zero_change_attestation_text(
+            target.ticket_id,
+        ),
+        reviewer_id="synthetic-human",
+        project_id="PEPPER",
+        ticket_id=target.ticket_id,
+        next_action_id=pr.governed_ticket_lifecycle_action_ids(target.ticket_id)[
+            "zero_change_attestation"
+        ],
+    )
+    attestation = pr._build_zero_change_attestation_record(
+        request=attestation_request,
+        projection=projection_record,
+        completion=terminal_completion,
+    )
+    pr._persist_zero_change_attestation_record(attestation)
+
+    original_bridge_load_generation = bridge.load_generation_record
+    original_projection_load_generation = projection.load_generation_record
+
+    def drifted_load_generation(*, ticket_id, **kwargs):
+        if ticket_id == target.ticket_id:
+            raise bridge.TicketArchitectBridgeConflict(
+                "TicketSpec conflicts with roadmap contract",
+            )
+        return original_bridge_load_generation(ticket_id=ticket_id, **kwargs)
+
+    def drifted_projection_generation(*, ticket_id, **kwargs):
+        if ticket_id == target.ticket_id:
+            raise bridge.TicketArchitectBridgeConflict(
+                "TicketSpec conflicts with roadmap contract",
+            )
+        return original_projection_load_generation(ticket_id=ticket_id, **kwargs)
+
+    monkeypatch.setattr(bridge, "load_generation_record", drifted_load_generation)
+    monkeypatch.setattr(projection, "load_generation_record", drifted_projection_generation)
+
+    snapshot = pr.build_workflow_control_snapshot()
+    selected_generation = pr._current_incomplete_generation_record_from_records()
+    approved_authority = pr._approved_generation_authority_for_current_selector(
+        target.ticket_id,
+    )
+
+    assert approved_authority is not None
+    assert selected_generation is not None
+    assert selected_generation["ticket_id"] == target.ticket_id
+    assert snapshot["current_ticket_id"] == target.ticket_id
+    assert snapshot["workflow_status"] == "execution_completed"
+    assert snapshot["next_action"]["id"] == "PREPARE_P99_205_REVIEW"
+    assert snapshot["zero_change_result"] is True
+    assert snapshot["zero_change_authority_kind"] == "human_zero_change_attestation"
+    assert snapshot["human_zero_change_attestation_required"] is False
+    assert snapshot.get("remaining_blockers") == []
+
+
+def test_c39_v1_superseded_historical_approved_authority_is_not_current(
+    projection_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _install_c39_v1_projection_selector_fixture(
+        projection_home,
+        monkeypatch,
+        pr,
+        ticket_ids=("P99.4", "P99.5"),
+        generation_load_fail_ids=("P99.4",),
+        historical_authority_ids=("P99.4",),
+    )
+
+    assert pr._approved_generation_authority_for_current_selector("P99.4") is None
+    assert pr._current_projected_ticket_id_from_records() == "P99.5"
+
+
+def test_c39_v2_rejected_later_generation_does_not_supersede_historical_approved_authority(
+    projection_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _install_c39_v1_projection_selector_fixture(
+        projection_home,
+        monkeypatch,
+        pr,
+        ticket_ids=("P99.4", "P99.5"),
+        generation_load_fail_ids=("P99.4",),
+        historical_authority_ids=("P99.4",),
+        projected_ticket_ids=("P99.4",),
+        decision_by_ticket_id={"P99.5": "reject"},
+    )
+
+    assert pr._historical_approved_generation_authority_is_superseded("P99.4") is False
+    assert pr._approved_generation_authority_for_current_selector("P99.4") is not None
+    assert pr._current_projected_ticket_id_from_records() == "P99.4"
+
+
+def test_c39_v2_unactivated_later_generation_does_not_supersede_by_existence(
+    projection_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _install_c39_v1_projection_selector_fixture(
+        projection_home,
+        monkeypatch,
+        pr,
+        ticket_ids=("P99.4", "P99.5"),
+        generation_load_fail_ids=("P99.4",),
+        historical_authority_ids=("P99.4",),
+        projected_ticket_ids=("P99.4",),
+    )
+
+    assert pr._historical_approved_generation_authority_is_superseded("P99.4") is False
+    assert pr._approved_generation_authority_for_current_selector("P99.4") is not None
+    assert pr._current_projected_ticket_id_from_records() == "P99.4"
+
+
+def test_c39_v2_valid_activated_successor_supersedes_historical_approved_authority(
+    projection_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _install_c39_v1_projection_selector_fixture(
+        projection_home,
+        monkeypatch,
+        pr,
+        ticket_ids=("P99.4", "P99.5"),
+        generation_load_fail_ids=("P99.4",),
+        historical_authority_ids=("P99.4",),
+    )
+
+    assert pr._historical_approved_generation_authority_is_superseded("P99.4") is True
+    assert pr._approved_generation_authority_for_current_selector("P99.4") is None
+    assert pr._current_projected_ticket_id_from_records() == "P99.5"
+
+
+def test_c39_v2_invalid_later_completion_file_does_not_supersede_by_path_existence(
+    projection_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _install_c39_v1_projection_selector_fixture(
+        projection_home,
+        monkeypatch,
+        pr,
+        ticket_ids=("P99.4", "P99.5"),
+        generation_load_fail_ids=("P99.4", "P99.5"),
+        historical_authority_ids=("P99.4",),
+        projected_ticket_ids=("P99.4",),
+        decision_by_ticket_id={"P99.5": None},
+    )
+    _write_json_authority_record(
+        pr.review_acceptance_record_path_for_ticket("P99.5"),
+        {"ticket_id": "P99.5", "review_acceptance_status": "accepted"},
+    )
+
+    assert pr.review_acceptance_record_path_for_ticket("P99.5").exists()
+    assert pr._historical_approved_generation_authority_is_superseded("P99.4") is False
+    assert pr._approved_generation_authority_for_current_selector("P99.4") is not None
+
+
+def test_c39_v2_valid_durable_completion_supersedes_historical_approved_authority(
+    projection_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _install_c39_v1_projection_selector_fixture(
+        projection_home,
+        monkeypatch,
+        pr,
+        ticket_ids=("P99.4", "P99.5"),
+        generation_load_fail_ids=("P99.4", "P99.5"),
+        historical_authority_ids=("P99.4",),
+        projected_ticket_ids=("P99.4", "P99.5"),
+        decision_by_ticket_id={"P99.5": None},
+    )
+
+    def load_completion(*, projection_record=None, **_kwargs):
+        ticket_id = str((projection_record or {}).get("ticket_id") or "")
+        return {"ticket_id": ticket_id, "ticket_closed": True} if ticket_id == "P99.5" else None
+
+    monkeypatch.setattr(
+        pr,
+        "load_current_ticket_human_git_handoff_completion_record",
+        load_completion,
+    )
+
+    assert pr._historical_approved_generation_authority_is_superseded("P99.4") is True
+    assert pr._approved_generation_authority_for_current_selector("P99.4") is None
+
+
+def test_c39_v1_closed_historical_approved_authority_remains_historical(
+    projection_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    state = _install_c39_v1_projection_selector_fixture(
+        projection_home,
+        monkeypatch,
+        pr,
+        ticket_ids=("P99.4",),
+        closed_ticket_ids=("P99.4",),
+        generation_load_fail_ids=("P99.4",),
+        historical_authority_ids=("P99.4",),
+    )
+    historical_authority = {
+        "generation_record": state.records["P99.4"],
+        "approval_decision_record": state.decisions["P99.4"],
+    }
+
+    assert pr._approved_generation_authority_for_current_selector("P99.4") is None
+    assert pr._current_projected_ticket_id_from_records() is None
+    assert (
+        pr._projection_record_for_approved_generation_authority(historical_authority)
+        == state.projections["P99.4"]
+    )
+
+
+def test_c39_retry_execution_terminality_alone_does_not_clear_current_ticket(
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    state = _patch_c38_cross_revision_precedence_fixture(monkeypatch, pr)
+    projection_record = state.projections["P99.5"]
+
+    snapshot = pr.build_workflow_control_snapshot()
+
+    assert pr._projection_has_terminal_ticket_completion(projection_record) is False
+    assert snapshot["current_ticket_id"] == "P99.5"
+    assert snapshot["workflow_status"] == "execution_completed"
+    assert snapshot["retry_state"] == "retry_completed"
+    assert snapshot["next_action"]["id"] == "PREPARE_P99_5_REVIEW"
+
+
+def test_c39_handoff_completion_is_ticket_clearance_authority(monkeypatch) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _patch_c9_synthetic_authority(
+        monkeypatch,
+        pr,
+        current_ticket_id="P99.5",
+        lifecycle_overlay=_c9_lifecycle_overlay(pr, "P99.5", "validated_review_ready"),
+        completed_ticket_ids=(),
+        authority_ticket_ids=("P99.5",),
+        projected_ticket_ids=("P99.5",),
+        bootstrap_completed_ticket_id="P99.0",
+    )
+
+    monkeypatch.setattr(
+        pr,
+        "load_current_ticket_human_git_handoff_completion_record",
+        lambda *, projection_record=None, **_kwargs: {"ticket_id": "P99.5"}
+        if str((projection_record or {}).get("ticket_id") or "") == "P99.5"
+        else None,
+    )
+
+    overlay, blocker = pr._current_incomplete_ticket_authority_overlay()
+
+    assert blocker is None
+    assert overlay is None
+
+
 def test_c38_stale_projection_only_candidate_requires_predecessor_authority(
     monkeypatch,
 ) -> None:
@@ -13219,9 +13691,9 @@ def _completed_p18_9_2_with_drifted_candidate_workspace(
         "export interface RuntimeOverview { historicallyDrifted: string }\n",
         encoding="utf-8",
     )
-    drifted_completion = fixture.pr._kanban_completion_result_source(
-        fixture.pr._load_current_projection_record()
-    )
+    drifted_projection = projection.load_kanban_projection_record(ticket_id="P18.9.2")
+    assert drifted_projection is not None
+    drifted_completion = fixture.pr._kanban_completion_result_source(drifted_projection)
     assert drifted_completion["kanban_completion_result_SHA256"] != durable_completion_sha
     return SimpleNamespace(
         fixture=fixture,
