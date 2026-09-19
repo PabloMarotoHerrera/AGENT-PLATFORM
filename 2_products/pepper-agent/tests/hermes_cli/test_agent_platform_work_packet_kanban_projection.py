@@ -20920,6 +20920,165 @@ def test_c43_material_revision_tool_schema_preserves_structured_command_authorit
         assert len(compiled_authority["command_authority_SHA256"]) == 64
 
 
+def test_c44_rejected_current_ticket_revision_corrects_same_ticket_to_pending_approval(
+    projection_home,
+    monkeypatch,
+) -> None:
+    fixture = _c42_material_revision_ready_fixture(
+        projection_home,
+        monkeypatch,
+        ticket_id="P99.210",
+        run_id=44,
+    )
+    pr = fixture.pr
+    target = fixture.target
+    original_generation = fixture.original_generation
+
+    r0006_result = pr.revise_current_ticket_for_material_contract_failure(
+        human_authorization_text=(
+            f"Authorize {target.revise_next_action_id} to revise {target.ticket_id}."
+        ),
+        revision_contract=_c42_structured_validation_authority_revision_contract(
+            target.ticket_id,
+        ),
+        authorizer_id="synthetic-human",
+        project_id="PEPPER",
+        ticket_id=target.ticket_id,
+        next_action_id=target.revise_next_action_id,
+    )
+    r0006_generation = bridge.load_generation_record(ticket_id=target.ticket_id)
+    assert r0006_generation is not None
+    assert r0006_result["revision_reason"] == "material_contract_failure"
+
+    rejected_decision = bridge.apply_ticket_approval_decision(
+        ticket_id=target.ticket_id,
+        decision="reject",
+        actor="synthetic-human",
+    )
+    durable_rejected_decision = bridge.load_approval_decision_record(
+        ticket_id=target.ticket_id,
+        generation_record=r0006_generation,
+    )
+    correction_workflow = pr.build_workflow_control_snapshot()
+
+    assert rejected_decision["decision"] == "reject"
+    assert durable_rejected_decision is not None
+    assert durable_rejected_decision["approval_publication_SHA256"] == rejected_decision[
+        "authority"
+    ][
+        "approval_publication_SHA256"
+    ]
+    assert correction_workflow["current_ticket_id"] == target.ticket_id
+    assert correction_workflow["next_ticket_id"] is None
+    assert correction_workflow["workflow_status"] == "awaiting_correction"
+    assert correction_workflow["workflow_state"] == f"{target.ticket_id}-AWAITING-CORRECTION"
+    assert correction_workflow["next_action"]["id"] == target.revise_next_action_id
+    assert correction_workflow["next_action"]["required_human_action"] == "ticket_correction"
+
+    r0007_result = pr.revise_current_ticket_for_material_contract_failure(
+        human_authorization_text=(
+            f"Authorize {target.revise_next_action_id} to correct {target.ticket_id}."
+        ),
+        revision_contract=_c42_structured_validation_authority_revision_contract(
+            target.ticket_id,
+        ),
+        authorizer_id="synthetic-human",
+        project_id="PEPPER",
+        ticket_id=target.ticket_id,
+        next_action_id=target.revise_next_action_id,
+    )
+    r0007_generation = bridge.load_generation_record(ticket_id=target.ticket_id)
+    assert r0007_generation is not None
+    r0007_ticket = r0007_generation["ticket_spec"]
+    r0007_work_packet = r0007_generation["work_packet_compilation_result"]["work_packet"]
+    r0007_authority = r0007_generation["revision_authority"]
+    post_workflow = pr.build_workflow_control_snapshot()
+    history = [
+        json.loads(line)
+        for line in bridge.current_ticket_material_revision_history_path_for_ticket(
+            target.ticket_id,
+        ).read_text(encoding="utf-8").splitlines()
+    ]
+
+    assert r0007_result["revision_status"] == "awaiting_ticket_approval"
+    assert r0007_result["revision_reason"] == "rejected_current_ticket_revision_correction"
+    assert r0007_result["pending_ticket_approval_count"] == 1
+    assert r0007_result["active_execution_count"] == 0
+    assert r0007_result["provider_dispatch_count"] == 0
+    assert r0007_result["Git_commands_executed"] == 0
+    assert r0007_result["Docker_commands_executed"] == 0
+    assert r0007_result["Graphify_commands_executed"] == 0
+    assert r0007_result["revision_history_path"] == str(
+        bridge.current_ticket_material_revision_history_path_for_ticket(target.ticket_id),
+    )
+    assert not bridge.rejected_successor_revision_history_path_for_ticket(
+        target.ticket_id,
+    ).exists()
+
+    assert r0007_authority["authority_type"] == "current_ticket_material_contract_revision"
+    assert r0007_authority["revision_reason"] == "rejected_current_ticket_revision_correction"
+    assert r0007_authority["previous_bridge_SHA256"] == r0006_generation["bridge_SHA256"]
+    assert r0007_authority["rejected_approval_publication_SHA256"] == durable_rejected_decision[
+        "approval_publication_SHA256"
+    ]
+    assert r0007_authority["rejected_approval_decision"] == "reject"
+    assert "review_prepare_failure_SHA256" not in r0007_authority
+    assert "approved_approval_decision" not in r0007_authority
+
+    assert history[0]["historical_current_generation_record"] == original_generation
+    assert history[1]["revision_reason"] == "rejected_current_ticket_revision_correction"
+    assert history[1]["historical_current_generation_record"] == r0006_generation
+    assert history[1]["historical_rejected_decision_record"] == durable_rejected_decision
+    assert history[1]["new_generation_record"] == r0007_generation
+    assert "historical_review_prepare_failure_record" not in history[1]
+
+    assert int(
+        r0007_generation["ticket_publication_result"]["publication"]["revision"],
+    ) == int(r0006_generation["ticket_publication_result"]["publication"]["revision"]) + 1
+    assert r0007_generation["ticket_publication_result"]["publication"][
+        "supersedes_publication_id"
+    ] == r0006_generation["ticket_publication_result"]["publication"]["publication_id"]
+    assert bridge.load_approval_decision_record(
+        ticket_id=target.ticket_id,
+        generation_record=r0007_generation,
+    ) is None
+
+    assert post_workflow["current_ticket_id"] == target.ticket_id
+    assert post_workflow["workflow_status"] == "awaiting_ticket_approval"
+    assert post_workflow["pending_ticket_approval_count"] == 1
+    assert post_workflow["next_action"]["id"] == target.approval_next_action_id
+    assert r0007_generation["worker_execution"] is False
+    assert r0007_generation["Kanban_dispatch"] is False
+    assert r0007_generation["Git_mutation"] is False
+    assert r0007_generation["ticket_execution_authorized"] is False
+    assert r0007_generation["WorkPacket_execution_authorized"] is False
+    assert r0007_generation["runtime_execution_authorized"] is False
+
+    for step, work_packet_step, (validation_id, command, argv) in zip(
+        r0007_ticket["validation_steps"][:3],
+        r0007_work_packet["validation_steps"][:3],
+        _c42_validation_command_specs(),
+        strict=True,
+    ):
+        authority = step["command_authority"]
+        compiled_authority = work_packet_step["command_authority"]
+        assert authority["validation_id"] == validation_id
+        assert authority["source_command"] == command
+        assert authority["package_relative_path"] == "2_products/pepper-agent/web"
+        assert authority["command_argv"] == list(argv)
+        assert authority["timeout_seconds"] == 180
+        assert authority["expected_exit_codes"] == [0]
+        assert authority["authority_kind"] == "governed_validation_command"
+        assert authority["command_family"] == "package_script"
+        assert authority["package_manager"] == "npm"
+        assert authority["command_authority_id"].startswith("GVCMD-AUTH-")
+        assert len(authority["command_authority_SHA256"]) == 64
+        assert work_packet_step["command_execution_authorized"] is True
+        assert compiled_authority["source_ticket_command_authority_SHA256"] == authority[
+            "command_authority_SHA256"
+        ]
+
+
 def test_c37_transient_review_prepare_failure_does_not_project_material_revision(
     projection_home,
     monkeypatch,

@@ -1873,6 +1873,24 @@ def load_immutable_approved_current_ticket_authority(
     )
 
 
+def load_immutable_rejected_current_ticket_authority(
+    *,
+    ticket_id: str,
+    require_rejected_decision: bool = False,
+) -> dict[str, dict[str, Any]] | None:
+    """Load rejected current-ticket correction base authority without roadmap reconstruction."""
+
+    return _load_immutable_decided_ticket_authority(
+        ticket_id=ticket_id,
+        require_decision=require_rejected_decision,
+        expected_decision=HumanApprovalDecision.REJECT,
+        expected_status="rejected",
+        missing_decision_message=f"{_safe_ticket_id(ticket_id)} rejected ticket decision is absent",
+        wrong_decision_message=f"{_safe_ticket_id(ticket_id)} current ticket is not rejected",
+        wrong_status_message=f"{_safe_ticket_id(ticket_id)} current ticket rejection status mismatch",
+    )
+
+
 def _load_immutable_approved_ticket_authority(
     *,
     ticket_id: str,
@@ -1880,6 +1898,27 @@ def _load_immutable_approved_ticket_authority(
     missing_decision_message: str,
     not_approved_message: str,
     not_approved_status_message: str,
+) -> dict[str, dict[str, Any]] | None:
+    return _load_immutable_decided_ticket_authority(
+        ticket_id=ticket_id,
+        require_decision=require_approved_decision,
+        expected_decision=HumanApprovalDecision.APPROVE,
+        expected_status="approved",
+        missing_decision_message=missing_decision_message,
+        wrong_decision_message=not_approved_message,
+        wrong_status_message=not_approved_status_message,
+    )
+
+
+def _load_immutable_decided_ticket_authority(
+    *,
+    ticket_id: str,
+    require_decision: bool,
+    expected_decision: HumanApprovalDecision,
+    expected_status: str,
+    missing_decision_message: str,
+    wrong_decision_message: str,
+    wrong_status_message: str,
 ) -> dict[str, dict[str, Any]] | None:
     safe_ticket_id = _safe_ticket_id(ticket_id)
     path = generation_record_path_for_ticket(safe_ticket_id)
@@ -1890,32 +1929,32 @@ def _load_immutable_approved_ticket_authority(
     )
     decision = _read_approval_decision_record_unvalidated(safe_ticket_id)
     if decision is None:
-        if require_approved_decision:
+        if require_decision:
             raise TicketArchitectBridgeConflict(missing_decision_message)
         return None
-    if decision.get("decision") != HumanApprovalDecision.APPROVE.value:
-        if require_approved_decision:
-            raise TicketArchitectBridgeConflict(not_approved_message)
+    if decision.get("decision") != expected_decision.value:
+        if require_decision:
+            raise TicketArchitectBridgeConflict(wrong_decision_message)
         return None
-    if decision.get("status") != "approved":
-        if require_approved_decision:
-            raise TicketArchitectBridgeConflict(not_approved_status_message)
+    if decision.get("status") != expected_status:
+        if require_decision:
+            raise TicketArchitectBridgeConflict(wrong_status_message)
         return None
     try:
-        approved_decision = _validate_approval_decision_record_with_generation(
+        validated_decision = _validate_approval_decision_record_with_generation(
             decision,
             ticket_id=safe_ticket_id,
             generation=generation,
         )
     except TicketArchitectBridgeConflict:
-        if require_approved_decision:
+        if require_decision:
             raise
         raise TicketArchitectBridgeConflict(
-            f"{safe_ticket_id} approved ticket decision is invalid"
+            f"{safe_ticket_id} {expected_status} ticket decision is invalid"
         )
     return {
         "generation_record": generation,
-        "approval_decision_record": approved_decision,
+        "approval_decision_record": validated_decision,
     }
 
 
@@ -2458,7 +2497,7 @@ def revise_rejected_successor_ticket(
 def revise_current_ticket_for_material_contract_failure(
     *,
     workflow: dict[str, Any],
-    review_prepare_failure_record: dict[str, Any],
+    review_prepare_failure_record: dict[str, Any] | None,
     human_authorization_text: str,
     revision_contract: TicketSpecMaterialRevisionContract | dict[str, Any],
     authorizer_id: str = "pepper-chat-human",
@@ -2466,7 +2505,7 @@ def revise_current_ticket_for_material_contract_failure(
     requested_ticket_id: str | None = None,
     requested_next_action_id: str | None = None,
 ) -> dict[str, Any]:
-    """Revise an active current ticket after a material review-prepare contract failure."""
+    """Revise an active current ticket after governed material or rejection authority."""
 
     if revision_contract is None:
         raise TicketArchitectBridgeInputError("current-ticket material revision requires revision_contract")
@@ -2481,17 +2520,24 @@ def revise_current_ticket_for_material_contract_failure(
         or next_action.get("target_ticket_id")
     )
     current_generation: dict[str, Any] | None = None
-    approved_decision: dict[str, Any] | None = None
+    previous_decision: dict[str, Any] | None = None
     revised_generation: dict[str, Any] | None = None
     revision_authority: dict[str, Any] | None = None
     history_entry: dict[str, Any] | None = None
     validated_revision_contract: TicketSpecMaterialRevisionContract | None = None
+    revision_reason = "material_contract_failure"
     with _STORE_LOCK:
         approved_authority = load_immutable_approved_current_ticket_authority(
             ticket_id=safe_ticket_id,
             require_approved_decision=False,
         )
+        rejected_authority = None
         if approved_authority is None:
+            rejected_authority = load_immutable_rejected_current_ticket_authority(
+                ticket_id=safe_ticket_id,
+                require_rejected_decision=False,
+            )
+        if approved_authority is None and rejected_authority is None:
             if not generation_record_path_for_ticket(safe_ticket_id).exists():
                 raise TicketArchitectBridgeConflict(
                     f"{safe_ticket_id} has no current generated ticket to revise"
@@ -2499,8 +2545,12 @@ def revise_current_ticket_for_material_contract_failure(
             raise TicketArchitectBridgeConflict(
                 f"{safe_ticket_id} approved ticket decision is absent"
             )
-        current_generation = approved_authority["generation_record"]
-        approved_decision = approved_authority["approval_decision_record"]
+        current_authority = approved_authority or rejected_authority
+        assert current_authority is not None
+        current_generation = current_authority["generation_record"]
+        previous_decision = current_authority["approval_decision_record"]
+        if rejected_authority is not None:
+            revision_reason = "rejected_current_ticket_revision_correction"
         target = _historical_target_from_record(current_generation)
         _validate_revision_requested_identity(
             requested_project_id=requested_project_id,
@@ -2513,6 +2563,7 @@ def revise_current_ticket_for_material_contract_failure(
             target=target,
             review_prepare_failure_record=review_prepare_failure_record,
             current_generation=current_generation,
+            revision_reason=revision_reason,
         )
         human_authorization_text = _validate_revision_authorization_text(
             human_authorization_text,
@@ -2526,12 +2577,13 @@ def revise_current_ticket_for_material_contract_failure(
         authorizer_id = _reviewer_id_from_actor(authorizer_id)
         revision_authority = _build_current_ticket_material_revision_authority(
             current_generation=current_generation,
-            approved_decision=approved_decision,
+            previous_decision=previous_decision,
             review_prepare_failure_record=review_prepare_failure_record,
             target=target,
             human_authorization_text=human_authorization_text,
             authorizer_id=authorizer_id,
             revision_contract=validated_revision_contract,
+            revision_reason=revision_reason,
         )
         prior_publication = _publication_from_generation_record(current_generation)
         revision_workflow = _revision_generation_workflow(workflow, target=target)
@@ -2549,12 +2601,13 @@ def revise_current_ticket_for_material_contract_failure(
         )
         history_entry = _build_current_ticket_material_revision_history_entry(
             current_generation=current_generation,
-            approved_decision=approved_decision,
+            previous_decision=previous_decision,
             review_prepare_failure_record=review_prepare_failure_record,
             revised_generation=revised_generation,
             target=target,
             human_authorization_text=human_authorization_text,
             authorizer_id=authorizer_id,
+            revision_reason=revision_reason,
         )
         _write_json_atomic(
             generation_record_path_for_ticket(target.ticket_id),
@@ -2575,17 +2628,16 @@ def revise_current_ticket_for_material_contract_failure(
         "revision_status": "awaiting_ticket_approval",
         "revision_action_id": target.revise_next_action_id,
         "material_revision_authority_type": "current_ticket_material_contract_revision",
+        "revision_reason": revision_reason,
         "human_authorization_text": human_authorization_text,
         "authorizer_id": authorizer_id,
-        "review_prepare_failure_SHA256": review_prepare_failure_record[
-            "review_prepare_failure_SHA256"
-        ],
         "previous_generation_bridge_SHA256": current_generation["bridge_SHA256"],
-        "previous_approval_publication_SHA256": approved_decision[
+        "previous_approval_publication_SHA256": previous_decision[
             "approval_publication_SHA256"
         ],
+        "previous_approval_decision": previous_decision["decision"],
         "historical_current_generation_preserved": True,
-        "historical_approved_decision_preserved": True,
+        "historical_previous_decision_preserved": True,
         "revision_history_path": str(
             current_ticket_material_revision_history_path_for_ticket(target.ticket_id)
         ),
@@ -2608,6 +2660,21 @@ def revise_current_ticket_for_material_contract_failure(
         "Docker_commands_executed": 0,
         "Graphify_commands_executed": 0,
     })
+    if revision_reason == "material_contract_failure":
+        assert review_prepare_failure_record is not None
+        result.update({
+            "review_prepare_failure_SHA256": review_prepare_failure_record[
+                "review_prepare_failure_SHA256"
+            ],
+            "historical_approved_decision_preserved": True,
+        })
+    else:
+        result.update({
+            "rejected_approval_publication_SHA256": previous_decision[
+                "approval_publication_SHA256"
+            ],
+            "historical_rejected_decision_preserved": True,
+        })
     return result
 
 
@@ -2865,8 +2932,9 @@ def _validate_current_ticket_material_revision_workflow(
     workflow: dict[str, Any],
     *,
     target: GovernedTicketGenerationTarget,
-    review_prepare_failure_record: dict[str, Any],
+    review_prepare_failure_record: dict[str, Any] | None,
     current_generation: dict[str, Any],
+    revision_reason: str,
 ) -> None:
     if workflow.get("project_id") != target.project_id:
         raise TicketArchitectBridgeInputError(f"active governed project is not {target.project_id}")
@@ -2878,16 +2946,6 @@ def _validate_current_ticket_material_revision_workflow(
         raise TicketArchitectBridgeInputError(
             f"current-ticket revision requires active ticket {target.ticket_id}"
         )
-    if workflow.get("workflow_status") != "awaiting_material_revision":
-        raise TicketArchitectBridgeInputError(
-            f"{target.ticket_id} material revision requires awaiting_material_revision"
-        )
-    if workflow.get("workflow_state") != f"{target.ticket_id}-AWAITING-MATERIAL-REVISION":
-        raise TicketArchitectBridgeInputError(
-            f"workflow state is not {target.ticket_id}-AWAITING-MATERIAL-REVISION"
-        )
-    if workflow.get("material_revision_required") is not True:
-        raise TicketArchitectBridgeInputError("workflow does not require material revision")
     next_action = workflow.get("next_action")
     if not isinstance(next_action, dict):
         raise TicketArchitectBridgeInputError("next action is unavailable")
@@ -2899,12 +2957,36 @@ def _validate_current_ticket_material_revision_workflow(
         raise TicketArchitectBridgeInputError(
             f"next action does not target {target.ticket_id}"
         )
-    if next_action.get("required_human_action") != "ticket_material_revision":
-        raise TicketArchitectBridgeInputError("next action is not a material revision action")
     if int(workflow.get("pending_ticket_approval_count") or 0) != 0:
         raise TicketArchitectBridgeInputError("pending ticket approvals remain")
     if int(workflow.get("active_execution_count") or 0) != 0:
         raise TicketArchitectBridgeInputError("an execution is already active")
+    if revision_reason == "rejected_current_ticket_revision_correction":
+        if workflow.get("workflow_status") != "awaiting_correction":
+            raise TicketArchitectBridgeInputError(
+                f"{target.ticket_id} rejected current-ticket revision requires awaiting_correction"
+            )
+        if workflow.get("workflow_state") != f"{target.ticket_id}-AWAITING-CORRECTION":
+            raise TicketArchitectBridgeInputError(
+                f"workflow state is not {target.ticket_id}-AWAITING-CORRECTION"
+            )
+        if next_action.get("required_human_action") != "ticket_correction":
+            raise TicketArchitectBridgeInputError("next action is not a ticket correction action")
+        return
+    if revision_reason != "material_contract_failure":
+        raise TicketArchitectBridgeInputError("current-ticket revision reason is unsupported")
+    if workflow.get("workflow_status") != "awaiting_material_revision":
+        raise TicketArchitectBridgeInputError(
+            f"{target.ticket_id} material revision requires awaiting_material_revision"
+        )
+    if workflow.get("workflow_state") != f"{target.ticket_id}-AWAITING-MATERIAL-REVISION":
+        raise TicketArchitectBridgeInputError(
+            f"workflow state is not {target.ticket_id}-AWAITING-MATERIAL-REVISION"
+        )
+    if workflow.get("material_revision_required") is not True:
+        raise TicketArchitectBridgeInputError("workflow does not require material revision")
+    if next_action.get("required_human_action") != "ticket_material_revision":
+        raise TicketArchitectBridgeInputError("next action is not a material revision action")
     if not isinstance(review_prepare_failure_record, dict):
         raise TicketArchitectBridgeInputError("review-prepare failure authority is unavailable")
     if review_prepare_failure_record.get("review_prepare_resolution") != "MATERIAL_REVISION_REQUIRED":
@@ -3476,13 +3558,24 @@ def _build_material_revision_authority(
 def _build_current_ticket_material_revision_authority(
     *,
     current_generation: dict[str, Any],
-    approved_decision: dict[str, Any],
-    review_prepare_failure_record: dict[str, Any],
+    previous_decision: dict[str, Any],
+    review_prepare_failure_record: dict[str, Any] | None,
     target: GovernedTicketGenerationTarget,
     human_authorization_text: str,
     authorizer_id: str,
     revision_contract: TicketSpecMaterialRevisionContract | dict[str, Any],
+    revision_reason: str,
 ) -> dict[str, Any]:
+    if revision_reason not in {
+        "material_contract_failure",
+        "rejected_current_ticket_revision_correction",
+    }:
+        raise TicketArchitectBridgeInputError("current-ticket revision reason is unsupported")
+    if revision_reason == "material_contract_failure" and not isinstance(
+        review_prepare_failure_record,
+        dict,
+    ):
+        raise TicketArchitectBridgeInputError("review-prepare failure authority is unavailable")
     previous_publication = _publication_from_generation_record(current_generation)
     base_ticket_spec = _revision_base_ticket_spec_from_generation(
         current_generation,
@@ -3497,6 +3590,7 @@ def _build_current_ticket_material_revision_authority(
         "schema_version": TICKET_ARCHITECT_BRIDGE_SCHEMA_VERSION,
         "policy_id": TICKET_ARCHITECT_MATERIAL_REVISION_AUTHORITY_POLICY_ID,
         "authority_type": "current_ticket_material_contract_revision",
+        "revision_reason": revision_reason,
         "project_id": target.project_id,
         "macroproject_id": target.macroproject_id,
         "ticket_id": target.ticket_id,
@@ -3517,20 +3611,6 @@ def _build_current_ticket_material_revision_authority(
         "previous_publication_id": previous_publication.publication_id,
         "previous_publication_revision": previous_revision,
         "new_publication_revision": previous_revision + 1,
-        "approved_approval_publication_SHA256": approved_decision[
-            "approval_publication_SHA256"
-        ],
-        "approved_approval_decision": approved_decision["decision"],
-        "review_prepare_failure_SHA256": review_prepare_failure_record[
-            "review_prepare_failure_SHA256"
-        ],
-        "review_prepare_validation_result_SHA256": review_prepare_failure_record.get(
-            "review_prepare_validation_result_SHA256"
-        ),
-        "review_prepare_resolution": review_prepare_failure_record[
-            "review_prepare_resolution"
-        ],
-        "failure_classification": review_prepare_failure_record["failure_classification"],
         "human_authorization_text": human_authorization_text,
         "authorizer_id": authorizer_id,
         "revision_contract": validated_contract.model_dump(mode="json"),
@@ -3538,6 +3618,31 @@ def _build_current_ticket_material_revision_authority(
             validated_contract
         ),
     }
+    if revision_reason == "material_contract_failure":
+        assert review_prepare_failure_record is not None
+        authority.update({
+            "approved_approval_publication_SHA256": previous_decision[
+                "approval_publication_SHA256"
+            ],
+            "approved_approval_decision": previous_decision["decision"],
+            "review_prepare_failure_SHA256": review_prepare_failure_record[
+                "review_prepare_failure_SHA256"
+            ],
+            "review_prepare_validation_result_SHA256": review_prepare_failure_record.get(
+                "review_prepare_validation_result_SHA256"
+            ),
+            "review_prepare_resolution": review_prepare_failure_record[
+                "review_prepare_resolution"
+            ],
+            "failure_classification": review_prepare_failure_record["failure_classification"],
+        })
+    else:
+        authority.update({
+            "rejected_approval_publication_SHA256": previous_decision[
+                "approval_publication_SHA256"
+            ],
+            "rejected_approval_decision": previous_decision["decision"],
+        })
     authority["revision_authority_SHA256"] = _revision_authority_digest(authority)
     return authority
 
@@ -3578,11 +3683,21 @@ def _validate_material_revision_authority(
         if authority.get("rejected_approval_decision") != HumanApprovalDecision.REJECT.value:
             raise TicketArchitectBridgeConflict("revision authority rejected decision mismatch")
     else:
-        if authority.get("approved_approval_decision") != HumanApprovalDecision.APPROVE.value:
-            raise TicketArchitectBridgeConflict("revision authority approved decision mismatch")
-        if authority.get("review_prepare_resolution") != "MATERIAL_REVISION_REQUIRED":
-            raise TicketArchitectBridgeConflict("revision authority review-prepare resolution mismatch")
-        _safe_digest(authority.get("review_prepare_failure_SHA256"))
+        revision_reason = str(authority.get("revision_reason") or "")
+        if revision_reason not in {
+            "material_contract_failure",
+            "rejected_current_ticket_revision_correction",
+        }:
+            raise TicketArchitectBridgeConflict("revision authority reason mismatch")
+        if revision_reason == "material_contract_failure":
+            if authority.get("approved_approval_decision") != HumanApprovalDecision.APPROVE.value:
+                raise TicketArchitectBridgeConflict("revision authority approved decision mismatch")
+            if authority.get("review_prepare_resolution") != "MATERIAL_REVISION_REQUIRED":
+                raise TicketArchitectBridgeConflict("revision authority review-prepare resolution mismatch")
+            _safe_digest(authority.get("review_prepare_failure_SHA256"))
+        else:
+            if authority.get("rejected_approval_decision") != HumanApprovalDecision.REJECT.value:
+                raise TicketArchitectBridgeConflict("revision authority rejected decision mismatch")
     try:
         previous_revision = int(authority.get("previous_publication_revision") or 0)
         new_revision = int(authority.get("new_publication_revision") or 0)
@@ -3607,6 +3722,7 @@ def _validate_material_revision_authority(
     approval_digest_field = (
         "rejected_approval_publication_SHA256"
         if authority_type == "rejected_successor_material_revision"
+        or authority.get("revision_reason") == "rejected_current_ticket_revision_correction"
         else "approved_approval_publication_SHA256"
     )
     _safe_digest(authority.get(approval_digest_field))
@@ -3643,6 +3759,11 @@ def _build_revision_ticket_spec(
     current_ticket_revision = (
         authority.get("authority_type") == "current_ticket_material_contract_revision"
     )
+    current_ticket_revision_reason = str(authority.get("revision_reason") or "")
+    current_rejected_revision = (
+        current_ticket_revision
+        and current_ticket_revision_reason == "rejected_current_ticket_revision_correction"
+    )
     revision_contract = _revision_contract_from_authority(authority, target=target)
     base_commit_message = (
         base.recommended_commit_message
@@ -3656,7 +3777,9 @@ def _build_revision_ticket_spec(
             kind=AuthorityReferenceKind.GOVERNANCE_RECORD,
             value=f"{target.ticket_id}-MATERIAL-REVISION-{revision_label}-{authority_digest[:12]}",
             rationale=(
-                "Explicit human material-revision authority for the current ticket."
+                "Explicit human correction authority for the rejected current-ticket revision."
+                if current_rejected_revision
+                else "Explicit human material-revision authority for the current ticket."
                 if current_ticket_revision
                 else "Explicit human correction authority for the material generated-successor revision."
             ),
@@ -3665,11 +3788,15 @@ def _build_revision_ticket_spec(
             kind=AuthorityReferenceKind.GOVERNANCE_RECORD,
             value=(
                 f"{target.ticket_id}-REVIEW-PREPARE-FAILURE-{authority['review_prepare_failure_SHA256'][:12]}"
-                if current_ticket_revision
+                if current_ticket_revision and not current_rejected_revision
+                else f"{target.ticket_id}-REJECTED-CURRENT-REVISION-{authority['previous_bridge_SHA256'][:12]}"
+                if current_rejected_revision
                 else f"{target.ticket_id}-REJECTED-GENERATION-{authority['previous_bridge_SHA256'][:12]}"
             ),
             rationale=(
-                "Durable review-preparation material contract failure remains immutable historical evidence."
+                "Rejected current-ticket revision remains immutable historical evidence."
+                if current_rejected_revision
+                else "Durable review-preparation material contract failure remains immutable historical evidence."
                 if current_ticket_revision
                 else "Rejected predecessor generated-ticket authority remains immutable historical evidence."
             ),
@@ -3745,7 +3872,10 @@ def _build_revision_ticket_spec(
                     + (
                         "durable review-preparation material contract failure "
                         f"{authority['review_prepare_failure_SHA256']}."
-                        if current_ticket_revision
+                        if current_ticket_revision and not current_rejected_revision
+                        else "durable human rejection of current revision "
+                        f"bridge {authority['previous_bridge_SHA256']}."
+                        if current_rejected_revision
                         else "human rejection of "
                         f"bridge {authority['previous_bridge_SHA256']}."
                     )
@@ -4813,6 +4943,16 @@ def _assemble_context_pack(
             revision_authority,
             target=target,
         )
+        authority_type = str(authority.get("authority_type") or "")
+        revision_reason = str(authority.get("revision_reason") or "")
+        if authority_type == "current_ticket_material_contract_revision":
+            revision_source = (
+                "after a rejected current-ticket revision"
+                if revision_reason == "rejected_current_ticket_revision_correction"
+                else "after a durable review-preparation material contract failure"
+            )
+        else:
+            revision_source = "after a rejected generated-successor approval"
         contract_fragment = (
             f" Structured contract SHA256: {authority['revision_contract_SHA256']}."
             if authority.get("revision_contract_SHA256")
@@ -4826,8 +4966,8 @@ def _assemble_context_pack(
                 source_reference=authority["revision_authority_SHA256"],
                 content=(
                     f"{target.ticket_id} material revision R{int(authority['new_publication_revision']):04d} "
-                    f"supersedes {authority['previous_publication_id']} after a rejected generated-successor "
-                    f"approval.{contract_fragment} Human correction: {authority['human_authorization_text']}"
+                    f"supersedes {authority['previous_publication_id']} {revision_source}."
+                    f"{contract_fragment} Human correction: {authority['human_authorization_text']}"
                 ),
                 authority_references=tuple(
                     reference
@@ -5694,12 +5834,13 @@ def _build_rejected_successor_revision_history_entry(
 def _build_current_ticket_material_revision_history_entry(
     *,
     current_generation: dict[str, Any],
-    approved_decision: dict[str, Any],
-    review_prepare_failure_record: dict[str, Any],
+    previous_decision: dict[str, Any],
+    review_prepare_failure_record: dict[str, Any] | None,
     revised_generation: dict[str, Any],
     target: GovernedTicketGenerationTarget,
     human_authorization_text: str,
     authorizer_id: str,
+    revision_reason: str,
 ) -> dict[str, Any]:
     entry = {
         "schema_version": TICKET_ARCHITECT_BRIDGE_SCHEMA_VERSION,
@@ -5707,30 +5848,26 @@ def _build_current_ticket_material_revision_history_entry(
         "source_system": "pepper-ticket-architect-bridge",
         "revised_at": _utc_now_iso(),
         "revision_status": "current_ticket_revised_to_awaiting_ticket_approval",
+        "revision_reason": revision_reason,
         "ticket_id": target.ticket_id,
         "ticket_title": target.ticket_title,
         "revision_action_id": target.revise_next_action_id,
         "new_generation_action_id": target.next_action_id,
         "authorizer_id": authorizer_id,
         "human_authorization_text": human_authorization_text,
-        "review_prepare_failure_SHA256": review_prepare_failure_record[
-            "review_prepare_failure_SHA256"
-        ],
         "previous_generation_bridge_SHA256": current_generation["bridge_SHA256"],
         "previous_ticket_spec_SHA256": current_generation["ticket_spec_SHA256"],
         "previous_work_packet_id": current_generation["work_packet_id"],
         "previous_work_packet_SHA256": current_generation["work_packet_SHA256"],
-        "previous_approval_publication_SHA256": approved_decision[
+        "previous_approval_publication_SHA256": previous_decision[
             "approval_publication_SHA256"
         ],
-        "previous_approval_decision": approved_decision["decision"],
+        "previous_approval_decision": previous_decision["decision"],
         "revised_generation_bridge_SHA256": revised_generation["bridge_SHA256"],
         "revised_ticket_spec_SHA256": revised_generation["ticket_spec_SHA256"],
         "revised_work_packet_id": revised_generation["work_packet_id"],
         "revised_work_packet_SHA256": revised_generation["work_packet_SHA256"],
         "historical_current_generation_record": current_generation,
-        "historical_approved_decision_record": approved_decision,
-        "historical_review_prepare_failure_record": review_prepare_failure_record,
         "new_generation_record": revised_generation,
         "ticket_generated": True,
         "human_ticket_approval_required": True,
@@ -5749,6 +5886,17 @@ def _build_current_ticket_material_revision_history_entry(
         "Graphify_commands_executed": 0,
         "WorkPacket_compilation_count": 1,
     }
+    if revision_reason == "material_contract_failure":
+        assert review_prepare_failure_record is not None
+        entry.update({
+            "review_prepare_failure_SHA256": review_prepare_failure_record[
+                "review_prepare_failure_SHA256"
+            ],
+            "historical_approved_decision_record": previous_decision,
+            "historical_review_prepare_failure_record": review_prepare_failure_record,
+        })
+    else:
+        entry["historical_rejected_decision_record"] = previous_decision
     revision_authority = revised_generation.get("revision_authority")
     if isinstance(revision_authority, dict) and revision_authority.get(
         "revision_contract_SHA256"
@@ -6172,6 +6320,7 @@ __all__ = (
     "load_approval_decision_record",
     "load_p18_9_0_approval_decision_record",
     "load_immutable_approved_current_ticket_authority",
+    "load_immutable_rejected_current_ticket_authority",
     "validate_generation_record",
     "validate_p18_9_0_generation_record",
     "validate_approval_decision_record",

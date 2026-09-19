@@ -5681,21 +5681,36 @@ def revise_current_ticket_for_material_contract_failure(
     ticket_id: str | None = None,
     next_action_id: str | None = None,
 ) -> dict[str, Any]:
-    """Revise the active current ticket after durable material review-prep failure."""
+    """Revise the active current ticket from durable material or rejection authority."""
 
     from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
         revise_current_ticket_for_material_contract_failure as revise_current_ticket,
     )
 
-    projection = _load_current_projection_record()
-    failure_record = load_current_ticket_review_prepare_failure_record(
-        projection_record=projection,
-    )
-    if failure_record is None:
-        raise ProductRuntimeConflict("current ticket material revision authority is absent")
-    if failure_record.get("review_prepare_resolution") != "MATERIAL_REVISION_REQUIRED":
-        raise ProductRuntimeConflict("current review-prepare failure does not authorize material revision")
     workflow = build_workflow_control_snapshot()
+    next_action = workflow.get("next_action")
+    if not isinstance(next_action, dict):
+        next_action = {}
+    current_ticket_id = str(workflow.get("current_ticket_id") or "").strip()
+    rejected_current_revision_correction = (
+        workflow.get("workflow_status") == "awaiting_correction"
+        and current_ticket_id
+        and next_action.get("id") == governed_ticket_lifecycle_action_ids(current_ticket_id)[
+            "revise"
+        ]
+        and next_action.get("target_ticket_id") == current_ticket_id
+        and next_action.get("required_human_action") == "ticket_correction"
+    )
+    failure_record = None
+    if not rejected_current_revision_correction:
+        projection = _load_current_projection_record()
+        failure_record = load_current_ticket_review_prepare_failure_record(
+            projection_record=projection,
+        )
+        if failure_record is None:
+            raise ProductRuntimeConflict("current ticket material revision authority is absent")
+        if failure_record.get("review_prepare_resolution") != "MATERIAL_REVISION_REQUIRED":
+            raise ProductRuntimeConflict("current review-prepare failure does not authorize material revision")
     return revise_current_ticket(
         workflow=workflow,
         review_prepare_failure_record=failure_record,
