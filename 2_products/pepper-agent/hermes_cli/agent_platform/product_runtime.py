@@ -1638,24 +1638,37 @@ def _current_incomplete_generation_record_from_records() -> dict[str, Any] | Non
             overlay = generated_record_to_workflow_overlay(record)
         except Exception:
             continue
-        if overlay.get("workflow_status") in {
+        current_ticket_material_revision = _is_current_ticket_material_revision_generation(
+            record,
+        )
+        workflow_status = overlay.get("workflow_status")
+        current_ticket_material_revision_before_reprojection = (
+            current_ticket_material_revision
+            and workflow_status in {"awaiting_ticket_approval", "awaiting_correction"}
+        )
+        if workflow_status in {
             "awaiting_ticket_approval",
             "awaiting_correction",
-        }:
+        } and not current_ticket_material_revision:
             continue
         if not str(overlay.get("current_ticket_id") or "").strip():
             continue
         projection = None
-        try:
-            projection = _projection_record_for_generated_ticket(record)
-        except Exception:
-            pass
+        if not current_ticket_material_revision_before_reprojection:
+            try:
+                projection = _projection_record_for_generated_ticket(record)
+            except Exception:
+                pass
         if _projection_has_terminal_ticket_completion(projection):
             continue
         _predecessor_overlay, predecessor_valid = (
             _completed_predecessor_overlay_for_current_authority(ticket_id, record)
         )
-        if not predecessor_valid:
+        if (
+            not predecessor_valid
+            and projection is None
+            and not current_ticket_material_revision
+        ):
             continue
         return record
     return None
@@ -3555,23 +3568,22 @@ def _current_incomplete_ticket_authority_overlay() -> tuple[
                 overlay = generated_record_to_workflow_overlay(generation)
             except Exception:
                 continue
-            current_ticket_material_revision_pending_approval = (
-                overlay.get("workflow_status") == "awaiting_ticket_approval"
-                and _is_current_ticket_material_revision_generation(generation)
+            current_ticket_material_revision = _is_current_ticket_material_revision_generation(
+                generation,
             )
-            if overlay.get("workflow_status") in {
+            workflow_status = overlay.get("workflow_status")
+            current_ticket_material_revision_before_reprojection = (
+                current_ticket_material_revision
+                and workflow_status in {"awaiting_ticket_approval", "awaiting_correction"}
+            )
+            if workflow_status in {
                 "awaiting_ticket_approval",
                 "awaiting_correction",
-            } and not current_ticket_material_revision_pending_approval:
+            } and not current_ticket_material_revision:
                 continue
             if not str(overlay.get("current_ticket_id") or "").strip():
                 continue
-            predecessor_overlay, predecessor_valid = (
-                _completed_predecessor_overlay_for_current_authority(ticket_id, generation)
-            )
-            if not predecessor_valid:
-                continue
-            if not current_ticket_material_revision_pending_approval:
+            if not current_ticket_material_revision_before_reprojection:
                 try:
                     projection = _projection_record_for_generated_ticket(generation)
                     if projection is not None:
@@ -3584,6 +3596,15 @@ def _current_incomplete_ticket_authority_overlay() -> tuple[
                         "status": "blocked_by_invalid_generated_successor_projection_authority",
                         "evidence": _safe_text(exc, limit=300),
                     }
+            predecessor_overlay, predecessor_valid = (
+                _completed_predecessor_overlay_for_current_authority(ticket_id, generation)
+            )
+            if (
+                not predecessor_valid
+                and projection is None
+                and not current_ticket_material_revision
+            ):
+                continue
             if projection is not None:
                 lifecycle_blocker = _apply_current_projection_execution_lifecycle_overlay(
                     overlay,

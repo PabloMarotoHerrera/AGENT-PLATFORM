@@ -9723,6 +9723,192 @@ def test_c35_pending_successor_completed_zero_change_boundary_preempts_review_pr
     assert blockers == []
 
 
+def _patch_c38_cross_revision_precedence_fixture(monkeypatch, pr) -> SimpleNamespace:
+    latest_overlay = dict(_c9_lifecycle_overlay(pr, "P99.5", "validated_review_ready"))
+    latest_overlay.update({
+        "workflow_state": "P99.5-EXECUTION-COMPLETED",
+        "zero_change_result": True,
+        "zero_change_authority_kind": "human_zero_change_attestation",
+        "human_zero_change_attestation_required": False,
+        "review_prepare_eligible_result": True,
+    })
+    return _patch_c9_synthetic_authority(
+        monkeypatch,
+        pr,
+        current_ticket_id="P99.5",
+        lifecycle_overlay=None,
+        completed_ticket_ids=("P99.2",),
+        authority_ticket_ids=("P99.2", "P99.3", "P99.4", "P99.5"),
+        projected_ticket_ids=("P99.2", "P99.5"),
+        bootstrap_completed_ticket_id="P99.2",
+        lifecycle_overlays_by_ticket={
+            "P99.5": latest_overlay,
+        },
+    )
+
+
+def _patch_c38_projection_only_selector_fixture(
+    monkeypatch,
+    pr,
+    *,
+    projection_only_ticket_id: str,
+    completed_ticket_ids: tuple[str, ...],
+    authority_ticket_ids: tuple[str, ...],
+    projected_ticket_ids: tuple[str, ...],
+) -> SimpleNamespace:
+    state = _patch_c9_synthetic_authority(
+        monkeypatch,
+        pr,
+        current_ticket_id=projection_only_ticket_id,
+        lifecycle_overlay=None,
+        completed_ticket_ids=completed_ticket_ids,
+        authority_ticket_ids=authority_ticket_ids,
+        projected_ticket_ids=projected_ticket_ids,
+        bootstrap_completed_ticket_id="P99.0",
+    )
+
+    def load_generation_record(*, ticket_id, **_kwargs):
+        if ticket_id == projection_only_ticket_id:
+            return None
+        return state.records.get(ticket_id)
+
+    def load_projection_record(*, ticket_id, **_kwargs):
+        return state.projections.get(ticket_id)
+
+    roadmap_ids = tuple(f"P99.{index}" for index in range(0, 6))
+    monkeypatch.setattr(bridge, "load_generation_record", load_generation_record)
+    monkeypatch.setattr(projection, "load_kanban_projection_record", load_projection_record)
+    monkeypatch.setattr(
+        bridge,
+        "resolve_roadmap_ticket_authorities",
+        lambda: [{"ticket_id": ticket_id} for ticket_id in roadmap_ids],
+    )
+    return state
+
+
+def test_c38_latest_projected_current_ticket_survives_incomplete_predecessor_traversal(
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _patch_c38_cross_revision_precedence_fixture(monkeypatch, pr)
+
+    snapshot = pr.build_workflow_control_snapshot()
+    binding = pr.resolve_current_ticket_lifecycle_binding()
+    selected_generation = pr._current_incomplete_generation_record_from_records()
+
+    assert selected_generation is not None
+    assert selected_generation["ticket_id"] == "P99.5"
+    assert binding.ticket_id == "P99.5"
+    assert snapshot["current_ticket_id"] == "P99.5"
+    assert snapshot["workflow_status"] == "execution_completed"
+    assert snapshot["workflow_state"] == "P99.5-EXECUTION-COMPLETED"
+    assert snapshot["zero_change_result"] is True
+    assert snapshot["zero_change_authority_kind"] == "human_zero_change_attestation"
+    assert snapshot["human_zero_change_attestation_required"] is False
+    assert snapshot["next_action"]["id"] == "PREPARE_P99_5_REVIEW"
+    assert snapshot["next_action"]["target_ticket_id"] == "P99.5"
+    assert snapshot["current_ticket_authority_precedence"] == {
+        "policy": "latest_valid_incomplete_current_ticket_over_historical_completion",
+        "ticket_id": "P99.5",
+        "authority_source": "generation_record_with_optional_projection",
+        "durable_completion_required_to_clear_current": True,
+    }
+    assert snapshot["current_ticket_id"] not in {"P99.2", "P99.3", "P99.4"}
+    assert snapshot["next_action"]["id"] != "PREPARE_P99_2_REVIEW"
+
+
+def test_c38_stale_projection_only_candidate_requires_predecessor_authority(
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    state = _patch_c38_projection_only_selector_fixture(
+        monkeypatch,
+        pr,
+        projection_only_ticket_id="P99.2",
+        completed_ticket_ids=(),
+        authority_ticket_ids=("P99.2", "P99.5"),
+        projected_ticket_ids=("P99.2",),
+    )
+
+    overlay, blocker = pr._current_incomplete_ticket_authority_overlay()
+
+    assert state.projections["P99.2"]["ticket_id"] == "P99.2"
+    assert state.records["P99.5"]["ticket_id"] == "P99.5"
+    assert overlay is None
+    assert blocker is None
+
+
+def test_c38_historical_predecessor_completion_remains_readable_not_current(
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    state = _patch_c38_cross_revision_precedence_fixture(monkeypatch, pr)
+
+    evidence = pr.load_terminal_completed_predecessor_evidence("P99.2")
+    snapshot = pr.build_workflow_control_snapshot()
+
+    assert evidence == {"ticket_id": "P99.2"}
+    assert state.projections["P99.2"]["ticket_id"] == "P99.2"
+    assert "P99.2" in state.completed
+    assert snapshot["current_ticket_id"] == "P99.5"
+    assert snapshot["current_ticket_id"] != "P99.2"
+    assert snapshot["next_action"]["id"] != "PREPARE_P99_2_REVIEW"
+
+
+def test_c38_projection_only_successor_activation_fails_closed_through_current_selector(
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _patch_c38_projection_only_selector_fixture(
+        monkeypatch,
+        pr,
+        projection_only_ticket_id="P99.5",
+        completed_ticket_ids=(),
+        authority_ticket_ids=("P99.4", "P99.5"),
+        projected_ticket_ids=("P99.5",),
+    )
+
+    overlay, blocker = pr._current_incomplete_ticket_authority_overlay()
+
+    assert overlay is None
+    assert blocker is None
+
+
+def test_c38_successor_activation_without_predecessor_completion_fails_closed(
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _patch_c9_synthetic_authority(
+        monkeypatch,
+        pr,
+        current_ticket_id="P99.5",
+        lifecycle_overlay=None,
+        completed_ticket_ids=(),
+        authority_ticket_ids=("P99.4", "P99.5"),
+        projected_ticket_ids=(),
+        bootstrap_completed_ticket_id="P99.3",
+    )
+
+    overlay, blocker = pr._completed_predecessor_successor_lifecycle_overlay(
+        {
+            "project_id": "PEPPER",
+            "macroproject_id": "P99",
+            "closed_predecessor_ticket_id": "P99.4",
+            "workflow_status": "completed",
+            "remaining_blockers": [],
+        },
+        predecessor_ticket_id="P99.4",
+    )
+
+    assert overlay is None
+    assert blocker is None
+
+
 def test_synthetic_c9_only_durable_completion_clears_current_successor_authority(
     monkeypatch,
 ) -> None:
