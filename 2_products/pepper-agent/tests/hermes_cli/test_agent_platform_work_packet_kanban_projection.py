@@ -9011,7 +9011,30 @@ def _c46_prepare_current_revision_fixture(projection_home, monkeypatch):
     )
 
 
-def test_c47_prepare_current_ticket_execution_materializes_approved_current_revision_projection(
+def test_c48_pre_projection_approved_authority_resolver_does_not_load_projection(
+    projection_home,
+    monkeypatch,
+) -> None:
+    state = _c46_prepare_current_revision_fixture(projection_home, monkeypatch)
+
+    def forbidden_projection_lookup(*_args, **_kwargs):
+        raise AssertionError("pre-projection authority resolver loaded projection")
+
+    monkeypatch.setattr(
+        state.pr,
+        "_projection_record_for_generation_with_approved_authority_fallback",
+        forbidden_projection_lookup,
+    )
+    monkeypatch.setattr(projection, "load_kanban_projection_record", forbidden_projection_lookup)
+
+    authority = state.pr._current_approved_generation_authority_from_records()
+
+    assert authority is not None
+    assert authority["generation_record"] == state.generation
+    assert authority["approval_decision_record"] == state.decision
+
+
+def test_c48_prepare_current_ticket_execution_materializes_approved_current_revision_projection(
     projection_home,
     monkeypatch,
 ) -> None:
@@ -9025,6 +9048,10 @@ def test_c47_prepare_current_ticket_execution_materializes_approved_current_revi
         generation_record=state.generation,
         decision_record=state.decision,
     ) is None
+    approved_authority = state.pr._current_approved_generation_authority_from_records()
+    assert approved_authority is not None
+    assert approved_authority["generation_record"] == state.generation
+    assert approved_authority["approval_decision_record"] == state.decision
 
     import tools.pepper_workflow_tools  # noqa: F401
     from model_tools import handle_function_call
@@ -9045,10 +9072,14 @@ def test_c47_prepare_current_ticket_execution_materializes_approved_current_revi
         generation_record=state.generation,
         decision_record=state.decision,
     )
+    bundle = state.pr._load_current_approved_ticket_authority_bundle()
 
     assert result["success"] is True
     assert result["source_tool"] == "prepare_current_ticket_execution"
     assert projection_record is not None
+    assert bundle["generation_record"] == state.generation
+    assert bundle["approval_decision_record"] == state.decision
+    assert bundle["projection_record"] == projection_record
     assert result["ticket_id"] == state.target.ticket_id
     assert result["ticket_id"] != "P18.9.0"
     assert result["ticket_spec_SHA256"] == state.generation["ticket_spec_SHA256"]
@@ -9073,7 +9104,7 @@ def test_c47_prepare_current_ticket_execution_materializes_approved_current_revi
     assert result["Git_mutation"] is False
 
 
-def test_c47_prepare_current_ticket_execution_fails_closed_when_projection_materialization_fails(
+def test_c48_prepare_current_ticket_execution_fails_closed_when_projection_materialization_fails(
     projection_home,
     monkeypatch,
 ) -> None:
@@ -9084,7 +9115,7 @@ def test_c47_prepare_current_ticket_execution_fails_closed_when_projection_mater
 
     def fail_project_task(*_args, **_kwargs):
         raise projection.WorkPacketKanbanProjectionConflict(
-            "synthetic C47 projection materialization failure",
+            "synthetic C48 projection materialization failure",
         )
 
     monkeypatch.setattr(projection, "_project_task", fail_project_task)
@@ -9105,7 +9136,7 @@ def test_c47_prepare_current_ticket_execution_fails_closed_when_projection_mater
     )
 
     assert result["success"] is False
-    assert "synthetic C47 projection materialization failure" in result["error"]
+    assert "synthetic C48 projection materialization failure" in result["error"]
     assert "P18.9.0" not in result["error"]
     assert result["dispatch_performed"] is False
     assert result["execution_started"] is False

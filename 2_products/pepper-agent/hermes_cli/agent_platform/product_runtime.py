@@ -1855,16 +1855,9 @@ def _current_approved_generation_authority_from_records() -> dict[str, dict[str,
         record = authority["generation_record"]
         if not _approved_generation_authority_matches_record(authority, record):
             continue
-        try:
-            projection = _projection_record_for_generation_with_approved_authority_fallback(
-                record,
-            )
-        except Exception:
-            projection = None
         if _ticket_has_terminal_completion_record_for_current_selector(
             generation_record=record,
             approval_decision_record=authority["approval_decision_record"],
-            projection_record=projection,
         ):
             continue
         return authority
