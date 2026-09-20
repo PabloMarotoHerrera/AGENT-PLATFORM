@@ -9002,40 +9002,29 @@ def _c46_prepare_current_revision_fixture(projection_home, monkeypatch):
         generation_record=generation,
     )
     assert decision is not None
-    approved_workflow = {
-        **_synthetic_workflow_for_target(target),
-        **bridge.generated_record_to_workflow_overlay(generation),
-        "active_execution_count": 0,
-        "execution_state": "no_active_executions",
-    }
-    projected = projection.project_current_approved_workpacket_to_kanban(
-        workflow=approved_workflow,
-        requested_project_id="PEPPER",
-        requested_ticket_id=target.ticket_id,
-        requested_next_action_id=target.approved_no_execution_next_action_id,
-    )
-    projection_record = projection.load_kanban_projection_record(
-        ticket_id=target.ticket_id,
-        generation_record=generation,
-        decision_record=decision,
-    )
-    assert projection_record is not None
     return SimpleNamespace(
         pr=pr,
         target=target,
         generation=generation,
         decision=decision,
-        projected=projected,
-        projection_record=projection_record,
         bootstrap_projection=bootstrap_projection,
     )
 
 
-def test_c46_prepare_current_ticket_execution_uses_approved_current_revision_projection(
+def test_c47_prepare_current_ticket_execution_materializes_approved_current_revision_projection(
     projection_home,
     monkeypatch,
 ) -> None:
     state = _c46_prepare_current_revision_fixture(projection_home, monkeypatch)
+    assert projection.kanban_projection_record_path().exists()
+    assert not projection.kanban_projection_record_path_for_ticket(
+        state.target.ticket_id,
+    ).exists()
+    assert projection.load_kanban_projection_record(
+        ticket_id=state.target.ticket_id,
+        generation_record=state.generation,
+        decision_record=state.decision,
+    ) is None
 
     import tools.pepper_workflow_tools  # noqa: F401
     from model_tools import handle_function_call
@@ -9044,30 +9033,39 @@ def test_c46_prepare_current_ticket_execution_uses_approved_current_revision_pro
         handle_function_call(
             "prepare_current_ticket_execution",
             {
-                "human_request_text": "Prepare P18.9.5 current revision execution.",
+                "human_request_text": "Prepare current approved execution projection.",
                 "project_id": "PEPPER",
                 "ticket_id": state.target.ticket_id,
                 "next_action_id": state.target.approved_no_execution_next_action_id,
             },
         )
     )
+    projection_record = projection.load_kanban_projection_record(
+        ticket_id=state.target.ticket_id,
+        generation_record=state.generation,
+        decision_record=state.decision,
+    )
 
     assert result["success"] is True
     assert result["source_tool"] == "prepare_current_ticket_execution"
+    assert projection_record is not None
     assert result["ticket_id"] == state.target.ticket_id
     assert result["ticket_id"] != "P18.9.0"
     assert result["ticket_spec_SHA256"] == state.generation["ticket_spec_SHA256"]
     assert result["work_packet_id"] == state.generation["work_packet_id"]
     assert result["work_packet_SHA256"] == state.generation["work_packet_SHA256"]
-    assert result["authority"]["projection_SHA256"] == state.projection_record[
+    assert result["authority"]["projection_SHA256"] == projection_record[
         "projection_SHA256"
     ]
-    assert result["kanban_task_id"] == state.projection_record["kanban_task_id"]
+    assert projection_record["ticket_id"] == state.target.ticket_id
+    assert projection_record["ticket_spec_SHA256"] == state.generation["ticket_spec_SHA256"]
+    assert projection_record["work_packet_SHA256"] == state.generation["work_packet_SHA256"]
+    assert result["kanban_task_id"] == projection_record["kanban_task_id"]
     assert result["kanban_task_id"] != state.bootstrap_projection["kanban_task_id"]
     assert result["current_ticket_id"] == state.target.ticket_id
     assert result["workflow_status"] == "queued"
     assert result["queue_state"] == "kanban_projection_ready_not_dispatched"
-    assert result["idempotent_replay"] is True
+    assert result["idempotent_replay"] is False
     assert result["dispatch_performed"] is False
     assert result["execution_started"] is False
     assert result["worker_execution"] is False
@@ -9075,12 +9073,21 @@ def test_c46_prepare_current_ticket_execution_uses_approved_current_revision_pro
     assert result["Git_mutation"] is False
 
 
-def test_c46_prepare_current_ticket_execution_fails_closed_without_current_projection(
+def test_c47_prepare_current_ticket_execution_fails_closed_when_projection_materialization_fails(
     projection_home,
     monkeypatch,
 ) -> None:
     state = _c46_prepare_current_revision_fixture(projection_home, monkeypatch)
-    projection.kanban_projection_record_path_for_ticket(state.target.ticket_id).unlink()
+    assert not projection.kanban_projection_record_path_for_ticket(
+        state.target.ticket_id,
+    ).exists()
+
+    def fail_project_task(*_args, **_kwargs):
+        raise projection.WorkPacketKanbanProjectionConflict(
+            "synthetic C47 projection materialization failure",
+        )
+
+    monkeypatch.setattr(projection, "_project_task", fail_project_task)
 
     import tools.pepper_workflow_tools  # noqa: F401
     from model_tools import handle_function_call
@@ -9098,8 +9105,13 @@ def test_c46_prepare_current_ticket_execution_fails_closed_without_current_proje
     )
 
     assert result["success"] is False
-    assert "P18.9.5 current projection unavailable/not projected" in result["error"]
+    assert "synthetic C47 projection materialization failure" in result["error"]
     assert "P18.9.0" not in result["error"]
+    assert result["dispatch_performed"] is False
+    assert result["execution_started"] is False
+    assert result["worker_execution"] is False
+    assert result["Kanban_dispatch"] is False
+    assert result["Git_mutation"] is False
     assert projection.load_kanban_projection_record(
         ticket_id=state.target.ticket_id,
         generation_record=state.generation,

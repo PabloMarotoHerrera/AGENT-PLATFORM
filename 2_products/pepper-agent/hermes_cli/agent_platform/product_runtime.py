@@ -1847,7 +1847,7 @@ def _current_incomplete_generation_record_from_records() -> dict[str, Any] | Non
     return None
 
 
-def _current_approved_generation_record_from_records() -> dict[str, Any] | None:
+def _current_approved_generation_authority_from_records() -> dict[str, dict[str, Any]] | None:
     for ticket_id in reversed(_governed_authority_ticket_ids_from_records()):
         authority, _historical = _approved_generation_supersession_authority(ticket_id)
         if authority is None:
@@ -1867,7 +1867,14 @@ def _current_approved_generation_record_from_records() -> dict[str, Any] | None:
             projection_record=projection,
         ):
             continue
-        return record
+        return authority
+    return None
+
+
+def _current_approved_generation_record_from_records() -> dict[str, Any] | None:
+    authority = _current_approved_generation_authority_from_records()
+    if authority is not None:
+        return authority["generation_record"]
     return None
 
 
@@ -5998,13 +6005,12 @@ def project_current_approved_workpacket_to_kanban(
     )
 
     workflow = build_workflow_control_snapshot()
-    approved_generation = _current_approved_generation_record_from_records()
-    if approved_generation is not None:
-        approved_ticket_id = str(approved_generation["ticket_id"])
+    approved_authority = _current_approved_generation_authority_from_records()
+    if approved_authority is not None:
+        generation = approved_authority["generation_record"]
+        decision = approved_authority["approval_decision_record"]
+        approved_ticket_id = str(generation["ticket_id"])
         if approved_ticket_id != PEPPER_BOOTSTRAP_NEXT_TICKET_ID:
-            bundle = _load_current_approved_ticket_authority_bundle()
-            generation = bundle["generation_record"]
-            decision = bundle["approval_decision_record"]
             workflow = _generation_workflow_overlay_for_current_selector(
                 generation,
                 approved_authority={

@@ -1134,7 +1134,14 @@ def _prepare_current_ticket_execution(args: dict[str, Any], **_kwargs) -> str:
         )
         updated_context = pr.build_lead_agent_operational_context()
     except Exception as exc:
-        extra = {"success": False}
+        extra = {
+            "success": False,
+            "dispatch_performed": False,
+            "worker_execution": False,
+            "execution_started": False,
+            "Kanban_dispatch": False,
+            "Git_mutation": False,
+        }
         blocker_code = getattr(exc, "blocker_code", None)
         diagnostics = getattr(exc, "diagnostics", None)
         if blocker_code:
