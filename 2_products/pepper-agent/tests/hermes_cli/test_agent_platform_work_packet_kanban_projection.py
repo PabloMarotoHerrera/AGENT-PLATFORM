@@ -10209,6 +10209,183 @@ def test_c39_v1_closed_latest_projection_does_not_override_older_open(
     assert pr._load_current_projection_record() == state.projections["P99.4"]
 
 
+def test_c45_approved_current_ticket_projection_overrides_bootstrap_projection(
+    projection_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    state = _install_c39_v1_projection_selector_fixture(
+        projection_home,
+        monkeypatch,
+        pr,
+        ticket_ids=("P18.9.0", "P18.9.5"),
+    )
+
+    bundle = pr._load_current_approved_ticket_authority_bundle()
+    current_projection = pr._load_current_projection_record()
+    binding_projection = pr._current_projection_record_for_binding()
+
+    assert bundle["generation_record"] == state.records["P18.9.5"]
+    assert bundle["approval_decision_record"] == state.decisions["P18.9.5"]
+    assert bundle["projection_record"] == state.projections["P18.9.5"]
+    assert current_projection == state.projections["P18.9.5"]
+    assert binding_projection == state.projections["P18.9.5"]
+    assert current_projection != state.projections["P18.9.0"]
+
+
+def test_c45_approved_current_ticket_without_projection_does_not_fallback_to_bootstrap(
+    projection_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    state = _install_c39_v1_projection_selector_fixture(
+        projection_home,
+        monkeypatch,
+        pr,
+        ticket_ids=("P18.9.0", "P18.9.5"),
+        projected_ticket_ids=("P18.9.0",),
+    )
+
+    with pytest.raises(
+        pr.ProductRuntimeNotFound,
+        match="P18.9.5 current projection unavailable/not projected",
+    ):
+        pr._load_current_projection_record()
+
+    assert pr._current_projection_record_for_binding() is None
+    assert state.projections["P18.9.0"]["ticket_id"] == "P18.9.0"
+
+
+def _c45_revision_authority(ticket_id: str, revision: str) -> SimpleNamespace:
+    token = f"{ticket_id}:{revision}"
+    generation = _c9_generation_record(ticket_id)
+    generation.update({
+        "ticket_spec_SHA256": hashlib.sha256(f"{token}:spec".encode()).hexdigest(),
+        "work_packet_id": f"WP-{ticket_id.replace('.', '-')}-{revision}-synthetic",
+        "work_packet_SHA256": hashlib.sha256(f"{token}:wp".encode()).hexdigest(),
+    })
+    decision = {
+        "ticket_id": ticket_id,
+        "decision": "approve",
+        "status": "approved",
+        "approval_publication_SHA256": hashlib.sha256(
+            f"{token}:approval".encode(),
+        ).hexdigest(),
+    }
+    projection_record = _c9_projection_record(ticket_id)
+    projection_record.update({
+        "ticket_spec_SHA256": generation["ticket_spec_SHA256"],
+        "work_packet_id": generation["work_packet_id"],
+        "work_packet_SHA256": generation["work_packet_SHA256"],
+        "approval_publication_SHA256": decision["approval_publication_SHA256"],
+        "dependency_plan_SHA256": hashlib.sha256(
+            f"{token}:dependency".encode(),
+        ).hexdigest(),
+        "kanban_board_slug": f"synthetic-{revision.lower()}",
+        "kanban_task_id": f"t_{ticket_id.replace('.', '_').lower()}_{revision.lower()}",
+    })
+    projection_record["projection_SHA256"] = hashlib.sha256(
+        f"{token}:projection".encode(),
+    ).hexdigest()
+    return SimpleNamespace(
+        generation=generation,
+        decision=decision,
+        projection=projection_record,
+    )
+
+
+def _write_c45_terminal_completion(pr, projection_record: dict[str, object]) -> dict:
+    record = {
+        "ticket_id": projection_record["ticket_id"],
+        "ticket_spec_SHA256": projection_record["ticket_spec_SHA256"],
+        "work_packet_id": projection_record["work_packet_id"],
+        "work_packet_SHA256": projection_record["work_packet_SHA256"],
+        "approval_publication_SHA256": projection_record["approval_publication_SHA256"],
+        "dependency_plan_SHA256": projection_record["dependency_plan_SHA256"],
+        "projection_SHA256": projection_record["projection_SHA256"],
+        "kanban_board_slug": projection_record["kanban_board_slug"],
+        "kanban_task_id": projection_record["kanban_task_id"],
+        "workflow_status": "completed",
+        "ticket_closed": True,
+    }
+    record["completion_record_SHA256"] = pr._human_git_handoff_completion_record_digest(
+        record,
+    )
+    _write_json_authority_record(
+        pr.human_git_handoff_completion_record_path_for_ticket(str(record["ticket_id"])),
+        record,
+    )
+    return record
+
+
+def test_c45_revision_bound_terminal_completion_does_not_clear_newer_revision(
+    projection_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    ticket_id = "P18.9.5"
+    state = _install_c39_v1_projection_selector_fixture(
+        projection_home,
+        monkeypatch,
+        pr,
+        ticket_ids=(ticket_id,),
+    )
+    r0006 = _c45_revision_authority(ticket_id, "R0006")
+    r0007 = _c45_revision_authority(ticket_id, "R0007")
+    state.records[ticket_id] = r0007.generation
+    state.decisions[ticket_id] = r0007.decision
+    state.projections[ticket_id] = r0007.projection
+    _write_c45_terminal_completion(pr, r0006.projection)
+
+    assert not pr._ticket_has_terminal_completion_record_for_current_selector(
+        generation_record=r0007.generation,
+        approval_decision_record=r0007.decision,
+    )
+    assert not pr._ticket_has_terminal_completion_record_for_current_selector(
+        generation_record=r0007.generation,
+        approval_decision_record=r0007.decision,
+        projection_record=r0007.projection,
+    )
+    assert pr._current_approved_generation_record_from_records() == r0007.generation
+    assert pr._load_current_projection_record() == r0007.projection
+
+
+def test_c45_revision_bound_terminal_completion_clears_matching_revision(
+    projection_home,
+    monkeypatch,
+) -> None:
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    ticket_id = "P18.9.5"
+    state = _install_c39_v1_projection_selector_fixture(
+        projection_home,
+        monkeypatch,
+        pr,
+        ticket_ids=(ticket_id,),
+    )
+    r0007 = _c45_revision_authority(ticket_id, "R0007")
+    state.records[ticket_id] = r0007.generation
+    state.decisions[ticket_id] = r0007.decision
+    state.projections[ticket_id] = r0007.projection
+    _write_c45_terminal_completion(pr, r0007.projection)
+
+    assert pr._ticket_has_terminal_completion_record_for_current_selector(
+        generation_record=r0007.generation,
+        approval_decision_record=r0007.decision,
+    )
+    assert pr._ticket_has_terminal_completion_record_for_current_selector(
+        generation_record=r0007.generation,
+        approval_decision_record=r0007.decision,
+        projection_record=r0007.projection,
+    )
+    assert pr._current_approved_generation_record_from_records() is None
+    with pytest.raises(pr.ProductRuntimeNotFound):
+        pr._load_current_projection_record()
+
+
 def test_c39_approved_generation_projection_drift_terminal_execution_remains_current(
     projection_home,
     monkeypatch,
@@ -14304,7 +14481,11 @@ def test_invalid_p18_9_3_successor_projection_fails_closed_without_reactivating_
             _write_json_authority_record(path, record)
 
         if label == "missing":
-            assert state.pr._load_current_projection_record()["ticket_id"] == "P18.9.2"
+            with pytest.raises(
+                state.pr.ProductRuntimeNotFound,
+                match="P18.9.3 current projection unavailable/not projected",
+            ):
+                state.pr._load_current_projection_record()
         else:
             with pytest.raises(state.pr.ProductRuntimeConflict):
                 state.pr._load_current_projection_record()

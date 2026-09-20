@@ -1432,6 +1432,136 @@ def _projection_has_terminal_ticket_completion(
     return _projection_has_completed_predecessor_evidence(projection)
 
 
+def _ticket_has_terminal_completion_record_for_current_selector(
+    *,
+    generation_record: dict[str, Any],
+    approval_decision_record: dict[str, Any] | None,
+    projection_record: dict[str, Any] | None = None,
+) -> bool:
+    safe_ticket_id = _safe_id(generation_record.get("ticket_id"))
+    if not isinstance(approval_decision_record, dict):
+        return False
+    if approval_decision_record.get("decision") != "approve":
+        return False
+    generation_bindings = (
+        "ticket_id",
+        "ticket_spec_SHA256",
+        "work_packet_id",
+        "work_packet_SHA256",
+    )
+    if any(generation_record.get(key) in {None, ""} for key in generation_bindings):
+        return False
+    approval_publication = approval_decision_record.get("approval_publication_SHA256")
+    if approval_publication in {None, ""}:
+        return False
+    projection_bindings: tuple[str, ...] = ()
+    if projection_record is not None:
+        projection_bindings = tuple(
+            key
+            for key in (
+                "dependency_plan_SHA256",
+                "projection_SHA256",
+                "kanban_board_slug",
+                "kanban_task_id",
+            )
+            if projection_record.get(key) not in {None, ""}
+        )
+        if not projection_bindings:
+            return False
+    try:
+        path = human_git_handoff_completion_record_path_for_ticket(safe_ticket_id)
+        if path.exists():
+            record = json.loads(path.read_text(encoding="utf-8"))
+            if (
+                isinstance(record, dict)
+                and record.get("completion_record_SHA256")
+                == _human_git_handoff_completion_record_digest(record)
+                and record.get("ticket_id") == safe_ticket_id
+                and record.get("workflow_status") == "completed"
+                and record.get("ticket_closed") is True
+                and all(
+                    record.get(key) == generation_record.get(key)
+                    for key in generation_bindings
+                )
+                and record.get("approval_publication_SHA256") == approval_publication
+                and all(
+                    record.get(key) == projection_record.get(key)
+                    for key in projection_bindings
+                )
+            ):
+                return True
+    except Exception:
+        pass
+    try:
+        path = review_acceptance_record_path_for_ticket(safe_ticket_id)
+        if path.exists():
+            record = json.loads(path.read_text(encoding="utf-8"))
+            if (
+                isinstance(record, dict)
+                and record.get("review_acceptance_action_SHA256")
+                == _review_acceptance_record_digest(record)
+                and record.get("ticket_id") == safe_ticket_id
+                and record.get("review_acceptance_status") == "accepted"
+                and record.get("ticket_closed") is True
+                and record.get("P18_9_0_closed") is True
+                and record.get("P18_9_0_completed") is True
+                and all(
+                    record.get(key) == generation_record.get(key)
+                    for key in generation_bindings
+                )
+                and record.get("approval_publication_SHA256") == approval_publication
+                and all(
+                    record.get(key) == projection_record.get(key)
+                    for key in projection_bindings
+                )
+            ):
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _terminal_handoff_completion_record_for_projection(
+    projection: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not isinstance(projection, dict):
+        return None
+    ticket_id = str(projection.get("ticket_id") or "").strip()
+    if not ticket_id:
+        return None
+    try:
+        path = human_git_handoff_completion_record_path_for_ticket(ticket_id)
+        if not path.exists():
+            return None
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(record, dict):
+        return None
+    if record.get("completion_record_SHA256") != _human_git_handoff_completion_record_digest(
+        record,
+    ):
+        return None
+    if record.get("workflow_status") != "completed" or record.get("ticket_closed") is not True:
+        return None
+    if all(
+        record.get(key) == projection.get(key)
+        for key in (
+            "ticket_id",
+            "ticket_spec_SHA256",
+            "work_packet_id",
+            "work_packet_SHA256",
+            "approval_publication_SHA256",
+            "dependency_plan_SHA256",
+            "projection_SHA256",
+            "kanban_board_slug",
+            "kanban_task_id",
+        )
+    ):
+        return record
+    return None
+
+
 def _projection_has_completed_predecessor_evidence(
     projection: dict[str, Any] | None,
 ) -> bool:
@@ -1440,34 +1570,8 @@ def _projection_has_completed_predecessor_evidence(
     ticket_id = str(projection.get("ticket_id") or "").strip()
     if not ticket_id:
         return False
-    try:
-        path = human_git_handoff_completion_record_path_for_ticket(ticket_id)
-        if path.exists():
-            record = json.loads(path.read_text(encoding="utf-8"))
-            if (
-                isinstance(record, dict)
-                and record.get("completion_record_SHA256")
-                == _human_git_handoff_completion_record_digest(record)
-                and record.get("workflow_status") == "completed"
-                and record.get("ticket_closed") is True
-                and all(
-                    record.get(key) == projection.get(key)
-                    for key in (
-                        "ticket_id",
-                        "ticket_spec_SHA256",
-                        "work_packet_id",
-                        "work_packet_SHA256",
-                        "approval_publication_SHA256",
-                        "dependency_plan_SHA256",
-                        "projection_SHA256",
-                        "kanban_board_slug",
-                        "kanban_task_id",
-                    )
-                )
-            ):
-                return True
-    except Exception:
-        pass
+    if _terminal_handoff_completion_record_for_projection(projection) is not None:
+        return True
     try:
         path = review_acceptance_record_path_for_ticket(ticket_id)
         if path.exists():
@@ -1714,7 +1818,21 @@ def _current_incomplete_generation_record_from_records() -> dict[str, Any] | Non
                 )
             except Exception:
                 pass
-        if _projection_has_terminal_ticket_completion(projection):
+        completion_authority = _approved_generation_authority_for_completion_selector(
+            ticket_id,
+            record,
+            approved_authority,
+        )
+        if (
+            completion_authority is not None
+            and _ticket_has_terminal_completion_record_for_current_selector(
+                generation_record=record,
+                approval_decision_record=completion_authority["approval_decision_record"],
+                projection_record=projection,
+            )
+        ):
+            continue
+        if projection is not None and _projection_has_terminal_ticket_completion(projection):
             continue
         _predecessor_overlay, predecessor_valid = (
             _completed_predecessor_overlay_for_current_authority(ticket_id, record)
@@ -1729,12 +1847,44 @@ def _current_incomplete_generation_record_from_records() -> dict[str, Any] | Non
     return None
 
 
+def _current_approved_generation_record_from_records() -> dict[str, Any] | None:
+    for ticket_id in reversed(_governed_authority_ticket_ids_from_records()):
+        authority, _historical = _approved_generation_supersession_authority(ticket_id)
+        if authority is None:
+            continue
+        record = authority["generation_record"]
+        if not _approved_generation_authority_matches_record(authority, record):
+            continue
+        try:
+            projection = _projection_record_for_generation_with_approved_authority_fallback(
+                record,
+            )
+        except Exception:
+            projection = None
+        if _ticket_has_terminal_completion_record_for_current_selector(
+            generation_record=record,
+            approval_decision_record=authority["approval_decision_record"],
+            projection_record=projection,
+        ):
+            continue
+        return record
+    return None
+
+
 def _current_projection_record_for_binding() -> dict[str, Any] | None:
     try:
         from hermes_cli.agent_platform.workflow.work_packet_kanban_projection import (
             load_p18_9_0_kanban_projection_record,
         )
 
+        approved_generation = _current_approved_generation_record_from_records()
+        if approved_generation is not None:
+            projection = _current_projection_record_for_ticket_id(
+                str(approved_generation["ticket_id"]),
+            )
+            if projection is not None:
+                return projection
+            return None
         ticket_id = _current_projected_ticket_id_from_records()
         if ticket_id:
             projection = _current_projection_record_for_ticket_id(ticket_id)
@@ -2236,6 +2386,12 @@ def _current_approved_ticket_authority_bundle_from_records(
         return None
     if str(projection_record.get("ticket_id") or "").strip() != safe_ticket_id:
         return None
+    if _ticket_has_terminal_completion_record_for_current_selector(
+        generation_record=generation_record,
+        approval_decision_record=approval_decision_record,
+        projection_record=projection_record,
+    ):
+        return None
     if _projection_has_terminal_ticket_completion(projection_record):
         return None
     return {
@@ -2284,11 +2440,26 @@ def _current_approved_ticket_authority_bundle_for_ticket(
     if bundle is not None:
         return bundle
     if normal_error is not None and raise_on_invalid_current:
-        raise normal_error
+        if isinstance(normal_error, ProductRuntimeConflict):
+            raise normal_error
+        raise ProductRuntimeConflict(str(normal_error)) from normal_error
     return None
 
 
 def _load_current_approved_ticket_authority_bundle() -> dict[str, dict[str, Any]]:
+    approved_generation = _current_approved_generation_record_from_records()
+    if approved_generation is not None:
+        approved_ticket_id = str(approved_generation["ticket_id"])
+        bundle = _current_approved_ticket_authority_bundle_for_ticket(
+            approved_ticket_id,
+            raise_on_invalid_current=True,
+        )
+        if bundle is not None:
+            return bundle
+        raise ProductRuntimeNotFound(
+            f"{approved_ticket_id} current projection unavailable/not projected"
+        )
+
     ticket_id = _current_projected_ticket_id_from_records()
     if ticket_id:
         bundle = _current_approved_ticket_authority_bundle_for_ticket(
@@ -2324,6 +2495,21 @@ def _approved_generation_authority_matches_record(
         if generation.get(key) != record.get(key):
             return False
     return True
+
+
+def _approved_generation_authority_for_completion_selector(
+    ticket_id: str,
+    record: dict[str, Any],
+    approved_authority: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, dict[str, Any]] | None:
+    authority = approved_authority
+    if authority is None:
+        authority, _historical = _approved_generation_supersession_authority(ticket_id)
+    if authority is None:
+        return None
+    if not _approved_generation_authority_matches_record(authority, record):
+        return None
+    return authority
 
 
 def _projection_record_for_generation_with_approved_authority_fallback(
@@ -3280,6 +3466,24 @@ def _apply_current_ticket_durable_completion_precedence(
         return
     if projection is None:
         return
+    terminal_handoff = _terminal_handoff_completion_record_for_projection(projection)
+    if terminal_handoff is not None:
+        snapshot.update(_human_git_handoff_completion_overlay_from_record(terminal_handoff))
+        snapshot.setdefault(
+            "historical_terminal_completed_predecessor_traversal",
+            {
+                "verdict": "HISTORICAL_TERMINAL_COMPLETED_PREDECESSOR_TRAVERSAL_READY",
+                "ticket_id": ticket_id,
+                "current_actionable_authority": False,
+                "projection_SHA256": projection.get("projection_SHA256"),
+                "completion_record_SHA256": terminal_handoff.get(
+                    "completion_record_SHA256",
+                ),
+                "terminal_completion_evidence": "human_git_handoff_completion",
+            },
+        )
+        _clear_current_ticket_execution_lifecycle_blockers(remaining_blockers, ticket_id)
+        return
     completion_overlay, completion_blocker = (
         _current_ticket_human_git_handoff_completion_overlay_or_blocker(projection)
     )
@@ -4091,6 +4295,22 @@ def _current_incomplete_ticket_authority_overlay() -> tuple[
                         )
                     )
                     if projection is not None:
+                        completion_authority = _approved_generation_authority_for_completion_selector(
+                            ticket_id,
+                            generation,
+                            approved_authority,
+                        )
+                        if (
+                            completion_authority is not None
+                            and _ticket_has_terminal_completion_record_for_current_selector(
+                                generation_record=generation,
+                                approval_decision_record=completion_authority[
+                                    "approval_decision_record"
+                                ],
+                                projection_record=projection,
+                            )
+                        ):
+                            continue
                         if _projection_has_terminal_ticket_completion(projection):
                             continue
                         overlay.update(_projection_overlay_for_record(projection))
@@ -4100,6 +4320,22 @@ def _current_incomplete_ticket_authority_overlay() -> tuple[
                         "status": "blocked_by_invalid_generated_successor_projection_authority",
                         "evidence": _safe_text(exc, limit=300),
                     }
+            if projection is None:
+                completion_authority = _approved_generation_authority_for_completion_selector(
+                    ticket_id,
+                    generation,
+                    approved_authority,
+                )
+                if (
+                    completion_authority is not None
+                    and _ticket_has_terminal_completion_record_for_current_selector(
+                        generation_record=generation,
+                        approval_decision_record=completion_authority[
+                            "approval_decision_record"
+                        ],
+                    )
+                ):
+                    continue
             predecessor_overlay, predecessor_valid = (
                 _completed_predecessor_overlay_for_current_authority(ticket_id, generation)
             )
