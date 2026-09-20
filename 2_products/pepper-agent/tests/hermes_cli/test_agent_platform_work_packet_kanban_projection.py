@@ -8760,6 +8760,12 @@ def test_chat_tool_prepares_current_generic_ticket_execution_projection(
         return workflow
 
     monkeypatch.setattr(pr, "build_workflow_control_snapshot", workflow_snapshot)
+    projection.project_current_approved_workpacket_to_kanban(
+        workflow=_approved_workflow_for_record(generation),
+        requested_project_id="PEPPER",
+        requested_ticket_id="P18.9.1",
+        requested_next_action_id="P18_9_1_APPROVED_NO_EXECUTION",
+    )
     import tools.pepper_workflow_tools  # noqa: F401
     from model_tools import handle_function_call
 
@@ -8828,6 +8834,17 @@ def test_chat_tool_prepares_approved_successor_execution_projection(
         )
     )
     approved_snapshot = pr.build_workflow_control_snapshot()
+    projection.project_current_approved_workpacket_to_kanban(
+        workflow={
+            **_p18_9_2_workflow(),
+            **bridge.generated_record_to_workflow_overlay(record),
+            "active_execution_count": 0,
+            "execution_state": "no_active_executions",
+        },
+        requested_project_id="PEPPER",
+        requested_ticket_id="P18.9.2",
+        requested_next_action_id="P18_9_2_APPROVED_NO_EXECUTION",
+    )
 
     result = json.loads(
         handle_function_call(
@@ -8878,6 +8895,216 @@ def test_chat_tool_prepares_approved_successor_execution_projection(
     assert queued_snapshot["worker_execution"] is False
     assert queued_snapshot["Kanban_dispatch"] is False
     assert queued_snapshot["Git_mutation"] is False
+
+
+def _c46_structured_current_target(ticket_id: str = "P18.9.5"):
+    contract = _synthetic_implementation_contract("C46CurrentRevision")
+    contract["validation_steps"] = [
+        {
+            "validation_id": validation_id,
+            "description": f"Run {validation_id} for the C46 current revision.",
+            "command": command,
+            "expected_result": f"{validation_id} exits successfully.",
+            "command_authority": {
+                "validation_id": validation_id,
+                "source_command": command,
+                "package_relative_path": "2_products/pepper-agent/web",
+                "command_argv": list(argv),
+                "timeout_seconds": 180,
+                "expected_exit_codes": [0],
+            },
+        }
+        for validation_id, command, argv in _c42_validation_command_specs()
+    ]
+    return bridge.GovernedTicketGenerationTarget(
+        project_id="PEPPER",
+        project_name="Pepper",
+        macroproject_id="P18.9",
+        macroproject_title="Pepper Product Personalization",
+        ticket_id=ticket_id,
+        ticket_title="Synthetic C46 Current Revision",
+        next_action_id=bridge.canonical_generation_action_id(ticket_id),
+        approval_next_action_id=bridge.approval_action_id(ticket_id),
+        approved_no_execution_next_action_id=bridge.approved_no_execution_action_id(ticket_id),
+        revise_next_action_id=bridge.revise_action_id(ticket_id),
+        canonical_roadmap_authority="synthetic_c46_current_revision_roadmap",
+        roadmap_authority_path="synthetic-c46-current-revision-roadmap.md",
+        roadmap_authority_section="Synthetic C46 current revision",
+        dependency_ticket_ids=(),
+        predecessor_ticket_id=None,
+        readiness_state="synthetic_ready",
+        authority_source="synthetic_c46_current_revision_fixture",
+        ticket_contract=contract,
+    )
+
+
+def _c46_prepare_current_revision_fixture(projection_home, monkeypatch):
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _install_execution_profile(monkeypatch, projection_home)
+    bootstrap_generation, _bootstrap_decision = _approve_current_ticket()
+    bootstrap_projection = pr.project_current_approved_workpacket_to_kanban(
+        project_id="PEPPER",
+        ticket_id="P18.9.0",
+        next_action_id="P18_9_0_APPROVED_NO_EXECUTION",
+    )
+    assert bootstrap_projection["ticket_id"] == "P18.9.0"
+    assert bootstrap_projection["ticket_spec_SHA256"] == bootstrap_generation[
+        "ticket_spec_SHA256"
+    ]
+
+    _install_implementation_profile(monkeypatch, projection_home)
+    target = _c46_structured_current_target()
+    original_resolve_roadmap_ticket_authority = bridge.resolve_roadmap_ticket_authority
+
+    def resolve_roadmap_ticket_authority(ticket_id: str) -> dict[str, object]:
+        if ticket_id == target.ticket_id:
+            return {
+                "ticket_id": target.ticket_id,
+                "ticket_title": target.ticket_title,
+                "authority_type": target.canonical_roadmap_authority,
+                "authority_path": target.roadmap_authority_path,
+                "authority_section": target.roadmap_authority_section,
+                "dependency_ticket_ids": target.dependency_ticket_ids,
+                "roadmap_purpose": target.roadmap_purpose,
+                "ticket_contract": target.ticket_contract,
+            }
+        return original_resolve_roadmap_ticket_authority(ticket_id)
+
+    monkeypatch.setattr(
+        bridge,
+        "resolve_roadmap_ticket_authority",
+        resolve_roadmap_ticket_authority,
+    )
+    bridge.generate_current_ticket(
+        workflow=_synthetic_workflow_for_target(target),
+        target=target,
+    )
+    generation = bridge.load_generation_record(ticket_id=target.ticket_id)
+    assert generation is not None
+    ticket_spec = generation["ticket_spec"]
+    assert [step["validation_id"] for step in ticket_spec["validation_steps"][:3]] == [
+        "V1",
+        "V2",
+        "V3",
+    ]
+    assert all(
+        "command_authority" in step
+        for step in ticket_spec["validation_steps"][:3]
+    )
+    approved = pr.apply_approval_decision(
+        target.ticket_id,
+        pr.ApprovalDecisionRequest(decision="approve", actor="synthetic-human"),
+    )
+    assert approved["status"] == "approved"
+    decision = bridge.load_approval_decision_record(
+        ticket_id=target.ticket_id,
+        generation_record=generation,
+    )
+    assert decision is not None
+    approved_workflow = {
+        **_synthetic_workflow_for_target(target),
+        **bridge.generated_record_to_workflow_overlay(generation),
+        "active_execution_count": 0,
+        "execution_state": "no_active_executions",
+    }
+    projected = projection.project_current_approved_workpacket_to_kanban(
+        workflow=approved_workflow,
+        requested_project_id="PEPPER",
+        requested_ticket_id=target.ticket_id,
+        requested_next_action_id=target.approved_no_execution_next_action_id,
+    )
+    projection_record = projection.load_kanban_projection_record(
+        ticket_id=target.ticket_id,
+        generation_record=generation,
+        decision_record=decision,
+    )
+    assert projection_record is not None
+    return SimpleNamespace(
+        pr=pr,
+        target=target,
+        generation=generation,
+        decision=decision,
+        projected=projected,
+        projection_record=projection_record,
+        bootstrap_projection=bootstrap_projection,
+    )
+
+
+def test_c46_prepare_current_ticket_execution_uses_approved_current_revision_projection(
+    projection_home,
+    monkeypatch,
+) -> None:
+    state = _c46_prepare_current_revision_fixture(projection_home, monkeypatch)
+
+    import tools.pepper_workflow_tools  # noqa: F401
+    from model_tools import handle_function_call
+
+    result = json.loads(
+        handle_function_call(
+            "prepare_current_ticket_execution",
+            {
+                "human_request_text": "Prepare P18.9.5 current revision execution.",
+                "project_id": "PEPPER",
+                "ticket_id": state.target.ticket_id,
+                "next_action_id": state.target.approved_no_execution_next_action_id,
+            },
+        )
+    )
+
+    assert result["success"] is True
+    assert result["source_tool"] == "prepare_current_ticket_execution"
+    assert result["ticket_id"] == state.target.ticket_id
+    assert result["ticket_id"] != "P18.9.0"
+    assert result["ticket_spec_SHA256"] == state.generation["ticket_spec_SHA256"]
+    assert result["work_packet_id"] == state.generation["work_packet_id"]
+    assert result["work_packet_SHA256"] == state.generation["work_packet_SHA256"]
+    assert result["authority"]["projection_SHA256"] == state.projection_record[
+        "projection_SHA256"
+    ]
+    assert result["kanban_task_id"] == state.projection_record["kanban_task_id"]
+    assert result["kanban_task_id"] != state.bootstrap_projection["kanban_task_id"]
+    assert result["current_ticket_id"] == state.target.ticket_id
+    assert result["workflow_status"] == "queued"
+    assert result["queue_state"] == "kanban_projection_ready_not_dispatched"
+    assert result["idempotent_replay"] is True
+    assert result["dispatch_performed"] is False
+    assert result["execution_started"] is False
+    assert result["worker_execution"] is False
+    assert result["Kanban_dispatch"] is False
+    assert result["Git_mutation"] is False
+
+
+def test_c46_prepare_current_ticket_execution_fails_closed_without_current_projection(
+    projection_home,
+    monkeypatch,
+) -> None:
+    state = _c46_prepare_current_revision_fixture(projection_home, monkeypatch)
+    projection.kanban_projection_record_path_for_ticket(state.target.ticket_id).unlink()
+
+    import tools.pepper_workflow_tools  # noqa: F401
+    from model_tools import handle_function_call
+
+    result = json.loads(
+        handle_function_call(
+            "prepare_current_ticket_execution",
+            {
+                "human_request_text": "Prepare current approved execution projection.",
+                "project_id": "PEPPER",
+                "ticket_id": state.target.ticket_id,
+                "next_action_id": state.target.approved_no_execution_next_action_id,
+            },
+        )
+    )
+
+    assert result["success"] is False
+    assert "P18.9.5 current projection unavailable/not projected" in result["error"]
+    assert "P18.9.0" not in result["error"]
+    assert projection.load_kanban_projection_record(
+        ticket_id=state.target.ticket_id,
+        generation_record=state.generation,
+        decision_record=state.decision,
+    ) is None
 
 
 def test_approved_successor_dependency_materialization_failure_survives_fresh_reconstruction(

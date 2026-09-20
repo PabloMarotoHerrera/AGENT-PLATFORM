@@ -5997,8 +5997,23 @@ def project_current_approved_workpacket_to_kanban(
         project_current_approved_workpacket_to_kanban as project_workpacket,
     )
 
+    workflow = build_workflow_control_snapshot()
+    approved_generation = _current_approved_generation_record_from_records()
+    if approved_generation is not None:
+        approved_ticket_id = str(approved_generation["ticket_id"])
+        if approved_ticket_id != PEPPER_BOOTSTRAP_NEXT_TICKET_ID:
+            bundle = _load_current_approved_ticket_authority_bundle()
+            generation = bundle["generation_record"]
+            decision = bundle["approval_decision_record"]
+            workflow = _generation_workflow_overlay_for_current_selector(
+                generation,
+                approved_authority={
+                    "generation_record": generation,
+                    "approval_decision_record": decision,
+                },
+            )
     return project_workpacket(
-        workflow=build_workflow_control_snapshot(),
+        workflow=workflow,
         requested_project_id=project_id,
         requested_ticket_id=ticket_id,
         requested_next_action_id=next_action_id,
