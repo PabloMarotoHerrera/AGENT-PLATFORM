@@ -243,6 +243,10 @@ def load_kanban_projection_record(
         allow_terminal_completed_predecessor_historical=allow_terminal_completed_predecessor_historical,
     )
     path = kanban_projection_record_path_for_ticket(safe_ticket_id)
+    if allow_terminal_completed_predecessor_historical:
+        historical_path = _historical_projection_path(generation_record)
+        if historical_path.exists():
+            path = historical_path
     if not path.exists():
         return None
     try:
@@ -251,13 +255,125 @@ def load_kanban_projection_record(
         raise WorkPacketKanbanProjectionConflict(
             f"{safe_ticket_id} Kanban projection record is unreadable"
         ) from exc
-    return validate_kanban_projection_record(
-        record,
-        ticket_id=safe_ticket_id,
-        generation_record=generation_record,
-        decision_record=decision_record,
-        allow_terminal_completed_predecessor_historical=allow_terminal_completed_predecessor_historical,
+    try:
+        return validate_kanban_projection_record(
+            record,
+            ticket_id=safe_ticket_id,
+            generation_record=generation_record,
+            decision_record=decision_record,
+            allow_terminal_completed_predecessor_historical=allow_terminal_completed_predecessor_historical,
+        )
+    except WorkPacketKanbanProjectionConflict:
+        if not allow_terminal_completed_predecessor_historical:
+            generation = _generation_authority(
+                ticket_id=safe_ticket_id,
+                generation_record=generation_record,
+                allow_terminal_completed_predecessor_historical=False,
+            )
+            if generation is not None and generation.get("ticket_id") == safe_ticket_id:
+                decision = _approval_decision_authority(
+                    ticket_id=safe_ticket_id,
+                    generation_record=generation,
+                    decision_record=decision_record,
+                    allow_terminal_completed_predecessor_historical=False,
+                )
+                if (
+                    decision is not None
+                    and decision.get("decision") == "approve"
+                    and _projection_is_superseded(record, generation)
+                ):
+                    return None
+        raise
+
+
+def _historical_projection_path(record: dict[str, Any]) -> Path:
+    ticket_id = _safe_ticket_id(record.get("ticket_id"))
+    digest = str(record.get("work_packet_SHA256") or "")
+    if not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise WorkPacketKanbanProjectionConflict(
+            "historical projection WorkPacket digest is invalid"
+        )
+    return (
+        kanban_projection_record_path_for_ticket(ticket_id).parent
+        / "history"
+        / ticket_id
+        / f"{digest}.json"
     )
+
+
+def _projection_is_superseded(
+    record: dict[str, Any], generation: dict[str, Any]
+) -> bool:
+    """Require a validated revision chain and approved historical projection binding."""
+    from hermes_cli.agent_platform.workflow import ticket_architect_bridge as bridge
+
+    if not isinstance(record, dict) or record.get(
+        "projection_SHA256"
+    ) != _projection_record_digest(record):
+        return False
+    ticket_id = str(generation["ticket_id"])
+    entries = []
+    for path in (
+        bridge.current_ticket_material_revision_history_path_for_ticket(ticket_id),
+        bridge.rejected_successor_revision_history_path_for_ticket(ticket_id),
+    ):
+        if path.exists():
+            try:
+                entries.extend(
+                    json.loads(line)
+                    for line in path.read_text(encoding="utf-8").splitlines()
+                    if line.strip()
+                )
+            except (OSError, ValueError):
+                return False
+    cursor = generation.get("bridge_SHA256")
+    visited = set()
+    while cursor and cursor not in visited:
+        visited.add(cursor)
+        predecessors = [
+            entry
+            for entry in entries
+            if isinstance(entry, dict)
+            and entry.get("revised_generation_bridge_SHA256") == cursor
+        ]
+        if len(predecessors) != 1:
+            return False
+        entry = predecessors[0]
+        if entry.get("ticket_id") != ticket_id or entry.get(
+            "revision_SHA256"
+        ) != bridge._revision_history_record_digest(entry):
+            return False
+        previous = entry.get("historical_current_generation_record") or entry.get(
+            "historical_rejected_generation_record"
+        )
+        successor = entry.get("new_generation_record")
+        if not isinstance(previous, dict) or not isinstance(successor, dict):
+            return False
+        try:
+            bridge.validate_historical_approved_predecessor_generation_record(previous)
+            bridge.validate_historical_approved_predecessor_generation_record(successor)
+            if (
+                previous.get("ticket_id") != ticket_id
+                or successor.get("ticket_id") != ticket_id
+                or successor.get("bridge_SHA256") != cursor
+            ):
+                return False
+            decision = entry.get("historical_approved_decision_record")
+            if decision is not None and record.get(
+                "work_packet_SHA256"
+            ) == previous.get("work_packet_SHA256"):
+                validate_kanban_projection_record(
+                    record,
+                    ticket_id=ticket_id,
+                    generation_record=previous,
+                    decision_record=decision,
+                    allow_terminal_completed_predecessor_historical=True,
+                )
+                return True
+        except (bridge.TicketArchitectBridgeError, WorkPacketKanbanProjectionError):
+            return False
+        cursor = previous.get("bridge_SHA256")
+    return False
 
 
 def validate_p18_9_0_kanban_projection_record(
@@ -1670,6 +1786,16 @@ def _persist_projection_record(record: dict[str, Any]) -> None:
         existing = load_kanban_projection_record(ticket_id=ticket_id)
         if existing is not None:
             return
+        # The loader only returns None for an existing record after proving
+        # supersession. Preserve that exact evidence before replacing current.
+        previous_bytes = path.read_bytes()
+        historical_path = _historical_projection_path(json.loads(previous_bytes))
+        historical_path.parent.mkdir(parents=True, exist_ok=True)
+        if historical_path.exists():
+            if historical_path.read_bytes() != previous_bytes:
+                raise WorkPacketKanbanProjectionConflict("historical projection archive mismatch")
+        else:
+            historical_path.write_bytes(previous_bytes)
     tmp = path.with_suffix(path.suffix + ".tmp")
     serialized = json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     tmp.write_text(serialized, encoding="utf-8")

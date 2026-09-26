@@ -4331,6 +4331,8 @@ def _current_incomplete_ticket_authority_overlay() -> tuple[
                         "evidence": _safe_text(exc, limit=300),
                     }
             if projection is None:
+                overlay["kanban_projection_authority"] = None
+                overlay["P18_9_kanban_projection_present"] = False
                 completion_authority = _approved_generation_authority_for_completion_selector(
                     ticket_id,
                     generation,
