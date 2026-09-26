@@ -9011,6 +9011,191 @@ def _c46_prepare_current_revision_fixture(projection_home, monkeypatch):
     )
 
 
+def _append_c49_revision_history_entry(path: Path, entry: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def _c49_mixed_durable_history_fixture(projection_home, monkeypatch):
+    state = _c46_prepare_current_revision_fixture(projection_home, monkeypatch)
+    ticket_id = state.target.ticket_id
+    older_approved = _c45_revision_authority(ticket_id, "R0005")
+    rejected_revision = _c45_revision_authority(ticket_id, "R0006")
+    rejected_decision = dict(rejected_revision.decision)
+    rejected_decision.update({"decision": "reject", "status": "rejected"})
+    corrected_revision = _c45_revision_authority(ticket_id, "R0006-CORRECTED")
+
+    _append_c49_revision_history_entry(
+        bridge.rejected_successor_revision_history_path_for_ticket(ticket_id),
+        {
+            "ticket_id": ticket_id,
+            "revision_status": "revised_to_awaiting_ticket_approval",
+            "historical_rejected_generation_record": rejected_revision.generation,
+            "historical_rejected_approval_decision_record": rejected_decision,
+            "new_generation_record": corrected_revision.generation,
+        },
+    )
+    _append_c49_revision_history_entry(
+        bridge.current_ticket_material_revision_history_path_for_ticket(ticket_id),
+        {
+            "ticket_id": ticket_id,
+            "revision_status": "current_ticket_revised_to_awaiting_ticket_approval",
+            "revision_reason": "material_contract_failure",
+            "historical_current_generation_record": older_approved.generation,
+            "historical_approved_decision_record": older_approved.decision,
+            "new_generation_record": corrected_revision.generation,
+        },
+    )
+    _write_c45_terminal_completion(state.pr, older_approved.projection)
+
+    monkeypatch.setattr(
+        state.pr,
+        "_governed_authority_ticket_ids_from_records",
+        lambda: (ticket_id, "P18.9.0"),
+    )
+    return SimpleNamespace(
+        **vars(state),
+        older_approved=older_approved,
+        rejected_revision=rejected_revision,
+        rejected_decision=rejected_decision,
+        corrected_revision=corrected_revision,
+    )
+
+
+def test_c49_mixed_history_resolver_selects_current_approved_revision(
+    projection_home,
+    monkeypatch,
+) -> None:
+    state = _c49_mixed_durable_history_fixture(projection_home, monkeypatch)
+    assert not projection.kanban_projection_record_path_for_ticket(
+        state.target.ticket_id,
+    ).exists()
+    assert not state.pr._ticket_has_terminal_completion_record_for_current_selector(
+        generation_record=state.generation,
+        approval_decision_record=state.decision,
+    )
+
+    authority = state.pr._current_approved_generation_authority_from_records()
+
+    assert authority is not None
+    assert authority["generation_record"]["ticket_id"] == state.target.ticket_id
+    assert authority["generation_record"]["ticket_id"] != "P18.9.0"
+    assert authority["generation_record"]["ticket_spec_SHA256"] == state.generation[
+        "ticket_spec_SHA256"
+    ]
+    assert authority["generation_record"]["work_packet_id"] == state.generation[
+        "work_packet_id"
+    ]
+    assert authority["generation_record"]["work_packet_SHA256"] == state.generation[
+        "work_packet_SHA256"
+    ]
+    assert authority["approval_decision_record"] == state.decision
+
+
+def test_c49_wrapper_hands_current_approved_revision_to_projection(
+    projection_home,
+    monkeypatch,
+) -> None:
+    state = _c49_mixed_durable_history_fixture(projection_home, monkeypatch)
+    captured = {}
+
+    def capture_projection_handoff(
+        *,
+        workflow,
+        requested_project_id=None,
+        requested_ticket_id=None,
+        requested_next_action_id=None,
+    ):
+        captured.update({
+            "workflow": workflow,
+            "requested_project_id": requested_project_id,
+            "requested_ticket_id": requested_ticket_id,
+            "requested_next_action_id": requested_next_action_id,
+        })
+        return {"success": True, "ticket_id": workflow["current_ticket_id"]}
+
+    monkeypatch.setattr(
+        projection,
+        "project_current_approved_workpacket_to_kanban",
+        capture_projection_handoff,
+    )
+
+    result = state.pr.project_current_approved_workpacket_to_kanban(
+        project_id="PEPPER",
+        ticket_id=state.target.ticket_id,
+        next_action_id=state.target.approved_no_execution_next_action_id,
+    )
+    workflow = captured["workflow"]
+
+    assert result["success"] is True
+    assert result["ticket_id"] == state.target.ticket_id
+    assert workflow["current_ticket_id"] == state.target.ticket_id
+    assert workflow["current_ticket_id"] != "P18.9.0"
+    assert workflow["workflow_status"] == "ticket_approved"
+    assert workflow["next_action"]["id"] == state.target.approved_no_execution_next_action_id
+    assert workflow["generated_ticket_authority"]["ticket_spec_SHA256"] == state.generation[
+        "ticket_spec_SHA256"
+    ]
+    assert workflow["generated_ticket_authority"]["work_packet_id"] == state.generation[
+        "work_packet_id"
+    ]
+    assert workflow["generated_ticket_authority"]["work_packet_SHA256"] == state.generation[
+        "work_packet_SHA256"
+    ]
+    assert captured["requested_ticket_id"] == state.target.ticket_id
+
+
+def test_c49_prepare_current_ticket_execution_uses_current_revision_under_mixed_history(
+    projection_home,
+    monkeypatch,
+) -> None:
+    state = _c49_mixed_durable_history_fixture(projection_home, monkeypatch)
+    assert projection.load_kanban_projection_record(
+        ticket_id=state.target.ticket_id,
+        generation_record=state.generation,
+        decision_record=state.decision,
+    ) is None
+
+    import tools.pepper_workflow_tools  # noqa: F401
+    from model_tools import handle_function_call
+
+    result = json.loads(
+        handle_function_call(
+            "prepare_current_ticket_execution",
+            {
+                "human_request_text": "Prepare mixed-history current approved execution.",
+                "project_id": "PEPPER",
+                "ticket_id": state.target.ticket_id,
+                "next_action_id": state.target.approved_no_execution_next_action_id,
+            },
+        )
+    )
+    projection_record = projection.load_kanban_projection_record(
+        ticket_id=state.target.ticket_id,
+        generation_record=state.generation,
+        decision_record=state.decision,
+    )
+
+    assert result["success"] is True
+    assert result["source_tool"] == "prepare_current_ticket_execution"
+    assert result["ticket_id"] == state.target.ticket_id
+    assert result["ticket_id"] != "P18.9.0"
+    assert projection_record is not None
+    assert projection_record["ticket_id"] == state.target.ticket_id
+    assert result["ticket_spec_SHA256"] == state.generation["ticket_spec_SHA256"]
+    assert result["work_packet_id"] == state.generation["work_packet_id"]
+    assert result["work_packet_SHA256"] == state.generation["work_packet_SHA256"]
+    assert projection_record["ticket_spec_SHA256"] == state.generation["ticket_spec_SHA256"]
+    assert projection_record["work_packet_SHA256"] == state.generation["work_packet_SHA256"]
+    assert result["kanban_task_id"] != state.bootstrap_projection["kanban_task_id"]
+    assert result["dispatch_performed"] is False
+    assert result["execution_started"] is False
+    assert result["worker_execution"] is False
+    assert result["Kanban_dispatch"] is False
+    assert result["Git_mutation"] is False
+
+
 def test_c48_pre_projection_approved_authority_resolver_does_not_load_projection(
     projection_home,
     monkeypatch,

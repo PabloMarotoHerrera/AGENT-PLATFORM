@@ -1360,6 +1360,16 @@ def _governed_authority_ticket_ids_from_records() -> tuple[str, ...]:
     return (*roadmap_ticket_ids, *orphan_ticket_ids)
 
 
+def _current_authority_ticket_ids_by_precedence() -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            _governed_authority_ticket_ids_from_records(),
+            key=_governed_ticket_sequence_key,
+            reverse=True,
+        )
+    )
+
+
 def _projection_has_valid_durable_ticket_completion(
     projection: dict[str, Any] | None,
 ) -> bool:
@@ -1766,7 +1776,7 @@ def _current_incomplete_generation_record_from_records() -> dict[str, Any] | Non
     except Exception:
         return None
 
-    for ticket_id in reversed(_governed_authority_ticket_ids_from_records()):
+    for ticket_id in _current_authority_ticket_ids_by_precedence():
         approved_authority = None
         authority_bundle = None
         try:
@@ -1848,7 +1858,7 @@ def _current_incomplete_generation_record_from_records() -> dict[str, Any] | Non
 
 
 def _current_approved_generation_authority_from_records() -> dict[str, dict[str, Any]] | None:
-    for ticket_id in reversed(_governed_authority_ticket_ids_from_records()):
+    for ticket_id in _current_authority_ticket_ids_by_precedence():
         authority, _historical = _approved_generation_supersession_authority(ticket_id)
         if authority is None:
             continue
@@ -3826,7 +3836,7 @@ def _correction_successor_records_for_precedence() -> list[dict[str, Any]]:
         return []
 
     records: list[dict[str, Any]] = []
-    for ticket_id in reversed(_governed_authority_ticket_ids_from_records()):
+    for ticket_id in _current_authority_ticket_ids_by_precedence():
         try:
             record = load_generation_record(
                 ticket_id=ticket_id,
