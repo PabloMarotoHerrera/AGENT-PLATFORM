@@ -345,6 +345,10 @@ _GOVERNED_TICKET_AUTHORITY_PATH_SPECS = {
         _GOVERNED_TICKET_START_STORE_DIR,
         "execution-start.json",
     ),
+    "execution_start_history": (
+        _GOVERNED_TICKET_START_STORE_DIR,
+        "execution-start.history.jsonl",
+    ),
     "retry_start": (
         _GOVERNED_TICKET_START_STORE_DIR,
         "retry-start.json",
@@ -2092,6 +2096,15 @@ def _execution_start_record_path_for_projection(
         return execution_start_record_path_for_ticket(str(projection_record["ticket_id"]))
     projection = _load_current_projection_record()
     return execution_start_record_path_for_ticket(str(projection["ticket_id"]))
+
+
+def execution_start_history_path_for_ticket(ticket_id: str) -> Path:
+    """Return the append-only execution-start history for one governed ticket."""
+
+    return governed_ticket_lifecycle_authority_path(
+        "execution_start_history",
+        ticket_id=ticket_id,
+    )
 
 
 def _current_ticket_identity_fields(
@@ -6298,10 +6311,114 @@ def load_p18_9_0_execution_start_record(
         raise ProductRuntimeConflict(
             "execution-start authorization record is unreadable"
         ) from exc
-    return validate_p18_9_0_execution_start_record(
-        record,
-        projection_record=projection_record,
+    projection = (
+        projection_record
+        if projection_record is not None
+        else _load_current_projection_record()
     )
+    try:
+        return validate_p18_9_0_execution_start_record(
+            record, projection_record=projection
+        )
+    except ProductRuntimeAuthorityMismatch:
+        if _execution_start_is_superseded(record, projection):
+            return None
+        raise
+
+
+def _execution_start_is_superseded(
+    record: dict[str, Any],
+    projection: dict[str, Any],
+) -> bool:
+    """Prove historical execution authority without mutating or granting a start."""
+    from hermes_cli.agent_platform.workflow import ticket_architect_bridge as bridge
+    from hermes_cli.agent_platform.workflow import (
+        work_packet_kanban_projection as kanban,
+    )
+
+    if (
+        not isinstance(record, dict)
+        or record.get("ticket_id") != projection.get("ticket_id")
+        or record.get("start_authorization_SHA256")
+        != _execution_start_record_digest(record)
+    ):
+        return False
+    try:
+        ticket_id = str(projection["ticket_id"])
+        generation = bridge.load_generation_record(ticket_id=ticket_id)
+        if generation is None:
+            return False
+        kanban.validate_kanban_projection_record(
+            projection,
+            ticket_id=ticket_id,
+            generation_record=generation,
+        )
+        historical_path = kanban._historical_projection_path(record)
+        historical = json.loads(historical_path.read_text(encoding="utf-8"))
+        if not kanban._projection_is_superseded(historical, generation):
+            return False
+        validate_p18_9_0_execution_start_record(record, projection_record=historical)
+        _execution_start_history_entries(ticket_id)
+    except (
+        OSError,
+        ValueError,
+        ProductRuntimeError,
+        bridge.TicketArchitectBridgeError,
+        kanban.WorkPacketKanbanProjectionError,
+    ):
+        return False
+    return True
+
+
+def _execution_start_history_entries(ticket_id: str) -> list[dict[str, Any]]:
+    path = execution_start_history_path_for_ticket(ticket_id)
+    if not path.exists():
+        return []
+    try:
+        entries = [
+            json.loads(line)
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        for entry in entries:
+            record = entry["record"]
+            if (
+                not isinstance(record, dict)
+                or record.get("ticket_id") != ticket_id
+                or record.get("start_authorization_SHA256")
+                != _execution_start_record_digest(record)
+            ):
+                raise ValueError(
+                    "historical execution-start record identity/digest mismatch"
+                )
+            if "record_text" in entry:
+                raw = entry["record_text"].encode("utf-8")
+                if (
+                    hashlib.sha256(raw).hexdigest() != entry.get("record_bytes_SHA256")
+                    or json.loads(raw) != record
+                ):
+                    raise ValueError("historical execution-start bytes mismatch")
+        return entries
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        raise ProductRuntimeConflict("execution-start history is invalid") from exc
+
+
+def load_historical_execution_start_record(
+    *,
+    projection_record: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Read archived start evidence for an explicit historical projection only."""
+    for entry in reversed(
+        _execution_start_history_entries(str(projection_record["ticket_id"]))
+    ):
+        record = entry["record"]
+        if record.get("projection_SHA256") == projection_record.get(
+            "projection_SHA256"
+        ):
+            return validate_p18_9_0_execution_start_record(
+                record, projection_record=projection_record
+            )
+    return None
 
 
 def _bootstrap_projection_record_for_validation() -> dict[str, Any]:
@@ -9192,13 +9309,24 @@ def _governed_autonomy_activation_effective_projection(record: dict[str, Any]) -
     }
 
 
-def _append_authority_history(path: Path, record: dict[str, Any], *, reason: str) -> None:
+def _append_authority_history(
+    path: Path,
+    record: dict[str, Any],
+    *,
+    reason: str,
+    record_text: str | None = None,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     entry = {
         "archived_at": _utc_now_iso(),
         "archive_reason": reason,
         "record": record,
     }
+    if record_text is not None:
+        entry["record_text"] = record_text
+        entry["record_bytes_SHA256"] = hashlib.sha256(
+            record_text.encode("utf-8")
+        ).hexdigest()
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n")
 
@@ -23796,11 +23924,37 @@ def _execution_start_authority_mismatch_diagnostics(
 
 
 def _persist_execution_start_record(record: dict[str, Any]) -> None:
-    validate_p18_9_0_execution_start_record(record)
+    projection = _load_current_projection_record()
+    validate_p18_9_0_execution_start_record(record, projection_record=projection)
     path = execution_start_record_path_for_ticket(str(record["ticket_id"]))
+    if path.exists():
+        previous_text = path.read_bytes().decode("utf-8")
+        previous = json.loads(previous_text)
+        try:
+            validate_p18_9_0_execution_start_record(
+                previous, projection_record=projection
+            )
+        except ProductRuntimeAuthorityMismatch:
+            if not _execution_start_is_superseded(previous, projection):
+                raise
+            history = execution_start_history_path_for_ticket(str(record["ticket_id"]))
+            if not any(
+                entry["record"]["start_authorization_SHA256"]
+                == previous["start_authorization_SHA256"]
+                for entry in _execution_start_history_entries(str(record["ticket_id"]))
+            ):
+                _append_authority_history(
+                    history,
+                    previous,
+                    reason="superseded_same_ticket_revision",
+                    record_text=previous_text,
+                )
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.write_text(
+        json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     tmp.replace(path)
 
 
