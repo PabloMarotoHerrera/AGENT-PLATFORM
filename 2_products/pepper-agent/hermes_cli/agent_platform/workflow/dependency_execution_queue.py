@@ -27,7 +27,9 @@ from pydantic import (
 from hermes_cli.agent_platform.ticket_factory import (
     HumanApprovalDecision,
     TicketDependencyPlan,
-    WaveDisposition,
+)
+from hermes_cli.agent_platform.ticket_factory.dependency_planning import (
+    is_ticket_dependency_wave_ready,
 )
 from hermes_cli.agent_platform.workflow.approval_workflow import (
     APPROVAL_WORKFLOW_INTEGRATION_POLICY_ID,
@@ -1129,13 +1131,7 @@ def _build_queue_candidate(
 
 
 def _plan_ready_for_ticket(plan: TicketDependencyPlan, ticket_id: str) -> bool:
-    if ticket_id in plan.blocked_ticket_ids:
-        return False
-    return any(
-        ticket_id in wave.ticket_ids
-        and wave.disposition is WaveDisposition.DEPENDENCY_READY
-        for wave in plan.waves
-    )
+    return is_ticket_dependency_wave_ready(plan, ticket_id=ticket_id)
 
 
 def _dependency_blockers(
