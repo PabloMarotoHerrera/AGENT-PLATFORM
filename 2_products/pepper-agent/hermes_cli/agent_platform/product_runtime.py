@@ -31360,7 +31360,13 @@ def _p18_9_0_retry_start_overlay(
         "kanban_task_id": record["kanban_task_id"],
         "kanban_run_id": record.get("kanban_run_id"),
     }
-    if not bool(record.get("execution_started")):
+    # A dispatch can create and fail a new run without ever starting a worker.
+    # Historical authorization only projects pending while its recovery cycle
+    # still matches the current failure; otherwise reconcile the live run below.
+    if (
+        not bool(record.get("execution_started"))
+        and _recovery_record_matches_current_failure(projection, recovery)
+    ):
         return {
             "readiness": "execution_failed_retry_pending",
             "workflow_state": f"{binding.ticket_id}-RETRY-PENDING-NOT-DISPATCHED",
