@@ -16401,6 +16401,155 @@ def _dispatch_source_authority_materialization_manifest(
     return manifest
 
 
+class _GovernedScratchDispatchOwnershipConflict(ProductRuntimeConflict):
+    """The dispatch claim no longer exclusively owns the scratch workspace."""
+
+
+def _reset_governed_dispatch_scratch_contents(
+    conn: Any,
+    *,
+    projection: dict[str, Any],
+    claimed: Any,
+    workspace_root: Path,
+    source_authority: dict[str, Any],
+) -> None:
+    """Reset only an exact managed task scratch, under the dispatch write lock.
+
+    The caller must validate durable source authority before entering this
+    boundary, and keep the lock through copy and exact verification. Existing
+    materialized-destination removal provides containment and root protection;
+    preflight rejects redirects/mounts before *any* prior evidence is removed.
+    """
+    from hermes_constants import get_hermes_home
+    from hermes_cli import kanban_db
+    from hermes_cli.agent_platform.runtime_adapter.path_containment import (
+        assert_existing_path_contained,
+        is_reparse_or_symlink,
+        validate_safe_path_segment,
+    )
+
+    if not conn.in_transaction:
+        raise ProductRuntimeConflict("scratch reset requires the dispatch write lock")
+    board = str(projection["kanban_board_slug"])
+    task_id = str(projection["kanban_task_id"])
+    validate_safe_path_segment(task_id)
+    database = next((row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"), "")
+    if not database or Path(database).resolve() != kanban_db.kanban_db_path(board=board).resolve():
+        raise ProductRuntimeConflict("scratch reset board database mismatch")
+    task = kanban_db.get_task(conn, task_id)
+    run_id = getattr(claimed, "current_run_id", None)
+    lock = getattr(claimed, "claim_lock", None)
+    run = conn.execute("SELECT * FROM task_runs WHERE id=? AND task_id=?", (run_id, task_id)).fetchone()
+    if (
+        claimed.id != task_id or not task or not run or not lock
+        or task.current_run_id != run_id or source_authority.get("run_id") != run_id
+        or task.status != "running" or task.claim_lock != lock
+        or task.worker_pid is not None or run["worker_pid"] is not None
+        or run["status"] != "running" or run["ended_at"] is not None
+        or run["claim_lock"] != lock
+        or (task.claim_expires or 0) <= time.time()
+        or (run["claim_expires"] or 0) <= time.time()
+        or conn.execute(
+            "SELECT 1 FROM task_runs WHERE task_id=? AND id!=? AND ended_at IS NULL",
+            (task_id, run_id),
+        ).fetchone()
+    ):
+        raise _GovernedScratchDispatchOwnershipConflict("scratch reset requires the exclusive unspawned dispatch claim")
+    if task.workspace_kind != "scratch" or claimed.workspace_kind != "scratch":
+        raise ProductRuntimeConflict("source authority reset requires a managed scratch workspace")
+    root = kanban_db.workspaces_root(board=board).expanduser()
+    workspace = workspace_root.expanduser()
+    # Fresh governed attempts already have a separate canonical task-owned
+    # path. Accept that exact allocation only with its durable preparation
+    # event; a task body alone cannot authorize deleting an arbitrary sibling.
+    expected_workspace = root / task_id
+    if workspace != expected_workspace:
+        try:
+            body = json.loads(task.body or "{}")
+        except (TypeError, json.JSONDecodeError):
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        attempt = body.get("fresh_execution_attempt_number")
+        run_count = conn.execute("SELECT COUNT(*) FROM task_runs WHERE task_id=?", (task_id,)).fetchone()[0]
+        prepared = False
+        if (type(attempt) is int and 1 <= attempt <= run_count
+                and body.get("fresh_execution_requested") is True
+                and body.get("fresh_execution_workspace_path") == str(workspace)
+                and workspace == root / f"{task_id}-attempt-{attempt}"):
+            for event in conn.execute(
+                "SELECT payload FROM task_events WHERE task_id=? "
+                "AND kind='governed_autonomy_continuation_prepared' ORDER BY id DESC", (task_id,),
+            ):
+                try:
+                    payload = json.loads(event["payload"] or "{}")
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(payload, dict):
+                    continue
+                reference = payload.get("fresh_execution_request_reference")
+                if (payload.get("source") == PEPPER_GOVERNED_AUTONOMY_RUNTIME_SOURCE_SYSTEM
+                        and payload.get("fresh_execution_workspace_path") == str(workspace)
+                        and isinstance(reference, dict)
+                        and reference.get("fresh_execution_request_SHA256")
+                        == body.get("fresh_execution_request_SHA256")
+                        and _SAFE_SHA256.fullmatch(str(body.get("fresh_execution_request_SHA256") or ""))):
+                    prepared = True
+                    break
+        if prepared:
+            expected_workspace = workspace
+    # Inspect lexical paths before resolving so junctions/symlinks cannot hide.
+    if (not workspace.is_absolute() or workspace != expected_workspace
+            or not task.workspace_path or Path(task.workspace_path).expanduser() != workspace):
+        raise ProductRuntimeConflict("scratch reset requires the exact managed task workspace")
+    for path in (root, *root.parents):
+        if is_reparse_or_symlink(path):
+            raise ProductRuntimeConflict("scratch reset refuses redirected workspace ancestors")
+    canonical = assert_existing_path_contained(workspace, containment_root=root)
+    if canonical == root.resolve() or not canonical.is_dir() or canonical.is_mount():
+        raise ProductRuntimeConflict("scratch reset refuses a root or mounted workspace")
+    if not kanban_db._is_managed_scratch_path(canonical):
+        raise ProductRuntimeConflict("scratch reset is outside managed scratch storage")
+    protected = [
+        get_hermes_home() / "agent-platform",
+        kanban_db.worker_logs_dir(board=board), kanban_db.attachments_root(board=board),
+        Path(source_authority["snapshot_root"]), Path(source_authority["authority_path"]).parent,
+    ]
+    source_root = (source_authority.get("git_source_authority") or {}).get("source_root")
+    if source_root:
+        protected.append(Path(source_root))
+    for path in protected:
+        protected_root = path.expanduser().resolve()
+        if canonical.is_relative_to(protected_root) or protected_root.is_relative_to(canonical):
+            raise ProductRuntimeConflict("scratch reset overlaps protected source or durable storage")
+    # Refuse another active task/child's workspace, including aliases/descendants.
+    for other in conn.execute(
+        "SELECT workspace_path FROM tasks WHERE id!=? AND workspace_path IS NOT NULL "
+        "AND (status='running' OR current_run_id IS NOT NULL OR worker_pid IS NOT NULL)",
+        (task_id,),
+    ):
+        other_path = Path(other["workspace_path"]).expanduser().resolve()
+        if canonical.is_relative_to(other_path) or other_path.is_relative_to(canonical):
+            raise _GovernedScratchDispatchOwnershipConflict("scratch reset overlaps another active task")
+    if conn.execute(
+        "SELECT 1 FROM task_links l JOIN tasks t ON t.id=l.child_id WHERE l.parent_id=? "
+        "AND t.status NOT IN ('done','archived','failed','cancelled') LIMIT 1", (task_id,),
+    ).fetchone():
+        raise _GovernedScratchDispatchOwnershipConflict("scratch reset has an active dependent child")
+    children = sorted(canonical.iterdir())
+    if children and not getattr(shutil.rmtree, "avoids_symlink_attacks", False):
+        raise ProductRuntimeConflict("scratch reset requires symlink-safe recursive removal")
+    for directory, dirs, files in os.walk(canonical, followlinks=False):
+        for name in dirs + files:
+            entry = Path(directory) / name
+            if is_reparse_or_symlink(entry) or entry.is_mount():
+                raise ProductRuntimeConflict("scratch reset refuses redirects or nested mounts")
+            if not entry.is_dir() and not entry.is_file():
+                raise ProductRuntimeConflict("scratch reset refuses non-regular entries")
+    for child in children:
+        _remove_materialized_destination(child, workspace_root=canonical)
+
+
 def _materialize_dispatch_workspace_from_source_authority(
     *,
     source_authority: dict[str, Any],
@@ -16415,6 +16564,7 @@ def _materialize_dispatch_workspace_from_source_authority(
         source_authority=source_authority,
         workspace_root=workspace,
     )
+    manifest["source_materialized"] = False
     _write_materialization_manifest(
         Path(manifest["manifest_path"]),
         manifest,
@@ -16424,6 +16574,7 @@ def _materialize_dispatch_workspace_from_source_authority(
         source_authority=source_authority,
         workspace_root=workspace,
     )
+    manifest["source_materialized"] = True
     manifest["source_authority_materialization_verification"] = verification
     _write_materialization_manifest(
         Path(manifest["manifest_path"]),
@@ -16435,11 +16586,15 @@ def _materialize_dispatch_workspace_from_source_authority(
 
 def _prepare_governed_source_authority_for_dispatch(
     *,
+    conn: Any,
+    claimed: Any,
     projection: dict[str, Any],
     workspace: Path | str,
     env_overlay: dict[str, str],
     run_id: int | None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
+    from hermes_cli import kanban_db
+
     terminal_run_id = _int_or_none(run_id)
     if terminal_run_id is None:
         raise ProductRuntimeConflict("source authority validation requires a terminal run id")
@@ -16485,10 +16640,17 @@ def _prepare_governed_source_authority_for_dispatch(
         run_id=terminal_run_id,
     )
     try:
-        rematerialized = _materialize_dispatch_workspace_from_source_authority(
-            source_authority=authority,
-            workspace_root=Path(workspace),
-        )
+        with kanban_db.write_txn(conn):
+            _reset_governed_dispatch_scratch_contents(
+                conn, projection=projection, claimed=claimed,
+                workspace_root=Path(workspace), source_authority=authority,
+            )
+            rematerialized = _materialize_dispatch_workspace_from_source_authority(
+                source_authority=authority,
+                workspace_root=Path(workspace),
+            )
+    except _GovernedScratchDispatchOwnershipConflict:
+        raise
     except Exception as exc:
         raise ProductRuntimeConflict(f"source authority materialization failed: {exc}") from exc
     durable_reference = _governed_source_authority_reference(authority)
@@ -16917,11 +17079,22 @@ def _dispatch_exact_current_kanban_task(
             try:
                 source_materialization, durable_source_authority_reference = (
                     _prepare_governed_source_authority_for_dispatch(
+                        conn=conn,
+                        claimed=claimed,
                         projection=projection,
                         workspace=workspace,
                         env_overlay=env_overlay,
                         run_id=getattr(claimed, "current_run_id", None),
                     )
+                )
+            except _GovernedScratchDispatchOwnershipConflict as exc:
+                # Do not close or mutate a run whose ownership was lost during
+                # authority derivation. No workspace reset or worker occurred.
+                task = kanban_db.get_task(conn, task_id)
+                runs = kanban_db.list_runs(conn, task_id) if task is not None else []
+                return _dispatch_blocked_result(
+                    "WORKSPACE_SOURCE_MATERIALIZATION_FAILED", str(exc),
+                    task=task, runs=runs, dispatch_performed=True,
                 )
             except ProductRuntimeDependencyGap as exc:
                 detail = f"{exc.dependency_code}: {_safe_text(str(exc), limit=240)}"
