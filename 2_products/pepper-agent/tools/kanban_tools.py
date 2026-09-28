@@ -34,6 +34,10 @@ import os
 from typing import Any, Optional
 
 from agent.redact import redact_sensitive_text
+from hermes_cli.kanban_db import (
+    BLOCK_TERMINAL_METADATA_SCHEMA,
+    validate_block_terminal_metadata,
+)
 from hermes_cli.goals import judge_goal
 from tools.registry import registry, tool_error
 from hermes_cli.config import cfg_get, load_config
@@ -692,6 +696,15 @@ def _handle_block(args: dict, **kw) -> str:
         return tool_error("reason is required — explain what input you need")
     reason = redact_sensitive_text(str(reason), force=True)
     kind = args.get("kind")
+    metadata = args.get("metadata")
+    try:
+        metadata = validate_block_terminal_metadata(metadata)
+        if metadata is not None:
+            metadata = validate_block_terminal_metadata(json.loads(redact_sensitive_text(
+                json.dumps(metadata, ensure_ascii=False, allow_nan=False), force=True,
+            )))
+    except (TypeError, ValueError):
+        return tool_error("metadata must satisfy the bounded terminal evidence schema")
     board = args.get("board")
     try:
         kb, conn = _connect(board=board)
@@ -729,6 +742,7 @@ def _handle_block(args: dict, **kw) -> str:
                 conn, tid,
                 reason=reason,
                 kind=kind,
+                metadata=metadata,
                 expected_run_id=_worker_run_id(tid),
             )
             if not ok:
@@ -1559,6 +1573,7 @@ KANBAN_BLOCK_SCHEMA = {
                     "Omit only if none apply."
                 ),
             },
+            "metadata": BLOCK_TERMINAL_METADATA_SCHEMA,
             "board": _board_schema_prop(),
         },
         "required": ["reason"],

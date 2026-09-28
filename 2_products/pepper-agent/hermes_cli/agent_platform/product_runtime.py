@@ -19071,6 +19071,8 @@ def _governed_autonomy_terminal_validated_candidate_review_required(
 def _terminal_run_review_boundary_evidence(
     task: Any,
     run: Any,
+    *,
+    projection_record: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     if task is None or run is None:
         return None
@@ -19097,8 +19099,77 @@ def _terminal_run_review_boundary_evidence(
     manifest, materialization_reference = _governed_autonomy_materialization_manifest(
         getattr(task, "workspace_path", None),
     )
+    if (
+        not isinstance(manifest, dict)
+        or manifest.get("source_materialized") is not True
+        or manifest.get("policy_id") != PEPPER_SCRATCH_SOURCE_MATERIALIZATION_POLICY_ID
+        or not isinstance(manifest.get("writable_allowed_paths"), list)
+    ):
+        return None
+    try:
+        if Path(str(manifest.get("workspace_root") or "")).resolve() != Path(task.workspace_path).resolve():
+            return None
+    except (OSError, ValueError, TypeError):
+        return None
+    metadata = getattr(run, "metadata", None)
+    if projection_record is not None:
+        for key in ("ticket_id", "ticket_spec_SHA256", "work_packet_id", "work_packet_SHA256", "projection_SHA256"):
+            if key in manifest and manifest[key] != projection_record.get(key):
+                return None
+        expected_task = projection_record.get("kanban_task_id")
+        if expected_task is not None and expected_task != getattr(task, "id", None):
+            return None
+    if isinstance(metadata, dict):
+        # Explicit negative/malformed evidence must dominate positive prose or
+        # flags. Transporting metadata must never turn contradictions into
+        # authority to skip recovery.
+        for key in ("validation_infrastructure_failure", "Git_mutation", "git_mutation"):
+            if key in metadata and metadata[key] is not False:
+                return None
+        for key in ("validation_passed", "execution_validation_passed", "implementation_complete", "implementation_completed", "review_required"):
+            if key in metadata and metadata[key] is not True:
+                return None
+        for key in (
+            "ticket_id", "ticket_spec_SHA256", "work_packet_id",
+            "work_packet_SHA256", "projection_SHA256",
+        ):
+            if key in metadata and metadata[key] != manifest.get(key):
+                return None
+        for key, expected in (
+            ("kanban_task_id", getattr(task, "id", None)),
+            ("run_id", getattr(run, "id", None)),
+        ):
+            if key in metadata and metadata[key] != expected:
+                return None
+    if getattr(run, "task_id", None) != getattr(task, "id", None):
+        return None
     candidate_changes = _governed_autonomy_candidate_changes_reference(manifest)
     if not _governed_autonomy_candidate_changes_available(candidate_changes):
+        return None
+    materialized_roots = manifest.get("materialized_roots")
+    if materialized_roots:
+        if not isinstance(materialized_roots, list):
+            return None
+        scoped_changes = _governed_autonomy_candidate_changes_reference({
+            **manifest, "writable_allowed_paths": materialized_roots,
+        })
+        if not scoped_changes or scoped_changes.get("available") is not True:
+            return None
+        if scoped_changes.get("truncated") or any(
+            not _review_candidate_path_in_workpacket_scope(
+                change["path"], tuple(manifest["writable_allowed_paths"]),
+            )
+            for change in scoped_changes["files"]
+        ):
+            return None
+    # A matching relative glob is insufficient if a candidate is a symlink
+    # escaping the governed scratch or source tree.
+    try:
+        for root_key in ("source_root", "workspace_root"):
+            root = Path(str(manifest[root_key])).resolve(strict=True)
+            for change in candidate_changes["files"]:
+                (root / change["path"]).resolve().relative_to(root)
+    except (OSError, RuntimeError, ValueError, KeyError, TypeError):
         return None
     run_view = _run_dict(run)
     if _governed_autonomy_terminal_text_has_validation_failure(
@@ -19125,16 +19196,16 @@ def _terminal_run_review_boundary_evidence(
         ).strip().lower().replace("-", "_")
         structured_review_required = (
             (
-                bool(metadata.get("review_required"))
+                metadata.get("review_required") is True
                 or terminal_class in {"review_required", "validated_review_required"}
             )
-            and bool(
-                metadata.get("implementation_complete")
-                or metadata.get("implementation_completed")
+            and (
+                metadata.get("implementation_complete") is True
+                or metadata.get("implementation_completed") is True
             )
-            and bool(
-                metadata.get("validation_passed")
-                or metadata.get("execution_validation_passed")
+            and (
+                metadata.get("validation_passed") is True
+                or metadata.get("execution_validation_passed") is True
             )
             and human_boundary in {"", "human_review", "code_review", "human_code_review"}
         )
@@ -23797,6 +23868,7 @@ def _p18_9_0_terminal_execution_state(
     runs: list[Any],
     *,
     ticket_id: str = PEPPER_BOOTSTRAP_NEXT_TICKET_ID,
+    projection_record: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     action_ids = governed_ticket_lifecycle_action_ids(ticket_id)
     if task is None:
@@ -23815,7 +23887,9 @@ def _p18_9_0_terminal_execution_state(
     outcome = str(getattr(latest_run, "outcome", "") or "").strip().lower()
     if task_status == "running" and getattr(task, "current_run_id", None):
         return None
-    review_boundary = _terminal_run_review_boundary_evidence(task, latest_run)
+    review_boundary = _terminal_run_review_boundary_evidence(
+        task, latest_run, projection_record=projection_record,
+    )
     if review_boundary is not None:
         return {
             "start_status": "completed",
@@ -30823,6 +30897,7 @@ def _current_ticket_execution_start_overlay(
             task,
             runs,
             ticket_id=binding.ticket_id,
+            projection_record=projection,
         )
     except Exception as exc:  # pragma: no cover - defensive live-state guard
         terminal_state = {
@@ -31166,7 +31241,9 @@ def _p18_9_0_retry_start_overlay(
         }, None
     try:
         task, runs = _p18_9_0_live_kanban_execution(projection)
-        terminal_state = _p18_9_0_terminal_execution_state(task, runs)
+        terminal_state = _p18_9_0_terminal_execution_state(
+            task, runs, ticket_id=binding.ticket_id, projection_record=projection,
+        )
     except Exception as exc:  # pragma: no cover - defensive live-state guard
         terminal_state = {
             "start_status": "failed",

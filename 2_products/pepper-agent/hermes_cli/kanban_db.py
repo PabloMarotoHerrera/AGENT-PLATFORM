@@ -4875,12 +4875,154 @@ def edit_completed_task_result(
     return True
 
 
+# Closed evidence contract for block_task and its public tool surface. These
+# limits cover the three C53 validations without providing a log/blob channel.
+BLOCK_METADATA_MAX_BYTES = 2048
+BLOCK_METADATA_MAX_DEPTH = 3  # container levels: root / results list / member
+BLOCK_METADATA_MAX_ENTRIES = 20
+BLOCK_METADATA_MAX_STRING = 128
+_BLOCK_SHA_SCHEMA = {"type": "string", "minLength": 64, "maxLength": 64,
+                     "pattern": r"^[0-9a-fA-F]{64}$"}
+_BLOCK_ID_SCHEMA = {"type": "string", "minLength": 1, "maxLength": 128,
+                    "pattern": r"^[A-Za-z0-9][A-Za-z0-9_.-]*$"}
+_BLOCK_OUTCOME_SCHEMA = {
+    "type": "string", "maxLength": 32,
+    "enum": ["review_required", "validated_review_required", "blocked",
+             "execution_failed", "validation_failed", "infrastructure_failed"],
+}
+_BLOCK_BOUNDARY_SCHEMA = {
+    "type": "string", "maxLength": 32,
+    "enum": ["human_review", "code_review", "human_code_review"],
+}
+BLOCK_TERMINAL_METADATA_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "maxProperties": BLOCK_METADATA_MAX_ENTRIES,
+    "description": (
+        "Optional terminal evidence; no execution or Git authority. Maximum "
+        "2048 UTF-8 bytes using JSON ensure_ascii=False with default separators; "
+        "three container levels, 20 object entries, 16 validation results, "
+        "128 characters per string. Unknown fields are rejected. No logs, "
+        "source, diffs, transcripts, credentials or binary/base64 payloads. "
+        "Validation success must be explicit, never inferred from a review request."
+    ),
+    "properties": {
+        **{key: {"type": "boolean"} for key in (
+            "review_required", "implementation_complete", "implementation_completed",
+            "validation_passed", "execution_validation_passed",
+            "validation_infrastructure_failure", "Git_mutation", "git_mutation",
+        )},
+        "terminal_outcome_class": _BLOCK_OUTCOME_SCHEMA,
+        "terminal_outcome": _BLOCK_OUTCOME_SCHEMA,
+        "human_boundary": _BLOCK_BOUNDARY_SCHEMA,
+        "authority_boundary": _BLOCK_BOUNDARY_SCHEMA,
+        **{key: _BLOCK_ID_SCHEMA for key in (
+            "ticket_id", "work_packet_id", "kanban_task_id",
+        )},
+        **{key: _BLOCK_SHA_SCHEMA for key in (
+            "ticket_spec_SHA256", "work_packet_SHA256", "projection_SHA256",
+        )},
+        "run_id": {"type": "integer", "minimum": 1, "maximum": 9223372036854775807},
+        "validation_results": {
+            "type": "array", "maxItems": 16,
+            "items": {
+                "type": "object", "additionalProperties": False, "maxProperties": 4,
+                "required": ["validation_id", "status"],
+                "properties": {
+                    "validation_id": {"type": "string", "minLength": 2,
+                                      "maxLength": 16, "pattern": r"^V[0-9]+$"},
+                    "status": {"type": "string", "maxLength": 16,
+                               "enum": ["passed", "failed", "skipped", "not_applicable",
+                                        "error"]},
+                    "exit_code": {"type": "integer", "minimum": -2147483648,
+                                  "maximum": 2147483647},
+                    "command_SHA256": _BLOCK_SHA_SCHEMA,
+                },
+            },
+        },
+    },
+}
+
+
+def validate_block_terminal_metadata(metadata: Optional[dict]) -> Optional[dict]:
+    """Validate before any write and return a detached, finite JSON object.
+
+    None means no metadata (legacy callers). Redaction is deliberately separate:
+    neither redaction nor serialization can silently remove unknown evidence.
+    Errors never echo untrusted values, field names, or possible credentials.
+    """
+    if metadata is None:
+        return None
+
+    def bounded(value, depth=0):
+        if type(value) in (dict, list):
+            depth += 1
+            if depth > BLOCK_METADATA_MAX_DEPTH:
+                raise ValueError("block metadata exceeds maximum container depth 3")
+            limit = BLOCK_METADATA_MAX_ENTRIES if type(value) is dict else 16
+            if len(value) > limit:
+                raise ValueError("block metadata exceeds collection entry limit")
+            if type(value) is dict:
+                for key, member in value.items():
+                    if type(key) is not str or len(key) > BLOCK_METADATA_MAX_STRING:
+                        raise ValueError("block metadata has an invalid object key")
+                    bounded(member, depth)
+            else:
+                for member in value:
+                    bounded(member, depth)
+        elif type(value) is str:
+            if len(value) > BLOCK_METADATA_MAX_STRING:
+                raise ValueError("block metadata exceeds string length limit 128")
+        elif type(value) not in (bool, int):
+            # No float/null fields exist; this also rejects NaN and Infinity.
+            raise ValueError("block metadata contains an unsupported JSON value")
+
+    def check(value, schema):
+        expected = {"object": dict, "array": list, "string": str,
+                    "boolean": bool, "integer": int}[schema["type"]]
+        if type(value) is not expected:
+            raise ValueError("block metadata field has an invalid type")
+        if expected is dict:
+            properties = schema["properties"]
+            if len(value) > schema["maxProperties"]:
+                raise ValueError("block metadata exceeds object entry limit")
+            if any(key not in properties for key in value):
+                raise ValueError("block metadata contains an unknown field")
+            if any(key not in value for key in schema.get("required", ())):
+                raise ValueError("block metadata is missing required validation evidence")
+            for key, member in value.items():
+                check(member, properties[key])
+        elif expected is list:
+            if len(value) > schema["maxItems"]:
+                raise ValueError("block metadata exceeds validation result limit")
+            for member in value:
+                check(member, schema["items"])
+        elif expected is str:
+            if not schema.get("minLength", 0) <= len(value) <= schema["maxLength"]:
+                raise ValueError("block metadata field exceeds string length bounds")
+            if "enum" in schema and value not in schema["enum"]:
+                raise ValueError("block metadata field has an unsupported value")
+            if "pattern" in schema and re.fullmatch(schema["pattern"], value) is None:
+                raise ValueError("block metadata field has an invalid identity format")
+        elif expected is int:
+            if not schema["minimum"] <= value <= schema["maximum"]:
+                raise ValueError("block metadata integer is outside bounds")
+
+    bounded(metadata)
+    check(metadata, BLOCK_TERMINAL_METADATA_SCHEMA)
+    encoded = json.dumps(metadata, ensure_ascii=False, allow_nan=False)
+    if len(encoded.encode("utf-8")) > BLOCK_METADATA_MAX_BYTES:
+        raise ValueError("block metadata exceeds serialized UTF-8 byte limit 2048")
+    return json.loads(encoded)
+
+
 def block_task(
     conn: sqlite3.Connection,
     task_id: str,
     *,
     reason: Optional[str] = None,
     kind: Optional[str] = None,
+    metadata: Optional[dict] = None,
     expected_run_id: Optional[int] = None,
 ) -> bool:
     """Transition ``running``/``ready`` → ``blocked`` (or route elsewhere).
@@ -4910,6 +5052,7 @@ def block_task(
     Returns True on any successful transition (to ``blocked``, ``todo``, or
     ``triage``), False when the task wasn't in a blockable state.
     """
+    metadata = validate_block_terminal_metadata(metadata)
     if kind is not None and kind not in VALID_BLOCK_KINDS:
         raise ValueError(
             f"block kind must be one of {sorted(VALID_BLOCK_KINDS)} or None"
@@ -4955,11 +5098,11 @@ def block_task(
             run_id = _end_run(
                 conn, task_id,
                 outcome="blocked", status="blocked",
-                summary=reason,
+                summary=reason, metadata=metadata,
             )
             if run_id is None and reason:
                 run_id = _synthesize_ended_run(
-                    conn, task_id, outcome="blocked", summary=reason,
+                    conn, task_id, outcome="blocked", summary=reason, metadata=metadata,
                 )
             _append_event(
                 conn, task_id, "dependency_wait",
@@ -5009,11 +5152,11 @@ def block_task(
             run_id = _end_run(
                 conn, task_id,
                 outcome="blocked", status="blocked",
-                summary=reason,
+                summary=reason, metadata=metadata,
             )
             if run_id is None and reason:
                 run_id = _synthesize_ended_run(
-                    conn, task_id, outcome="blocked", summary=reason,
+                    conn, task_id, outcome="blocked", summary=reason, metadata=metadata,
                 )
             _append_event(
                 conn, task_id, "block_loop_detected",
@@ -5063,7 +5206,7 @@ def block_task(
             run_id = _end_run(
                 conn, task_id,
                 outcome="blocked", status="blocked",
-                summary=reason,
+                summary=reason, metadata=metadata,
             )
             # Synthesize a run when blocking a never-claimed task so the
             # reason is preserved in attempt history.
@@ -5071,7 +5214,7 @@ def block_task(
                 run_id = _synthesize_ended_run(
                     conn, task_id,
                     outcome="blocked",
-                    summary=reason,
+                    summary=reason, metadata=metadata,
                 )
             _append_event(
                 conn, task_id, "blocked",
