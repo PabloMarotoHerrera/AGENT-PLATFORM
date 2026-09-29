@@ -26205,9 +26205,26 @@ def _p17_7_handoff_parent_and_branch(
 
 
 def _p17_7_handoff_commit_message(binding: CurrentTicketLifecycleBinding) -> str:
-    title = _safe_text(binding.ticket_title, limit=80)
-    message = f"{binding.ticket_id} {title}"[:120].strip()
-    return message or binding.ticket_id
+    from pydantic import TypeAdapter, ValidationError
+
+    from hermes_cli.agent_platform.work_packet.human_git_handoff import CommitMessageText
+
+    validator = TypeAdapter(CommitMessageText)
+    fallback = f"{binding.ticket_id} Apply accepted ticket changes"
+    title = str(binding.ticket_title or "").strip()
+    # Ticket prose has a different lexical domain from execution artifacts.
+    # Validate the complete subject instead of deleting or truncating its meaning.
+    # Path-bearing titles are metadata, not useful public commit subjects.
+    candidate = (
+        f"{binding.ticket_id} {title}"
+        if title and not any(separator in title for separator in ("/", "\\"))
+        else fallback
+    )
+    try:
+        return validator.validate_python(candidate)
+    except ValidationError:
+        # Keep canonical policy authoritative even if fallback validation fails.
+        return validator.validate_python(fallback)
 
 
 def _human_candidate_materialization_plan_digest(plan: dict[str, Any]) -> str:
