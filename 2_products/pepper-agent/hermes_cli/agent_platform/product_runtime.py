@@ -1572,6 +1572,16 @@ def _terminal_handoff_completion_record_for_projection(
             "kanban_task_id",
         )
     ):
+        if record.get("completion_identity_SHA256") != _human_git_handoff_completion_identity_digest(record):
+            return None
+        try:
+            _load_completed_handoff_compatible_review_decision_record(
+                projection=projection,
+                completion_record=record,
+                current_error=ProductRuntimeConflict("terminal handoff accepted review authority mismatch"),
+            )
+        except ProductRuntimeConflict:
+            return None
         return record
     return None
 
@@ -32771,6 +32781,9 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
             remaining_blockers.append(predecessor_blocker)
     _apply_current_ticket_durable_completion_precedence(snapshot, remaining_blockers)
     _apply_pending_successor_approval_precedence(snapshot, remaining_blockers)
+    # Successor selection can replace the ticket whose closure was reconciled
+    # above. Reconcile the final selected revision before publishing any reads.
+    _apply_current_ticket_durable_completion_precedence(snapshot, remaining_blockers)
     snapshot["remaining_blockers"] = remaining_blockers
     snapshot["blocker_count"] = len(remaining_blockers)
     snapshot["next_action_label"] = _next_action_label(snapshot.get("next_action"))
