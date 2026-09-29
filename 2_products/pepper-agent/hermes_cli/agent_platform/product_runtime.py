@@ -3540,13 +3540,15 @@ def _apply_current_ticket_durable_completion_precedence(
 def _apply_pending_successor_approval_precedence(
     snapshot: dict[str, Any],
     remaining_blockers: list[dict[str, Any]],
+    *,
+    allow_current_ticket_projection: bool = True,
 ) -> None:
     if _workflow_has_active_nonterminal_current_execution(snapshot):
         return
     previous_current_ticket_id = str(snapshot.get("current_ticket_id") or "").strip()
     overlay, blocker = _pending_generated_successor_ticket_approval_overlay(
         snapshot,
-        allow_current_ticket_projection=True,
+        allow_current_ticket_projection=allow_current_ticket_projection,
     )
     if overlay is not None:
         next_current_ticket_id = str(overlay.get("current_ticket_id") or "").strip()
@@ -32784,6 +32786,20 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
     # Successor selection can replace the ticket whose closure was reconciled
     # above. Reconcile the final selected revision before publishing any reads.
     _apply_current_ticket_durable_completion_precedence(snapshot, remaining_blockers)
+    # A late closure can expose a different canonical successor. Resolve its
+    # persisted publication/decision from that closed state before publishing
+    # the pre-generation action, without displacing active work.
+    if (
+        snapshot.get("workflow_status") == "completed"
+        and not snapshot.get("current_ticket_id")
+        and snapshot.get("closed_predecessor_ticket_id")
+    ):
+        _apply_pending_successor_approval_precedence(
+            snapshot,
+            remaining_blockers,
+            allow_current_ticket_projection=False,
+        )
+        _apply_current_ticket_durable_completion_precedence(snapshot, remaining_blockers)
     snapshot["remaining_blockers"] = remaining_blockers
     snapshot["blocker_count"] = len(remaining_blockers)
     snapshot["next_action_label"] = _next_action_label(snapshot.get("next_action"))
