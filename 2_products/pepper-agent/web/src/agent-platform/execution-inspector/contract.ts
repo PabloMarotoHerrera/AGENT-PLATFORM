@@ -73,6 +73,7 @@ export interface ExecutionSummary extends ExecutionSourceProvenance {
   readonly workPacketId: string | null;
   readonly validationState: string | null;
   readonly reviewState: string | null;
+  readonly recoveryState: string | null;
   readonly gitHandoffState: string | null;
   readonly nextAction: string | null;
 }
@@ -325,6 +326,7 @@ function executionSummary(
     workPacketId: null,
     validationState: null,
     reviewState: null,
+    recoveryState: null,
     gitHandoffState: null,
     nextAction: null,
   };
@@ -345,6 +347,7 @@ function controlledExecutionSummary(value: unknown, observedAt: number): Executi
   const workPacketId = optionalSourceToken(record?.work_packet_id, 128);
   const validationState = optionalSourceToken(record?.validation_state, 128);
   const reviewState = optionalSourceToken(record?.review_state, 128);
+  const recoveryState = optionalSourceToken(record?.recovery_state, 128);
   const gitHandoffState = optionalSourceToken(record?.git_handoff_state, 128);
   const nextAction = optionalSourceToken(record?.next_action, 128);
   if (
@@ -353,7 +356,7 @@ function controlledExecutionSummary(value: unknown, observedAt: number): Executi
     originalSourceOutcome === null && record.outcome !== null && record.outcome !== undefined && record.outcome !== "" ||
     endedAt === null && record.ended_at !== null && record.ended_at !== undefined ||
     workflowState === undefined || workPacketId === undefined || validationState === undefined ||
-    reviewState === undefined || gitHandoffState === undefined || nextAction === undefined
+    reviewState === undefined || recoveryState === undefined || gitHandoffState === undefined || nextAction === undefined
   ) return null;
   return {
     source: EXECUTION_SOURCE,
@@ -373,6 +376,7 @@ function controlledExecutionSummary(value: unknown, observedAt: number): Executi
     workPacketId,
     validationState,
     reviewState,
+    recoveryState,
     gitHandoffState,
     nextAction,
   };
@@ -622,6 +626,7 @@ export function parseExecutionDetailSource(
     workPacketId: optionalSourceToken(controlRecord?.work_packet_id, 128) ?? execution.workPacketId,
     validationState: optionalSourceToken(controlRecord?.validation_state, 128) ?? execution.validationState,
     reviewState: optionalSourceToken(controlRecord?.review_state, 128) ?? execution.reviewState,
+    recoveryState: optionalSourceToken(controlRecord?.recovery_state, 128) ?? execution.recoveryState,
     gitHandoffState: optionalSourceToken(controlRecord?.git_handoff_state, 128) ?? execution.gitHandoffState,
     nextAction: optionalSourceToken(controlRecord?.next_action, 128) ?? execution.nextAction,
     safeActionCategory: "Hermes Kanban task attempt",

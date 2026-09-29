@@ -107,6 +107,10 @@ export function ExecutionDetailView({
                     <dt>Status</dt><dd>{execution.originalSourceStatus}</dd>
                     <dt>Outcome</dt><dd>{execution.originalSourceOutcome ?? "not supplied"}</dd>
                     <dt>Workflow</dt><dd>{execution.workflowState ?? "not supplied"}</dd>
+                    <dt>Validation</dt><dd>{execution.validationState ?? "not supplied"}</dd>
+                    <dt>Review</dt><dd>{execution.reviewState ?? "not supplied"}</dd>
+                    <dt>Recovery</dt><dd>{execution.recoveryState ?? "not supplied"}</dd>
+                    <dt>Git handoff</dt><dd>{execution.gitHandoffState ?? "human_git_authority_preserved"}</dd>
                     <dt>Next action</dt><dd>{execution.nextAction ?? "inspect_detail"}</dd>
                     <dt>Started</dt><dd>{formatExecutionTimestamp(execution.startedAt)}</dd>
                     <dt>Ended</dt><dd>{formatExecutionTimestamp(execution.endedAt)}</dd>
@@ -120,6 +124,7 @@ export function ExecutionDetailView({
                   <p className="text-sm leading-relaxed text-[var(--agent-platform-text-secondary)]">{execution.source.retentionLimitation}</p>
                   <p className="text-sm leading-relaxed text-[var(--agent-platform-text-secondary)]">Executable content is excluded. Result and failure presence is shown without raw narrative detail; metadata, event payloads, logs, claims, PIDs, paths and process inspection are not displayed.</p>
                   <p className="text-sm leading-relaxed text-[var(--agent-platform-text-secondary)]">Git handoff: {execution.gitHandoffState ?? "human_git_authority_preserved"}. WorkPacket: {execution.workPacketId ?? "not supplied"}.</p>
+                  <p className="text-sm leading-relaxed text-[var(--agent-platform-text-secondary)]">Validation, review, recovery, next-action, and Git handoff values are source metadata only; this page does not stop, retry, roll back, approve, reject, stage, commit, or push.</p>
                 </CardContent>
               </Card>
             </section>

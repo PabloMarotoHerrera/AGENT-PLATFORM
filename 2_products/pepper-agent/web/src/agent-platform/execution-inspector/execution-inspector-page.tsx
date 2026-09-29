@@ -251,6 +251,10 @@ export function ExecutionInspectorView({ state, profile, refresh }: ExecutionIns
                             <span>Source profile: {execution.sourceProfile ?? "not supplied"}</span>
                             <span>Started: {formatExecutionTimestamp(execution.startedAt)}</span>
                             <span>Ended: {formatExecutionTimestamp(execution.endedAt)}</span>
+                            <span>Validation: {execution.validationState ?? "not supplied"}</span>
+                            <span>Review: {execution.reviewState ?? "not supplied"}</span>
+                            <span>Recovery: {execution.recoveryState ?? "not supplied"}</span>
+                            <span>Git handoff: {execution.gitHandoffState ?? "human_git_authority_preserved"}</span>
                             <span>Next action: {execution.nextAction ?? "inspect_detail"}</span>
                           </div>
                         </div>

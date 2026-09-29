@@ -71,6 +71,15 @@ function taskWire(overrides: Record<string, unknown> = {}) {
       }],
     },
     runs: [run()],
+    control: {
+      workflow_state: "execution_review",
+      work_packet_id: "WP-P18-9-6-R0002-1072ce2891aa",
+      validation_state: "passed",
+      review_state: "review_required",
+      recovery_state: "not_required",
+      git_handoff_state: "human_git_authority_preserved",
+      next_action: "inspect_detail",
+    },
     events: [
       {
         id: 11,
@@ -170,6 +179,33 @@ describe("safe source-qualified execution projection", () => {
       taskTitle: "Source task title withheld by the execution projection",
     });
     expect(parsed?.source.retentionLimitation).toContain("Human Git authority is preserved");
+  });
+
+  it("projects controlled lifecycle, review, recovery, and Git handoff metadata from collection rows", () => {
+    const parsed = parseExecutionCollectionSource({
+      source_system: "pepper-controlled-execution",
+      executions: [{
+        ...run(),
+        board_slug: "alpha-board",
+        task_title: "Controlled run",
+        workflow_state: "execution_review",
+        work_packet_id: "WP-P18-9-6-R0002-1072ce2891aa",
+        validation_state: "passed",
+        review_state: "review_required",
+        recovery_state: "not_required",
+        git_handoff_state: "human_git_authority_preserved",
+        next_action: "human_review",
+      }],
+    }, "all", "all", 1_700_000_100_000);
+    expect(parsed?.executions[0]).toMatchObject({
+      workflowState: "execution_review",
+      workPacketId: "WP-P18-9-6-R0002-1072ce2891aa",
+      validationState: "passed",
+      reviewState: "review_required",
+      recoveryState: "not_required",
+      gitHandoffState: "human_git_authority_preserved",
+      nextAction: "human_review",
+    });
   });
 
   it("does not infer status or outcome from recency, task state, errors, summaries, or event text", () => {
@@ -586,7 +622,13 @@ describe("controlled Execution Inspector pages", () => {
     expect(markup).toContain("Source timing and state");
     expect(markup).toContain("Retention and redaction");
     expect(markup).toContain("Workflow");
+    expect(markup).toContain("Validation");
+    expect(markup).toContain("Review");
+    expect(markup).toContain("Recovery");
     expect(markup).toContain("Git handoff");
+    expect(markup).toContain("review_required");
+    expect(markup).toContain("not_required");
+    expect(markup).toContain("source metadata only");
     expect(markup).toContain("Explicitly linked source events");
     expect(markup).toContain("Safe action category");
     expect(markup).toContain("Validation summaries");
