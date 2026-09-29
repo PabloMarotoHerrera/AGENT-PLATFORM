@@ -25022,6 +25022,10 @@ def _review_prepare_workflow_blocker(
             "ZERO_CHANGE_ATTESTATION_REQUIRED",
             "explicit human zero-change attestation is required before review preparation",
         )
+    if workflow.get("workflow_status") == "execution_completed_pending_manual_validation":
+        return "MANUAL_VALIDATION_REQUIRED", "required manual validation needs explicit human evidence"
+    if workflow.get("workflow_status") == "blocked_manual_validation_failed":
+        return "MANUAL_VALIDATION_FAILED", "failed manual validation requires governed correction"
     if workflow.get("workflow_status") != "execution_completed":
         return "PEPPER_REVIEW_PREPARE_ACTION_GAP", "workflow status is not execution_completed"
     next_action = workflow.get("next_action")
@@ -28645,7 +28649,25 @@ def _review_completion_validation_contract_satisfied(
     acceptance_contract: dict[str, Any] | None,
 ) -> bool:
     from tools import workpacket_validation_tool as validation_tool
+    from hermes_cli.agent_platform import manual_validation
 
+    if isinstance(acceptance_contract, dict):
+        try:
+            items = manual_validation.inspect(acceptance_contract, completion)
+        except (ValueError, OSError, TypeError):
+            return False
+        if items:
+            if any(item["status"] != "passed" for item in items):
+                return False
+            # Manual-only contracts require persisted human evidence, not a
+            # machine-command success flag. Mixed contracts retain command gates.
+            if not validation_tool.review_prepare_validation_requirements(acceptance_contract):
+                # Supply only the verified aggregate human result, retaining all
+                # existing infrastructure/failure checks and the original source.
+                validated = {**completion, "validation_passed": True}
+                return validation_tool.review_prepare_validation_contract_satisfied(
+                    validated, acceptance_contract,
+                )
     return validation_tool.review_prepare_validation_contract_satisfied(
         completion,
         acceptance_contract,
@@ -30875,6 +30897,122 @@ def _review_prepare_material_revision_required_overlay(
     }
 
 
+def _manual_validation_action_id(ticket_id: str) -> str:
+    return f"ATTEST_{ticket_id.replace('.', '_').upper()}_MANUAL_VALIDATION"
+
+
+def _current_manual_validation_context(projection: dict[str, Any]) -> dict[str, Any]:
+    from hermes_cli.agent_platform import manual_validation
+
+    contract = _acceptance_contract_for_review_projection(projection)
+    if not manual_validation.required_items(contract):
+        return {"items": [], "human_action_required": False}
+    completion = _current_review_round_completion_source(projection)
+    if completion.get("blocker_code") or not _completion_binds_current_terminal_run(projection, completion):
+        raise ProductRuntimeConflict("manual validation requires the current terminal run")
+    for key in ("ticket_id", "ticket_spec_SHA256", "work_packet_id", "work_packet_SHA256"):
+        if contract.get(key) != projection.get(key):
+            raise ProductRuntimeConflict(f"manual validation {key} mismatch")
+    zero = resolve_zero_change_authority(projection, completion)
+    if not _review_prepare_eligible_result(completion, contract, zero_change_authority=zero):
+        raise ProductRuntimeConflict("candidate or zero-change authority must be resolved first")
+    items = manual_validation.inspect(contract, completion)
+    satisfied = _review_completion_validation_contract_satisfied(completion, contract)
+    return {
+        "items": items,
+        "source_authority": manual_validation.POLICY,
+        "ticket_id": projection["ticket_id"],
+        "work_packet_id": projection["work_packet_id"],
+        "work_packet_SHA256": projection["work_packet_SHA256"],
+        "run_id": completion["run_id"],
+        "validation_contract_SHA256": manual_validation.digest(contract),
+        "human_action_required": any(item["status"] == "pending" for item in items),
+        "validation_contract_satisfied": satisfied,
+        "reviewable_result": satisfied,
+        "validated_noop_result": satisfied and zero.get("zero_change_result") is True,
+        "zero_change_result": zero.get("zero_change_result") is True,
+        "next_action_id": _manual_validation_action_id(projection["ticket_id"]),
+    }
+
+
+def inspect_current_ticket_manual_validation() -> dict[str, Any]:
+    """Read exact contract wording and evidence without making a human decision."""
+    projection = _load_current_projection_record()
+    return _current_manual_validation_context(projection)
+
+
+def attest_current_ticket_manual_validation(
+    *, ticket_id: str, work_packet_id: str, work_packet_sha256: str,
+    run_id: int, validation_id: str, validation_contract_sha256: str,
+    binding_sha256: str, next_action_id: str, status: str,
+    human_attestation_text: str, evidence: str,
+) -> dict[str, Any]:
+    from hermes_cli.agent_platform import manual_validation
+
+    projection = _load_current_projection_record()
+    _validate_execution_start_authority(projection)
+    context = _current_manual_validation_context(projection)
+    expected = {
+        "ticket_id": ticket_id, "work_packet_id": work_packet_id,
+        "work_packet_SHA256": work_packet_sha256, "run_id": run_id,
+        "validation_contract_SHA256": validation_contract_sha256,
+        "next_action_id": next_action_id,
+    }
+    if type(run_id) is not int or any(context.get(key) != value for key, value in expected.items()):
+        raise ProductRuntimeConflict("manual validation current identity/action mismatch")
+    item = next((item for item in context["items"] if item["validation_id"] == validation_id), None)
+    if item is None or item["binding_SHA256"] != binding_sha256:
+        raise ProductRuntimeConflict("manual validation item/binding mismatch")
+    if item["status"] == "pending":
+        workflow = build_workflow_control_snapshot()
+        if (
+            workflow.get("workflow_status") != "execution_completed_pending_manual_validation"
+            or (workflow.get("next_action") or {}).get("id") != next_action_id
+            or workflow.get("current_ticket_id") != ticket_id
+            or int(workflow.get("active_execution_count") or 0) != 0
+            or workflow.get("recovery_state") != "not_required"
+        ):
+            raise ProductRuntimeConflict("manual validation is not the current human action")
+    record, replay = manual_validation.persist(
+        item["binding"], status=status, human_attestation_text=human_attestation_text,
+        evidence=evidence, actor="pepper-chat-human",
+    )
+    return {
+        "manual_validation": _current_manual_validation_context(projection),
+        "evidence_SHA256": record["evidence_SHA256"], "idempotent_replay": replay,
+        "status": record["status"], "auto_validation": False,
+        "review_preparation_recorded": False, "review_decision_recorded": False,
+        "ticket_execution_authorized": False, "WorkPacket_execution_authorized": False,
+        "runtime_execution_authorized": False, "worker_execution": False,
+        "Kanban_dispatch": False, "Git_mutation": False,
+    }
+
+
+def _manual_validation_review_overlay(projection: dict[str, Any]) -> dict[str, Any] | None:
+    context = _current_manual_validation_context(projection)
+    if not context["items"]:
+        return None
+    failed = any(item["status"] == "failed" for item in context["items"])
+    pending = context["human_action_required"]
+    overlay = {"manual_validation": context, **{
+        key: context[key] for key in ("validation_contract_satisfied", "reviewable_result", "validated_noop_result")
+    }}
+    if failed or pending:
+        state = "manual_validation_failed" if failed else "manual_validation_required"
+        overlay.update({
+            "workflow_status": "blocked_manual_validation_failed" if failed else "execution_completed_pending_manual_validation",
+            "workflow_state": state, "validation_state": state,
+            "review_state": "blocked_pending_contract_validation",
+            "next_action": {
+                "id": f"RESOLVE_{projection['ticket_id'].replace('.', '_').upper()}_MANUAL_VALIDATION_FAILURE" if failed else context["next_action_id"],
+                "target_ticket_id": projection["ticket_id"],
+                "label": "Resolve failed manual validation through governed correction." if failed else "Inspect and explicitly attest required manual validation.",
+                "required_human_action": "manual_validation_failure_resolution" if failed else "manual_validation_attestation",
+            },
+        })
+    return overlay
+
+
 def _p18_9_0_review_prepare_overlay(
     projection: dict[str, Any],
     *,
@@ -30923,6 +31061,17 @@ def _p18_9_0_review_prepare_overlay(
                     "review_prepare_failure_SHA256"
                 ],
             }
+        if completed_overlay.get("workflow_status") == "execution_completed":
+            try:
+                manual_overlay = _manual_validation_review_overlay(projection)
+            except Exception as exc:
+                return {"workflow_status": "blocked_invalid_manual_validation_authority"}, {
+                    "id": f"{binding.ticket_id}-MANUAL-VALIDATION-AUTHORITY",
+                    "status": "blocked_invalid_manual_validation_authority",
+                    "evidence": _safe_text(exc, limit=300),
+                }
+            if manual_overlay is not None:
+                return manual_overlay, None
         return None, None
     if completed_overlay.get("workflow_status") != "execution_completed":
         return None, {
@@ -32871,6 +33020,7 @@ def build_lead_agent_operational_context() -> dict[str, Any]:
         "approval_state": approval_state,
         "pending_approval_count": pending_approval_count,
         "pending_ticket_approval_count": int(workflow.get("pending_ticket_approval_count") or 0),
+        "manual_validation": workflow.get("manual_validation"),
         "queue_state": _workflow_value(workflow, "queue_state", "unavailable"),
         "execution_state": _execution_state(active_execution_count),
         "execution_count": execution_count,

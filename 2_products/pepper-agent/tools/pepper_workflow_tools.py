@@ -588,6 +588,7 @@ def _get_current_project(args: dict[str, Any], **_kwargs) -> str:
     return _result({
         "source_tool": "get_current_project",
         "source_system": ctx["source_system"],
+        "manual_validation": ctx.get("manual_validation"),
         "product_id": ctx["product_id"],
         "project_id": ctx["project_id"],
         "project_name": ctx["project_name"],
@@ -607,6 +608,7 @@ def _get_current_ticket(args: dict[str, Any], **_kwargs) -> str:
     return _result({
         "source_tool": "get_current_ticket",
         "source_system": ctx["source_system"],
+        "manual_validation": ctx.get("manual_validation"),
         "available": ctx["available"],
         "message": ctx["message"],
         "project_id": ctx["project_id"],
@@ -627,6 +629,7 @@ def _get_workflow_control(args: dict[str, Any], **_kwargs) -> str:
     return _result({
         "source_tool": "get_workflow_control",
         "source_system": ctx["source_system"],
+        "manual_validation": ctx.get("manual_validation"),
         "product_id": ctx["product_id"],
         "project_id": ctx["project_id"],
         "current_ticket_id": ctx["current_ticket_id"],
@@ -837,6 +840,7 @@ def _get_execution_status(args: dict[str, Any], **_kwargs) -> str:
     ]
     return _result({
         "source_tool": "get_execution_status",
+        "manual_validation": pr.build_workflow_control_snapshot().get("manual_validation"),
         "source_system": source.get("source_system", pr.CONTROLLED_EXECUTION_SOURCE_SYSTEM),
         "execution_state": "active_executions" if active else "no_active_executions",
         "execution_count": len(executions),
@@ -853,6 +857,7 @@ def _get_review_status(args: dict[str, Any], **_kwargs) -> str:
     return _result({
         "source_tool": "get_review_status",
         "source_system": ctx["source_system"],
+        "manual_validation": ctx.get("manual_validation"),
         "workflow_status": ctx["workflow_status"],
         "validation_state": ctx["validation_state"],
         "review_state": ctx["review_state"],
@@ -891,6 +896,7 @@ def _get_next_action(args: dict[str, Any], **_kwargs) -> str:
     return _result({
         "source_tool": "get_next_action",
         "source_system": ctx["source_system"],
+        "manual_validation": ctx.get("manual_validation"),
         "project_id": ctx["project_id"],
         "current_ticket_id": ctx["current_ticket_id"],
         "next_ticket_id": ctx["next_ticket_id"],
@@ -1452,6 +1458,25 @@ def _prepare_current_ticket_review(args: dict[str, Any], **_kwargs) -> str:
         "auto_retry": False,
         "auto_rollback": False,
     })
+
+
+def _inspect_current_ticket_manual_validation(args: dict[str, Any], **_kwargs) -> str:
+    try:
+        return _result({
+            "source_tool": "inspect_current_ticket_manual_validation",
+            "manual_validation": _runtime().inspect_current_ticket_manual_validation(),
+            "read_only": True, "auto_validation": False,
+        })
+    except Exception as exc:
+        return tool_error(str(exc), success=False)
+
+
+def _attest_current_ticket_manual_validation(args: dict[str, Any], **_kwargs) -> str:
+    try:
+        result = _runtime().attest_current_ticket_manual_validation(**args)
+        return _result({"source_tool": "attest_current_ticket_manual_validation", **result})
+    except Exception as exc:
+        return tool_error(str(exc), success=False)
 
 
 def _attest_current_ticket_zero_change_for_review_prepare(
@@ -3026,4 +3051,42 @@ registry.register(
     handler=_generate_current_ticket,
     emoji="G",
     max_result_size_chars=24000,
+)
+
+
+registry.register(
+    name="inspect_current_ticket_manual_validation", toolset=TOOLSET,
+    schema={
+        "name": "inspect_current_ticket_manual_validation",
+        "description": "Read required manual validation items, exact contract wording, run/WorkPacket binding, evidence status and required human attestation texts. Makes no decision.",
+        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    handler=_inspect_current_ticket_manual_validation, emoji="V", max_result_size_chars=24000,
+)
+
+registry.register(
+    name="attest_current_ticket_manual_validation", toolset=TOOLSET,
+    schema={
+        "name": "attest_current_ticket_manual_validation",
+        "description": "Persist one explicit human passed/failed manual validation using the exact inspected binding and attestation text. Never executes, prepares review, approves review, retries, or mutates Git.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                **{key: {"type": "string"} for key in (
+                    "ticket_id", "work_packet_id", "work_packet_sha256", "validation_id",
+                    "validation_contract_sha256", "binding_sha256", "next_action_id",
+                    "human_attestation_text", "evidence",
+                )},
+                "run_id": {"type": "integer", "minimum": 1},
+                "status": {"type": "string", "enum": ["passed", "failed"]},
+            },
+            "required": [
+                "ticket_id", "work_packet_id", "work_packet_sha256", "validation_id",
+                "validation_contract_sha256", "binding_sha256", "next_action_id",
+                "human_attestation_text", "evidence", "run_id", "status",
+            ],
+            "additionalProperties": False,
+        },
+    },
+    handler=_attest_current_ticket_manual_validation, emoji="V", max_result_size_chars=24000,
 )

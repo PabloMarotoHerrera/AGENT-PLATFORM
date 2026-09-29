@@ -7703,6 +7703,24 @@ def _prepare_completed_review_package(monkeypatch):
         assert ok is True
     finally:
         conn.close()
+    # This fixture represents a human-validated review package. Required manual
+    # items need their own evidence; machine success and zero-change are separate.
+    manual = pr.inspect_current_ticket_manual_validation()
+    for item in manual["items"]:
+        attested = pr.attest_current_ticket_manual_validation(
+            ticket_id=manual["ticket_id"],
+            work_packet_id=manual["work_packet_id"],
+            work_packet_sha256=manual["work_packet_SHA256"],
+            run_id=manual["run_id"],
+            validation_id=item["validation_id"],
+            validation_contract_sha256=manual["validation_contract_SHA256"],
+            binding_sha256=item["binding_SHA256"],
+            next_action_id=manual["next_action_id"],
+            status="passed",
+            human_attestation_text=item["required_attestation_text"]["passed"],
+            evidence="Synthetic human checked the exact description and expected result.",
+        )
+        assert attested["status"] == "passed"
     review = pr.prepare_current_ticket_review(
         project_id="PEPPER",
         ticket_id="P18.9.0",

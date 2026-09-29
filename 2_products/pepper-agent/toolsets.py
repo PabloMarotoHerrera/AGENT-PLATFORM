@@ -250,6 +250,8 @@ TOOLSETS = {
             "prepare_current_ticket_execution",
             "start_current_ticket_execution",
             "recover_current_ticket_execution",
+            "inspect_current_ticket_manual_validation",
+            "attest_current_ticket_manual_validation",
             "prepare_current_ticket_review",
             "accept_current_ticket_review",
         ],
