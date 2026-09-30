@@ -1369,6 +1369,7 @@ def _continue_current_ticket_governed_autonomy(args: dict[str, Any], **_kwargs) 
                 f"do not supply {', '.join(forbidden)}"
             )
         result = pr.continue_current_ticket_governed_autonomy(
+            terminal_review_selection=args.get("terminal_review_selection"),
             runtime_goal=str(args.get("runtime_goal") or ""),
             observed_failure=str(args.get("observed_failure") or "").strip() or None,
             requested_capability=str(args.get("requested_capability") or "").strip() or None,
@@ -2255,6 +2256,21 @@ _CONTINUE_CURRENT_TICKET_GOVERNED_AUTONOMY_SCHEMA = {
         "delegate_goal": {
             "type": "string",
             "description": "Optional A2A child goal for canonical Hermes delegate_task. Backend derives child scope and filesystem operations from the active authority.",
+        },
+        "terminal_review_selection": {
+            "type": "object",
+            "description": "Explicit human choice to use an existing terminal material revision for review. Supply exact candidate and lineage guards; never combine with a fresh-execution request.",
+            "properties": {
+                "choice": {"type": "string", "enum": ["terminal_governed_run_review"]},
+                "work_packet_SHA256": {"type": "string"},
+                "review_revision_request_SHA256": {"type": "string"},
+                "predecessor_reviewed_run_id": {"type": "integer"},
+                "terminal_run_id": {"type": "integer"},
+                "candidate_SHA256": {"type": "string"},
+            },
+            "required": ["choice", "work_packet_SHA256", "review_revision_request_SHA256",
+                         "predecessor_reviewed_run_id", "terminal_run_id", "candidate_SHA256"],
+            "additionalProperties": False,
         },
         "fresh_execution_request_text": {
             "type": "string",

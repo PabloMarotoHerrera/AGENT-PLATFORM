@@ -6720,6 +6720,8 @@ def load_current_ticket_review_prepare_record(
         raise ProductRuntimeConflict(
             f"{projection['ticket_id']} review-preparation record is unreadable"
         ) from exc
+    if _terminal_review_selection_supersedes(projection, record, "package"):
+        return None
     if allow_historical_mismatch and _review_prepare_superseded_by_current_round(
         record,
         projection=projection,
@@ -6864,6 +6866,16 @@ def _review_prepare_record_matches_projection_identity(
     return all(record.get(key) == value for key, value in expected.items())
 
 
+def _terminal_review_selection_authority(projection: dict[str, Any]) -> dict[str, Any] | None:
+    from . import terminal_review_selection
+    return terminal_review_selection.load(projection)
+
+
+def _terminal_review_selection_supersedes(projection, record, kind) -> bool:
+    from . import terminal_review_selection
+    return terminal_review_selection.supersedes(projection, record, kind)
+
+
 def _review_prepare_superseded_by_current_round(
     record: dict[str, Any],
     *,
@@ -6873,6 +6885,8 @@ def _review_prepare_superseded_by_current_round(
         return False
     if record.get("review_prepare_action_SHA256") != _review_prepare_record_digest(record):
         return False
+    if _terminal_review_selection_supersedes(projection, record, "package"):
+        return True
     binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
     if not _review_prepare_record_matches_projection_identity(record, projection):
         return False
@@ -7107,6 +7121,8 @@ def _review_decision_superseded_by_current_round(
 ) -> bool:
     if not _review_decision_has_basic_current_ticket_identity(record, projection=projection):
         return False
+    if _terminal_review_selection_supersedes(projection, record, "decision"):
+        return True
     completion = _current_review_round_completion_source(projection)
     if completion.get("blocker_code"):
         return False
@@ -7227,6 +7243,7 @@ def validate_current_ticket_review_decision_record(
     record: dict[str, Any],
     *,
     projection_record: dict[str, Any] | None = None,
+    review_prepare_record: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Validate persisted human review-decision provenance for the current ticket."""
 
@@ -7355,7 +7372,10 @@ def validate_current_ticket_review_decision_record(
         ):
             raise ProductRuntimeConflict("review-decision identity digest mismatch")
     if source_kind == "review_prepare":
-        review_prepare = load_current_ticket_review_prepare_record(projection_record=projection)
+        review_prepare = (
+            review_prepare_record if review_prepare_record is not None
+            else load_current_ticket_review_prepare_record(projection_record=projection)
+        )
         if review_prepare is None:
             raise ProductRuntimeConflict("review-decision prepared review authority is missing")
         expected_prepare = {
@@ -7402,6 +7422,8 @@ def load_current_ticket_review_decision_record(
         record = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise ProductRuntimeConflict("review-decision record is unreadable") from exc
+    if _terminal_review_selection_supersedes(projection, record, "decision"):
+        return None
     if allow_historical_mismatch and _review_decision_superseded_by_current_round(
         record,
         projection=projection,
@@ -11240,6 +11262,27 @@ def inspect_current_ticket_review_candidate(
         raw_record = _load_current_ticket_review_prepare_record_raw(
             projection_record=projection,
         )
+        promoted = _terminal_review_selection_authority(projection)
+        if promoted is not None and (
+            raw_record is None or raw_record == promoted["predecessor_package"]
+        ):
+            from . import terminal_review_selection
+            candidate = terminal_review_selection.candidate_view(promoted)
+            guard = _current_review_candidate_guard_blocker(
+                candidate, reviewed_run_id=reviewed_run_id,
+                review_package_SHA256=review_package_SHA256,
+                review_prepare_action_SHA256=review_prepare_action_SHA256,
+            )
+            if guard:
+                raise ProductRuntimeCandidateInspectionBlocked(*guard)
+            result = _build_current_review_candidate_inspection_result(
+                projection=projection, review_prepare=candidate, operation=operation,
+                candidate_path=candidate_path, max_bytes=max_bytes,
+            )
+            result["candidate_authority_kind"] = "selected_terminal_revision"
+            result["selection_SHA256"] = promoted["selection_SHA256"]
+            result["review_prepared"] = False
+            return result
         raw_record_for_blocker = raw_record
         if raw_record is None:
             return _review_candidate_inspection_blocked_result(
@@ -12539,6 +12582,7 @@ def continue_current_ticket_governed_autonomy(
     delegate_parent_agent: Any | None = None,
     fresh_execution_request_text: str | None = None,
     resume_pending_fresh_execution_request_SHA256: str | None = None,
+    terminal_review_selection: dict[str, Any] | None = None,
     fresh_execution_request_override: dict[str, Any] | None = None,
     human_review_revision_segment_reference: dict[str, Any] | None = None,
     spawn_fn: Any = None,
@@ -12596,6 +12640,23 @@ def continue_current_ticket_governed_autonomy(
         activation=activation,
         previous=previous,
         effective_authority=effective_authority,
+    )
+    if terminal_review_selection is not None:
+        if (
+            strategy not in {"AUTO", "DIRECT"}
+            or fresh_execution_request_text or resume_pending_fresh_execution_request_SHA256
+            or fresh_execution_request_override is not None
+            or human_review_revision_segment_reference is not None
+        ):
+            raise ProductRuntimeConflict("terminal review selection cannot request fresh execution")
+        from . import terminal_review_selection as selection_authority
+        return selection_authority.select(projection, terminal_review_selection)
+    from . import terminal_review_selection as selection_authority
+    selection_authority.require_unconsumed_execution_choice(
+        projection,
+        text=request.fresh_execution_request_text,
+        resume_sha=request.resume_pending_fresh_execution_request_SHA256,
+        override=fresh_execution_request_override,
     )
     decision = _select_governed_autonomy_runtime_decision(request)
     terminal_reconciliation = _governed_autonomy_runtime_terminal_reconciliation(
@@ -29563,6 +29624,9 @@ def _governed_autonomy_current_review_round_completion_source(
 
 
 def _current_review_round_completion_source(projection: dict[str, Any]) -> dict[str, Any]:
+    promoted = _terminal_review_selection_authority(projection)
+    if promoted is not None:
+        return promoted["completion"]
     governed_completion = _governed_autonomy_current_review_round_completion_source(
         projection,
     )
@@ -29571,14 +29635,17 @@ def _current_review_round_completion_source(projection: dict[str, Any]) -> dict[
     return _kanban_completion_result_source(projection)
 
 
-def _kanban_completion_result_source(projection: dict[str, Any]) -> dict[str, Any]:
+def _kanban_completion_result_source(
+    projection: dict[str, Any], *, reconcile_lifecycle: bool = True,
+) -> dict[str, Any]:
     from hermes_cli import kanban_db
 
     board = _normalize_board(str(projection["kanban_board_slug"]))
     task_id = str(projection["kanban_task_id"])
     conn = kanban_db.connect(board=board)
     try:
-        _reconcile_kanban_board_lifecycle(conn, task_id=task_id)
+        if reconcile_lifecycle:
+            _reconcile_kanban_board_lifecycle(conn, task_id=task_id)
         task = kanban_db.get_task(conn, task_id)
         if task is None:
             return {
@@ -31778,6 +31845,10 @@ def _p18_9_0_live_kanban_execution(
 def _current_ticket_governed_autonomy_overlay(
     projection: dict[str, Any],
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    promoted = _terminal_review_selection_authority(projection)
+    if promoted is not None:
+        from . import terminal_review_selection
+        return terminal_review_selection.overlay(projection, promoted), None
     binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
     try:
         record = load_current_ticket_governed_autonomy_activation_record(
@@ -32190,6 +32261,19 @@ def _current_ticket_governed_autonomy_overlay(
             "blocker_code": "CONTINUATION_AUTHORITY_MISMATCH",
             "blocker_detail": effective_authority["diagnostics"].get("reason"),
         })
+    if (
+        terminal_reconciliation is not None
+        and overlay.get("workflow_status") == "governed_autonomy_validation_blocked"
+        and (runtime_state or {}).get("fresh_execution_request_reference", {}).get(
+            "fresh_execution_provenance"
+        ) == "human_review_changes_requested"
+    ):
+        from . import terminal_review_selection
+        try:
+            option = terminal_review_selection._context(projection)["selection"]
+            overlay["next_action"]["terminal_review_selection"] = option
+        except ProductRuntimeConflict as exc:
+            overlay["terminal_review_selection_blocker"] = str(exc)
     return overlay, None
 
 
