@@ -33019,20 +33019,40 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
     # Successor selection can replace the ticket whose closure was reconciled
     # above. Reconcile the final selected revision before publishing any reads.
     _apply_current_ticket_durable_completion_precedence(snapshot, remaining_blockers)
-    # A late closure can expose a different canonical successor. Resolve its
-    # persisted publication/decision from that closed state before publishing
-    # the pre-generation action, without displacing active work.
-    if (
+    # Each persisted closure can reveal another already-generated successor.
+    # Traverse until live authority or an unconsumed generation boundary wins;
+    # a fixed number of passes leaks the last predecessor's consumed action.
+    visited_predecessors: set[str] = set()
+    while (
         snapshot.get("workflow_status") == "completed"
         and not snapshot.get("current_ticket_id")
         and snapshot.get("closed_predecessor_ticket_id")
     ):
+        predecessor = str(snapshot["closed_predecessor_ticket_id"])
+        if predecessor in visited_predecessors:
+            raise ProductRuntimeConflict("successor authority traversal contains a cycle")
+        visited_predecessors.add(predecessor)
         _apply_pending_successor_approval_precedence(
             snapshot,
             remaining_blockers,
             allow_current_ticket_projection=False,
         )
         _apply_current_ticket_durable_completion_precedence(snapshot, remaining_blockers)
+        if snapshot.get("closed_predecessor_ticket_id") == predecessor:
+            break
+    # Pending human approval is current governed authority, not execution
+    # authority. Publish its identity only after historical execution overlays.
+    if (
+        snapshot.get("workflow_status") == "awaiting_ticket_approval"
+        and snapshot.get("generated_successor_ticket_id")
+        and snapshot.get("pending_ticket_approval_count") == 1
+    ):
+        snapshot["current_ticket_id"] = snapshot["generated_successor_ticket_id"]
+        snapshot["current_ticket_title"] = snapshot["generated_successor_ticket_title"]
+        snapshot["workflow_state"] = f"{snapshot['current_ticket_id']}-AWAITING-TICKET-APPROVAL"
+        snapshot["governed_workflow_state"] = "awaiting_ticket_approval"
+        snapshot["execution_started"] = False
+        _clear_stale_handoff_completion_projection_fields(snapshot)
     snapshot["remaining_blockers"] = remaining_blockers
     snapshot["blocker_count"] = len(remaining_blockers)
     snapshot["next_action_label"] = _next_action_label(snapshot.get("next_action"))

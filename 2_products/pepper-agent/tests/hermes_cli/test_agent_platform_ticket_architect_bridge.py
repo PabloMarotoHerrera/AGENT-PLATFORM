@@ -3040,7 +3040,7 @@ def test_chat_revise_generated_successor_ticket_uses_revision_backend_without_ex
     assert result["source_tool"] == "revise_generated_successor_ticket"
     assert result["revision_applied"] is True
     assert result["workflow_status"] == "awaiting_ticket_approval"
-    assert result["current_ticket_id"] is None
+    assert result["current_ticket_id"] == "P18.9.2"
     assert result["next_ticket_id"] == "P18.9.2"
     assert result["pending_approval_count"] == 1
     assert result["pending_ticket_approval_count"] == 1
@@ -5060,10 +5060,10 @@ def test_workflow_control_projects_p18_9_2_pending_successor_approval_without_ac
     snapshot = pr.build_workflow_control_snapshot()
     context = pr.build_lead_agent_operational_context()
 
-    assert snapshot["current_ticket_id"] is None
+    assert snapshot["current_ticket_id"] == "P18.9.2"
     assert snapshot["generated_successor_ticket_id"] == "P18.9.2"
     assert snapshot["next_ticket_id"] == "P18.9.2"
-    assert snapshot["workflow_state"] == "P18.9.2-SUCCESSOR-AWAITING-TICKET-APPROVAL"
+    assert snapshot["workflow_state"] == "P18.9.2-AWAITING-TICKET-APPROVAL"
     assert snapshot["workflow_status"] == "awaiting_ticket_approval"
     assert snapshot["approval_state"] == "pending_ticket_approval"
     assert snapshot["pending_approval_count"] == 1
@@ -5085,9 +5085,9 @@ def test_workflow_control_projects_p18_9_2_pending_successor_approval_without_ac
     assert snapshot["worker_execution"] is False
     assert snapshot["Kanban_dispatch"] is False
     assert snapshot["Git_mutation"] is False
-    assert context["available"] is False
-    assert context["message"] == "no active governed ticket"
-    assert context["current_ticket_id"] is None
+    assert context["available"] is True
+    assert context["message"] == "active governed ticket"
+    assert context["current_ticket_id"] == "P18.9.2"
     assert context["pending_ticket_approval_count"] == 1
     assert context["next_action"]["id"] == "APPROVE_P18_9_2"
     assert [item["id"] for item in context["approvals"]["items"]] == ["P18.9.2"]
@@ -5132,7 +5132,7 @@ def test_workflow_control_projects_p18_9_2_successor_after_predecessor_handoff_o
 
     snapshot = pr.build_workflow_control_snapshot()
 
-    assert snapshot["current_ticket_id"] is None
+    assert snapshot["current_ticket_id"] == "P18.9.2"
     assert snapshot["closed_predecessor_ticket_id"] == "P18.9.1"
     assert snapshot["generated_successor_ticket_id"] == "P18.9.2"
     assert snapshot["workflow_status"] == "awaiting_ticket_approval"
@@ -5292,10 +5292,10 @@ def test_c15_completed_predecessor_generated_successor_pending_approval_is_actio
     snapshot = pr.build_workflow_control_snapshot()
     context = pr.build_lead_agent_operational_context()
 
-    assert snapshot["current_ticket_id"] is None
+    assert snapshot["current_ticket_id"] == "P18.9.2"
     assert snapshot["closed_predecessor_ticket_id"] == "P18.9.1"
-    assert snapshot["ticket_closed"] is True
-    assert snapshot["handoff_completion_present"] is True
+    assert snapshot["ticket_closed"] is False
+    assert snapshot["handoff_completion_present"] is False
     assert snapshot["generated_successor_ticket_id"] == "P18.9.2"
     assert snapshot["next_ticket_id"] == "P18.9.2"
     assert snapshot["workflow_status"] == "awaiting_ticket_approval"
@@ -5313,7 +5313,7 @@ def test_c15_completed_predecessor_generated_successor_pending_approval_is_actio
     assert snapshot["generated_ticket_authority"]["work_packet_SHA256"] == successor[
         "work_packet_SHA256"
     ]
-    assert context["current_ticket_id"] is None
+    assert context["current_ticket_id"] == "P18.9.2"
     assert context["pending_ticket_approval_count"] == 1
     assert context["next_action"]["id"] == "APPROVE_P18_9_2"
     assert [item["id"] for item in context["approvals"]["items"]] == ["P18.9.2"]
@@ -5335,7 +5335,7 @@ def test_c26_pending_successor_approval_preempts_stale_review_prepare_projection
 
     assert stale["current_ticket_id"] == "P18.9.1"
     assert stale["next_action"]["id"] == "PREPARE_P18_9_1_REVIEW"
-    assert snapshot["current_ticket_id"] is None
+    assert snapshot["current_ticket_id"] == "P18.9.2"
     assert snapshot["generated_successor_ticket_id"] == "P18.9.2"
     assert snapshot["next_ticket_id"] == "P18.9.2"
     assert snapshot["workflow_status"] == "awaiting_ticket_approval"
@@ -5359,7 +5359,7 @@ def test_c26_pending_successor_approval_preempts_stale_review_prepare_projection
     assert snapshot["worker_execution"] is False
     assert snapshot["Kanban_dispatch"] is False
     assert snapshot["Git_mutation"] is False
-    assert context["current_ticket_id"] is None
+    assert context["current_ticket_id"] == "P18.9.2"
     assert context["pending_ticket_approval_count"] == 1
     assert context["next_action"]["id"] == "APPROVE_P18_9_2"
     assert [item["id"] for item in context["approvals"]["items"]] == ["P18.9.2"]

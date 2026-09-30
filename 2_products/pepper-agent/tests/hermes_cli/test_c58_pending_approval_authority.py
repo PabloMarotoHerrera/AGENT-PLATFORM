@@ -140,7 +140,7 @@ def test_c58_persisted_pending_approval_surfaces_and_explicit_decision(scenario)
         result = json.loads(reader({}))
         assert result["success"] is True
         assert result["next_action"]["id"] == scenario.target.approval_next_action_id
-        assert result["current_ticket_id"] is None
+        assert result["current_ticket_id"] == scenario.target.ticket_id
     workflow = context["workflow_control"]
     assert workflow["closed_predecessor_ticket_id"] == "P999.7"
     assert workflow["queue_state"] == "awaiting_human_successor_ticket_approval"
