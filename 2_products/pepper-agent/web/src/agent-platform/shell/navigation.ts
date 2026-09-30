@@ -52,6 +52,7 @@ const PRODUCT_ROUTE_GROUPS: readonly [RegExp, CompactShellNavigationGroupId][] =
   [/^\/agent-platform\/overview(?:\/|$)/, "control"],
   [/^\/agent-platform\/(?:projects|approvals|executions)(?:\/|$)/, "work"],
   [/^\/agent-platform\/(?:automation|integrations)(?:\/|$)/, "automation"],
+  [/^\/agent-platform\/resources(?:\/|$)/, "resources"],
   [/^\/agent-platform\/settings(?:\/|$)/, "system"],
 ];
 

@@ -28,7 +28,7 @@ def test_tracked_defaults_form_the_validated_dual_version_contract():
         configuration.feature_flags["agent_platform.product_ui"] is FeatureState.ENABLED
     )
     assert configuration.extension_modules == PRODUCT_UI_EXTENSION_MODULE_IDS
-    assert len(configuration.extension_modules) == 11
+    assert len(configuration.extension_modules) == 12
     assert len(configuration.extension_modules) == len(
         set(configuration.extension_modules)
     )
@@ -50,6 +50,7 @@ def test_product_ui_activation_ids_are_the_exact_accepted_registry_order():
         "agent_platform.ui.execution_detail",
         "agent_platform.ui.automation",
         "agent_platform.ui.integrations",
+        "agent_platform.ui.resources",
         "agent_platform.ui.settings",
     )
 

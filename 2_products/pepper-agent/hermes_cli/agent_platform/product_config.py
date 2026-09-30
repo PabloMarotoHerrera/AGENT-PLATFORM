@@ -76,6 +76,7 @@ PRODUCT_UI_EXTENSION_MODULE_IDS: tuple[str, ...] = (
     "agent_platform.ui.execution_detail",
     "agent_platform.ui.automation",
     "agent_platform.ui.integrations",
+    "agent_platform.ui.resources",
     "agent_platform.ui.settings",
 )
 

@@ -8,6 +8,7 @@ import { APPROVAL_INBOX_DESCRIPTORS } from "./approval-inbox";
 import { AUTOMATION_INTEGRATIONS_DESCRIPTORS } from "./automation-integrations";
 import { EXECUTION_INSPECTOR_DESCRIPTORS } from "./execution-inspector";
 import { PROJECTS_TICKETS_DESCRIPTORS } from "./projects-tickets";
+import { RESOURCES_DESCRIPTORS } from "./resources";
 import { RUNTIME_OVERVIEW_DESCRIPTOR } from "./runtime-overview";
 import { SAFE_SETTINGS_DESCRIPTOR } from "./safe-settings";
 
@@ -59,6 +60,7 @@ export const AGENT_PLATFORM_EXTENSIONS: readonly ProductExtensionDescriptor[] = 
   ...APPROVAL_INBOX_DESCRIPTORS,
   ...EXECUTION_INSPECTOR_DESCRIPTORS,
   ...AUTOMATION_INTEGRATIONS_DESCRIPTORS,
+  ...RESOURCES_DESCRIPTORS,
   SAFE_SETTINGS_DESCRIPTOR,
 ]);
 

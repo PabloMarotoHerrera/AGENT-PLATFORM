@@ -8,6 +8,7 @@ import {
   INTEGRATIONS_DESCRIPTOR,
   IntegrationsPage,
 } from "./automation-integrations";
+import { RESOURCES_DESCRIPTOR, ResourcesPage } from "./resources";
 import {
   AGENT_PLATFORM_EXTENSIONS,
   mergeProductNavigation,
@@ -28,6 +29,7 @@ const ACTIVATED_PRODUCT_EXTENSION_IDS = Object.freeze([
   "agent_platform.ui.execution_detail",
   "agent_platform.ui.automation",
   "agent_platform.ui.integrations",
+  "agent_platform.ui.resources",
   "agent_platform.ui.settings",
 ]);
 
@@ -127,13 +129,16 @@ describe("P18.UI-A canonical activation evidence", () => {
       "/agent-platform/executions/:executionId",
       "/agent-platform/automation",
       "/agent-platform/integrations",
+      "/agent-platform/resources",
       "/agent-platform/settings",
     ]);
     expect(resolved.filter((extension) => extension.route.path === "/agent-platform/automation")).toHaveLength(1);
     expect(resolved.filter((extension) => extension.route.path === "/agent-platform/integrations")).toHaveLength(1);
+    expect(resolved.filter((extension) => extension.route.path === "/agent-platform/resources")).toHaveLength(1);
     expect(navigation.map((item) => item.path)).toContain("/agent-platform/projects");
     expect(navigation.map((item) => item.path)).toContain("/agent-platform/automation");
     expect(navigation.map((item) => item.path)).toContain("/agent-platform/integrations");
+    expect(navigation.map((item) => item.path)).toContain("/agent-platform/resources");
     expect(navigation.map((item) => item.path)).toContain("/kanban");
     expect(new Set(navigation.map((item) => item.path)).size).toBe(navigation.length);
   });
@@ -159,6 +164,21 @@ describe("P18.UI-A canonical activation evidence", () => {
     expect(integrationsMarkup).toContain("Open Pairing");
     expect(integrationsMarkup).toContain("Open Channels");
     expect(integrationsMarkup).not.toContain("Pepper / Automation");
+  });
+
+  it("test_canonical_Resources_identity_page", () => {
+    const resourcesMarkup = renderToStaticMarkup(createElement(ResourcesPage));
+
+    expect(RESOURCES_DESCRIPTOR.route).toMatchObject({
+      path: "/agent-platform/resources",
+      title: "Resources",
+    });
+    expect(resourcesMarkup).toContain("Pepper / Resources");
+    expect(resourcesMarkup).toContain("Open Files");
+    expect(resourcesMarkup).toContain("Open Models");
+    expect(resourcesMarkup).toContain("Open Documentation");
+    expect(resourcesMarkup).toContain("Navigation-only");
+    expect(resourcesMarkup).not.toContain("Pepper / Automation");
   });
 
   it("test_canonical_unapproved_extension_remains_inert", () => {

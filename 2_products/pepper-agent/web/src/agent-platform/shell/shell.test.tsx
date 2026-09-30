@@ -46,6 +46,7 @@ const activatedProductExtensionIds = Object.freeze([
   "agent_platform.ui.execution_detail",
   "agent_platform.ui.automation",
   "agent_platform.ui.integrations",
+  "agent_platform.ui.resources",
   "agent_platform.ui.settings",
 ]);
 
@@ -182,6 +183,7 @@ describe("shell navigation", () => {
         { path: "/agent-platform/executions", label: "Executions", groupId: "agent-platform" as const },
         { path: "/agent-platform/automation", label: "Automation", groupId: "agent-platform" as const },
         { path: "/agent-platform/integrations", label: "Integrations", groupId: "agent-platform" as const },
+        { path: "/agent-platform/resources", label: "Resources", groupId: "agent-platform" as const },
         { path: "/agent-platform/settings", label: "Settings", groupId: "agent-platform" as const },
       ],
       [],
@@ -200,6 +202,7 @@ describe("shell navigation", () => {
         "/agent-platform/automation",
         "/agent-platform/integrations",
       ]],
+      ["resources", ["/agent-platform/resources"]],
       ["system", ["/agent-platform/settings"]],
     ]);
   });
@@ -269,6 +272,7 @@ describe("shell navigation", () => {
       "/agent-platform/executions/:executionId",
       "/agent-platform/automation",
       "/agent-platform/integrations",
+      "/agent-platform/resources",
       "/agent-platform/settings",
     ]);
     expect(navItems.map((item) => item.path)).toEqual([
@@ -278,6 +282,7 @@ describe("shell navigation", () => {
       "/agent-platform/executions",
       "/agent-platform/automation",
       "/agent-platform/integrations",
+      "/agent-platform/resources",
       "/agent-platform/settings",
     ]);
     expect(navItems.map((item) => item.path)).not.toContain("/agent-platform/projects/:boardSlug");

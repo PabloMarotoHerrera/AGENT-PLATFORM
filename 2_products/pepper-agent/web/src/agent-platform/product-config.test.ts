@@ -27,6 +27,7 @@ function validWireConfiguration(): Record<string, unknown> {
       "agent_platform.ui.execution_detail",
       "agent_platform.ui.automation",
       "agent_platform.ui.integrations",
+      "agent_platform.ui.resources",
       "agent_platform.ui.settings",
     ],
     documentation_url: null,
@@ -57,6 +58,7 @@ describe("product configuration", () => {
       "agent_platform.ui.execution_detail",
       "agent_platform.ui.automation",
       "agent_platform.ui.integrations",
+      "agent_platform.ui.resources",
       "agent_platform.ui.settings",
     ]);
   });

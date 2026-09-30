@@ -33,6 +33,7 @@ const ACTIVATED_PRODUCT_EXTENSION_IDS = Object.freeze([
   "agent_platform.ui.execution_detail",
   "agent_platform.ui.automation",
   "agent_platform.ui.integrations",
+  "agent_platform.ui.resources",
   "agent_platform.ui.settings",
 ]);
 
@@ -60,11 +61,11 @@ function source(overrides: Partial<SafeSettingsSourceContext> = {}): SafeSetting
     productConfiguration: configuration(),
     selectedProfileContext: "reviewer",
     extensionPosture: {
-      compiledDescriptorCount: 11,
-      selectedModuleCount: 11,
-      resolvedDescriptorCount: 11,
-      registeredRouteCount: 11,
-      registeredNavigationCount: 7,
+      compiledDescriptorCount: 12,
+      selectedModuleCount: 12,
+      resolvedDescriptorCount: 12,
+      registeredRouteCount: 12,
+      registeredNavigationCount: 8,
     },
     themeId: "default",
     fontId: "theme",
@@ -114,11 +115,11 @@ describe("Pepper safe settings projection", () => {
       sourceAuthority: "read-only tracked product configuration",
     }]);
     expect(value.extensionPosture).toEqual({
-      compiledDescriptorCount: 11,
-      selectedModuleCount: 11,
-      resolvedDescriptorCount: 11,
-      registeredRouteCount: 11,
-      registeredNavigationCount: 7,
+      compiledDescriptorCount: 12,
+      selectedModuleCount: 12,
+      resolvedDescriptorCount: 12,
+      registeredRouteCount: 12,
+      registeredNavigationCount: 8,
     });
     expect(value.preferences.map((item) => [item.id, item.classification, item.writeAvailable]))
       .toEqual([
