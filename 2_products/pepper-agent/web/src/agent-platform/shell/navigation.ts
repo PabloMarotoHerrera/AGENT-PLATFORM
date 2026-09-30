@@ -51,6 +51,7 @@ const COMPACT_SHELL_NAVIGATION_GROUP_ORDER: readonly CompactShellNavigationGroup
 const PRODUCT_ROUTE_GROUPS: readonly [RegExp, CompactShellNavigationGroupId][] = [
   [/^\/agent-platform\/overview(?:\/|$)/, "control"],
   [/^\/agent-platform\/(?:projects|approvals|executions)(?:\/|$)/, "work"],
+  [/^\/agent-platform\/(?:automation|integrations)(?:\/|$)/, "automation"],
   [/^\/agent-platform\/settings(?:\/|$)/, "system"],
 ];
 

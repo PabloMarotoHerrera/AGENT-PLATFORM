@@ -25,6 +25,8 @@ const ACTIVATED_PRODUCT_EXTENSION_IDS = Object.freeze([
   "agent_platform.ui.approval_detail",
   "agent_platform.ui.executions",
   "agent_platform.ui.execution_detail",
+  "agent_platform.ui.automation",
+  "agent_platform.ui.integrations",
   "agent_platform.ui.settings",
 ]);
 
@@ -87,14 +89,16 @@ describe("Pepper frontend extensions", () => {
       "/agent-platform/projects",
       "/agent-platform/approvals",
       "/agent-platform/executions",
+      "/agent-platform/automation",
+      "/agent-platform/integrations",
       "/agent-platform/settings",
     ]);
     expect(getProductExtensionPosture(committed)).toEqual({
-      compiledDescriptorCount: 9,
-      selectedModuleCount: 9,
-      resolvedDescriptorCount: 9,
-      registeredRouteCount: 9,
-      registeredNavigationCount: 5,
+      compiledDescriptorCount: 11,
+      selectedModuleCount: 11,
+      resolvedDescriptorCount: 11,
+      registeredRouteCount: 11,
+      registeredNavigationCount: 7,
     });
   });
 
@@ -118,6 +122,8 @@ describe("Pepper frontend extensions", () => {
       ["agent_platform.ui.projects", "/agent-platform/projects", "Projects"],
       ["agent_platform.ui.approvals", "/agent-platform/approvals", "Approvals"],
       ["agent_platform.ui.executions", "/agent-platform/executions", "Executions"],
+      ["agent_platform.ui.automation", "/agent-platform/automation", "Automation"],
+      ["agent_platform.ui.integrations", "/agent-platform/integrations", "Integrations"],
       ["agent_platform.ui.settings", "/agent-platform/settings", "Settings"],
     ]);
   });
@@ -135,7 +141,7 @@ describe("Pepper frontend extensions", () => {
   it("returns no registered descriptors when product configuration is unavailable", () => {
     expect(resolveRegisteredProductExtensions(null, ["/sessions", "/kanban"])).toEqual([]);
     expect(getProductExtensionPosture(null)).toEqual({
-      compiledDescriptorCount: 9,
+      compiledDescriptorCount: 11,
       selectedModuleCount: 0,
       resolvedDescriptorCount: 0,
       registeredRouteCount: 0,
@@ -151,7 +157,7 @@ describe("Pepper frontend extensions", () => {
 
     expect(resolveRegisteredProductExtensions(committed, ["/sessions"])).toEqual([]);
     expect(getProductExtensionPosture(committed)).toEqual({
-      compiledDescriptorCount: 9,
+      compiledDescriptorCount: 11,
       selectedModuleCount: 1,
       resolvedDescriptorCount: 0,
       registeredRouteCount: 0,
@@ -181,12 +187,14 @@ describe("Pepper frontend extensions", () => {
       manifest("/agent-platform/approvals/:approvalId"),
       manifest("/agent-platform/executions"),
       manifest("/agent-platform/executions/:executionId"),
+      manifest("/agent-platform/automation"),
+      manifest("/agent-platform/integrations"),
       manifest("/agent-platform/settings"),
       manifest("/:namespace/*"),
     ]);
 
     expect(filtered.manifests.map((entry) => entry.tab.path)).toEqual(["/kanban"]);
-    expect(filtered.blockedManifestCount).toBe(10);
+    expect(filtered.blockedManifestCount).toBe(12);
   });
 
   it("uses configuration order and enables only explicitly enabled descriptors", () => {

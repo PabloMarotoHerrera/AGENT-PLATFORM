@@ -1,6 +1,13 @@
-import type { ComponentType } from "react";
+import { createElement, type ComponentType } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import {
+  AUTOMATION_DESCRIPTOR,
+  AutomationPage,
+  INTEGRATIONS_DESCRIPTOR,
+  IntegrationsPage,
+} from "./automation-integrations";
 import {
   AGENT_PLATFORM_EXTENSIONS,
   mergeProductNavigation,
@@ -19,6 +26,8 @@ const ACTIVATED_PRODUCT_EXTENSION_IDS = Object.freeze([
   "agent_platform.ui.approval_detail",
   "agent_platform.ui.executions",
   "agent_platform.ui.execution_detail",
+  "agent_platform.ui.automation",
+  "agent_platform.ui.integrations",
   "agent_platform.ui.settings",
 ]);
 
@@ -116,11 +125,40 @@ describe("P18.UI-A canonical activation evidence", () => {
       "/agent-platform/approvals/:approvalId",
       "/agent-platform/executions",
       "/agent-platform/executions/:executionId",
+      "/agent-platform/automation",
+      "/agent-platform/integrations",
       "/agent-platform/settings",
     ]);
+    expect(resolved.filter((extension) => extension.route.path === "/agent-platform/automation")).toHaveLength(1);
+    expect(resolved.filter((extension) => extension.route.path === "/agent-platform/integrations")).toHaveLength(1);
     expect(navigation.map((item) => item.path)).toContain("/agent-platform/projects");
+    expect(navigation.map((item) => item.path)).toContain("/agent-platform/automation");
+    expect(navigation.map((item) => item.path)).toContain("/agent-platform/integrations");
     expect(navigation.map((item) => item.path)).toContain("/kanban");
     expect(new Set(navigation.map((item) => item.path)).size).toBe(navigation.length);
+  });
+
+  it("test_canonical_Automation_and_Integrations_identity_pages", () => {
+    const automationMarkup = renderToStaticMarkup(createElement(AutomationPage));
+    const integrationsMarkup = renderToStaticMarkup(createElement(IntegrationsPage));
+
+    expect(AUTOMATION_DESCRIPTOR.route).toMatchObject({
+      path: "/agent-platform/automation",
+      title: "Automation",
+    });
+    expect(INTEGRATIONS_DESCRIPTOR.route).toMatchObject({
+      path: "/agent-platform/integrations",
+      title: "Integrations",
+    });
+    expect(automationMarkup).toContain("Pepper / Automation");
+    expect(automationMarkup).toContain("Open Cron");
+    expect(automationMarkup).toContain("Open Webhooks");
+    expect(integrationsMarkup).toContain("Pepper / Integrations");
+    expect(integrationsMarkup).toContain("Open Plugins");
+    expect(integrationsMarkup).toContain("Open MCP");
+    expect(integrationsMarkup).toContain("Open Pairing");
+    expect(integrationsMarkup).toContain("Open Channels");
+    expect(integrationsMarkup).not.toContain("Pepper / Automation");
   });
 
   it("test_canonical_unapproved_extension_remains_inert", () => {

@@ -44,6 +44,8 @@ const activatedProductExtensionIds = Object.freeze([
   "agent_platform.ui.approval_detail",
   "agent_platform.ui.executions",
   "agent_platform.ui.execution_detail",
+  "agent_platform.ui.automation",
+  "agent_platform.ui.integrations",
   "agent_platform.ui.settings",
 ]);
 
@@ -178,6 +180,8 @@ describe("shell navigation", () => {
         { path: "/agent-platform/projects/demo", label: "Project", groupId: "agent-platform" as const },
         { path: "/agent-platform/approvals", label: "Approvals", groupId: "agent-platform" as const },
         { path: "/agent-platform/executions", label: "Executions", groupId: "agent-platform" as const },
+        { path: "/agent-platform/automation", label: "Automation", groupId: "agent-platform" as const },
+        { path: "/agent-platform/integrations", label: "Integrations", groupId: "agent-platform" as const },
         { path: "/agent-platform/settings", label: "Settings", groupId: "agent-platform" as const },
       ],
       [],
@@ -191,6 +195,10 @@ describe("shell navigation", () => {
         "/agent-platform/projects/demo",
         "/agent-platform/approvals",
         "/agent-platform/executions",
+      ]],
+      ["automation", [
+        "/agent-platform/automation",
+        "/agent-platform/integrations",
       ]],
       ["system", ["/agent-platform/settings"]],
     ]);
@@ -259,6 +267,8 @@ describe("shell navigation", () => {
       "/agent-platform/approvals/:approvalId",
       "/agent-platform/executions",
       "/agent-platform/executions/:executionId",
+      "/agent-platform/automation",
+      "/agent-platform/integrations",
       "/agent-platform/settings",
     ]);
     expect(navItems.map((item) => item.path)).toEqual([
@@ -266,6 +276,8 @@ describe("shell navigation", () => {
       "/agent-platform/projects",
       "/agent-platform/approvals",
       "/agent-platform/executions",
+      "/agent-platform/automation",
+      "/agent-platform/integrations",
       "/agent-platform/settings",
     ]);
     expect(navItems.map((item) => item.path)).not.toContain("/agent-platform/projects/:boardSlug");

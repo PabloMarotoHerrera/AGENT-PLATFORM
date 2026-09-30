@@ -5,6 +5,7 @@ import {
   type ProductConfiguration,
 } from "./product-config";
 import { APPROVAL_INBOX_DESCRIPTORS } from "./approval-inbox";
+import { AUTOMATION_INTEGRATIONS_DESCRIPTORS } from "./automation-integrations";
 import { EXECUTION_INSPECTOR_DESCRIPTORS } from "./execution-inspector";
 import { PROJECTS_TICKETS_DESCRIPTORS } from "./projects-tickets";
 import { RUNTIME_OVERVIEW_DESCRIPTOR } from "./runtime-overview";
@@ -57,6 +58,7 @@ export const AGENT_PLATFORM_EXTENSIONS: readonly ProductExtensionDescriptor[] = 
   ...PROJECTS_TICKETS_DESCRIPTORS,
   ...APPROVAL_INBOX_DESCRIPTORS,
   ...EXECUTION_INSPECTOR_DESCRIPTORS,
+  ...AUTOMATION_INTEGRATIONS_DESCRIPTORS,
   SAFE_SETTINGS_DESCRIPTOR,
 ]);
 
