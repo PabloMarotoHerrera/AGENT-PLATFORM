@@ -14,6 +14,14 @@ export interface RuntimeOverviewSnapshot {
     latestConfigVersion: number;
     updateAvailable: boolean;
   }>;
+  readonly upstreamUpdate: Readonly<{
+    candidateVisible: boolean;
+    currentConfigVersion: number;
+    latestConfigVersion: number;
+    nativeUpdateActionAllowed: false;
+    authority: "Pepper governed update orchestration";
+    sourceAuthority: "bounded runtime status projection";
+  }>;
   readonly gateway: Readonly<{
     state: RuntimeGatewayState;
     running: boolean;
@@ -289,6 +297,14 @@ export function parseRuntimeOverviewSnapshot(value: unknown): RuntimeOverviewSna
       configVersion,
       latestConfigVersion,
       updateAvailable: canUpdateHermes && latestConfigVersion > configVersion,
+    }),
+    upstreamUpdate: Object.freeze({
+      candidateVisible: canUpdateHermes && latestConfigVersion > configVersion,
+      currentConfigVersion: configVersion,
+      latestConfigVersion,
+      nativeUpdateActionAllowed: false,
+      authority: "Pepper governed update orchestration",
+      sourceAuthority: "bounded runtime status projection",
     }),
     gateway: Object.freeze({
       state: normalizeGatewayState(source.gateway_state, gatewayRunning),

@@ -127,6 +127,14 @@ describe("Runtime Overview contract", () => {
         latestConfigVersion: 33,
         updateAvailable: false,
       },
+      upstreamUpdate: {
+        candidateVisible: false,
+        currentConfigVersion: 33,
+        latestConfigVersion: 33,
+        nativeUpdateActionAllowed: false,
+        authority: "Pepper governed update orchestration",
+        sourceAuthority: "bounded runtime status projection",
+      },
       gateway: { state: "off", running: false, busy: false, drainable: false },
       activity: { activeSessions: 0, activeAgents: 0 },
       access: { authRequired: false },
@@ -201,6 +209,12 @@ describe("Runtime Overview contract", () => {
       gatewayMode: "telegram",
       restartDrainTimeoutSeconds: 45,
       configurationDrift: true,
+    });
+    expect(parsed?.upstreamUpdate).toMatchObject({
+      candidateVisible: true,
+      currentConfigVersion: 32,
+      latestConfigVersion: 33,
+      nativeUpdateActionAllowed: false,
     });
     expect(JSON.stringify(parsed)).not.toContain("SECRET_GATEWAY_TOKEN");
     expect(JSON.stringify(parsed)).not.toContain("private.invalid");
@@ -303,10 +317,32 @@ describe("Runtime Overview surface and descriptor", () => {
     expect(ready).toContain("Offline");
     expect(ready).toContain("Product runtime administration");
     expect(ready).toContain("Gateway mode");
+    expect(ready).toContain("Governed upstream update");
+    expect(ready).toContain("Hermes upstream visibility");
+    expect(ready).toContain("No governed update candidate");
+    expect(ready).toContain("Native update action");
+    expect(ready).toContain("Blocked");
     expect(ready).toContain("Recent sessions");
     expect(ready).toContain("not governed AGENT PLATFORM Agents");
     expect(ready).toContain("Workflow-control unavailable");
     expect(ready).not.toContain("private");
+  });
+
+  it("renders governed upstream update candidates as visibility-only with no native action authority", () => {
+    const ready = renderReady({}, {
+      config_version: 32,
+      latest_config_version: 33,
+      can_update_hermes: true,
+    });
+
+    expect(ready).toContain("Governed update candidate");
+    expect(ready).toContain("Pepper governed update orchestration");
+    expect(ready).toContain("Prepared review and human approval are required before product mutation.");
+    expect(ready).toContain("Visibility only; no direct update, pull, merge, rebase, Docker, Graphify, provider, or worker authority is added.");
+    expect(ready).not.toContain("hermes update");
+    expect(ready).not.toContain("git pull");
+    expect(ready).not.toContain("git merge");
+    expect(ready).not.toContain("git rebase");
   });
 
   it("answers the five required Control Center overview questions", () => {

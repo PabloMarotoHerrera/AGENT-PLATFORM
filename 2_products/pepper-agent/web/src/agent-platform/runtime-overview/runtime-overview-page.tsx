@@ -354,6 +354,34 @@ export function RuntimeOverviewView({ state, refresh }: RuntimeOverviewViewProps
               />
             </section>
 
+            <Card className="border-[var(--agent-platform-border-strong)] bg-[var(--agent-platform-surface-elevated)]" aria-label="Governed Hermes upstream update visibility">
+              <CardContent className="space-y-5 p-5 sm:p-6">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="flex items-start gap-3">
+                    <ShieldCheck className="mt-0.5 h-5 w-5 text-[var(--agent-platform-status-success)]" aria-hidden="true" />
+                    <div>
+                      <p className="font-mono text-xs uppercase tracking-[0.16em] text-[var(--agent-platform-text-muted)]">
+                        Governed upstream update
+                      </p>
+                      <h2 className="mt-2 text-xl font-semibold">Hermes upstream visibility</h2>
+                      <p className="mt-2 text-sm leading-relaxed text-[var(--agent-platform-text-secondary)]">
+                        Pepper surfaces update posture from the bounded runtime status only. Native Hermes, package-manager, and Git update actions remain unavailable from this control plane.
+                      </p>
+                    </div>
+                  </div>
+                  <Badge tone={snapshot.upstreamUpdate.candidateVisible ? "warning" : "success"}>
+                    {snapshot.upstreamUpdate.candidateVisible ? "Governed update candidate" : "No governed update candidate"}
+                  </Badge>
+                </div>
+                <dl className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                  <Cell label="Current config" value={snapshot.upstreamUpdate.currentConfigVersion} />
+                  <Cell label="Latest config" value={snapshot.upstreamUpdate.latestConfigVersion} />
+                  <Cell label="Authority" value={snapshot.upstreamUpdate.authority} detail="Prepared review and human approval are required before product mutation." />
+                  <Cell label="Native update action" value={snapshot.upstreamUpdate.nativeUpdateActionAllowed ? "Allowed" : "Blocked"} detail="Visibility only; no direct update, pull, merge, rebase, Docker, Graphify, provider, or worker authority is added." />
+                </dl>
+              </CardContent>
+            </Card>
+
             <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-label="Runtime activity">
               <Metric
                 icon={Users}
