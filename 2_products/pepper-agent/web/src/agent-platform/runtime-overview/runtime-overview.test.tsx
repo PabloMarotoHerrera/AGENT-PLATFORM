@@ -130,6 +130,11 @@ describe("Runtime Overview contract", () => {
       gateway: { state: "off", running: false, busy: false, drainable: false },
       activity: { activeSessions: 0, activeAgents: 0 },
       access: { authRequired: false },
+      administration: {
+        gatewayMode: "none",
+        restartDrainTimeoutSeconds: 0,
+        configurationDrift: false,
+      },
       workflowControl: null,
     });
     const retained = JSON.stringify(parsed);
@@ -176,9 +181,29 @@ describe("Runtime Overview contract", () => {
     expect(parseRuntimeOverviewSnapshot(statusResponse({ active_sessions: -1 }))).toBeNull();
     expect(parseRuntimeOverviewSnapshot(statusResponse({ auth_required: "false" }))).toBeNull();
     expect(parseRuntimeOverviewSnapshot(statusResponse({ version: "" }))).toBeNull();
+    expect(parseRuntimeOverviewSnapshot(statusResponse({ restart_drain_timeout: -1 }))).toBeNull();
     expect(parseRuntimeOverviewSnapshot(statusResponse({
       agent_platform_workflow_control: workflowControl({ next_action: { label: "missing governed action id" } }),
     }))?.workflowControl).toBeNull();
+  });
+
+  it("derives a credential-free product runtime administration posture", () => {
+    const parsed = parseRuntimeOverviewSnapshot(statusResponse({
+      config_version: 32,
+      latest_config_version: 33,
+      gateway_mode: "telegram",
+      restart_drain_timeout: 45,
+      gateways: [{ token: "SECRET_GATEWAY_TOKEN" }],
+      gateway_health_url: "https://private.invalid/health",
+    }));
+
+    expect(parsed?.administration).toEqual({
+      gatewayMode: "telegram",
+      restartDrainTimeoutSeconds: 45,
+      configurationDrift: true,
+    });
+    expect(JSON.stringify(parsed)).not.toContain("SECRET_GATEWAY_TOKEN");
+    expect(JSON.stringify(parsed)).not.toContain("private.invalid");
   });
 });
 
@@ -276,6 +301,8 @@ describe("Runtime Overview surface and descriptor", () => {
       />,
     );
     expect(ready).toContain("Offline");
+    expect(ready).toContain("Product runtime administration");
+    expect(ready).toContain("Gateway mode");
     expect(ready).toContain("Recent sessions");
     expect(ready).toContain("not governed AGENT PLATFORM Agents");
     expect(ready).toContain("Workflow-control unavailable");

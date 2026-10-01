@@ -44,9 +44,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function readString(value: unknown, field: string): string {
-  if (typeof value !== "string" || value.length === 0) {
-    throw new Error(`${field} must be a non-empty string`);
+function readString(value: unknown, field: string, maxLength = 240): string {
+  if (typeof value !== "string" || value.length === 0 || value.length > maxLength) {
+    throw new Error(`${field} must be bounded non-empty text`);
+  }
+  if ([...value].some((character) => {
+    const code = character.charCodeAt(0);
+    return code < 32 || code === 127;
+  })) {
+    throw new Error(`${field} must not contain control characters`);
   }
   return value;
 }
@@ -61,7 +67,7 @@ function readIdentifier(value: unknown, field: string): string {
 
 function readOptionalUrl(value: unknown, field: string): string | null {
   if (value === null) return null;
-  const url = new URL(readString(value, field));
+  const url = new URL(readString(value, field, 2_048));
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error(`${field} must use HTTP or HTTPS`);
   }
@@ -97,16 +103,16 @@ export function parseProductConfiguration(raw: unknown): ProductConfiguration {
     throw new Error("extension_modules must contain unique identifiers");
   }
 
-  const upstreamCommit = readString(raw.upstream_commit, "upstream_commit");
+  const upstreamCommit = readString(raw.upstream_commit, "upstream_commit", 40);
   if (!COMMIT_SHA.test(upstreamCommit)) throw new Error("upstream_commit must be a full SHA");
 
   return Object.freeze({
     schemaVersion: 1,
     productId: readIdentifier(raw.product_id, "product_id"),
-    productDisplayName: readString(raw.product_display_name, "product_display_name"),
-    productVersion: readString(raw.product_version, "product_version"),
-    upstreamProductName: readString(raw.upstream_product_name, "upstream_product_name"),
-    upstreamVersion: readString(raw.upstream_version, "upstream_version"),
+    productDisplayName: readString(raw.product_display_name, "product_display_name", 120),
+    productVersion: readString(raw.product_version, "product_version", 64),
+    upstreamProductName: readString(raw.upstream_product_name, "upstream_product_name", 120),
+    upstreamVersion: readString(raw.upstream_version, "upstream_version", 64),
     upstreamCommit,
     featureFlags: Object.freeze(featureFlags),
     extensionModules: Object.freeze(extensionModules),

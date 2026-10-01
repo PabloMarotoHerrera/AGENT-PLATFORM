@@ -108,6 +108,17 @@ describe("product configuration", () => {
     expect(() => parseProductConfiguration(raw)).toThrow(/must not contain credentials/);
   });
 
+  it("rejects unbounded or control-character product administration labels", () => {
+    expect(() => parseProductConfiguration({
+      ...validWireConfiguration(),
+      product_display_name: `Pepper\n${"x".repeat(130)}`,
+    })).toThrow(/bounded|control/);
+    expect(() => parseProductConfiguration({
+      ...validWireConfiguration(),
+      upstream_version: "0.19.0\u0007",
+    })).toThrow(/control/);
+  });
+
   it("consumes the protected backend endpoint through the existing API client", async () => {
     vi.stubGlobal("window", { __HERMES_SESSION_TOKEN__: "synthetic-session-token" });
     const fetchMock = vi.fn(

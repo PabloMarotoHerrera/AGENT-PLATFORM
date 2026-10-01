@@ -27,6 +27,11 @@ export interface RuntimeOverviewSnapshot {
   readonly access: Readonly<{
     authRequired: boolean;
   }>;
+  readonly administration: Readonly<{
+    gatewayMode: string;
+    restartDrainTimeoutSeconds: number;
+    configurationDrift: boolean;
+  }>;
   readonly workflowControl: RuntimeWorkflowControl | null;
 }
 
@@ -256,6 +261,8 @@ export function parseRuntimeOverviewSnapshot(value: unknown): RuntimeOverviewSna
   const activeSessions = asNonNegativeInteger(source.active_sessions);
   const activeAgents = asNonNegativeInteger(source.active_agents);
   const authRequired = asBoolean(source.auth_required);
+  const gatewayMode = asBoundedString(source.gateway_mode, 64);
+  const restartDrainTimeoutSeconds = asNonNegativeInteger(source.restart_drain_timeout);
 
   if (
     version === null ||
@@ -268,7 +275,9 @@ export function parseRuntimeOverviewSnapshot(value: unknown): RuntimeOverviewSna
     gatewayDrainable === null ||
     activeSessions === null ||
     activeAgents === null ||
-    authRequired === null
+    authRequired === null ||
+    gatewayMode === null ||
+    restartDrainTimeoutSeconds === null
   ) {
     return null;
   }
@@ -289,6 +298,11 @@ export function parseRuntimeOverviewSnapshot(value: unknown): RuntimeOverviewSna
     }),
     activity: Object.freeze({ activeSessions, activeAgents }),
     access: Object.freeze({ authRequired }),
+    administration: Object.freeze({
+      gatewayMode,
+      restartDrainTimeoutSeconds,
+      configurationDrift: latestConfigVersion !== configVersion,
+    }),
     workflowControl: parseWorkflowControl(source.agent_platform_workflow_control),
   });
 }

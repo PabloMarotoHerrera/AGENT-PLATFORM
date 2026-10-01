@@ -333,6 +333,27 @@ export function RuntimeOverviewView({ state, refresh }: RuntimeOverviewViewProps
               </CardContent>
             </Card>
 
+            <section className="grid gap-4 sm:grid-cols-3" aria-label="Product runtime administration">
+              <Metric
+                icon={Server}
+                label="Gateway mode"
+                value={snapshot.administration.gatewayMode}
+                detail="Credential-free runtime mode reported by the bounded status projection."
+              />
+              <Metric
+                icon={RefreshCw}
+                label="Drain timeout"
+                value={`${snapshot.administration.restartDrainTimeoutSeconds}s`}
+                detail="Read-only restart drain posture; no lifecycle control is exposed here."
+              />
+              <Metric
+                icon={ListChecks}
+                label="Config drift"
+                value={snapshot.administration.configurationDrift ? "Detected" : "None"}
+                detail="Derived only from current and latest config versions, without raw config access."
+              />
+            </section>
+
             <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-label="Runtime activity">
               <Metric
                 icon={Users}
