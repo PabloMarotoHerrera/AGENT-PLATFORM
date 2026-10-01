@@ -32575,6 +32575,69 @@ def _current_ticket_human_git_handoff_prepare_overlay(
     }
 
 
+def _apply_approved_ticket_execution_profile_authority(
+    snapshot: dict[str, Any],
+    remaining_blockers: list[dict[str, Any]],
+) -> None:
+    """Resolve pre-projection profile reads from immutable current approval."""
+    if (
+        snapshot.get("workflow_status") != "ticket_approved"
+        or _workflow_has_active_nonterminal_current_execution(snapshot)
+    ):
+        return
+    from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
+        load_immutable_approved_current_ticket_authority,
+    )
+    from hermes_cli.agent_platform.workflow.work_packet_kanban_projection import (
+        load_kanban_projection_record,
+        resolve_execution_profile_for_ticket,
+    )
+
+    profile_fields = (
+        "assignee_profile", "selected_profile", "execution_profile_role", "selected_role",
+        "profile_assignment_policy_id", "profile_assignment_policy_revision",
+        "profile_assignment_basis", "selection_rationale", "candidate_profiles",
+        "profile_assignment_gap", "profile_classification_basis", "profile_toolsets",
+        "profile_toolset_policy", "required_profile_toolsets", "required_profile_sentinels",
+        "required_write_toolsets", "required_capabilities", "ticket_execution_requirements",
+        "profile_assignment_diagnostics", "lead_agent_auto_assigned",
+        "ticket_architect_executor_distinct", "human_profile_selection_required",
+        "available_profiles",
+    )
+    for field in profile_fields:
+        snapshot.pop(field, None)
+    ticket_id = str(snapshot.get("current_ticket_id") or "").strip()
+    try:
+        authority = load_immutable_approved_current_ticket_authority(
+            ticket_id=ticket_id, require_approved_decision=True,
+        )
+        if authority is None:
+            raise ProductRuntimeConflict("current approved ticket authority is absent")
+        generation = authority["generation_record"]
+        if generation.get("ticket_id") != ticket_id:
+            raise ProductRuntimeConflict("current approved ticket profile identity mismatch")
+        projection = load_kanban_projection_record(
+            ticket_id=ticket_id,
+            generation_record=generation,
+            decision_record=authority["approval_decision_record"],
+        )
+        if projection is not None:
+            # An existing validated projection keeps its persisted assignment.
+            snapshot.update({key: projection[key] for key in profile_fields if key in projection})
+            return
+        snapshot.update(resolve_execution_profile_for_ticket(generation))
+    except Exception as exc:
+        snapshot["profile_assignment_gap"] = True
+        diagnostics = getattr(exc, "diagnostics", None)
+        if isinstance(diagnostics, dict):
+            snapshot["profile_assignment_diagnostics"] = diagnostics
+        _workflow_append_unique_blocker(remaining_blockers, {
+            "id": f"{ticket_id or 'CURRENT'}-EXECUTION-PROFILE-AUTHORITY",
+            "status": "blocked_by_invalid_current_execution_profile_authority",
+            "evidence": _safe_text(exc, limit=300),
+        })
+
+
 def build_workflow_control_snapshot() -> dict[str, Any]:
     """Return the controlled cutover dashboard projection."""
 
@@ -33053,6 +33116,7 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
         snapshot["governed_workflow_state"] = "awaiting_ticket_approval"
         snapshot["execution_started"] = False
         _clear_stale_handoff_completion_projection_fields(snapshot)
+    _apply_approved_ticket_execution_profile_authority(snapshot, remaining_blockers)
     snapshot["remaining_blockers"] = remaining_blockers
     snapshot["blocker_count"] = len(remaining_blockers)
     snapshot["next_action_label"] = _next_action_label(snapshot.get("next_action"))
