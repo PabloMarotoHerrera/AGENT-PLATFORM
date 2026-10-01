@@ -9504,6 +9504,7 @@ def validate_p18_9_0_recovery_action_record(
     authorization_diagnostics = execution_recovery_authorization_text_diagnostics(
         str(record.get("human_authorization_text") or ""),
         current_ticket_id=binding.ticket_id,
+        current_run_id=record.get("latest_failed_run_id"),
         requested_ticket_id=record.get("ticket_id"),
         current_next_action_id=binding.execution_recovery_next_action_id,
         requested_next_action_id=binding.execution_recovery_next_action_id,
@@ -12304,17 +12305,16 @@ def recover_current_ticket_execution(
     _validate_execution_start_authority(projection)
     existing = load_current_ticket_recovery_action_record(projection_record=projection)
     if existing is not None and _recovery_record_matches_current_failure(projection, existing):
+        _validate_execution_recovery_authorization_text(
+            request.human_authorization_text,
+            current_ticket_id=binding.ticket_id,
+            current_run_id=existing.get("latest_failed_run_id"),
+        )
         if existing.get("human_authorization_text") != request.human_authorization_text:
             raise ProductRuntimeConflict(
                 f"{binding.ticket_id} recovery was already recorded with different authorization text"
             )
         return _recovery_action_operational_result(existing, idempotent_replay=True)
-    if existing is not None:
-        _archive_existing_authority_record(
-            recovery_action_record_path_for_ticket(binding.ticket_id),
-            recovery_action_history_path_for_ticket(binding.ticket_id),
-            reason="superseded_recovery_cycle",
-        )
     workflow = build_workflow_control_snapshot()
     workflow_blocker = _execution_recovery_workflow_blocker(workflow)
     if workflow_blocker is not None:
@@ -12344,6 +12344,17 @@ def recover_current_ticket_execution(
             retry_source=retry_source,
         )
 
+    _validate_execution_recovery_authorization_text(
+        request.human_authorization_text,
+        current_ticket_id=binding.ticket_id,
+        current_run_id=retry_source["latest_run_id"],
+    )
+    if existing is not None:
+        _archive_existing_authority_record(
+            recovery_action_record_path_for_ticket(binding.ticket_id),
+            recovery_action_history_path_for_ticket(binding.ticket_id),
+            reason="superseded_recovery_cycle",
+        )
     record = _build_recovery_action_record(
         request=request,
         projection=projection,
@@ -13321,6 +13332,7 @@ def execution_recovery_authorization_text_diagnostics(
     value: str,
     *,
     current_ticket_id: str,
+    current_run_id: int | None = None,
     requested_ticket_id: str | None = None,
     current_next_action_id: str | None = None,
     requested_next_action_id: str | None = None,
@@ -13384,22 +13396,92 @@ def execution_recovery_authorization_text_diagnostics(
             "EXECUTION_RECOVERY_HUMAN_AUTHORIZATION_TEXT_GAP",
             "execution recovery authorization text must name the current ticket",
         )
-    if expected_ticket_id.upper() not in mentioned_ticket_ids:
+    if (
+        mentioned_ticket_ids != {expected_ticket_id.upper()}
+        or requested_ticket_id not in {None, expected_ticket_id}
+    ):
         return blocked(
             "EXECUTION_RECOVERY_AUTHORIZATION_TICKET_MISMATCH",
             "execution recovery authorization targets a different ticket",
         )
-    if not _authorization_text_has_recovery_intent(normalized):
+    mentioned_actions = set(re.findall(r"\brecover_p\d+(?:_\d+)+_execution\b", normalized))
+    if mentioned_actions - {str(expected_next_action_id).lower()}:
+        return blocked(
+            "EXECUTION_RECOVERY_ACTION_MISMATCH",
+            "execution recovery authorization names a different action",
+        )
+    mentioned_runs = {int(run) for run in re.findall(
+        r"\brun(?:[ _-]?id)?\s*(?:[=:#]\s*)?(\d+)\b", normalized,
+    )}
+    if current_run_id is not None and mentioned_runs - {int(current_run_id)}:
+        return blocked(
+            "EXECUTION_RECOVERY_AUTHORIZATION_RUN_MISMATCH",
+            "execution recovery authorization targets a different run",
+        )
+    if not _authorization_text_explicitly_authorizes_recovery(normalized):
         return blocked(
             "EXECUTION_AUTHORIZATION_KIND_MISMATCH",
             "explicit execution recovery authorization text is required",
         )
-    if _authorization_text_has_retry_intent(normalized):
+    if _recovery_text_has_execution_authority(normalized):
         return blocked(
             "EXECUTION_AUTHORIZATION_KIND_MISMATCH",
             "execution recovery authorization must not be retry-start authorization",
         )
     return None
+
+
+def _authorization_text_explicitly_authorizes_recovery(normalized: str) -> bool:
+    # Consent must be affirmative and attached to recovery, not an inspection,
+    # question, or a separate authorization of another action.
+    recovery = r"(?:recovery|recuperacion|recuperar|recover_p\d+(?:_\d+)+_execution)\b"
+    modifiers = r"(?:(?:explicitly|explicitamente|the|la|el|governed|execution|action|de|ejecucion)\s+)*"
+    if re.search(
+        r"\b(?:do\s+not|don't|no|not)\s+(?:authorize|autorizo|autorizar)\s+"
+        + modifiers
+        + recovery,
+        normalized,
+    ):
+        return False
+    return bool(
+        re.search(
+            r"(?:^|[.;\n])\s*(?:i\s+)?(?:explicitly\s+)?(?:authorize|autorizo)\s+"
+            + modifiers
+            + recovery,
+            normalized,
+        )
+    )
+
+
+def _recovery_text_has_execution_authority(normalized: str) -> bool:
+    # Remove only a bounded, explicitly prohibited action list. Never discard
+    # a whole sentence: a later affirmative retry/start must remain visible.
+    action = (
+        r"(?:(?:start|initiate|authorize|iniciar|autorizar)\s+)?"
+        r"(?:(?:a|an|the|any|un|una)\s+)?"
+        r"(?:retry|retries|rerun|reintentar|reintento|"
+        r"(?:new|another|next)\s+(?:execution|run)|nueva\s+ejecucion)\b"
+    )
+    prohibition = (
+        r"\b(?:do\s+not|don't|must\s+not|no)\s+"
+        + action
+        + r"(?:\s+(?:or|nor|ni)\s+"
+        + action
+        + r")*"
+    )
+    affirmative = re.sub(prohibition, " ", normalized)
+    return bool(
+        _authorization_text_has_retry_intent(affirmative)
+        or re.search(
+            r"\b(?:rerun|re-run|(?:new|another|next)\s+(?:execution|run))\b",
+            affirmative,
+        )
+        or re.search(
+            r"\b(?:start|execute|dispatch|iniciar|ejecutar)\b|"
+            r"\b(?:authorize|autorizo)\s+(?:(?:a|the|la)\s+)?(?:execution|run|ejecucion)\b",
+            affirmative,
+        )
+    )
 
 
 def _normalize_authorization_intent_text(value: str) -> str:
@@ -13540,6 +13622,7 @@ def _validate_execution_recovery_authorization_text(
     value: str,
     *,
     current_ticket_id: str,
+    current_run_id: int | None = None,
     requested_ticket_id: str | None = None,
     current_next_action_id: str | None = None,
     requested_next_action_id: str | None = None,
@@ -13547,6 +13630,7 @@ def _validate_execution_recovery_authorization_text(
     diagnostics = execution_recovery_authorization_text_diagnostics(
         value,
         current_ticket_id=current_ticket_id,
+        current_run_id=current_run_id,
         requested_ticket_id=requested_ticket_id,
         current_next_action_id=current_next_action_id,
         requested_next_action_id=requested_next_action_id,
