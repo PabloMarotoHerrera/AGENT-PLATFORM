@@ -30,6 +30,10 @@ pytestmark = pytest.mark.parametrize("flow", ["executable"], indirect=True)
 
 @pytest.fixture
 def evidence(flow, monkeypatch):
+    return persist_evidence(flow, monkeypatch)
+
+
+def persist_evidence(flow, monkeypatch, *, refresh_recovery=True):
     workspace = flow.candidate.parent
     package = workspace / "2_products/pepper-agent/web"
     package.mkdir(parents=True)
@@ -104,18 +108,19 @@ def evidence(flow, monkeypatch):
         run = kanban_db.list_runs(conn, projected["kanban_task_id"])[-1]
     finally:
         conn.close()
-    # Rebuild the isolated recovery after persisting the terminal failure evidence.
-    pr.recovery_action_record_path_for_ticket(flow.record["ticket_id"]).unlink()
-    recovered = pr.recover_current_ticket_execution(
-        human_authorization_text=pr.governed_ticket_recovery_authorization_text(
-            flow.record["ticket_id"]
-        ),
-        ticket_id=flow.record["ticket_id"],
-    )
-    flow.args.update(
-        reason_code=defect.REASON,
-        recovery_action_SHA256=recovered["recovery_action_SHA256"],
-    )
+    if refresh_recovery:
+        # Rebuild the isolated recovery after persisting the terminal failure evidence.
+        pr.recovery_action_record_path_for_ticket(flow.record["ticket_id"]).unlink()
+        recovered = pr.recover_current_ticket_execution(
+            human_authorization_text=pr.governed_ticket_recovery_authorization_text(
+                flow.record["ticket_id"]
+            ),
+            ticket_id=flow.record["ticket_id"],
+        )
+        flow.args.update(
+            reason_code=defect.REASON,
+            recovery_action_SHA256=recovered["recovery_action_SHA256"],
+        )
     database = flow.home / "profiles" / run.profile / "state.db"
     state = SessionDB(database)
     sid = "synthetic-c66-worker"

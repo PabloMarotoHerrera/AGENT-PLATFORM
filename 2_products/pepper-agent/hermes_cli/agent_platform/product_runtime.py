@@ -6473,18 +6473,9 @@ def _load_recovery_action_record_from_path(
     *,
     projection_record: dict[str, Any],
 ) -> dict[str, Any] | None:
-    if not path.exists():
-        return None
-    try:
-        record = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ProductRuntimeConflict(
-            "execution recovery action record is unreadable"
-        ) from exc
-    return validate_p18_9_0_recovery_action_record(
-        record,
-        projection_record=projection_record,
-    )
+    from hermes_cli.agent_platform import recovery_authority
+
+    return recovery_authority.resolve(path, projection_record)
 
 
 def load_current_ticket_recovery_action_record(
@@ -12370,12 +12361,6 @@ def recover_current_ticket_execution(
         current_ticket_id=binding.ticket_id,
         current_run_id=retry_source["latest_run_id"],
     )
-    if existing is not None:
-        _archive_existing_authority_record(
-            recovery_action_record_path_for_ticket(binding.ticket_id),
-            recovery_action_history_path_for_ticket(binding.ticket_id),
-            reason="superseded_recovery_cycle",
-        )
     record = _build_recovery_action_record(
         request=request,
         projection=projection,
@@ -17652,6 +17637,9 @@ def _build_recovery_action_record(
         "auto_rollback": False,
         "human_smoke_marker": "PEPPER-RECOVERY-ACTION-READY-FOR-HUMAN-SMOKE",
     }
+    from hermes_cli.agent_platform import recovery_authority
+
+    record["terminal_run_SHA256"] = recovery_authority.terminal_identity(record)
     record["recovery_action_SHA256"] = _recovery_action_record_digest(record)
     return record
 
@@ -24428,11 +24416,9 @@ def _persist_recovery_action_record(record: dict[str, Any]) -> None:
     validate_p18_9_0_recovery_action_record(record)
     ticket_id = str(record["ticket_id"])
     path = recovery_action_record_path_for_ticket(ticket_id)
-    _archive_existing_authority_record(
-        path,
-        recovery_action_history_path_for_ticket(ticket_id),
-        reason="replaced_by_current_recovery_cycle",
-    )
+    from hermes_cli.agent_platform import recovery_authority
+
+    recovery_authority.archive_for_replacement(record, _load_current_projection_record())
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
