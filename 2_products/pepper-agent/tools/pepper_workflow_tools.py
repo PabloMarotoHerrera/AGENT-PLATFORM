@@ -628,6 +628,7 @@ def _get_workflow_control(args: dict[str, Any], **_kwargs) -> str:
     ctx = _context()
     return _result({
         "source_tool": "get_workflow_control",
+        "alternative_actions": ctx.get("alternative_actions", []),
         "source_system": ctx["source_system"],
         "manual_validation": ctx.get("manual_validation"),
         "product_id": ctx["product_id"],
@@ -895,6 +896,7 @@ def _get_next_action(args: dict[str, Any], **_kwargs) -> str:
     ctx = _context()
     return _result({
         "source_tool": "get_next_action",
+        "alternative_actions": ctx.get("alternative_actions", []),
         "source_system": ctx["source_system"],
         "manual_validation": ctx.get("manual_validation"),
         "project_id": ctx["project_id"],
@@ -1023,6 +1025,23 @@ def _revise_generated_successor_ticket(args: dict[str, Any], **_kwargs) -> str:
         "auto_retry": False,
         "auto_rollback": False,
     })
+
+
+def _request_current_ticket_material_revision(args: dict[str, Any], **kwargs) -> str:
+    from hermes_cli.agent_platform import retry_material_revision
+    try:
+        result = retry_material_revision.request(
+            human_authorization_text=str(args.get("human_authorization_text") or kwargs.get("user_task") or ""),
+            ticket_id=str(args.get("ticket_id") or ""),
+            failed_run_id=args.get("failed_run_id"),
+            work_packet_SHA256=str(args.get("work_packet_SHA256") or ""),
+            recovery_action_SHA256=str(args.get("recovery_action_SHA256") or ""),
+            reason_code=str(args.get("reason_code") or ""),
+        )
+        workflow = _runtime().build_workflow_control_snapshot()
+        return _result({"source_tool": "request_current_ticket_material_revision", **result, "workflow_status": workflow["workflow_status"], "next_action": workflow["next_action"]})
+    except Exception as exc:
+        return tool_error(str(exc) or "material revision request failed", success=False)
 
 
 def _revise_current_ticket_for_material_contract_failure(args: dict[str, Any], **_kwargs) -> str:
@@ -3040,7 +3059,7 @@ registry.register(
         "name": "revise_current_ticket_for_material_contract_failure",
         "description": (
             "Apply explicit human material-revision authorization for only the active current "
-            "ticket when review preparation is durably blocked by a material contract defect. "
+            "ticket at the material-revision gate, authorized by a durable review-preparation failure or explicit retry-pending material-revision request. "
             "Regenerates the same ticket into pending approval; no approval, execution, Kanban "
             "dispatch, Docker, Graphify, Git, or rejected-successor correction."
         ),
@@ -3105,4 +3124,30 @@ registry.register(
         },
     },
     handler=_attest_current_ticket_manual_validation, emoji="V", max_result_size_chars=24000,
+)
+
+
+registry.register(
+    name="request_current_ticket_material_revision",
+    toolset=TOOLSET,
+    schema={
+        "name": "request_current_ticket_material_revision",
+        "description": "Request the material-revision gate for the current retry-pending ticket using exact human consent and the alternative action's evidence binding. Suspends retry without consuming it. Does not revise, approve, validate, dispatch or execute; a separate REVISE decision remains required.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "human_authorization_text": {"type": "string"},
+                "ticket_id": {"type": "string"},
+                "failed_run_id": {"type": "integer"},
+                "work_packet_SHA256": {"type": "string"},
+                "recovery_action_SHA256": {"type": "string"},
+                "reason_code": {"type": "string", "enum": ["required_validation_command_authority_missing"]},
+            },
+            "required": ["human_authorization_text", "ticket_id", "failed_run_id", "work_packet_SHA256", "recovery_action_SHA256", "reason_code"],
+            "additionalProperties": False,
+        },
+    },
+    handler=_request_current_ticket_material_revision,
+    emoji="M",
+    max_result_size_chars=16000,
 )

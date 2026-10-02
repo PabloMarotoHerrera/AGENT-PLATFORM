@@ -2498,6 +2498,7 @@ def revise_current_ticket_for_material_contract_failure(
     *,
     workflow: dict[str, Any],
     review_prepare_failure_record: dict[str, Any] | None,
+    material_revision_request_record: dict[str, Any] | None = None,
     human_authorization_text: str,
     revision_contract: TicketSpecMaterialRevisionContract | dict[str, Any],
     authorizer_id: str = "pepper-chat-human",
@@ -2525,7 +2526,7 @@ def revise_current_ticket_for_material_contract_failure(
     revision_authority: dict[str, Any] | None = None
     history_entry: dict[str, Any] | None = None
     validated_revision_contract: TicketSpecMaterialRevisionContract | None = None
-    revision_reason = "material_contract_failure"
+    revision_reason = ("retry_pending_material_contract_failure" if material_revision_request_record is not None else "material_contract_failure")
     with _STORE_LOCK:
         approved_authority = load_immutable_approved_current_ticket_authority(
             ticket_id=safe_ticket_id,
@@ -2562,6 +2563,7 @@ def revise_current_ticket_for_material_contract_failure(
             workflow,
             target=target,
             review_prepare_failure_record=review_prepare_failure_record,
+            material_revision_request_record=material_revision_request_record,
             current_generation=current_generation,
             revision_reason=revision_reason,
         )
@@ -2579,6 +2581,7 @@ def revise_current_ticket_for_material_contract_failure(
             current_generation=current_generation,
             previous_decision=previous_decision,
             review_prepare_failure_record=review_prepare_failure_record,
+            material_revision_request_record=material_revision_request_record,
             target=target,
             human_authorization_text=human_authorization_text,
             authorizer_id=authorizer_id,
@@ -2603,6 +2606,7 @@ def revise_current_ticket_for_material_contract_failure(
             current_generation=current_generation,
             previous_decision=previous_decision,
             review_prepare_failure_record=review_prepare_failure_record,
+            material_revision_request_record=material_revision_request_record,
             revised_generation=revised_generation,
             target=target,
             human_authorization_text=human_authorization_text,
@@ -2668,6 +2672,8 @@ def revise_current_ticket_for_material_contract_failure(
             ],
             "historical_approved_decision_preserved": True,
         })
+    elif revision_reason == "retry_pending_material_contract_failure":
+        result.update({"material_revision_request_SHA256": material_revision_request_record["material_revision_request_SHA256"], "historical_approved_decision_preserved": True})
     else:
         result.update({
             "rejected_approval_publication_SHA256": previous_decision[
@@ -2933,6 +2939,7 @@ def _validate_current_ticket_material_revision_workflow(
     *,
     target: GovernedTicketGenerationTarget,
     review_prepare_failure_record: dict[str, Any] | None,
+    material_revision_request_record: dict[str, Any] | None = None,
     current_generation: dict[str, Any],
     revision_reason: str,
 ) -> None:
@@ -2973,7 +2980,7 @@ def _validate_current_ticket_material_revision_workflow(
         if next_action.get("required_human_action") != "ticket_correction":
             raise TicketArchitectBridgeInputError("next action is not a ticket correction action")
         return
-    if revision_reason != "material_contract_failure":
+    if revision_reason not in {"material_contract_failure", "retry_pending_material_contract_failure"}:
         raise TicketArchitectBridgeInputError("current-ticket revision reason is unsupported")
     if workflow.get("workflow_status") != "awaiting_material_revision":
         raise TicketArchitectBridgeInputError(
@@ -2987,6 +2994,16 @@ def _validate_current_ticket_material_revision_workflow(
         raise TicketArchitectBridgeInputError("workflow does not require material revision")
     if next_action.get("required_human_action") != "ticket_material_revision":
         raise TicketArchitectBridgeInputError("next action is not a material revision action")
+    if revision_reason == "retry_pending_material_contract_failure":
+        from hermes_cli.agent_platform import retry_material_revision
+        from hermes_cli.agent_platform.workflow.work_packet_kanban_projection import load_kanban_projection_record
+        if not isinstance(material_revision_request_record, dict):
+            raise TicketArchitectBridgeInputError("material revision request authority absent")
+        projection = load_kanban_projection_record(ticket_id=target.ticket_id)
+        retry_material_revision.validate_current(material_revision_request_record, projection)
+        if workflow.get("material_revision_request_authority") != material_revision_request_record:
+            raise TicketArchitectBridgeInputError("workflow material revision request mismatch")
+        return
     if not isinstance(review_prepare_failure_record, dict):
         raise TicketArchitectBridgeInputError("review-prepare failure authority is unavailable")
     if review_prepare_failure_record.get("review_prepare_resolution") != "MATERIAL_REVISION_REQUIRED":
@@ -3560,6 +3577,7 @@ def _build_current_ticket_material_revision_authority(
     current_generation: dict[str, Any],
     previous_decision: dict[str, Any],
     review_prepare_failure_record: dict[str, Any] | None,
+    material_revision_request_record: dict[str, Any] | None = None,
     target: GovernedTicketGenerationTarget,
     human_authorization_text: str,
     authorizer_id: str,
@@ -3568,6 +3586,7 @@ def _build_current_ticket_material_revision_authority(
 ) -> dict[str, Any]:
     if revision_reason not in {
         "material_contract_failure",
+        "retry_pending_material_contract_failure",
         "rejected_current_ticket_revision_correction",
     }:
         raise TicketArchitectBridgeInputError("current-ticket revision reason is unsupported")
@@ -3636,6 +3655,13 @@ def _build_current_ticket_material_revision_authority(
             ],
             "failure_classification": review_prepare_failure_record["failure_classification"],
         })
+    elif revision_reason == "retry_pending_material_contract_failure":
+        authority.update({
+            "approved_approval_publication_SHA256": previous_decision["approval_publication_SHA256"],
+            "approved_approval_decision": previous_decision["decision"],
+            "material_revision_request_SHA256": material_revision_request_record["material_revision_request_SHA256"],
+            "material_revision_request_record": material_revision_request_record,
+        })
     else:
         authority.update({
             "rejected_approval_publication_SHA256": previous_decision[
@@ -3686,6 +3712,7 @@ def _validate_material_revision_authority(
         revision_reason = str(authority.get("revision_reason") or "")
         if revision_reason not in {
             "material_contract_failure",
+            "retry_pending_material_contract_failure",
             "rejected_current_ticket_revision_correction",
         }:
             raise TicketArchitectBridgeConflict("revision authority reason mismatch")
@@ -3695,6 +3722,21 @@ def _validate_material_revision_authority(
             if authority.get("review_prepare_resolution") != "MATERIAL_REVISION_REQUIRED":
                 raise TicketArchitectBridgeConflict("revision authority review-prepare resolution mismatch")
             _safe_digest(authority.get("review_prepare_failure_SHA256"))
+        elif revision_reason == "retry_pending_material_contract_failure":
+            from hermes_cli.agent_platform import retry_material_revision
+            if authority.get("approved_approval_decision") != HumanApprovalDecision.APPROVE.value:
+                raise TicketArchitectBridgeConflict("material revision request approved decision mismatch")
+            record = authority.get("material_revision_request_record")
+            if not isinstance(record, dict):
+                raise TicketArchitectBridgeConflict("material revision request record absent")
+            retry_material_revision.validate_record(record, {
+                "ticket_id": target.ticket_id,
+                "ticket_spec_SHA256": authority["previous_ticket_spec_SHA256"],
+                "work_packet_id": authority["previous_work_packet_id"],
+                "work_packet_SHA256": authority["previous_work_packet_SHA256"],
+            })
+            if authority.get("material_revision_request_SHA256") != record["material_revision_request_SHA256"]:
+                raise TicketArchitectBridgeConflict("material revision request reference mismatch")
         else:
             if authority.get("rejected_approval_decision") != HumanApprovalDecision.REJECT.value:
                 raise TicketArchitectBridgeConflict("revision authority rejected decision mismatch")
@@ -3787,14 +3829,18 @@ def _build_revision_ticket_spec(
         AuthorityReferenceSpec(
             kind=AuthorityReferenceKind.GOVERNANCE_RECORD,
             value=(
-                f"{target.ticket_id}-REVIEW-PREPARE-FAILURE-{authority['review_prepare_failure_SHA256'][:12]}"
+                f"{target.ticket_id}-MATERIAL-REVISION-REQUEST-{authority['material_revision_request_SHA256'][:12]}"
+                if current_ticket_revision_reason == "retry_pending_material_contract_failure"
+                else f"{target.ticket_id}-REVIEW-PREPARE-FAILURE-{authority['review_prepare_failure_SHA256'][:12]}"
                 if current_ticket_revision and not current_rejected_revision
                 else f"{target.ticket_id}-REJECTED-CURRENT-REVISION-{authority['previous_bridge_SHA256'][:12]}"
                 if current_rejected_revision
                 else f"{target.ticket_id}-REJECTED-GENERATION-{authority['previous_bridge_SHA256'][:12]}"
             ),
             rationale=(
-                "Rejected current-ticket revision remains immutable historical evidence."
+                "Explicit retry-pending material revision request remains immutable historical evidence."
+                if current_ticket_revision_reason == "retry_pending_material_contract_failure"
+                else "Rejected current-ticket revision remains immutable historical evidence."
                 if current_rejected_revision
                 else "Durable review-preparation material contract failure remains immutable historical evidence."
                 if current_ticket_revision
@@ -3870,7 +3916,10 @@ def _build_revision_ticket_spec(
                     f"{revision_label} material revision supersedes "
                     f"{authority['previous_publication_id']} after "
                     + (
-                        "durable review-preparation material contract failure "
+                        "durable human material revision request "
+                        f"{authority['material_revision_request_SHA256']}."
+                        if current_ticket_revision_reason == "retry_pending_material_contract_failure"
+                        else "durable review-preparation material contract failure "
                         f"{authority['review_prepare_failure_SHA256']}."
                         if current_ticket_revision and not current_rejected_revision
                         else "durable human rejection of current revision "
@@ -5836,6 +5885,7 @@ def _build_current_ticket_material_revision_history_entry(
     current_generation: dict[str, Any],
     previous_decision: dict[str, Any],
     review_prepare_failure_record: dict[str, Any] | None,
+    material_revision_request_record: dict[str, Any] | None = None,
     revised_generation: dict[str, Any],
     target: GovernedTicketGenerationTarget,
     human_authorization_text: str,
@@ -5895,6 +5945,8 @@ def _build_current_ticket_material_revision_history_entry(
             "historical_approved_decision_record": previous_decision,
             "historical_review_prepare_failure_record": review_prepare_failure_record,
         })
+    elif revision_reason == "retry_pending_material_contract_failure":
+        entry.update({"historical_approved_decision_record": previous_decision, "historical_material_revision_request_record": material_revision_request_record, "material_revision_request_SHA256": material_revision_request_record["material_revision_request_SHA256"]})
     else:
         entry["historical_rejected_decision_record"] = previous_decision
     revision_authority = revised_generation.get("revision_authority")

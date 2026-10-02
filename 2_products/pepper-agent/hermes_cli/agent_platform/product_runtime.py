@@ -5975,18 +5975,28 @@ def revise_current_ticket_for_material_contract_failure(
         and next_action.get("required_human_action") == "ticket_correction"
     )
     failure_record = None
+    material_request = None
     if not rejected_current_revision_correction:
         projection = _load_current_projection_record()
-        failure_record = load_current_ticket_review_prepare_failure_record(
-            projection_record=projection,
-        )
-        if failure_record is None:
+        from hermes_cli.agent_platform import retry_material_revision
+        generation = _current_approved_ticket_authority_bundle_for_ticket(
+            current_ticket_id, raise_on_invalid_current=True,
+        )["generation_record"]
+        material_request = retry_material_revision.load(generation)
+        if material_request is not None:
+            retry_material_revision.validate_current(material_request, projection)
+        else:
+            failure_record = load_current_ticket_review_prepare_failure_record(
+                projection_record=projection,
+            )
+        if failure_record is None and material_request is None:
             raise ProductRuntimeConflict("current ticket material revision authority is absent")
-        if failure_record.get("review_prepare_resolution") != "MATERIAL_REVISION_REQUIRED":
+        if failure_record is not None and failure_record.get("review_prepare_resolution") != "MATERIAL_REVISION_REQUIRED":
             raise ProductRuntimeConflict("current review-prepare failure does not authorize material revision")
     return revise_current_ticket(
         workflow=workflow,
         review_prepare_failure_record=failure_record,
+        material_revision_request_record=material_request,
         human_authorization_text=human_authorization_text,
         revision_contract=revision_contract,
         authorizer_id=authorizer_id,
@@ -12175,6 +12185,17 @@ def start_current_ticket_execution(
             spawn_fn=spawn_fn,
         )
 
+    if (
+        workflow.get("material_revision_request_authority")
+        or workflow.get("workflow_status") == "material_revision_authority_blocked"
+    ):
+        return _blocked_current_execution_start_result(
+            projection,
+            request=request,
+            blocker_code="EXECUTION_SUSPENDED_FOR_MATERIAL_REVISION",
+            blocker_detail="material revision authority suspends execution of this publication",
+        )
+
     authorization_diagnostics = execution_human_authorization_text_diagnostics(
         request.human_authorization_text,
         current_ticket_id=binding.ticket_id,
@@ -13017,6 +13038,35 @@ def _start_current_ticket_retry_execution(
     workflow: dict[str, Any],
     spawn_fn: Any = None,
 ) -> dict[str, Any]:
+    from hermes_cli.agent_platform.workflow.ticket_architect_bridge import _STORE_LOCK
+
+    # Serialize the two human choices within the canonical authority store.
+    with _STORE_LOCK:
+        return _start_current_ticket_retry_execution_locked(
+            request=request, projection=projection, workflow=workflow, spawn_fn=spawn_fn,
+        )
+
+
+def _start_current_ticket_retry_execution_locked(
+    *,
+    request: CurrentTicketExecutionStartRequest,
+    projection: dict[str, Any],
+    workflow: dict[str, Any],
+    spawn_fn: Any = None,
+) -> dict[str, Any]:
+    from hermes_cli.agent_platform.retry_material_revision import path_for
+
+    # Read the durable gate as well as the caller's possibly older snapshot.
+    if (
+        path_for(projection).exists()
+        or workflow.get("material_revision_required")
+        or workflow.get("workflow_status") == "material_revision_authority_blocked"
+    ):
+        return _blocked_current_execution_retry_start_result(
+            projection, request=request,
+            blocker_code="RETRY_SUSPENDED_FOR_MATERIAL_REVISION",
+            blocker_detail="material revision authority suspends this retry without consuming it",
+        )
     binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
     workflow_next_action = workflow.get("next_action")
     workflow_next_action_id = (
@@ -33200,6 +33250,8 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
         snapshot["governed_workflow_state"] = "awaiting_ticket_approval"
         snapshot["execution_started"] = False
         _clear_stale_handoff_completion_projection_fields(snapshot)
+    from hermes_cli.agent_platform.retry_material_revision import apply_workflow
+    apply_workflow(snapshot, remaining_blockers)
     _apply_approved_ticket_execution_profile_authority(snapshot, remaining_blockers)
     snapshot["remaining_blockers"] = remaining_blockers
     snapshot["blocker_count"] = len(remaining_blockers)
@@ -33272,6 +33324,8 @@ def build_lead_agent_operational_context() -> dict[str, Any]:
         "approval_state": approval_state,
         "pending_approval_count": pending_approval_count,
         "pending_ticket_approval_count": int(workflow.get("pending_ticket_approval_count") or 0),
+        "alternative_actions": workflow.get("alternative_actions", []),
+        "material_revision_request_authority": workflow.get("material_revision_request_authority"),
         "manual_validation": workflow.get("manual_validation"),
         "queue_state": _workflow_value(workflow, "queue_state", "unavailable"),
         "execution_state": _execution_state(active_execution_count),
