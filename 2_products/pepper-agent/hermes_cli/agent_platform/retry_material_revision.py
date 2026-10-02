@@ -10,6 +10,37 @@ POLICY = "pepper-retry-material-revision-request-v1"
 REASON = "required_validation_command_authority_missing"
 
 
+def _eligible(evidence):
+    from hermes_cli.agent_platform.validation_contract_failure import (
+        REASON as incompatible,
+    )
+
+    if not isinstance(evidence, dict):
+        return False
+    if evidence.get("reason_code") == REASON:
+        return isinstance(
+            evidence.get("missing_required_validation_steps"), list
+        ) and bool(evidence["missing_required_validation_steps"])
+    failures = evidence.get("incompatible_validation_commands")
+    return (
+        evidence.get("reason_code") == incompatible
+        and isinstance(failures, list)
+        and len(failures) == 1
+        and all(
+            isinstance(item, dict)
+            and item.get("failure_classification") == "unsupported_cli_option"
+            and item.get("command_authority_matched") is True
+            and item.get("ad_hoc_command_substitution") is False
+            and item.get("test_execution_started") is False
+            and isinstance(item.get("command"), dict)
+            and item["command"].get("command_authority_SHA256")
+            and item.get("source_messages")
+            and item.get("source_session")
+            for item in failures
+        )
+    )
+
+
 def digest(record: dict) -> str:
     payload = {
         k: v for k, v in record.items() if k != "material_revision_request_SHA256"
@@ -61,7 +92,6 @@ def validate_record(record: dict, generation: dict) -> dict:
     expected = {
         "policy_id": POLICY,
         "schema_version": 1,
-        "reason_code": REASON,
         "retry_authority_status": "suspended_not_consumed",
         "material_revision_required": True,
         "execution_started": False,
@@ -97,9 +127,8 @@ def validate_record(record: dict, generation: dict) -> dict:
     evidence = record["material_failure_evidence"]
     if (
         not isinstance(evidence, dict)
-        or evidence.get("reason_code") != REASON
-        or not isinstance(evidence.get("missing_required_validation_steps"), list)
-        or not evidence["missing_required_validation_steps"]
+        or evidence.get("reason_code") != record.get("reason_code")
+        or not _eligible(evidence)
         or type(record["failed_run_id"]) is not int
         or record["failed_run_id"] < 1
     ):
@@ -223,6 +252,14 @@ def context(projection: dict) -> tuple[dict, dict, dict]:
         )
     ]
     evidence = {"reason_code": REASON, "missing_required_validation_steps": missing}
+    if not missing:
+        from hermes_cli.agent_platform.validation_contract_failure import (
+            evidence as command_evidence,
+        )
+
+        evidence = (
+            command_evidence(projection, run, workspace, work_packet, specs) or evidence
+        )
     binding = {
         "project_id": generation["project_id"],
         "macroproject_id": generation["macroproject_id"],
@@ -244,6 +281,7 @@ def context(projection: dict) -> tuple[dict, dict, dict]:
         "observed_attempt_count": len(runs),
         "max_attempts": recovery["max_attempts"],
         "material_failure_evidence": evidence,
+        "reason_code": evidence["reason_code"],
     }
     return generation, recovery, binding
 
@@ -256,7 +294,7 @@ def validate_current(record: dict, projection: dict) -> dict:
     for key, value in binding.items():
         if record.get(key) != value:
             raise ValueError(f"material revision request {key} source changed")
-    if not binding["material_failure_evidence"]["missing_required_validation_steps"]:
+    if not _eligible(binding["material_failure_evidence"]):
         raise ValueError("material contract failure evidence absent")
     return record
 
@@ -312,11 +350,8 @@ def request(
                 raise pr.ProductRuntimeConflict(
                     f"material revision request {key} mismatch"
                 )
-        if (
-            reason_code != REASON
-            or not binding["material_failure_evidence"][
-                "missing_required_validation_steps"
-            ]
+        if reason_code != binding["reason_code"] or not _eligible(
+            binding["material_failure_evidence"]
         ):
             raise pr.ProductRuntimeConflict(
                 "bounded material contract failure evidence required"
@@ -365,9 +400,7 @@ def apply_workflow(snapshot: dict, blockers: list) -> None:
             raise ValueError("material revision current ticket mismatch")
         record = load(generation)
         if record is None:
-            if binding["material_failure_evidence"][
-                "missing_required_validation_steps"
-            ]:
+            if _eligible(binding["material_failure_evidence"]):
                 snapshot["alternative_actions"] = [
                     {
                         "id": action_id(generation["ticket_id"]),
@@ -376,6 +409,7 @@ def apply_workflow(snapshot: dict, blockers: list) -> None:
                         "label": "Request the material-revision gate; changes workflow authority but does not revise or start execution. A separate REVISE decision is required.",
                         "human_authorization_text": action_id(generation["ticket_id"]),
                         "request_binding": binding,
+                        "reason_code": binding["reason_code"],
                     }
                 ]
             return

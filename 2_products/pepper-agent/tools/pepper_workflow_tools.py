@@ -3141,7 +3141,7 @@ registry.register(
                 "failed_run_id": {"type": "integer"},
                 "work_packet_SHA256": {"type": "string"},
                 "recovery_action_SHA256": {"type": "string"},
-                "reason_code": {"type": "string", "enum": ["required_validation_command_authority_missing"]},
+                "reason_code": {"type": "string", "enum": ["required_validation_command_authority_missing", "governed_validation_command_incompatible"]},
             },
             "required": ["human_authorization_text", "ticket_id", "failed_run_id", "work_packet_SHA256", "recovery_action_SHA256", "reason_code"],
             "additionalProperties": False,
