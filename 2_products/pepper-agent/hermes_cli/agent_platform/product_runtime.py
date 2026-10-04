@@ -6728,6 +6728,9 @@ def load_current_ticket_review_prepare_record(
         raise ProductRuntimeConflict(
             f"{projection['ticket_id']} review-preparation record is unreadable"
         ) from exc
+    from .post_accept_material_revision import supersedes_lifecycle_record
+    if supersedes_lifecycle_record(projection, record, "review_prepare"):
+        return None
     if _terminal_review_selection_supersedes(projection, record, "package"):
         return None
     if allow_historical_mismatch and _review_prepare_superseded_by_current_round(
@@ -7430,6 +7433,9 @@ def load_current_ticket_review_decision_record(
         record = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise ProductRuntimeConflict("review-decision record is unreadable") from exc
+    from .post_accept_material_revision import supersedes_lifecycle_record
+    if supersedes_lifecycle_record(projection, record, "review_decision"):
+        return None
     if _terminal_review_selection_supersedes(projection, record, "decision"):
         return None
     if allow_historical_mismatch and _review_decision_superseded_by_current_round(
@@ -7873,6 +7879,9 @@ def load_current_ticket_human_git_handoff_prepare_record(
         record = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise ProductRuntimeConflict("human Git handoff preparation record is unreadable") from exc
+    from .post_accept_material_revision import supersedes_lifecycle_record
+    if supersedes_lifecycle_record(projection, record, "handoff"):
+        return None
     return validate_current_ticket_human_git_handoff_prepare_record(
         record,
         projection_record=projection,

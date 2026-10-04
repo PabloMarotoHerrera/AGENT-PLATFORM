@@ -128,6 +128,57 @@ def load(generation):
     return validate_record(json.loads(path.read_text(encoding="utf-8")), generation)
 
 
+def supersedes_lifecycle_record(projection, record, section):
+    """Exclude only the authenticated predecessor of a current material revision.
+
+    Ticket identity alone is never enough. The current generated publication,
+    approval, projection and durable human transition must agree, and the file
+    must equal the immutable historical evidence carried by that transition.
+    Current records continue through their ordinary strict validators.
+    """
+    from . import product_runtime as pr
+    from .workflow import ticket_architect_bridge as bridge
+
+    identity = ("ticket_id", "ticket_spec_SHA256", "work_packet_id", "work_packet_SHA256")
+    if not isinstance(record, dict) or all(record.get(k) == projection.get(k) for k in identity):
+        return False
+    generation = bridge.load_generation_record(ticket_id=projection["ticket_id"])
+    authority = (generation or {}).get("revision_authority") or {}
+    if authority.get("revision_reason") != REASON:
+        return False
+    pr._validate_execution_start_authority(projection)
+    approval = bridge.load_approval_decision_record(
+        ticket_id=projection["ticket_id"], generation_record=generation,
+    )
+    publication = generation["ticket_publication_result"]["publication"]
+    if (
+        any(generation.get(k) != projection.get(k) for k in identity)
+        or publication["revision"] != authority["new_publication_revision"]
+        or not approval or approval.get("decision") != "approve"
+        or approval.get("approval_publication_SHA256") != projection.get("approval_publication_SHA256")
+    ):
+        raise pr.ProductRuntimeConflict("current material-revision projection/approval authority mismatch")
+    from .workflow.work_packet_kanban_projection import validate_kanban_projection_record
+    validate_kanban_projection_record(
+        projection, ticket_id=projection["ticket_id"],
+        generation_record=generation, decision_record=approval,
+    )
+    transition = authority["material_revision_request_record"]
+    durable = load(transition)
+    if durable != transition:
+        raise pr.ProductRuntimeConflict("post-accept historical transition is missing or changed")
+    historical = transition["historical_authority"][section]
+    if record != historical:
+        raise pr.ProductRuntimeConflict(
+            f"post-accept historical {section} differs from authenticated predecessor; "
+            f"historical_revision={authority['previous_publication_revision']} "
+            f"current_revision={publication['revision']} "
+            f"expected_ticket_spec_SHA256={historical.get('ticket_spec_SHA256')} "
+            f"actual_ticket_spec_SHA256={record.get('ticket_spec_SHA256')}"
+        )
+    return True
+
+
 def assert_handoff_current(projection):
     # Even corrupt authority must never resurrect the old executable handoff.
     if path_for(projection).exists():
