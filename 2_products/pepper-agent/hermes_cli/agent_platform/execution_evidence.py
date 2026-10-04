@@ -271,6 +271,45 @@ def _json(value):
     return json.loads(value) if isinstance(value, str) else value
 
 
+def _current_task_witness(p, run, workspace, args, payload, invocation, result):
+    """Accept only explicit-task or canonical worker-local empty arguments.
+
+    Both forms require the same independent result authority. The wider transcript
+    window preserves final conclusions, but cannot supply a post-terminal witness.
+    """
+    if args not in ({}, {"task_id": p["kanban_task_id"]}):
+        return False
+    if (
+        not run.started_at
+        <= invocation["timestamp"]
+        <= result["timestamp"]
+        <= run.ended_at + 1
+    ):
+        return False
+    task = payload.get("task")
+    if not isinstance(task, dict):
+        return False
+    try:
+        body = _json(task.get("body", "{}"))
+    except (ValueError, TypeError):
+        return False
+    return (
+        isinstance(body, dict)
+        and task.get("id") == p["kanban_task_id"]
+        and type(task.get("current_run_id")) is int
+        and task["current_run_id"] == run.id
+        and task.get("workspace_path") == str(workspace)
+        and all(
+            body.get(k) == p[v]
+            for k, v in (
+                ("TicketSpec_SHA256", "ticket_spec_SHA256"),
+                ("WorkPacket_ID", "work_packet_id"),
+                ("WorkPacket_SHA256", "work_packet_SHA256"),
+            )
+        )
+    )
+
+
 def worker(p, task, run, workspace, *, offset=0):
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", run.profile):
         raise ValueError("invalid worker profile")
@@ -304,7 +343,7 @@ def worker(p, task, run, workspace, *, offset=0):
                 ]
                 if len(rows) > MAX_MESSAGES:
                     raise ValueError("worker transcript exceeds inspection bound")
-                calls, paired, witness = {}, [], None
+                calls, paired, witness, paired_ids = {}, [], None, set()
                 for row in rows:
                     if (
                         row["timestamp"] < run.started_at
@@ -314,6 +353,8 @@ def worker(p, task, run, workspace, *, offset=0):
                     if row["role"] == "assistant":
                         for call in _json(row["tool_calls"] or "[]"):
                             fn = call["function"]
+                            if call["id"] in calls:
+                                raise ValueError("ambiguous duplicate tool invocation")
                             calls[call["id"]] = (
                                 fn["name"],
                                 _json(fn.get("arguments", "{}")),
@@ -321,28 +362,19 @@ def worker(p, task, run, workspace, *, offset=0):
                             )
                     elif row["role"] == "tool" and row["tool_call_id"] in calls:
                         name, args, invocation = calls[row["tool_call_id"]]
-                        if name != row["tool_name"]:
+                        if (
+                            name != row["tool_name"]
+                            or row["tool_call_id"] in paired_ids
+                        ):
                             raise ValueError("tool invocation/result mismatch")
+                        paired_ids.add(row["tool_call_id"])
                         try:
                             payload = _json(row["content"])
                         except (ValueError, TypeError):
                             payload = None
                         if name == "kanban_show" and isinstance(payload, dict):
-                            t = payload.get("task", {})
-                            body = _json(t.get("body", "{}"))
-                            if (
-                                args.get("task_id") == p["kanban_task_id"]
-                                and t.get("id") == p["kanban_task_id"]
-                                and t.get("current_run_id") == run.id
-                                and t.get("workspace_path") == str(workspace)
-                                and all(
-                                    body.get(k) == p[v]
-                                    for k, v in (
-                                        ("TicketSpec_SHA256", "ticket_spec_SHA256"),
-                                        ("WorkPacket_ID", "work_packet_id"),
-                                        ("WorkPacket_SHA256", "work_packet_SHA256"),
-                                    )
-                                )
+                            if _current_task_witness(
+                                p, run, workspace, args, payload, invocation, row
                             ):
                                 witness = row
                         paired.append((name, args, invocation, row, payload))
@@ -537,6 +569,7 @@ def validation(p, run, workspace, source_record, paired, packet, *, offset=0):
     }
     discovered = {}
     results = []
+    excluded = []
 
     def remap(value):
         if isinstance(value, str):
@@ -554,7 +587,19 @@ def validation(p, run, workspace, source_record, paired, packet, *, offset=0):
             row["timestamp"] > run.ended_at + 1
             or invocation["timestamp"] > run.ended_at + 1
         ):
-            raise ValueError("validation outside terminal run interval")
+            # The transcript includes a short tail for worker conclusions. Tail
+            # calls cannot establish this run's validation, nor erase a valid
+            # in-run result. Retain their identities as explicit exclusions.
+            excluded.append({
+                "invocation_message_id": invocation["id"],
+                "result_message_id": row["id"],
+                "invocation_timestamp": invocation["timestamp"],
+                "result_timestamp": row["timestamp"],
+                "invocation_SHA256": digest(invocation),
+                "result_SHA256": digest(row),
+                "reason": "outside terminal run interval; not validation authority",
+            })
+            continue
         if not isinstance(result, dict) or any(
             result.get(k) != p[k]
             for k in ("ticket_id", "work_packet_id", "work_packet_SHA256")
@@ -697,11 +742,18 @@ def validation(p, run, workspace, source_record, paired, packet, *, offset=0):
             **streams,
         })
     if not results:
-        return unavailable("no persisted governed validation run invocation")
+        return {
+            **unavailable("no persisted governed validation run invocation"),
+            "excluded_post_terminal_count": len(excluded),
+            "excluded_post_terminal_calls": excluded[:LIMIT],
+        }
     if len(results) > 5:
         raise ValueError("validation results exceed inspection bound")
     return {
         "available": True,
+        "excluded_post_terminal_count": len(excluded),
+        "excluded_post_terminal_calls": excluded[:LIMIT],
+        "excluded_post_terminal_truncated": len(excluded) > LIMIT,
         "results": results[offset : offset + 1],
         "result_total": len(results),
         "next_offset": offset + 1 if offset + 1 < len(results) else None,
