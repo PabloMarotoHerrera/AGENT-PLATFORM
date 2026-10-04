@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Callable, Literal, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from .post_accept_material_revision import serialized as _serialize_revision_boundary
 
 
 APPROVAL_SOURCE_SYSTEM = "hermes-write-approval"
@@ -5945,6 +5946,7 @@ def revise_generated_successor_ticket(
     )
 
 
+@_serialize_revision_boundary
 def revise_current_ticket_for_material_contract_failure(
     *,
     human_authorization_text: str,
@@ -5982,10 +5984,15 @@ def revise_current_ticket_for_material_contract_failure(
         generation = _current_approved_ticket_authority_bundle_for_ticket(
             current_ticket_id, raise_on_invalid_current=True,
         )["generation_record"]
-        material_request = retry_material_revision.load(generation)
+        from . import post_accept_material_revision
+        material_request = post_accept_material_revision.load(generation)
         if material_request is not None:
-            retry_material_revision.validate_current(material_request, projection)
+            post_accept_material_revision.validate_current(material_request, projection)
         else:
+            material_request = retry_material_revision.load(generation)
+        if material_request is not None and material_request.get("policy_id") == retry_material_revision.POLICY:
+            retry_material_revision.validate_current(material_request, projection)
+        if material_request is None:
             failure_record = load_current_ticket_review_prepare_failure_record(
                 projection_record=projection,
             )
@@ -11548,6 +11555,7 @@ def accept_current_ticket_review(
     return _review_acceptance_operational_result(record, idempotent_replay=False)
 
 
+@_serialize_revision_boundary
 def submit_current_ticket_review_decision(
     *,
     decision: Literal["accept", "changes_requested", "reject"],
@@ -11699,6 +11707,7 @@ def submit_current_ticket_review_decision(
     return _review_decision_operational_result(record, idempotent_replay=False)
 
 
+@_serialize_revision_boundary
 def prepare_current_ticket_human_git_handoff(
     *,
     project_id: str | None = None,
@@ -11717,6 +11726,8 @@ def prepare_current_ticket_human_git_handoff(
     _validate_execution_start_authority(projection)
     binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
     _validate_human_git_handoff_prepare_request_guards(request, binding=binding)
+    from .post_accept_material_revision import assert_handoff_current
+    assert_handoff_current(projection)
 
     try:
         completion = load_current_ticket_human_git_handoff_completion_record(
@@ -11927,6 +11938,7 @@ def prepare_current_ticket_human_git_handoff(
     )
 
 
+@_serialize_revision_boundary
 def complete_current_ticket_human_git_handoff(
     *,
     reviewed_run_id: int,
@@ -11969,6 +11981,8 @@ def complete_current_ticket_human_git_handoff(
     _validate_execution_start_authority(projection)
     binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
     _validate_human_git_handoff_completion_request_guards(request, binding=binding)
+    from .post_accept_material_revision import assert_handoff_current
+    assert_handoff_current(projection)
 
     existing = None
     try:
@@ -12153,6 +12167,7 @@ def complete_current_ticket_human_git_handoff(
     )
 
 
+@_serialize_revision_boundary
 def start_current_ticket_execution(
     *,
     human_authorization_text: str,
@@ -33281,6 +33296,8 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
     apply_workflow(snapshot, remaining_blockers)
     from .zero_change_decision import apply_workflow as apply_zero_change_decision
     apply_zero_change_decision(snapshot, remaining_blockers)
+    from .post_accept_material_revision import apply_workflow as apply_post_accept_revision
+    apply_post_accept_revision(snapshot, remaining_blockers)
     _apply_approved_ticket_execution_profile_authority(snapshot, remaining_blockers)
     snapshot["remaining_blockers"] = remaining_blockers
     snapshot["blocker_count"] = len(remaining_blockers)

@@ -1028,6 +1028,18 @@ def _revise_generated_successor_ticket(args: dict[str, Any], **_kwargs) -> str:
 
 
 def _request_current_ticket_material_revision(args: dict[str, Any], **kwargs) -> str:
+    if args.get("origin") == "post_accept":
+        from hermes_cli.agent_platform import post_accept_material_revision
+        try:
+            if set(args) - {"origin", "human_authorization_text", "request_binding", "next_action_id"}:
+                raise ValueError("post-accept request accepts only its exact exposed binding")
+            result = post_accept_material_revision.request(
+                human_authorization_text=args.get("human_authorization_text", ""),
+                binding=args.get("request_binding"), next_action_id=args.get("next_action_id"),
+            )
+            return _result({"source_tool": "request_current_ticket_material_revision", **result})
+        except Exception as exc:
+            return tool_error(str(exc) or "post-accept revision request denied", success=False)
     from hermes_cli.agent_platform import retry_material_revision
     try:
         result = retry_material_revision.request(
@@ -1524,6 +1536,19 @@ def _attest_current_ticket_zero_change_for_review_prepare(
 
 
 def _inspect_current_ticket_review_candidate(args: dict[str, Any], **_kwargs) -> str:
+    if args.get("operation") == "post_accept_history":
+        from hermes_cli.agent_platform import post_accept_material_revision
+        try:
+            if set(args) - {"operation", "ticket_id", "work_packet_SHA256", "evidence_section", "evidence_offset", "candidate_path", "max_bytes"}:
+                raise ValueError("historical inspection requires exact ticket and WorkPacket SHA")
+            return _result(post_accept_material_revision.inspect_history(
+                ticket_id=args["ticket_id"], work_packet_SHA256=args["work_packet_SHA256"],
+                evidence_section=args.get("evidence_section", "transition"),
+                evidence_offset=args.get("evidence_offset", 0),
+                candidate_path=args.get("candidate_path"), max_bytes=args.get("max_bytes"),
+            ))
+        except Exception as exc:
+            return tool_error(str(exc) or "historical post-accept evidence unavailable", success=False)
     if str(args.get("operation", "")).strip().startswith("pre_review_"):
         try:
             allowed = {"operation", "ticket_id", "project_id", "reviewed_run_id", "candidate_path", "candidate_binding_SHA256", "evidence_offset", "max_bytes"}
@@ -2412,16 +2437,17 @@ _ATTEST_CURRENT_TICKET_ZERO_CHANGE_FOR_REVIEW_PREPARE_SCHEMA = {
 _INSPECT_CURRENT_TICKET_REVIEW_CANDIDATE_SCHEMA = {
     "type": "object",
     "properties": {
+        "work_packet_SHA256": {"type": "string", "description": "Exact prior WorkPacket guard for post_accept_history only; returns immutable prior review/candidate/handoff authority."},
         "operation": {
             "type": "string",
-            "enum": ["list", "metadata", "content", "diff", "aggregate_diff", "execution_evidence", "pre_review_list", "pre_review_metadata", "pre_review_content", "pre_review_diff", "pre_review_aggregate_diff"],
+            "enum": ["list", "metadata", "content", "diff", "aggregate_diff", "execution_evidence", "post_accept_history", "pre_review_list", "pre_review_metadata", "pre_review_content", "pre_review_diff", "pre_review_aggregate_diff"],
             "description": (
                 "Read-only inspection operation for the current prepared review candidate. "
                 "Use list first, then diff or content for an exact returned candidate_path."
                 " At pending manual validation use pre_review_list with exact ticket_id and reviewed_run_id, then pre_review_* with its candidate_binding_SHA256. No review preparation or human validation is performed."
             ),
         },
-        "evidence_section": {"type": "string", "enum": ["summary", "worker", "candidate", "validation", "historical_candidate"], "description": "For execution_evidence only. Requires exact current ticket_id and reviewed_run_id; no prepared review needed. All sections are read-only."},
+        "evidence_section": {"type": "string", "enum": ["summary", "worker", "candidate", "validation", "historical_candidate", "transition", "review_decision", "review_prepare", "handoff", "handoff_diagnosis", "projection", "list", "metadata", "content", "diff", "aggregate_diff"], "description": "Read-only section. execution_evidence uses summary/worker/candidate/validation/historical_candidate. post_accept_history uses transition/review_decision/review_prepare/handoff/handoff_diagnosis/projection (paginated with evidence_offset), or candidate list/metadata/content/diff/aggregate_diff, guarded by prior ticket_id and work_packet_SHA256."},
         "evidence_offset": {"type": "integer", "minimum": 0, "maximum": 10000, "description": "Bounded 25-entry worker/file page offset."},
         "candidate_binding_SHA256": {"type": "string", "description": "Required for pre_review_metadata/content/diff/aggregate_diff: exact binding returned by pre_review_list. Repeat list if authority or candidate changes."},
         "historical_binding": {"type": "object", "additionalProperties": False, "required": ["ticket_id", "work_packet_SHA256", "projection_SHA256", "task_id", "run_id", "workspace"], "properties": {
@@ -3164,10 +3190,13 @@ registry.register(
     toolset=TOOLSET,
     schema={
         "name": "request_current_ticket_material_revision",
-        "description": "Request the material-revision gate for the current retry-pending ticket using exact human consent and the alternative action's evidence binding. Suspends retry without consuming it. Does not revise, approve, validate, dispatch or execute; a separate REVISE decision remains required.",
+        "description": "Request the separately human-authorized material-revision gate from retry_pending or origin=post_accept from accepted review with an unexecuted handoff. Use the exact alternative action binding and consent; never infer it from dirty state. Preserves historical authority and does not generate, approve, execute, validate, materialize or mutate Git. A separate REVISE decision remains required.",
         "parameters": {
             "type": "object",
             "properties": {
+                "origin": {"type": "string", "enum": ["retry_pending", "post_accept"]},
+                "request_binding": {"type": "object", "description": "Exact complete request_binding returned by the post-accept alternative action."},
+                "next_action_id": {"type": "string"},
                 "human_authorization_text": {"type": "string"},
                 "ticket_id": {"type": "string"},
                 "failed_run_id": {"type": "integer"},
@@ -3175,7 +3204,11 @@ registry.register(
                 "recovery_action_SHA256": {"type": "string"},
                 "reason_code": {"type": "string", "enum": ["required_validation_command_authority_missing", "governed_validation_command_incompatible"]},
             },
-            "required": ["human_authorization_text", "ticket_id", "failed_run_id", "work_packet_SHA256", "recovery_action_SHA256", "reason_code"],
+            "required": ["human_authorization_text"],
+            "oneOf": [
+                {"required": ["ticket_id", "failed_run_id", "work_packet_SHA256", "recovery_action_SHA256", "reason_code"], "properties": {"origin": {"enum": ["retry_pending"]}}},
+                {"required": ["origin", "request_binding", "next_action_id"], "properties": {"origin": {"const": "post_accept"}}},
+            ],
             "additionalProperties": False,
         },
     },
