@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+from collections.abc import Mapping
 
 from hermes_cli import kanban_db as kb
 from hermes_cli.agent_platform import product_runtime as pr
@@ -610,6 +611,8 @@ def validation(p, run, workspace, source_record, paired, packet, *, offset=0):
             continue
         if args.get("action") != "run":
             continue
+        if not vt._validation_result_digest_valid_for_matching(result):
+            raise ValueError("persisted validation result digest mismatch")
         spec = specs.get(args.get("command_id"))
         command = result.get("command")
         if spec is None or command != discovered.get(args.get("command_id")):
@@ -720,6 +723,7 @@ def validation(p, run, workspace, source_record, paired, packet, *, offset=0):
             "execution_plan": actual,
             "execution_plan_SHA256": plan_sha,
             "process_started": child.get("process_started"),
+            "success": child.get("success"),
             "exit_code": child.get("exit_code"),
             "expected_exit_codes": command["expected_exit_codes"],
             "disposition": child.get("disposition"),
@@ -756,9 +760,131 @@ def validation(p, run, workspace, source_record, paired, packet, *, offset=0):
         "excluded_post_terminal_truncated": len(excluded) > LIMIT,
         "results": results[offset : offset + 1],
         "result_total": len(results),
+        "source_authority_SHA256": source_record["governed_source_authority_SHA256"],
         "next_offset": offset + 1 if offset + 1 < len(results) else None,
         "validation_execution_performed": False,
     }
+
+
+def review_validation_records(completion):
+    """Derive review records from current persisted evidence, without enriching completion.
+
+    Completion identity must stay byte-equivalent for existing human attestations.
+    The review digest covers the compact transport; provenance retains the distinct
+    original tool-result digest and invocation/session/run identities.
+    """
+    from tools import workpacket_validation_tool as vt
+
+    if not isinstance(completion, Mapping):
+        return ()
+    if not completion.get("durable_source_authority_SHA256") or not completion.get(
+        "kanban_completion_result_SHA256"
+    ):
+        return ()
+    try:
+        p = pr._load_current_projection_record()
+        canonical = pr._kanban_completion_result_source(p, read_only=True)
+        if canonical.get("blocker_code") or completion != canonical:
+            return ()
+        evidence = inspect(
+            project_id=p["project_id"],
+            ticket_id=p["ticket_id"],
+            run_id=canonical["run_id"],
+            section="validation",
+        )
+        validation_evidence = evidence["validation"]
+        worker_evidence = evidence["worker"]
+        # C68 validates at most five invocations, but a single result is the
+        # only unambiguous transport. Never select a passing page among retries.
+        if (
+            not worker_evidence.get("available")
+            or not validation_evidence.get("available")
+            or validation_evidence.get("result_total") != 1
+            or validation_evidence.get("source_authority_SHA256")
+            != canonical["durable_source_authority_SHA256"]
+            or evidence["binding"] != {k: p[k] for k in evidence["binding"]}
+            or evidence["workspace"] != canonical["kanban_task_workspace_path"]
+        ):
+            return ()
+        result = validation_evidence["results"][0]
+        if result["outcome"] not in {
+            "TESTS_PASSED",
+            "TESTS_FAILED",
+            "PRE_TEST_COMMAND_FAILURE",
+        }:
+            return ()
+        if result["success"] is True and (
+            result["outcome"] != "TESTS_PASSED"
+            or result["timed_out"] is not False
+            or result["failure_reason"] != "none"
+        ):
+            return ()
+        record = {
+            "review_prepare_validation_evidence_mode": "canonical_worker_evidence",
+            **{k: p[k] for k in ("ticket_id", "work_packet_id", "work_packet_SHA256")},
+            **{
+                k: result[k]
+                for k in (
+                    "command",
+                    "success",
+                    "process_started",
+                    "exit_code",
+                    "expected_exit_codes",
+                    "disposition",
+                    "failure_reason",
+                    "timed_out",
+                    "outcome",
+                    "execution_plan_SHA256",
+                )
+            },
+            "provenance": {
+                **evidence["binding"],
+                "run_id": canonical["run_id"],
+                "workspace": evidence["workspace"],
+                "kanban_completion_result_SHA256": canonical[
+                    "kanban_completion_result_SHA256"
+                ],
+                "durable_source_authority_SHA256": canonical[
+                    "durable_source_authority_SHA256"
+                ],
+                "worker_session_id": worker_evidence["session"]["id"],
+                **{
+                    k: worker_evidence[k]
+                    for k in (
+                        "session_SHA256",
+                        "task_witness_message_id",
+                        "task_witness_SHA256",
+                        "terminal_run_SHA256",
+                        "transcript_SHA256",
+                    )
+                },
+                **{
+                    k: result[k]
+                    for k in (
+                        "invocation_message_id",
+                        "invocation_message_SHA256",
+                        "source_message_id",
+                        "source_message_SHA256",
+                        "invocation_timestamp",
+                        "result_timestamp",
+                        "validation_result_SHA256",
+                    )
+                },
+                "execution_evidence_SHA256": evidence["evidence_SHA256"],
+            },
+        }
+        record["validation_result_SHA256"] = vt._validation_result_payload_digest(
+            record
+        )
+        # Fail closed if authority changed while reading the separate stores.
+        if (
+            p != pr._load_current_projection_record()
+            or canonical != pr._kanban_completion_result_source(p, read_only=True)
+        ):
+            return ()
+        return (record,)
+    except (OSError, ValueError, KeyError, TypeError, sqlite3.Error, RuntimeError):
+        return ()
 
 
 def inspect(

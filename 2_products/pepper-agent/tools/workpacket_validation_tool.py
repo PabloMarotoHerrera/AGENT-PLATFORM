@@ -293,6 +293,15 @@ def review_prepare_validation_result_records(
             value = container.get(key) if isinstance(container, Mapping) else None
             if isinstance(value, list):
                 records.extend(item for item in value if isinstance(item, dict))
+    # Derived canonical transport is recomputed, never trusted from completion
+    # metadata. Legacy result schemas retain their existing matching semantics.
+    records = [
+        item for item in records
+        if item.get("review_prepare_validation_evidence_mode") != "canonical_worker_evidence"
+    ]
+    from hermes_cli.agent_platform.execution_evidence import review_validation_records
+
+    records.extend(review_validation_records(completion))
     return tuple(records)
 
 
