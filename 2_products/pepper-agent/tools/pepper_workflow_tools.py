@@ -1524,6 +1524,19 @@ def _attest_current_ticket_zero_change_for_review_prepare(
 
 
 def _inspect_current_ticket_review_candidate(args: dict[str, Any], **_kwargs) -> str:
+    if args.get("operation") == "execution_evidence":
+        from hermes_cli.agent_platform import execution_evidence
+        try:
+            allowed = {"operation", "ticket_id", "project_id", "reviewed_run_id", "evidence_section", "evidence_offset", "historical_binding"}
+            if set(args) - allowed:
+                raise ValueError("execution evidence does not accept arbitrary paths or review authority")
+            return _result(execution_evidence.inspect(
+                ticket_id=args.get("ticket_id"), run_id=args.get("reviewed_run_id"),
+                project_id=args.get("project_id"), section=args.get("evidence_section", "summary"),
+                offset=args.get("evidence_offset", 0), historical=args.get("historical_binding"),
+            ))
+        except Exception as exc:
+            return tool_error(str(exc) or "execution evidence unavailable", success=False)
     pr = _runtime()
     try:
         result = pr.inspect_current_ticket_review_candidate(
@@ -2389,12 +2402,17 @@ _INSPECT_CURRENT_TICKET_REVIEW_CANDIDATE_SCHEMA = {
     "properties": {
         "operation": {
             "type": "string",
-            "enum": ["list", "metadata", "content", "diff", "aggregate_diff"],
+            "enum": ["list", "metadata", "content", "diff", "aggregate_diff", "execution_evidence"],
             "description": (
                 "Read-only inspection operation for the current prepared review candidate. "
                 "Use list first, then diff or content for an exact returned candidate_path."
             ),
         },
+        "evidence_section": {"type": "string", "enum": ["summary", "worker", "candidate", "validation", "historical_candidate"], "description": "For execution_evidence only. Requires exact current ticket_id and reviewed_run_id; no prepared review needed. All sections are read-only."},
+        "evidence_offset": {"type": "integer", "minimum": 0, "maximum": 10000, "description": "Bounded 25-entry worker/file page offset."},
+        "historical_binding": {"type": "object", "additionalProperties": False, "required": ["ticket_id", "work_packet_SHA256", "projection_SHA256", "task_id", "run_id", "workspace"], "properties": {
+            "ticket_id": {"type": "string"}, "work_packet_SHA256": {"type": "string"}, "projection_SHA256": {"type": "string"}, "task_id": {"type": "string"}, "run_id": {"type": "integer", "minimum": 1}, "workspace": {"type": "string", "description": "Exact historical workspace identity guard; never an arbitrary path to open."},
+        }},
         "candidate_path": {
             "type": "string",
             "description": (
@@ -2908,7 +2926,7 @@ registry.register(
     schema={
         "name": "inspect_current_ticket_review_candidate",
         "description": (
-            "Read the exact current prepared Pepper review candidate through review-package authority. "
+            "Inspect persisted terminal execution evidence before review with operation=execution_evidence (exact ticket_id and reviewed_run_id required); or read the current prepared candidate through review-package authority. "
             "Lists authorized candidate files and returns bounded candidate content or source-to-candidate "
             "unified diffs after source/candidate SHA, WorkPacket scope, and scratch path containment checks. "
             "Does not submit a review decision, mutate candidate files, dispatch workers, or mutate Git."
