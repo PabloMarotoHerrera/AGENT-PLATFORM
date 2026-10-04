@@ -10924,7 +10924,7 @@ def _zero_change_attestation_operational_result(
     }
 
 
-def attest_current_ticket_zero_change_for_review_prepare(
+def _attest_current_ticket_zero_change_for_review_prepare_locked(
     *,
     human_attestation_text: str,
     project_id: str,
@@ -10944,6 +10944,8 @@ def attest_current_ticket_zero_change_for_review_prepare(
     _validate_zero_change_attestation_request_guards(request)
     projection = _load_current_projection_record()
     _validate_execution_start_authority(projection)
+    from .zero_change_decision import require_not_rejected
+    require_not_rejected(projection)
     completion = _current_review_round_completion_source(projection)
     if completion.get("blocker_code"):
         return _blocked_zero_change_attestation_result(
@@ -11019,6 +11021,8 @@ def prepare_current_ticket_review(
     _validate_review_prepare_request_guards(request)
     projection = _load_current_projection_record()
     _validate_execution_start_authority(projection)
+    from .zero_change_decision import require_not_rejected
+    require_not_rejected(projection)
     _archive_superseded_current_review_round_records(projection)
 
     existing = None
@@ -12157,6 +12161,8 @@ def start_current_ticket_execution(
     _validate_execution_start_authority(projection)
     binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
     workflow = build_workflow_control_snapshot()
+    if workflow.get("workflow_status") == "zero_change_rejected_correction_required":
+        raise ProductRuntimeConflict("zero-change correction requires its separate run-bound authorization")
     workflow_next_action = workflow.get("next_action")
     workflow_next_action_id = (
         workflow_next_action.get("id") if isinstance(workflow_next_action, dict) else None
@@ -12638,6 +12644,8 @@ def continue_current_ticket_governed_autonomy(
         raise ProductRuntimeConflict(
             f"governed autonomy continuation is bounded to ticket {binding.ticket_id}"
         )
+    from .zero_change_decision import require_not_rejected
+    require_not_rejected(projection)
     activation = load_current_ticket_governed_autonomy_activation_record(
         projection_record=projection,
     )
@@ -20560,6 +20568,8 @@ def _fresh_execution_request_embedded_blocker(
 def _terminal_done_fresh_execution_rearm_reason(
     fresh_execution_request: dict[str, Any],
 ) -> str:
+    if fresh_execution_request.get("fresh_execution_provenance") == "human_zero_change_rejection_correction":
+        return "human_zero_change_rejection_correction"
     if _fresh_execution_request_is_runtime_substrate_recovery(fresh_execution_request):
         return "human_runtime_substrate_correction"
     return "human_review_changes_requested_revision"
@@ -20758,6 +20768,9 @@ def _terminal_done_fresh_execution_request_authority_blocker(
     task: Any | None = None,
     runs: list[Any] | None = None,
 ) -> tuple[str, str] | None:
+    if fresh_execution_request.get("fresh_execution_provenance") == "human_zero_change_rejection_correction":
+        from .zero_change_decision import corrective_blocker
+        return corrective_blocker(projection, fresh_execution_request)
     embedded_blocker = _fresh_execution_request_embedded_blocker(fresh_execution_request)
     if embedded_blocker is not None:
         return embedded_blocker
@@ -20880,6 +20893,7 @@ def _governed_autonomy_dispatch_task_body(
         "prior_terminal_run_id": fresh_execution_request.get("prior_terminal_run_id"),
         "fresh_execution_attempt_number": next_attempt_number,
         "fresh_execution_workspace_path": str(fresh_workspace_path),
+        "corrective_implementation_intent": fresh_execution_request.get("implementation_intent"),
         "fresh_execution_provenance": fresh_execution_request.get(
             "fresh_execution_provenance"
         ),
@@ -20899,6 +20913,12 @@ def _governed_autonomy_dispatch_task_body(
         ),
         "revision_source_base": fresh_execution_request.get("revision_source_base"),
     })
+    if fresh_execution_request.get("fresh_execution_provenance") == "human_zero_change_rejection_correction":
+        for key in tuple(body):
+            if key.startswith("governed_autonomy_"):
+                body.pop(key)
+        body["zero_change_decision_SHA256"] = fresh_execution_request["zero_change_decision_SHA256"]
+        body["corrective_start_authority_SHA256"] = activation_action_sha256
     return body, str(fresh_workspace_path)
 
 
@@ -21104,6 +21124,8 @@ def _claim_terminal_done_review_revision_task(
                 run_id=prior_terminal_run_id,
             )
             rearm_event = (
+                "governed_zero_change_corrective_execution_rearmed"
+                if fresh_execution_request.get("fresh_execution_provenance") == "human_zero_change_rejection_correction" else
                 "governed_autonomy_terminal_runtime_substrate_recovery_rearmed"
                 if _fresh_execution_request_is_runtime_substrate_recovery(
                     fresh_execution_request
@@ -33238,6 +33260,8 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
         _clear_stale_handoff_completion_projection_fields(snapshot)
     from hermes_cli.agent_platform.retry_material_revision import apply_workflow
     apply_workflow(snapshot, remaining_blockers)
+    from .zero_change_decision import apply_workflow as apply_zero_change_decision
+    apply_zero_change_decision(snapshot, remaining_blockers)
     _apply_approved_ticket_execution_profile_authority(snapshot, remaining_blockers)
     snapshot["remaining_blockers"] = remaining_blockers
     snapshot["blocker_count"] = len(remaining_blockers)
@@ -33391,3 +33415,15 @@ def build_lead_agent_operational_context() -> dict[str, Any]:
         "external_dashboard_state_copy_required": False,
         "external_ChatGPT_required": False,
     }
+
+
+def attest_current_ticket_zero_change_for_review_prepare(
+    *, human_attestation_text: str, project_id: str, ticket_id: str,
+    next_action_id: str, reviewer_id: str = "pepper-chat-human",
+) -> dict[str, Any]:
+    """Record positive human authority, serialized against explicit rejection."""
+    from .zero_change_decision import serialize_positive
+    return serialize_positive(_attest_current_ticket_zero_change_for_review_prepare_locked, {
+        "human_attestation_text": human_attestation_text, "project_id": project_id,
+        "ticket_id": ticket_id, "next_action_id": next_action_id, "reviewer_id": reviewer_id,
+    })

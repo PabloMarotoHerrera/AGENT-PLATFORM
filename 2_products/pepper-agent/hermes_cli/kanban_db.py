@@ -4635,6 +4635,9 @@ def _cleanup_workspace(conn: sqlite3.Connection, task_id: str) -> None:
             # completion would unconditionally ``shutil.rmtree`` that path
             # and silently delete the user's source data.
             if _is_managed_scratch_path(wp):
+                from hermes_cli.agent_platform.terminal_candidate_evidence import before_cleanup
+                if not before_cleanup(conn, task_id):
+                    return
                 shutil.rmtree(wp, ignore_errors=True)
                 _log.debug("Removed scratch workspace: %s", wp)
             else:
@@ -4689,6 +4692,9 @@ def _try_cleanup_parent_workspaces(conn: sqlite3.Connection, task_id: str) -> No
             import shutil
             wp = Path(row["workspace_path"])
             if wp.is_dir() and _is_managed_scratch_path(wp):
+                from hermes_cli.agent_platform.terminal_candidate_evidence import before_cleanup
+                if not before_cleanup(conn, parent_id):
+                    continue
                 shutil.rmtree(wp, ignore_errors=True)
                 _log.debug("Deferred cleanup: removed parent %s scratch workspace: %s", parent_id, wp)
     except Exception:

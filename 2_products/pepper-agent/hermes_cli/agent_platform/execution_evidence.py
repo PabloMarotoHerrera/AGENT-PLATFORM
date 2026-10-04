@@ -87,9 +87,18 @@ def run_context(p, run_id, *, latest=True):
     workspace = Path(task.workspace_path or "")
     root = kb.kanban_home() / "kanban/workspaces"
     safe_path(workspace, root, missing=True)
-    if workspace.name != task.id:
-        raise ValueError("workspace task identity mismatch")
     body = json.loads(task.body or "{}")
+    if workspace.name != task.id:
+        attempt = body.get("fresh_execution_attempt_number")
+        if (
+            type(attempt) is not int
+            or attempt != len(runs)
+            or attempt < 2
+            or workspace.name != f"{task.id}-attempt-{attempt}"
+            or body.get("fresh_execution_workspace_path") != str(workspace)
+            or not body.get("fresh_execution_request_SHA256")
+        ):
+            raise ValueError("workspace task identity mismatch")
     if any(
         body.get(k) != p[v]
         for k, v in (
@@ -163,6 +172,12 @@ def candidate(p, run, workspace, baseline, *, own_source=None, offset=0):
         "human_attestation_required": True,
     }
     if not workspace.is_dir():
+        if own_source is None:
+            from .terminal_candidate_evidence import load
+
+            retained = load(p, run, baseline, workspace, offset)
+            if retained is not None:
+                return retained
         return {
             **base,
             **unavailable(

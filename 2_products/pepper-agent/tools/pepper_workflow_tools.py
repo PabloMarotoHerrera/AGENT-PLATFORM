@@ -3169,3 +3169,47 @@ registry.register(
     emoji="M",
     max_result_size_chars=16000,
 )
+
+
+
+def _decide_current_ticket_zero_change(args, **_kwargs):
+    from hermes_cli.agent_platform import zero_change_decision as decision
+    try:
+        values = dict(args)
+        operation = values.pop("operation", None)
+        allowed = ({"human_authorization_text", "ticket_id", "run_id", "project_id", "ticket_spec_SHA256", "work_packet_SHA256", "projection_SHA256", "reviewer_id"}
+                   if operation == "reject" else {"human_authorization_text", "ticket_id", "run_id", "decision_SHA256"})
+        if set(values) - allowed:
+            raise ValueError("unsupported zero-change decision arguments")
+        if operation == "reject":
+            result = decision.request(**values)
+        elif operation == "start_corrective":
+            result = decision.start(**values)
+        else:
+            raise ValueError("explicit reject or start_corrective operation required")
+        return _result(result)
+    except Exception as exc:
+        return tool_error(str(exc), success=False)
+
+
+registry.register(
+    name="decide_current_ticket_zero_change",
+    toolset=TOOLSET,
+    schema={"name": "decide_current_ticket_zero_change", "description":
+        "Record explicit human refusal of zero-change attestation, or separately authorize fresh corrective execution. "
+        "Use the exact run-bound action text published by workflow. Rejection never starts execution, attests or prepares review. "
+        "Never infer either consent from inaction or from authorization for the other operation.",
+        "parameters": {"type": "object", "additionalProperties": False,
+            "required": ["operation", "human_authorization_text", "ticket_id", "run_id"],
+            "properties": {
+                "operation": {"type": "string", "enum": ["reject", "start_corrective"]},
+                "human_authorization_text": {"type": "string"},
+                "ticket_id": {"type": "string"}, "run_id": {"type": "integer", "minimum": 1},
+                "project_id": {"type": "string", "description": "Required for rejection."},
+                "ticket_spec_SHA256": {"type": "string", "description": "Required for rejection."},
+                "work_packet_SHA256": {"type": "string", "description": "Required for rejection."},
+                "projection_SHA256": {"type": "string", "description": "Required for rejection."},
+                "decision_SHA256": {"type": "string", "description": "Required only for separately authorized corrective start."},
+                "reviewer_id": {"type": "string"}}}},
+    handler=_decide_current_ticket_zero_change, emoji="Z", max_result_size_chars=24000,
+)
