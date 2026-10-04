@@ -20,6 +20,8 @@ from typing import Annotated, Any, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
+from . import material_revision_diagnostics as revision_diagnostics
+
 from agent.redact import redact_sensitive_text
 from hermes_constants import get_hermes_home
 from hermes_cli.agent_platform.ticket_factory import (
@@ -2577,36 +2579,40 @@ def revise_current_ticket_for_material_contract_failure(
             ticket_id=target.ticket_id,
             revise_next_action_id=target.revise_next_action_id,
         )
-        validated_revision_contract = validate_ticket_spec_material_revision_contract(
-            revision_contract,
-            target=target,
-        )
-        authorizer_id = _reviewer_id_from_actor(authorizer_id)
-        revision_authority = _build_current_ticket_material_revision_authority(
-            current_generation=current_generation,
-            previous_decision=previous_decision,
-            review_prepare_failure_record=review_prepare_failure_record,
-            material_revision_request_record=material_revision_request_record,
-            target=target,
-            human_authorization_text=human_authorization_text,
-            authorizer_id=authorizer_id,
-            revision_contract=validated_revision_contract,
-            revision_reason=revision_reason,
-        )
-        prior_publication = _publication_from_generation_record(current_generation)
-        revision_workflow = _revision_generation_workflow(workflow, target=target)
-        revised_generation = _build_generation_record(
-            revision_workflow,
-            target=target,
-            revision_authority=revision_authority,
-            prior_publication=prior_publication,
-        )
-        validate_generation_record(revised_generation, target=target)
-        _validate_material_revision_generation(
-            rejected_generation=current_generation,
-            revised_generation=revised_generation,
-            revision_authority=revision_authority,
-        )
+        with revision_diagnostics.preflight(
+            ticket_id=target.ticket_id,
+            revision_attempt=_publication_from_generation_record(current_generation).revision + 1,
+        ):
+            validated_revision_contract = revision_diagnostics.run("revision_contract_validation", validate_ticket_spec_material_revision_contract,
+                revision_contract,
+                target=target,
+            )
+            authorizer_id = _reviewer_id_from_actor(authorizer_id)
+            revision_authority = revision_diagnostics.run("revision_authority_build", _build_current_ticket_material_revision_authority,
+                current_generation=current_generation,
+                previous_decision=previous_decision,
+                review_prepare_failure_record=review_prepare_failure_record,
+                material_revision_request_record=material_revision_request_record,
+                target=target,
+                human_authorization_text=human_authorization_text,
+                authorizer_id=authorizer_id,
+                revision_contract=validated_revision_contract,
+                revision_reason=revision_reason,
+            )
+            prior_publication = _publication_from_generation_record(current_generation)
+            revision_workflow = _revision_generation_workflow(workflow, target=target)
+            revised_generation = revision_diagnostics.run("ticketspec_build", _build_generation_record,
+                revision_workflow,
+                target=target,
+                revision_authority=revision_authority,
+                prior_publication=prior_publication,
+            )
+            revision_diagnostics.run("ticketspec_normalization", validate_generation_record, revised_generation, target=target)
+            revision_diagnostics.run("ticketspec_normalization", _validate_material_revision_generation,
+                rejected_generation=current_generation,
+                revised_generation=revised_generation,
+                revision_authority=revision_authority,
+            )
         history_entry = _build_current_ticket_material_revision_history_entry(
             current_generation=current_generation,
             previous_decision=previous_decision,
@@ -3084,6 +3090,18 @@ def validate_ticket_spec_material_revision_contract(
         raise TicketArchitectBridgeInputError(
             "structured TicketSpec revision contract target ticket mismatch"
         )
+    for index, dependency in enumerate(contract.dependencies or ()):
+        if dependency.ticket_id == contract.ticket_id:
+            raise TicketArchitectBridgeInputError(
+                "ticket dependencies must not include the ticket itself",
+                failure_metadata={"revision_issue": {
+                    "issue_code": "dependency_self_reference", "severity": "error",
+                    "field_path": f"dependencies.{index}.ticket_id",
+                    "message": "A material revision cannot depend on its own ticket.",
+                    "expected_constraint": "Dependency ticket_id must differ from the current ticket_id.",
+                    "actual_value_summary": contract.ticket_id,
+                }},
+            )
     encoded = json.dumps(
         _normalize(contract),
         ensure_ascii=False,
@@ -4251,8 +4269,28 @@ def _build_generation_record(
             collection_complete=False,
         )
     )
-    _validate_lint_report(lint_report, target=target)
-    approval_record, publication_result, compilation_result = _compile_work_packet(
+    try:
+        _validate_lint_report(lint_report, target=target)
+    except TicketArchitectBridgeGenerationError as exc:
+        if revision_authority is not None:
+            exc.failure_metadata = {
+                **(exc.failure_metadata or {}),
+                "material_revision_lint_remediations": {
+                    diagnostic.diagnostic_id: _safe_lint_diagnostic_text(
+                        diagnostic.remediation, fallback=diagnostic.diagnostic_id,
+                    )
+                    for diagnostic in lint_report.diagnostics[:_LINT_FAILURE_DIAGNOSTIC_LIMIT]
+                },
+                "source_stage": "ticketspec_lint",
+                "generated_pre_lint_ticket_spec_SHA256": _ticket_spec_digest(ticket_spec),
+            }
+        raise
+    approval_record, publication_result, compilation_result = revision_diagnostics.run(
+        "workpacket_compile", _compile_work_packet,
+        _failure_context={
+            "lint_evaluated": True, "lint_passed": True,
+            "generated_pre_lint_ticket_spec_SHA256": _ticket_spec_digest(ticket_spec),
+        },
         project_spec=project_spec,
         ticket_spec=ticket_spec,
         context_pack=context_pack,

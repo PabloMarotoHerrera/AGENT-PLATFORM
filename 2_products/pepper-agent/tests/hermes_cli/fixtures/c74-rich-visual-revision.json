@@ -1,0 +1,218 @@
+{
+  "schema_version": 1,
+  "ticket_id": "P99.4",
+  "objective": "Generate P99.4 R0005 to complete the global Pepper visual identity and design-system implementation so the rendered Pepper application no longer presents visually as a lightly rebranded Hermes interface. R0004 remains valid historical evidence, but R0005 supersedes it as the current material revision because the accepted R0004 candidate did not fully satisfy the intended product-level visual result. R0005 must use fresh current canonical source authority at expected HEAD a016bb9d36d84745acf5a84a3a9e8690a87be178, not R0004 scratch candidate bytes, and must stop at pending approval with no execution.",
+  "context": [
+    "Current workflow is awaiting_material_revision for P99.4 after durable post-accept material-revision request authority. R0004 review is accepted_historical and its human Git handoff is superseded_by_material_revision; do not reinterpret or mutate R0004 history.",
+    "Material revision classification is MATERIAL_VISUAL_SCOPE_INCOMPLETE. R0004 introduced useful branding infrastructure, but its visible delta was too small and still inherited Hermes green/turquoise product identity.",
+    "Pepper visual target: elegant, dark, professional, restrained, technically sophisticated, premium, engineering-oriented, information-dense without clutter, and clearly distinct from upstream Hermes. It must not feel like a Hermes dashboard with only a small Pepper badge added.",
+    "Primary surfaces must be dominated by black, near-black, charcoal, graphite, and dark neutral gray. Pepper blue is a restrained product accent for selected navigation, active tabs, primary actions, focus treatment, brand mark, controlled highlights, selected data, and links where appropriate. Do not flood the UI with blue.",
+    "Semantic colors remain distinct: success/approved green, warning/pending amber/yellow, error/failed/rejected/blocked red, informational Pepper blue or neutral informational tone as appropriate. Do not replace semantic green with Pepper blue.",
+    "Pepper belongs visually to the Siamese family through dark neutral surfaces, restrained blue highlights, premium technical language, compact brand treatment, and disciplined component styling. Do not insert the Siamese cat logo unless separately authorized.",
+    "Dark mode is the primary acceptance target; light-mode infrastructure must not be broken. Full light-mode parity is not required.",
+    "Known unrelated untracked C64 path is not part of R0005 and must not be deleted, modified, staged, included in scope, or used as evidence: 2_products/pepper-agent/tests/hermes_cli/test_c64_validation_authority_boundary.py"
+  ],
+  "scope": {
+    "allowed_paths": [
+      "2_products/pepper-agent/web",
+      "2_products/pepper-agent/apps/shared",
+      "2_products/pepper-agent/apps/desktop/src",
+      "2_products/pepper-agent/apps/desktop/package.json",
+      "2_products/pepper-agent/apps/desktop/vitest.config.ts",
+      "2_products/pepper-agent/tests-js",
+      "2_products/pepper-agent/package.json",
+      "2_products/pepper-agent/package-lock.json"
+    ],
+    "forbidden_paths": [
+      "2_products/pepper-agent/tests/hermes_cli/test_c64_validation_authority_boundary.py",
+      "2_products/pepper-agent/run_agent.py",
+      "2_products/pepper-agent/cli.py",
+      "2_products/pepper-agent/model_tools.py",
+      "2_products/pepper-agent/toolsets.py",
+      "2_products/pepper-agent/gateway",
+      "2_products/pepper-agent/tui_gateway",
+      "2_products/pepper-agent/tools",
+      "2_products/pepper-agent/plugins",
+      "2_products/pepper-agent/hermes_cli",
+      "2_products/pepper-agent/.env",
+      "2_products/pepper-agent/node_modules",
+      "2_products/pepper-agent/dist",
+      "2_products/pepper-agent/build"
+    ],
+    "allowed_actions": [
+      "Inspect current frontend theme, tokens, shell, sidebar/navigation, shared primitives, visual components, and relevant frontend tests.",
+      "Modify frontend visual-system source files needed for a Pepper-native dark-first redesign.",
+      "Add or update reusable semantic tokens for dark neutral surfaces, Pepper blue accents, semantic status colors, focus rings, borders, elevation, spacing, radii, typography, and interaction states.",
+      "Update shared UI primitives including cards, panels, tables/lists, workflow blocks, status summaries, chat/session surfaces, forms, inspector surfaces, code/terminal-like blocks, buttons, tabs, badges, inputs, textareas, selects, dropdowns, toggles, segmented controls, and navigation visual components.",
+      "Preserve route semantics, navigation targets, workflow semantics, backend authority, provider/model authority, worker authority, and Git authority.",
+      "Add or update relevant frontend tests for product branding, tokens, sidebar selected/active treatment, semantic status preservation, R0004 concept preservation, and validation contract coverage."
+    ],
+    "forbidden_actions": [
+      "Do not approve R0005.",
+      "Do not execute R0005 or start any worker during generation.",
+      "Do not run git add, git commit, git push, git reset, git checkout, git restore, git clean, git stash, or otherwise mutate Git.",
+      "Do not materialize R0004 or copy R0004 scratch candidate bytes as implementation authority.",
+      "Do not delete, modify, stage, resolve, include, or use C64 as evidence.",
+      "Do not use Docker or Graphify.",
+      "Do not generate P99.5.",
+      "Do not alter backend/control-plane semantics except strictly necessary frontend visual plumbing that is explicitly justified.",
+      "Do not add a large new icon dependency without necessity.",
+      "Do not claim numerical WCAG compliance unless actual contrast calculations are performed."
+    ]
+  },
+  "constraints": [
+    "Pepper-specific brand/accent tokens must not simply map to var(--color-primary) if that value remains Hermes turquoise; final rendered Pepper accent must be Pepper blue.",
+    "Audit and replace inherited green/turquoise product-brand styling in primary theme tokens, navigation selection, active states, buttons, links, focus rings, borders, highlights, badges, shell accents, icon accents, hover states, terminal/chat decoration, and card decoration, while preserving green for semantic success.",
+    "Apply the Pepper visual system to global background, top/title bar, left sidebar, navigation sections, selected navigation state, hover state, separators, footer/system area, main content surface, panel boundaries, and right-side/context surfaces where shared architecture supports them.",
+    "Sidebar is a primary acceptance surface: near-black/charcoal background, restrained section hierarchy, subdued inactive items, Pepper-blue selected state, coherent hover states, neutral inactive icons, controlled separators, clear Pepper branding, reduced Hermes visual language, and preserved CONTROL, WORK, AGENTS, AUTOMATION, RESOURCES, SYSTEM sections/routes.",
+    "Content surfaces must use a hierarchy of dark surfaces rather than one flat black surface: canvas, panel, elevated panel, interactive surface, selected surface.",
+    "Interaction states must be coherent and reusable: default, hover, active, selected, focused, disabled, loading, pending, success, warning, failed, rejected, blocked. Important semantic states must not rely only on color; use combinations of text, icon, border, label, chip, marker, shape, and color.",
+    "Buttons and controls must clearly distinguish primary Pepper-blue actions, destructive red actions, disabled state, and visible focus on dark surfaces.",
+    "Structural design system must establish consistent radii, borders, separators, elevation, shadows, selected outlines, active rings, spacing hierarchy, and sizing hierarchy with premium restrained technical character, avoiding excessive glow, neon, thick outlines, gratuitous glassmorphism, large decorative gradients, and visual noise.",
+    "Typography must preserve high information density and technical readability across product title, page headings, section headings, card titles, body, metadata, status, and monospace technical values without unnecessarily replacing the existing font stack.",
+    "Pepper brand lockup must preserve compatible R0004 concepts while making PEPPER the primary identity and Hermes/upstream provenance secondary; Pepper mark must use Pepper blue, not inherited Hermes turquoise.",
+    "Preserve or improve readable text/background contrast, visible focus, non-color-only status meaning, accessible labels, decorative aria-hidden marks, disabled-state legibility, responsive behavior, desktop control-plane density, compact navigation, technical metadata readability, and panel layout behavior."
+  ],
+  "tasks": [
+    "Audit current frontend theme and inherited Hermes green/turquoise styling acting as product branding across shell, sidebar/navigation, tokens, shared primitives, controls, links, focus rings, badges, highlights, terminal/chat decoration, and cards.",
+    "Extend existing design-system architecture with Pepper-native semantic tokens for canvas, panel, elevated, interactive, selected, text primary/secondary/muted, subtle/strong borders, Pepper accent, accent hover/active/soft, focus ring, success, warning, error, and info.",
+    "Apply dark-first Pepper visual system to shell/sidebar/content surfaces and shared primitives used by Overview, Lead Agent, Projects/Tickets, Approvals, Executions, Agents or Resources, Settings where shared primitives apply, cards, panels, lists/tables, workflow blocks, status summaries, chat/session surfaces, forms, inspector surfaces, and code/terminal-like blocks.",
+    "Audit and style shared controls: primary/secondary/ghost/destructive/icon buttons, inputs, textareas, selects, dropdowns, tabs, toggles, and segmented controls.",
+    "Preserve semantic status colors and non-color-only communication for pending, success, warning, failed, rejected, and blocked states.",
+    "Preserve compatible R0004 brand/design-system concepts including product.initials, createProductInitials or equivalent, brand token category, brand accent abstraction, brand-lockup hierarchy, decorative initials semantics, Pepper textual identity, Hermes textual provenance, and valid R0004 test intent.",
+    "Add or update relevant frontend tests and validation evidence for visual identity propagation, semantic status preservation, no route/workflow drift, R0004 concept preservation, and mandatory human rendered inspection requirements.",
+    "Document any frontend scope expansion beyond expected visual-system categories in the worker response with justification and files modified."
+  ],
+  "acceptance_criteria": [
+    "Rendered application no longer appears primarily green/turquoise and is immediately distinguishable from current Hermes-dominant UI.",
+    "Black, near-black, charcoal, graphite, and dark neutral gray dominate major surfaces.",
+    "Pepper blue is restrained product accent for selected/active/focused/primary/product-brand states without flooding the UI.",
+    "Sidebar selected/active states use Pepper styling and preserve existing navigation sections/routes.",
+    "Main cards/panels use coherent dark neutral hierarchy.",
+    "Primary controls/buttons use Pepper visual language; destructive/disabled/focus states remain clearly distinguishable.",
+    "Success/warning/error/failed/rejected/blocked/pending/info remain semantically distinct and do not rely only on color.",
+    "Pepper is visually primary and Hermes/upstream provenance is secondary.",
+    "Useful R0004 brand/design-system concepts remain incorporated where compatible.",
+    "Routes, navigation targets, workflow semantics, backend/API/provider/worker/Git authority, and approval/execution/review/recovery semantics are unchanged.",
+    "Human rendered inspection after candidate execution covers Overview, Lead Agent, Projects/Tickets, Approvals, Executions, one Agents or Resources surface, sidebar/navigation, product branding, cards/status surfaces, primary buttons/actions, and selected/focus treatment.",
+    "R0005 must not close solely from unit tests; human rendered inspection is mandatory.",
+    "C64 remains unchanged and excluded from R0005 scope/evidence.",
+    "R0005 approval is pending after generation and execution is not started."
+  ],
+  "validation_steps": [
+    {
+      "validation_id": "V1",
+      "description": "Governed executable automated frontend validation using repository-authoritative current command; must not use npm test -- --runInBand.",
+      "command": "npm test",
+      "expected_result": "Command exits successfully and exercises current frontend/unit validation without reintroducing unsupported --runInBand.",
+      "required": true,
+      "command_authority": {
+        "validation_id": "V1",
+        "source_command": "npm test",
+        "package_relative_path": "2_products/pepper-agent",
+        "command_argv": [
+          "npm",
+          "test"
+        ],
+        "timeout_seconds": 600,
+        "expected_exit_codes": [
+          0
+        ]
+      }
+    },
+    {
+      "validation_id": "V2",
+      "description": "No route/navigation/workflow/runtime/provider/worker authority drift.",
+      "command": null,
+      "expected_result": "Inspection confirms route targets, navigation semantics, workflow/runtime/provider/worker authority, backend API semantics, approval/execution/review/recovery/Git authority, and TicketSpec/WorkPacket authority are unchanged except visual plumbing explicitly justified in scope.",
+      "required": true
+    },
+    {
+      "validation_id": "V3",
+      "description": "Dark-first accessibility and semantic status communication.",
+      "command": null,
+      "expected_result": "Rendered/code inspection confirms readable dark-surface contrast, visible focus, disabled-state legibility, accessible labels/decorative aria-hidden treatment, and non-color-only semantic status communication for success, warning, error, failed, rejected, blocked, and pending states.",
+      "required": true
+    },
+    {
+      "validation_id": "V4",
+      "description": "Pepper global visual identity satisfies R0005 specification.",
+      "command": null,
+      "expected_result": "Rendered inspection confirms Pepper no longer presents as Hermes green/turquoise; major surfaces are dark neutral, Pepper blue is restrained accent, primary controls and selected/focus states use Pepper language, and the UI feels elegant, restrained, premium, technical, and engineering-oriented.",
+      "required": true
+    },
+    {
+      "validation_id": "V5",
+      "description": "Useful R0004 brand/design-system concepts remain incorporated.",
+      "command": null,
+      "expected_result": "Inspection confirms compatible R0004 concepts remain or are rebuilt where appropriate, including product.initials/createProductInitials or equivalent initials abstraction, brand token category/accent abstraction, brand-lockup hierarchy, decorative initials semantics, Pepper textual identity, Hermes provenance, and valid R0004 test intent.",
+      "required": true
+    },
+    {
+      "validation_id": "V6",
+      "description": "Human rendered inspection confirms Pepper no longer presents as Hermes green/turquoise.",
+      "command": null,
+      "expected_result": "Human rendered inspection covers Overview, Lead Agent, Projects/Tickets, Approvals, Executions, one Agents or Resources surface, sidebar/navigation, product branding, cards/status surfaces, primary buttons/actions, and selected/focus treatment, and confirms material before/after visual delta.",
+      "required": true
+    },
+    {
+      "validation_id": "V7",
+      "description": "Human rendered inspection confirms coherent Pepper-blue, dark-neutral, and semantic status hierarchy across shell/sidebar/content/controls.",
+      "command": null,
+      "expected_result": "Human rendered inspection confirms shell/sidebar/content/cards/panels/controls share a coherent dark-neutral hierarchy, Pepper-blue restrained accent, and preserved semantic green/amber/red/info status meanings.",
+      "required": true
+    }
+  ],
+  "parallelization_hint": "serial",
+  "response_contract": {
+    "required_sections": [
+      "Summary",
+      "Files inspected",
+      "Files modified",
+      "Commands run",
+      "Tests run",
+      "Validation results",
+      "Rendered human inspection requirements",
+      "Limitations"
+    ],
+    "completion_verdict": "review_required",
+    "include_files_inspected": true,
+    "include_files_modified": true,
+    "include_commands_run": true,
+    "include_tests_run": true,
+    "include_limitations": true,
+    "required_fields": [
+      "summary",
+      "files_inspected",
+      "files_modified",
+      "commands_run",
+      "tests_run",
+      "validation_results",
+      "rendered_inspection_required",
+      "limitations",
+      "route_semantics_changed",
+      "backend_semantics_changed",
+      "git_mutation_performed",
+      "c64_touched",
+      "r0004_scratch_bytes_used"
+    ]
+  },
+  "governance_invariants": [
+    "Generation only: do not approve, project for execution, execute, start worker, run validation, prepare review, alter R0004 history, materialize R0004, resolve C64, mutate Git, use Docker, use Graphify, or generate P99.5 in the generation turn.",
+    "Git remains human-only.",
+    "R0004 review acceptance remains historical and unchanged; R0004 handoff remains historical/superseded evidence.",
+    "R0005 must be approval-pending after generation and execution must not start.",
+    "C64 path remains unrelated, unmodified, unstaged, excluded from WorkPacket scope, and unusable as visual acceptance evidence.",
+    "Provider/model authority and worker authority must not be expanded.",
+    "Fresh current canonical source authority is required; R0004 scratch candidate is historical only."
+  ],
+  "execution_requirements": [
+    "Use current canonical repository source at expected HEAD a016bb9d36d84745acf5a84a3a9e8690a87be178 when later executed/materialized under governed authority.",
+    "Operate within the generated frontend visual-system WorkPacket scope only.",
+    "Run repository-authoritative frontend validation command npm test during candidate execution unless superseded by canonical repository authority; never use npm test -- --runInBand.",
+    "After candidate execution, mandatory human rendered inspection must occur before closure and cover required surfaces.",
+    "Worker response must explicitly state whether route/navigation/workflow/runtime/provider/worker/backend semantics changed; expected answer is no except justified visual plumbing if any.",
+    "Worker response must explicitly state whether C64 was touched; expected answer is no."
+  ],
+  "recommended_commit_message": "feat(pepper): complete dark-first Pepper visual identity system"
+}
