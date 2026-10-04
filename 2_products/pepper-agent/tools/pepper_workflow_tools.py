@@ -1524,6 +1524,18 @@ def _attest_current_ticket_zero_change_for_review_prepare(
 
 
 def _inspect_current_ticket_review_candidate(args: dict[str, Any], **_kwargs) -> str:
+    if str(args.get("operation", "")).strip().startswith("pre_review_"):
+        try:
+            allowed = {"operation", "ticket_id", "project_id", "reviewed_run_id", "candidate_path", "candidate_binding_SHA256", "evidence_offset", "max_bytes"}
+            if set(args) - allowed:
+                raise ValueError("pre-review inspection accepts only current candidate guards")
+            return _result(_runtime().inspect_current_ticket_review_candidate(**{
+                **args, "operation": str(args["operation"]).strip(),
+            }))
+        except Exception as exc:
+            return _result({"success": False, "read_only": True, "inspection_status": "blocked", "blocker_code": "PRE_REVIEW_CANDIDATE_UNAVAILABLE", "blocker_detail": str(exc)[:500], "workflow_mutation": False})
+    if "candidate_binding_SHA256" in args:
+        return tool_error("candidate binding requires explicit pre-review operation", success=False)
     if args.get("operation") == "execution_evidence":
         from hermes_cli.agent_platform import execution_evidence
         try:
@@ -2402,21 +2414,23 @@ _INSPECT_CURRENT_TICKET_REVIEW_CANDIDATE_SCHEMA = {
     "properties": {
         "operation": {
             "type": "string",
-            "enum": ["list", "metadata", "content", "diff", "aggregate_diff", "execution_evidence"],
+            "enum": ["list", "metadata", "content", "diff", "aggregate_diff", "execution_evidence", "pre_review_list", "pre_review_metadata", "pre_review_content", "pre_review_diff", "pre_review_aggregate_diff"],
             "description": (
                 "Read-only inspection operation for the current prepared review candidate. "
                 "Use list first, then diff or content for an exact returned candidate_path."
+                " At pending manual validation use pre_review_list with exact ticket_id and reviewed_run_id, then pre_review_* with its candidate_binding_SHA256. No review preparation or human validation is performed."
             ),
         },
         "evidence_section": {"type": "string", "enum": ["summary", "worker", "candidate", "validation", "historical_candidate"], "description": "For execution_evidence only. Requires exact current ticket_id and reviewed_run_id; no prepared review needed. All sections are read-only."},
         "evidence_offset": {"type": "integer", "minimum": 0, "maximum": 10000, "description": "Bounded 25-entry worker/file page offset."},
+        "candidate_binding_SHA256": {"type": "string", "description": "Required for pre_review_metadata/content/diff/aggregate_diff: exact binding returned by pre_review_list. Repeat list if authority or candidate changes."},
         "historical_binding": {"type": "object", "additionalProperties": False, "required": ["ticket_id", "work_packet_SHA256", "projection_SHA256", "task_id", "run_id", "workspace"], "properties": {
             "ticket_id": {"type": "string"}, "work_packet_SHA256": {"type": "string"}, "projection_SHA256": {"type": "string"}, "task_id": {"type": "string"}, "run_id": {"type": "integer", "minimum": 1}, "workspace": {"type": "string", "description": "Exact historical workspace identity guard; never an arbitrary path to open."},
         }},
         "candidate_path": {
             "type": "string",
             "description": (
-                "Repository-relative candidate path from the current prepared review package. "
+                "Repository-relative changed path from the selected current inspection authority (prepared review or explicit pre_review_list). "
                 "Required for content and diff; arbitrary paths are rejected."
             ),
         },
@@ -2431,7 +2445,7 @@ _INSPECT_CURRENT_TICKET_REVIEW_CANDIDATE_SCHEMA = {
         "reviewed_run_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "Optional guard for the prepared review's reviewed run ID.",
+            "description": "Prepared review run guard; required exact current terminal run ID for pre_review_*.",
         },
         "review_package_SHA256": {
             "type": "string",

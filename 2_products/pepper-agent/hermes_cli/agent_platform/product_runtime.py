@@ -11248,8 +11248,23 @@ def inspect_current_ticket_review_candidate(
     review_package_SHA256: str | None = None,
     review_prepare_action_SHA256: str | None = None,
     max_bytes: int | None = None,
+    candidate_binding_SHA256: str | None = None,
+    evidence_offset: int = 0,
 ) -> dict[str, Any]:
     """Inspect the current prepared review candidate without mutating state."""
+
+    if isinstance(operation, str) and operation.startswith("pre_review_"):
+        from . import pre_review_candidate
+        if review_package_SHA256 is not None or review_prepare_action_SHA256 is not None:
+            raise ValueError("pre-review inspection does not accept review-package authority")
+        return pre_review_candidate.inspect(
+            operation=operation.removeprefix("pre_review_"), ticket_id=ticket_id,
+            reviewed_run_id=reviewed_run_id, project_id=project_id,
+            candidate_path=candidate_path, candidate_binding_SHA256=candidate_binding_SHA256,
+            evidence_offset=evidence_offset, max_bytes=max_bytes,
+        )
+    if candidate_binding_SHA256 is not None or evidence_offset:
+        raise ValueError("pre-review guards require an explicit pre-review operation")
 
     projection = _load_current_projection_record()
     raw_record_for_blocker: dict[str, Any] | None = None
@@ -29778,15 +29793,19 @@ def _current_review_round_completion_source(projection: dict[str, Any]) -> dict[
 
 
 def _kanban_completion_result_source(
-    projection: dict[str, Any], *, reconcile_lifecycle: bool = True,
+    projection: dict[str, Any], *, reconcile_lifecycle: bool = True, read_only: bool = False,
 ) -> dict[str, Any]:
     from hermes_cli import kanban_db
 
     board = _normalize_board(str(projection["kanban_board_slug"]))
     task_id = str(projection["kanban_task_id"])
-    conn = kanban_db.connect(board=board)
+    if read_only:
+        from .execution_evidence import connection
+        conn = connection(kanban_db.kanban_db_path(board=board))
+    else:
+        conn = kanban_db.connect(board=board)
     try:
-        if reconcile_lifecycle:
+        if reconcile_lifecycle and not read_only:
             _reconcile_kanban_board_lifecycle(conn, task_id=task_id)
         task = kanban_db.get_task(conn, task_id)
         if task is None:
