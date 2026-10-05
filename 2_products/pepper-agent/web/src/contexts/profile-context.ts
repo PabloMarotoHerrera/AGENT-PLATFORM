@@ -1,7 +1,7 @@
 import { createContext } from "react";
 
 export interface ProfileContextValue {
-  /** Profile every management surface reads/writes ("" = the dashboard
+  /** Explicit profile-local page target ("" = the dashboard
    *  process's own profile). */
   profile: string;
   /** The profile the dashboard process itself runs under. */

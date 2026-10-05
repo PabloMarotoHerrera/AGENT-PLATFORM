@@ -35,7 +35,6 @@ function qualifiers(boardSlug: string, taskId: string, profile: string): URLSear
   const selectedProfile = safeProfile(profile);
   if (!board || !task || selectedProfile === null) return null;
   const params = new URLSearchParams({ board, task });
-  if (selectedProfile) params.set("profile", selectedProfile);
   return params;
 }
 
@@ -43,9 +42,7 @@ export function buildExecutionsPath(profile: string, boardSlug = "", taskId = ""
   const selectedProfile = safeProfile(profile);
   if (selectedProfile === null) return null;
   if (!boardSlug && !taskId) {
-    return selectedProfile
-      ? `/agent-platform/executions?${new URLSearchParams({ profile: selectedProfile })}`
-      : "/agent-platform/executions";
+    return "/agent-platform/executions";
   }
   const params = qualifiers(boardSlug, taskId, profile);
   return params ? `/agent-platform/executions?${params}` : null;
@@ -79,7 +76,6 @@ export async function getQualifiedExecutionSource(
   if (!board || !task || selectedProfile === null) return null;
   try {
     const taskParams = new URLSearchParams({ board, task });
-    if (selectedProfile) taskParams.set("profile", selectedProfile);
     return await fetchJSON<unknown>(
       `${EXECUTION_API_ROOT}?${taskParams}`,
       { signal },
@@ -120,9 +116,8 @@ export async function prepareControlledExecution(
   const task = validateTaskId(taskId);
   const selectedProfile = safeProfile(profile);
   if (!board || !task || selectedProfile === null) return null;
-  const params = selectedProfile ? `?${new URLSearchParams({ profile: selectedProfile })}` : "";
   return fetchJSON<unknown>(
-    `${EXECUTION_API_ROOT}/start${params}`,
+    `${EXECUTION_API_ROOT}/start`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -143,10 +138,8 @@ export const loadExecutionInspectorRequest: ExecutionInspectorLoader = async (re
   const selectedProfile = safeProfile(profile);
   if (selectedProfile === null) return null;
   if (request.kind === "executions" && !request.boardSlug && !request.taskId) {
-    const params = new URLSearchParams();
-    if (selectedProfile) params.set("profile", selectedProfile);
     const raw = await fetchJSON<unknown>(
-      `${EXECUTION_API_ROOT}${params.toString() ? `?${params}` : ""}`,
+      EXECUTION_API_ROOT,
       { signal },
     );
     const collection = parseExecutionCollectionSource(raw, "all", "all", observedAt);

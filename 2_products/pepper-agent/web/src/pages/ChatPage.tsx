@@ -28,7 +28,7 @@ import { cn } from "@/lib/utils";
 import { Copy, PanelRight, RotateCcw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useSearchParams } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
 
 import { ChatSidebar } from "@/components/ChatSidebar";
 import { ChatSessionList } from "@/components/ChatSessionList";
@@ -58,6 +58,8 @@ import {
 import { PluginSlot } from "@/plugins";
 import { useTheme } from "@/themes";
 import { useProfileScope } from "@/contexts/useProfileScope";
+import { NewChatProfile } from "@/components/NewChatProfile";
+import { chatBindingFromUrl, chatBindingParams, newChatBinding, consumeChatLocation, type ChatLocationBinding } from "@/lib/profile-context";
 
 // Stable per-browser token identifying THIS chat tab's keep-alive PTY session.
 // Sent as ?attach=; lets a refresh/disconnect reattach to the same live process
@@ -173,6 +175,26 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
     setHasActivated((prev) => latchChatActivation(prev, isActive));
   }, [isActive]);
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
+  const { profiles, currentProfile } = useProfileScope();
+  const [draftProfile, setDraftProfile] = useState("");
+  const [chatLocation, setChatLocation] = useState<ChatLocationBinding>(() => ({
+    binding: isActive ? chatBindingFromUrl(searchParams) : newChatBinding(""),
+    locationKey: isActive ? location.key : null,
+  }));
+  const incomingLocation = consumeChatLocation(chatLocation, searchParams, isActive, location.key);
+  if (incomingLocation !== chatLocation) setChatLocation(incomingLocation);
+  const boundChat = incomingLocation.binding;
+  const explicitChatLink = isActive && (searchParams.has("resume") || searchParams.has("profile"));
+  const scopedProfile = boundChat.profile;
+  const resumeParam = boundChat.resume;
+  // Returning to bare /chat keeps the existing PTY and restores only its local
+  // bookmark identity. Navigating to any other page never changes this binding.
+  useEffect(() => {
+    if (isActive && !explicitChatLink && (boundChat.profile || boundChat.resume)) {
+      setSearchParams(chatBindingParams(boundChat), { replace: true });
+    }
+  }, [isActive, explicitChatLink, boundChat, setSearchParams]);
   // Lazy-init: the missing-token check happens at construction so the effect
   // body doesn't have to setState (React 19's set-state-in-effect rule).
   // In gated (OAuth) mode the server intentionally omits the session token —
@@ -232,34 +254,22 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
     setPtyState("connecting");
     setReconnectNonce((n) => n + 1);
   }, [clearReconnectTimer]);
-  const startFreshPty = useCallback(() => {
-    forceFreshPtyRef.current = true;
-    reconnectAttemptRef.current = 0;
-    clearReconnectTimer();
-    blockedInputNoticeRef.current = false;
-    ptyInputLineRef.current = "";
-    mobileReplacementInputUntilRef.current = 0;
-    setBanner(null);
-    setLastCloseCode(null);
-    setPtyState("connecting");
-    setReconnectNonce((n) => n + 1);
-  }, [clearReconnectTimer]);
   const startFreshDashboardChat = useCallback(() => {
-    const next = new URLSearchParams(searchParams);
-
-    next.delete("resume");
+    const binding = newChatBinding(draftProfile);
+    setChatLocation({ binding, locationKey: location.key });
+    const next = chatBindingParams(binding);
     forceFreshPtyRef.current = true;
     reconnectAttemptRef.current = 0;
     clearReconnectTimer();
     blockedInputNoticeRef.current = false;
     ptyInputLineRef.current = "";
     mobileReplacementInputUntilRef.current = 0;
-    setSearchParams(next, { replace: true });
+    if (isActive) setSearchParams(next, { replace: true });
     setBanner(null);
     setLastCloseCode(null);
     setPtyState("connecting");
     setReconnectNonce((n) => n + 1);
-  }, [clearReconnectTimer, searchParams, setSearchParams]);
+  }, [clearReconnectTimer, draftProfile, isActive, location.key, setSearchParams]);
   // Raw state for the mobile side-sheet + a derived value that force-
   // closes whenever the chat tab isn't active.  The *derived* value is
   // what side-effects (body-scroll lock, keydown listener, portal render)
@@ -298,17 +308,6 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
     [terminalBg, terminalFg],
   );
 
-  // The dashboard keeps ChatPage mounted persistently so the PTY survives tab
-  // switches. That is great for ordinary /chat navigation, but it means query
-  // param changes do NOT remount the component. Resume-in-chat from the
-  // Sessions page relies on `/chat?resume=<id>` changing at runtime, so we must
-  // treat the current resume target as part of the PTY identity and rebuild the
-  // terminal session when it changes.
-  const resumeParam = searchParams.get("resume");
-  // Profile-scoped chat: spawn the PTY under the globally selected
-  // management profile. Changing it remounts the terminal (key below /
-  // effect dep) so the user explicitly starts a fresh scoped session.
-  const { profile: scopedProfile } = useProfileScope();
   const channel = useMemo(
     () => generateChannelId(`${resumeParam ?? ""}\0${scopedProfile}`),
     [resumeParam, scopedProfile],
@@ -332,7 +331,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
   }, [isActive, sessionTitle, setTitle]);
 
   useEffect(() => {
-    if (!resumeParam) return;
+    if (!isActive || !resumeParam) return;
 
     let cancelled = false;
 
@@ -349,10 +348,10 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
     return () => {
       cancelled = true;
     };
-  }, [resumeParam, scopedProfile, handleSessionTitleChange]);
+  }, [isActive, resumeParam, scopedProfile, handleSessionTitleChange]);
 
   useEffect(() => {
-    if (!resumeParam) return;
+    if (!isActive || !resumeParam) return;
 
     let cancelled = false;
 
@@ -374,7 +373,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
     return () => {
       cancelled = true;
     };
-  }, [resumeParam, scopedProfile, searchParams, setSearchParams]);
+  }, [isActive, resumeParam, scopedProfile, searchParams, setSearchParams]);
 
   useEffect(() => {
     const mql = window.matchMedia("(max-width: 1023px)");
@@ -1408,6 +1407,8 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
       <PluginSlot name="chat:top" />
+      <NewChatProfile profiles={profiles} currentProfile={currentProfile} draft={draftProfile}
+        boundProfile={scopedProfile} onChange={setDraftProfile} onStart={startFreshDashboardChat} />
       {mobileModelToolsPortal}
 
       {visibleBanner && (
@@ -1462,7 +1463,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
                 Session ended.
               </div>
               <Button
-                onClick={startFreshPty}
+                onClick={startFreshDashboardChat}
                 prefix={<RotateCcw className="h-4 w-4" />}
                 aria-label="Start a new chat session"
               >

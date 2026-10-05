@@ -403,11 +403,11 @@ describe("controlled execution client", () => {
   });
 
   it("preserves exact board, task, run, and profile qualifiers in navigation", () => {
-    expect(buildExecutionsPath("review-profile")).toBe("/agent-platform/executions?profile=review-profile");
+    expect(buildExecutionsPath("review-profile")).toBe("/agent-platform/executions");
     expect(buildExecutionsPath("review-profile", "alpha-board", "t_alpha01"))
-      .toBe("/agent-platform/executions?board=alpha-board&task=t_alpha01&profile=review-profile");
+      .toBe("/agent-platform/executions?board=alpha-board&task=t_alpha01");
     expect(buildExecutionDetailPath(4, "alpha-board", "t_alpha01", "review-profile"))
-      .toBe("/agent-platform/executions/4?board=alpha-board&task=t_alpha01&profile=review-profile");
+      .toBe("/agent-platform/executions/4?board=alpha-board&task=t_alpha01");
     expect(buildExecutionDetailPath("04", "alpha-board", "t_alpha01", "review-profile")).toBeNull();
     expect(buildExecutionsPath("review-profile", "alpha-board", "../escape")).toBeNull();
   });
@@ -591,7 +591,7 @@ describe("controlled Execution Inspector pages", () => {
     expect(markup).toContain("Source profile: worker-profile");
     expect(markup).toContain("Filter by run ID, profile, or outcome");
     expect(markup).toContain("Source task title withheld by the execution projection");
-    expect(markup).toContain("/agent-platform/executions/4?board=alpha-board&amp;task=t_alpha01&amp;profile=review-profile");
+    expect(markup).toContain("/agent-platform/executions/4?board=alpha-board&amp;task=t_alpha01");
     for (const control of ["Stop", "Retry", "Rollback", "Approve", "Assign", "Dispatch", "Open terminal"]) {
       expect(markup).not.toContain(`>${control}<`);
     }
@@ -642,7 +642,7 @@ describe("controlled Execution Inspector pages", () => {
     expect(markup).toContain("Source event ID: 10");
     expect(markup).toContain("Worker handoff preparation is explicit and bounded to the accepted P15/P17 substrate");
     expect(markup).toContain("not a durable audit timeline");
-    expect(markup).toContain("/agent-platform/executions?board=alpha-board&amp;task=t_alpha01&amp;profile=review-profile");
+    expect(markup).toContain("/agent-platform/executions?board=alpha-board&amp;task=t_alpha01");
     expect(markup).not.toContain("private-event-token");
     expect(markup).not.toContain("private raw run error");
     for (const control of ["Stop", "Retry", "Rollback", "Approve", "Assign", "Dispatch", "Open terminal"]) {
@@ -700,7 +700,7 @@ describe("controlled Execution Inspector pages", () => {
         />
       </MemoryRouter>,
     );
-    expect(markup).toContain("/agent-platform/executions?board=alpha-board&amp;task=t_alpha01&amp;profile=review-profile");
+    expect(markup).toContain("/agent-platform/executions?board=alpha-board&amp;task=t_alpha01");
   });
 });
 

@@ -43,12 +43,11 @@ function setSessionHeader(headers: Headers, token: string): void {
 }
 
 // ── Global management-profile scope ──────────────────────────────────
-// The dashboard is a machine-level management surface: one header switcher
-// (ProfileProvider in App.tsx) decides which profile the management pages
-// read/write, and fetchJSON transparently appends ?profile=<name> to the
-// profile-scoped endpoint families below. "" = the dashboard process's own
-// profile (legacy behavior). Calls that already carry an explicit profile
-// (e.g. ProfileBuilder writes) are left untouched — explicit beats global.
+// ProfileProvider sets this only for an explicitly scoped management route.
+// It resets on bare navigation; chat transports its own bound profile directly.
+// fetchJSON appends ?profile=<name> only to the local endpoint families below.
+// "" = the dashboard process's own profile. Explicit profile parameters (for
+// example ProfileBuilder writes) take precedence over route-local defaults.
 let _managementProfile = "";
 
 export function setManagementProfile(name: string): void {

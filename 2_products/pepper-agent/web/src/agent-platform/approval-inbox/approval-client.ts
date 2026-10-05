@@ -25,7 +25,7 @@ function safeProfile(profile: string): string | null {
 function profileSuffix(profile: string): string | null {
   const validated = safeProfile(profile);
   if (validated === null) return null;
-  return validated ? `?${new URLSearchParams({ profile: validated })}` : "";
+  return ""; // Product links and API calls never carry management scope.
 }
 
 export function buildApprovalInboxPath(profile: string): string | null {

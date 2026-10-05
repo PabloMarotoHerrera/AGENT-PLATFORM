@@ -2,7 +2,7 @@
  * ChatSessionList — a ChatGPT-style conversation switcher that sits beside
  * the embedded TUI on the dashboard Chat tab.
  *
- * It lists the most recent sessions for the active management profile and
+ * It lists the most recent sessions for the bound chat profile and
  * lets the user swap between them without leaving the Chat page. Selecting
  * a row sets `/chat?resume=<id>`; ChatPage treats the resume target as part
  * of the PTY identity, so the change tears down the current terminal child
@@ -33,7 +33,7 @@ const SESSION_LIMIT = 30;
 interface ChatSessionListProps {
   /** Active resume target (the session currently shown in the terminal). */
   activeSessionId: string | null;
-  /** Management profile from the dashboard switcher — scopes the listing. */
+  /** Profile bound to the current chat — scopes the listing. */
   profile?: string;
   className?: string;
   /** Optional callback fired after a row is picked (e.g. close mobile sheet). */
@@ -120,12 +120,13 @@ export function ChatSessionList({
         (prev) => {
           const next = new URLSearchParams(prev);
           next.set("resume", id);
+          next.set("profile", scopeKey);
           return next;
         },
         { replace: false },
       );
     },
-    [activeSessionId, onPicked, setSearchParams],
+    [activeSessionId, onPicked, scopeKey, setSearchParams],
   );
 
   // "New chat" prefers ChatPage's robust handler (clears resume + forces a

@@ -356,19 +356,19 @@ describe("GET-only Kanban client boundary", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    expect(buildProjectsPath("review-profile")).toBe("/agent-platform/projects?profile=review-profile");
+    expect(buildProjectsPath("review-profile")).toBe("/agent-platform/projects");
     expect(buildProjectPath("alpha-board", "review-profile")).toBe(
-      "/agent-platform/projects/alpha-board?profile=review-profile",
+      "/agent-platform/projects/alpha-board",
     );
     expect(buildTicketPath("alpha-board", "t_alpha01", "review-profile")).toBe(
-      "/agent-platform/projects/alpha-board/tickets/t_alpha01?profile=review-profile",
+      "/agent-platform/projects/alpha-board/tickets/t_alpha01",
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("builds the legacy Kanban source path only as outbound navigation", () => {
     expect(buildKanbanSourcePath("alpha-board", "review-profile")).toBe(
-      "/kanban?board=alpha-board&profile=review-profile",
+      "/kanban?board=alpha-board",
     );
     expect(buildKanbanSourcePath("../escape", "review-profile")).toBeNull();
     expect(buildKanbanSourcePath("alpha-board", "../escape")).toBeNull();
@@ -488,8 +488,8 @@ describe("read-only workspace pages", () => {
     expect(markup).toContain("Source: Hermes Kanban");
     expect(markup).toContain("Authority: Provisional");
     expect(markup).toContain("alpha-board");
-    expect(markup).toContain("/agent-platform/projects/alpha-board?profile=review-profile");
-    expect(markup).toContain("/kanban?board=alpha-board&amp;profile=review-profile");
+    expect(markup).toContain("/agent-platform/projects/alpha-board");
+    expect(markup).toContain("/kanban?board=alpha-board");
     expect(markup).toContain("Paperclip remains the future");
     for (const control of ["Create Project", "Delete Project", "Import Project", "Start Work", "Assign Agent"]) {
       expect(markup).not.toContain(control);
@@ -515,7 +515,7 @@ describe("read-only workspace pages", () => {
     );
     expect(markup).toContain("Hermes Kanban board alpha-board");
     expect(markup).toContain("Hermes priority: 7");
-    expect(markup).toContain("/agent-platform/projects/alpha-board/tickets/t_alpha01?profile=default");
+    expect(markup).toContain("/agent-platform/projects/alpha-board/tickets/t_alpha01");
     expect(markup).toContain("not an ApprovalRequest");
     expect(markup).toContain("not executable here");
     for (const control of ["drag", "Change status", "Assign", "Delete", "Edit"] ) {

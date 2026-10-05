@@ -264,10 +264,10 @@ describe("controlled approval client", () => {
     }));
   });
 
-  it("preserves profile context and validates IDs before encoding deep links", () => {
-    expect(buildApprovalInboxPath("review-profile")).toBe("/agent-platform/approvals?profile=review-profile");
+  it("keeps product routes profile-free and validates IDs before encoding deep links", () => {
+    expect(buildApprovalInboxPath("review-profile")).toBe("/agent-platform/approvals");
     expect(buildApprovalDetailPath("a1b2c3d4", "review-profile"))
-      .toBe("/agent-platform/approvals/a1b2c3d4?profile=review-profile");
+      .toBe("/agent-platform/approvals/a1b2c3d4");
     expect(buildApprovalDetailPath("../escape", "review-profile")).toBeNull();
     expect(buildApprovalInboxPath("../escape")).toBeNull();
   });
@@ -373,7 +373,7 @@ describe("approval polling and identity freshness", () => {
 });
 
 describe("controlled Approval Inbox pages", () => {
-  it("renders controlled source facts, local filters, counts, and profile-preserving detail links", () => {
+  it("renders controlled source facts, local filters, counts, and product-global detail links", () => {
     const markup = renderToStaticMarkup(
       <MemoryRouter><ApprovalInboxView state={state(inboxView())} profile="review-profile" refresh={() => {}} /></MemoryRouter>,
     );
@@ -382,7 +382,7 @@ describe("controlled Approval Inbox pages", () => {
     expect(markup).toContain("explicit human dashboard action");
     expect(markup).toContain("Pending in source");
     expect(markup).toContain("Historical source states");
-    expect(markup).toContain("a1b2c3d4?profile=review-profile");
+    expect(markup).toContain("a1b2c3d4");
     expect(markup).toContain("Filter by title, source ID, target, or summary");
     for (const control of ["Allow", "Deny", "Confirm", "Execute", "Retry", "Assign", "Escalate"]) {
       expect(markup).not.toContain(`>${control}<`);
@@ -415,7 +415,7 @@ describe("controlled Approval Inbox pages", () => {
     expect(markup).toContain(">Approve<");
     expect(markup).toContain(">Reject<");
     expect(markup).toContain("Git staging, commit, and push remain outside this decision path");
-    expect(markup).toContain("/agent-platform/approvals?profile=review-profile");
+    expect(markup).toContain("/agent-platform/approvals");
     expect(markup).not.toContain("private-provider");
     expect(markup).not.toContain("rm -rf");
     for (const control of ["Allow", "Deny", "Confirm", "Cancel", "Retry", "Execute", "Open terminal", "Edit policy"]) {

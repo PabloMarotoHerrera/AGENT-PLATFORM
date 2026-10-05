@@ -7,7 +7,6 @@ import {
   useState,
 } from "react";
 import { useNavigate } from "react-router-dom";
-import { useProfileScope } from "@/contexts/useProfileScope";
 import {
   AlignLeft,
   Check,
@@ -260,7 +259,6 @@ export default function ProfilesPage() {
   const { toast, showToast } = useToast();
   const { t } = useI18n();
   const { setEnd } = usePageHeader();
-  const { setProfile } = useProfileScope();
 
   // Locale strings with English fallbacks. The enriched keys are optional in
   // the i18n type so untranslated locales don't break the build — they render
@@ -497,7 +495,6 @@ export default function ProfilesPage() {
       // The backend normalizes/validates the name; trust the canonical
       // value it returns rather than the raw input.
       const { active } = await api.setActiveProfile(name);
-      setProfile(active);
       showToast(
         `${L.activeSet}: ${active} — ${L.activeSetHint.replace("{name}", active)}`,
         "success",

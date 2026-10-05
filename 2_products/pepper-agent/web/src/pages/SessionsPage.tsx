@@ -1,3 +1,5 @@
+import { chatSessionPath } from "@/lib/profile-context";
+import { useProfileScope } from "@/contexts/useProfileScope";
 import {
   useEffect,
   useLayoutEffect,
@@ -391,6 +393,7 @@ function SessionRow({
   onExport,
   resumeInChatEnabled,
 }: SessionRowProps) {
+  const { profile } = useProfileScope();
   const [messages, setMessages] = useState<SessionMessage[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [renaming, setRenaming] = useState(false);
@@ -451,7 +454,7 @@ function SessionRow({
           title={t.sessions.resumeInChat}
           onClick={(e) => {
             e.stopPropagation();
-            navigate(`/chat?resume=${encodeURIComponent(session.id)}`);
+            navigate(chatSessionPath(profile, session.id));
           }}
         >
           <Play />

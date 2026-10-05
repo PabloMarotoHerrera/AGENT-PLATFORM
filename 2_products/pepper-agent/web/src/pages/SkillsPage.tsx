@@ -1,3 +1,4 @@
+import { chatSessionPath } from "@/lib/profile-context";
 import { useEffect, useLayoutEffect, useState, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -142,12 +143,7 @@ export default function SkillsPage() {
   const { setAfterTitle, setEnd } = usePageHeader();
 
   // ── Profile scoping ──
-  // The write target comes from the GLOBAL profile switcher (sidebar) via
-  // ProfileContext — one selector for the whole dashboard, deep-linkable
-  // as ?profile=<name>. This page just consumes it: the fetchJSON layer
-  // appends the param automatically; we still pass it explicitly where the
-  // call signature supports it (clearer, and robust if a caller bypasses
-  // the auto-injection).
+  // Explicit profile-management deep links scope this page only.
   const {
     profile: selectedProfile,
   } = useProfileScope();
@@ -242,8 +238,8 @@ export default function SkillsPage() {
     const composed = segs.join("; ").replace(/\s*\n\s*/g, " ").trim();
     if (!composed) return;
     setLearnOpen(false);
-    navigate(`/chat?learn=${encodeURIComponent(composed)}`);
-  }, [learnDir, learnUrl, learnText, navigate]);
+    navigate(chatSessionPath(selectedProfile, null, composed));
+  }, [learnDir, learnUrl, learnText, navigate, selectedProfile]);
   const openEditEditor = useCallback((skillName: string) => {
     setEditorSkill(skillName);
     setEditorOpen(true);

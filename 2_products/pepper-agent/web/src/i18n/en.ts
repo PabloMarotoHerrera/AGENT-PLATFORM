@@ -96,7 +96,7 @@ export const en: Translations = {
     managingProfile: "Active profile",
     currentProfileOption: "Pepper Default",
     managingProfileBanner:
-      "Managing profile \u201c{name}\u201d \u2014 config, keys, skills, MCPs, model, and new chats apply to that profile. Pepper governed workflow remains product-global. Profile chats may require their own provider setup.",
+      "Managing profile \u201c{name}\u201d \u2014 config, keys, skills, MCPs and model apply to this profile-local page. Choose new-chat profiles in chat. Pepper governed workflow remains product-global. Profile chats may require their own provider setup.",
   },
 
   status: {

@@ -89,7 +89,7 @@ describe("C77 product/global and profile/local authority", () => {
   it.each(profiles)("URL profile initializes only management state and preserves navigation for %s", (profile) => {
     const html = renderToStaticMarkup(<MemoryRouter initialEntries={[`/agent-platform/overview?profile=${profile}`]}><ProfileProvider><main>one Pepper shell</main></ProfileProvider></MemoryRouter>);
     expect(html).toBe("<main>one Pepper shell</main>");
-    expect(getManagementProfile()).toBe(profile);
+    expect(getManagementProfile()).toBe("");
     const groups = groupShellNavigation(
       ["/chat", "/profiles", "/cron", "/skills", "/config"].map(path => ({ path: `${path}?profile=${profile}` })),
       ["overview", "projects", "approvals", "executions", "resources"].map(path => ({ path: `/agent-platform/${path}?profile=${profile}`, groupId: "agent-platform" as const })), {},

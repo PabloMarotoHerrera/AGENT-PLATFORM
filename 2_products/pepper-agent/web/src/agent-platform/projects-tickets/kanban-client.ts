@@ -27,7 +27,7 @@ function query(entries: readonly (readonly [string, string | boolean])[]): strin
 function profileEntry(profile: string): readonly (readonly [string, string])[] | null {
   const validated = safeProfile(profile);
   if (validated === null) return null;
-  return validated ? [["profile", validated] as const] : [];
+  return []; // Product navigation never carries management scope.
 }
 
 export function buildProjectsPath(profile: string): string | null {

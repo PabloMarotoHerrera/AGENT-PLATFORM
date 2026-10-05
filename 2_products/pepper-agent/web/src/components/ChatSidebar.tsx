@@ -62,7 +62,7 @@ const STATE_TONE: Record<
 
 interface ChatSidebarProps {
   channel: string;
-  /** Chat profile from the dashboard switcher / URL scope. */
+  /** Profile bound to this chat at creation/resume. */
   profile?: string;
   className?: string;
   onDashboardNewSessionRequest?: () => void;
