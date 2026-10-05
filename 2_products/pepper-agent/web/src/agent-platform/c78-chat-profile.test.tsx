@@ -67,7 +67,7 @@ describe("C78 chat creation and immutable binding", () => {
 
   it.each(profiles)("binds new PTY and profile-local history to %s", async profile => {
     vi.stubGlobal("window", { location: { protocol: "http:", host: "localhost" } });
-    const fetchMock = vi.fn(async () => new Response("{}")); vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("{}")); vi.stubGlobal("fetch", fetchMock);
     const bound = newChatBinding(profile);
     const ws = new URL(await api.buildWsUrl("/api/pty", Object.fromEntries(chatBindingParams(bound))));
     expect(ws.searchParams.get("profile") ?? "").toBe(profile);
