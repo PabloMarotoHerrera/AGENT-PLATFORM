@@ -5993,6 +5993,13 @@ def revise_current_ticket_for_material_contract_failure(
         if material_request is not None and material_request.get("policy_id") == retry_material_revision.POLICY:
             retry_material_revision.validate_current(material_request, projection)
         if material_request is None:
+            from . import manual_validation_resolution
+            material_request = manual_validation_resolution.current(projection)
+            if material_request is not None:
+                manual_validation_resolution.validate_current(material_request, projection)
+                if material_request["human_decision"] != manual_validation_resolution.MATERIAL:
+                    raise ProductRuntimeConflict("manual resolution does not authorize material revision")
+        if material_request is None:
             failure_record = load_current_ticket_review_prepare_failure_record(
                 projection_record=projection,
             )
@@ -12200,8 +12207,8 @@ def start_current_ticket_execution(
     _validate_execution_start_authority(projection)
     binding = resolve_current_ticket_lifecycle_binding(projection_record=projection)
     workflow = build_workflow_control_snapshot()
-    if workflow.get("workflow_status") == "zero_change_rejected_correction_required":
-        raise ProductRuntimeConflict("zero-change correction requires its separate run-bound authorization")
+    if workflow.get("workflow_status") in {"zero_change_rejected_correction_required", "manual_validation_correction_authorized"}:
+        raise ProductRuntimeConflict("corrective execution requires its separate run-bound authorization")
     workflow_next_action = workflow.get("next_action")
     workflow_next_action_id = (
         workflow_next_action.get("id") if isinstance(workflow_next_action, dict) else None
@@ -12685,6 +12692,9 @@ def continue_current_ticket_governed_autonomy(
         )
     from .zero_change_decision import require_not_rejected
     require_not_rejected(projection)
+    from .manual_validation_resolution import current as current_manual_resolution
+    if current_manual_resolution(projection) is not None:
+        raise ProductRuntimeConflict("manual validation resolution requires its separate next-action authorization")
     activation = load_current_ticket_governed_autonomy_activation_record(
         projection_record=projection,
     )
@@ -20609,6 +20619,8 @@ def _terminal_done_fresh_execution_rearm_reason(
 ) -> str:
     if fresh_execution_request.get("fresh_execution_provenance") == "human_zero_change_rejection_correction":
         return "human_zero_change_rejection_correction"
+    if fresh_execution_request.get("fresh_execution_provenance") == "human_manual_validation_failure_correction":
+        return "human_manual_validation_failure_correction"
     if _fresh_execution_request_is_runtime_substrate_recovery(fresh_execution_request):
         return "human_runtime_substrate_correction"
     return "human_review_changes_requested_revision"
@@ -20810,6 +20822,9 @@ def _terminal_done_fresh_execution_request_authority_blocker(
     if fresh_execution_request.get("fresh_execution_provenance") == "human_zero_change_rejection_correction":
         from .zero_change_decision import corrective_blocker
         return corrective_blocker(projection, fresh_execution_request)
+    if fresh_execution_request.get("fresh_execution_provenance") == "human_manual_validation_failure_correction":
+        from .manual_validation_resolution import corrective_blocker
+        return corrective_blocker(projection, fresh_execution_request, task=task, runs=runs)
     embedded_blocker = _fresh_execution_request_embedded_blocker(fresh_execution_request)
     if embedded_blocker is not None:
         return embedded_blocker
@@ -20957,6 +20972,12 @@ def _governed_autonomy_dispatch_task_body(
             if key.startswith("governed_autonomy_"):
                 body.pop(key)
         body["zero_change_decision_SHA256"] = fresh_execution_request["zero_change_decision_SHA256"]
+        body["corrective_start_authority_SHA256"] = activation_action_sha256
+    if fresh_execution_request.get("fresh_execution_provenance") == "human_manual_validation_failure_correction":
+        for key in tuple(body):
+            if key.startswith("governed_autonomy_"):
+                body.pop(key)
+        body["manual_validation_resolution_SHA256"] = fresh_execution_request["manual_validation_resolution_SHA256"]
         body["corrective_start_authority_SHA256"] = activation_action_sha256
     return body, str(fresh_workspace_path)
 
@@ -21131,13 +21152,14 @@ def _claim_terminal_done_review_revision_task(
                 "current_run_id = NULL, claim_lock = NULL, claim_expires = NULL, "
                 "worker_pid = NULL, consecutive_failures = 0, last_failure_error = NULL, "
                 "skills = ?, body = ?, workspace_path = ? "
-                "WHERE id = ? AND status = 'done' AND current_run_id IS NULL "
+                "WHERE id = ? AND (status = 'done' OR (status = 'blocked' AND ? = 1)) AND current_run_id IS NULL "
                 "AND claim_lock IS NULL AND worker_pid IS NULL",
                 (
                     json.dumps([]),
                     json.dumps(body, sort_keys=True),
                     fresh_workspace_path,
                     task_id,
+                    int(fresh_execution_request.get("fresh_execution_provenance") == "human_manual_validation_failure_correction"),
                 ),
             )
             if cur.rowcount != 1:
@@ -21153,7 +21175,7 @@ def _claim_terminal_done_review_revision_task(
                 task_id,
                 "status",
                 {
-                    "from": "done",
+                    "from": task.status,
                     "to": "ready",
                     "reason": rearm_reason,
                     "fresh_execution_request_SHA256": fresh_execution_request[
@@ -21163,6 +21185,8 @@ def _claim_terminal_done_review_revision_task(
                 run_id=prior_terminal_run_id,
             )
             rearm_event = (
+                "governed_manual_validation_corrective_execution_rearmed"
+                if fresh_execution_request.get("fresh_execution_provenance") == "human_manual_validation_failure_correction" else
                 "governed_zero_change_corrective_execution_rearmed"
                 if fresh_execution_request.get("fresh_execution_provenance") == "human_zero_change_rejection_correction" else
                 "governed_autonomy_terminal_runtime_substrate_recovery_rearmed"
@@ -33307,6 +33331,8 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
     apply_zero_change_decision(snapshot, remaining_blockers)
     from .post_accept_material_revision import apply_workflow as apply_post_accept_revision
     apply_post_accept_revision(snapshot, remaining_blockers)
+    from .manual_validation_resolution import apply_workflow as apply_manual_resolution
+    apply_manual_resolution(snapshot, remaining_blockers)
     _apply_approved_ticket_execution_profile_authority(snapshot, remaining_blockers)
     snapshot["remaining_blockers"] = remaining_blockers
     snapshot["blocker_count"] = len(remaining_blockers)

@@ -411,58 +411,72 @@ def _start(
             raise pr.ProductRuntimeConflict(
                 "conflicting corrective execution authorization"
             )
-        req = pr.CurrentTicketExecutionStartRequest(
-            human_authorization_text=human_authorization_text,
-            project_id=p["project_id"],
-            ticket_id=ticket_id,
+        return dispatch_correction(
+            p=p, run_id=run_id, human_authorization_text=human_authorization_text,
+            decision_SHA256=decision_SHA256, auth=auth, fresh=fresh,
+            provider=provider, spawn_fn=spawn_fn, storage=path_for,
+            decision_field="zero_change_decision_SHA256",
         )
-        start_record = pr._build_execution_start_authorization_record(
-            request=req, projection=p, provider_readiness=provider
+
+
+def dispatch_correction(*, p, run_id, human_authorization_text, decision_SHA256,
+                        auth, fresh, provider, spawn_fn, storage, decision_field):
+    """Shared exact-task dispatch after a domain-specific corrective decision."""
+    ticket_id = p["ticket_id"]
+    result_path = storage(p, run_id, "result")
+    req = pr.CurrentTicketExecutionStartRequest(
+        human_authorization_text=human_authorization_text,
+        project_id=p["project_id"],
+        ticket_id=ticket_id,
+    )
+    start_record = pr._build_execution_start_authorization_record(
+        request=req, projection=p, provider_readiness=provider
+    )
+    start_record.update(
+        **{decision_field: decision_SHA256},
+        corrective_start_authority_SHA256=auth["decision_SHA256"],
+    )
+    start_record["start_authorization_SHA256"] = pr._execution_start_record_digest(
+        start_record
+    )
+    old = pr.execution_start_record_path_for_ticket(ticket_id)
+    if old.exists() and not storage(p, run_id, "prior-execution-start").exists():
+        prior = {
+            "record": json.loads(old.read_text()),
+            "record_text": old.read_text(),
+        }
+        prior["decision_SHA256"] = ev.digest(prior)
+        persist(storage(p, run_id, "prior-execution-start"), prior)
+    pr._persist_execution_start_record(start_record)
+    dispatched = pr._dispatch_exact_current_kanban_task(
+        p,
+        spawn_fn=spawn_fn,
+        prepared_dispatch={
+            "terminal_done_task_rearm_pending": True,
+            "fresh_execution_request_reference": fresh,
+            "source_run_id": run_id,
+            "activation_action_SHA256": auth["decision_SHA256"],
+            "backend_derived_live_authority_SHA256": decision_SHA256,
+        },
+    )
+    final = pr._finalize_execution_start_record(
+        start_record, dispatch_result=dispatched
+    )
+    pr._persist_execution_start_record(final)
+    result = pr._execution_start_operational_result(final, idempotent_replay=False)
+    saved = {"result": result}
+    saved["decision_SHA256"] = ev.digest(saved)
+    conn = ev.connection(ev.kb.kanban_db_path(board=p["kanban_board_slug"]))
+    try:
+        created_attempt = any(
+            r.id > run_id for r in ev.kb.list_runs(conn, p["kanban_task_id"])
         )
-        start_record.update(
-            zero_change_decision_SHA256=decision_SHA256,
-            corrective_start_authority_SHA256=auth["decision_SHA256"],
-        )
-        start_record["start_authorization_SHA256"] = pr._execution_start_record_digest(
-            start_record
-        )
-        old = pr.execution_start_record_path_for_ticket(ticket_id)
-        if old.exists() and not path_for(p, run_id, "prior-execution-start").exists():
-            prior = {
-                "record": json.loads(old.read_text()),
-                "record_text": old.read_text(),
-            }
-            prior["decision_SHA256"] = ev.digest(prior)
-            persist(path_for(p, run_id, "prior-execution-start"), prior)
-        pr._persist_execution_start_record(start_record)
-        dispatched = pr._dispatch_exact_current_kanban_task(
-            p,
-            spawn_fn=spawn_fn,
-            prepared_dispatch={
-                "terminal_done_task_rearm_pending": True,
-                "fresh_execution_request_reference": fresh,
-                "source_run_id": run_id,
-                "activation_action_SHA256": auth["decision_SHA256"],
-                "backend_derived_live_authority_SHA256": decision_SHA256,
-            },
-        )
-        final = pr._finalize_execution_start_record(
-            start_record, dispatch_result=dispatched
-        )
-        pr._persist_execution_start_record(final)
-        result = pr._execution_start_operational_result(final, idempotent_replay=False)
-        saved = {"result": result}
-        saved["decision_SHA256"] = ev.digest(saved)
-        conn = ev.connection(ev.kb.kanban_db_path(board=p["kanban_board_slug"]))
-        try:
-            created_attempt = any(
-                r.id > run_id for r in ev.kb.list_runs(conn, p["kanban_task_id"])
-            )
-        finally:
-            conn.close()
-        if created_attempt:
-            persist(result_path, saved)
-        return result
+    finally:
+        conn.close()
+    if created_attempt:
+        persist(result_path, saved)
+    return result
+
 
 
 @contextmanager

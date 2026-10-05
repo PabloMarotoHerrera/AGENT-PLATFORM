@@ -3219,6 +3219,54 @@ registry.register(
 
 
 
+def _resolve_current_ticket_manual_validation_failure(args, **_kwargs):
+    from hermes_cli.agent_platform import manual_validation_resolution as resolution
+    try:
+        if set(args) - {"binding", "decision", "human_authorization_text", "corrective_guidance", "authorizer"}:
+            raise ValueError("unsupported manual resolution arguments")
+        return _result(resolution.resolve(**args))
+    except Exception as exc:
+        return tool_error(str(exc), success=False)
+
+
+def _start_current_ticket_manual_validation_correction(args, **_kwargs):
+    from hermes_cli.agent_platform import manual_validation_resolution as resolution
+    try:
+        if set(args) - {"ticket_id", "run_id", "decision_SHA256", "human_authorization_text"}:
+            raise ValueError("unsupported manual corrective start arguments")
+        return _result(resolution.start(**args))
+    except Exception as exc:
+        return tool_error(str(exc), success=False)
+
+
+registry.register(
+    name="resolve_current_ticket_manual_validation_failure", toolset=TOOLSET,
+    schema={"name": "resolve_current_ticket_manual_validation_failure",
+        "description": "Record immutable explicit human classification of the current required manual-validation failure. Copy the exact published resolution_binding and authorization for the chosen decision. Never starts execution or generates a revision.",
+        "parameters": {"type": "object", "additionalProperties": False,
+            "required": ["binding", "decision", "human_authorization_text", "corrective_guidance"],
+            "properties": {
+                "binding": {"type": "object", "description": "Exact complete resolution_binding published by workflow control."},
+                "decision": {"type": "string", "enum": ["IMPLEMENTATION_CORRECTION_REQUIRED", "MATERIAL_REVISION_REQUIRED"]},
+                "human_authorization_text": {"type": "string"},
+                "corrective_guidance": {"type": "string", "minLength": 1, "maxLength": 8000},
+                "authorizer": {"type": "string", "minLength": 1, "maxLength": 128}}}},
+    handler=_resolve_current_ticket_manual_validation_failure, emoji="V", max_result_size_chars=24000,
+)
+
+registry.register(
+    name="start_current_ticket_manual_validation_correction", toolset=TOOLSET,
+    schema={"name": "start_current_ticket_manual_validation_correction",
+        "description": "Separately authorize one fresh corrective run of the same approved WorkPacket from current canonical source after an implementation-correction resolution. Requires the exact published start authorization and decision digest; never infer consent from the resolution itself.",
+        "parameters": {"type": "object", "additionalProperties": False,
+            "required": ["ticket_id", "run_id", "decision_SHA256", "human_authorization_text"],
+            "properties": {
+                "ticket_id": {"type": "string"}, "run_id": {"type": "integer", "minimum": 1},
+                "decision_SHA256": {"type": "string"}, "human_authorization_text": {"type": "string"}}}},
+    handler=_start_current_ticket_manual_validation_correction, emoji="V", max_result_size_chars=24000,
+)
+
+
 def _decide_current_ticket_zero_change(args, **_kwargs):
     from hermes_cli.agent_platform import zero_change_decision as decision
     try:
