@@ -124,11 +124,12 @@ def require_terminal_candidate(p, task, run):
     completed = (
         task.status == "done" and run.status == "done" and run.outcome == "completed"
     )
-    review_boundary = (
-        task.status == "blocked"
-        and pr._terminal_run_review_boundary_evidence(task, run, projection_record=p)
-        is not None
-    )
+    # Re-queueing can move a terminal needs_input task to triage/ready. The
+    # canonical verifier retains that run's validated review boundary while
+    # checking ownership, immutable scope, candidate changes and validation.
+    review_boundary = pr._terminal_run_review_boundary_evidence(
+        task, run, projection_record=p
+    ) is not None
     if not completed and not review_boundary:
         raise pr.ProductRuntimeConflict(
             "completed or validated review-boundary candidate required"
@@ -354,6 +355,7 @@ def apply_workflow(snapshot, blockers):
         if record is None:
             if snapshot.get("workflow_status") == "blocked_manual_validation_failed":
                 snapshot["next_action"] = discovery(p)
+                snapshot["human_action_required"] = True
             return
         validate_current(record, p)
         material = record["human_decision"] == MATERIAL
@@ -382,6 +384,15 @@ def apply_workflow(snapshot, blockers):
                 material_revision_request_authority=record,
             )
     except Exception as exc:
+        # Do not advertise the legacy resolvable placeholder when its current
+        # authority failed validation. The blocker is the actionable diagnosis.
+        snapshot.update(
+            next_action=None,
+            alternative_actions=[],
+            human_action_required=True,
+            reviewable_result=False,
+            validation_contract_satisfied=False,
+        )
         blockers.append({
             "id": "MANUAL-VALIDATION-RESOLUTION-AUTHORITY",
             "status": "blocked_by_invalid_manual_resolution",
