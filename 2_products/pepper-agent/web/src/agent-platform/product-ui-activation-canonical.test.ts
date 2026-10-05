@@ -221,11 +221,11 @@ describe("P18.UI-A canonical activation evidence", () => {
     )).resolves.toMatchObject({ kind: "ticket" });
 
     expect(requests).toEqual([
-      "/api/plugins/kanban/boards?include_archived=false&profile=review-profile",
-      "/api/plugins/kanban/boards?include_archived=false&profile=review-profile",
-      "/api/plugins/kanban/board?board=alpha-board&include_archived=false&profile=review-profile",
-      "/api/plugins/kanban/boards?include_archived=false&profile=review-profile",
-      "/api/plugins/kanban/tasks/t_alpha01?board=alpha-board&profile=review-profile",
+      "/api/plugins/kanban/boards?include_archived=false",
+      "/api/plugins/kanban/boards?include_archived=false",
+      "/api/plugins/kanban/board?board=alpha-board&include_archived=false",
+      "/api/plugins/kanban/boards?include_archived=false",
+      "/api/plugins/kanban/tasks/t_alpha01?board=alpha-board",
     ]);
     expect(requests.every((request) => request.startsWith("/api/plugins/kanban/"))).toBe(true);
     expect(requests.some((request) => request.startsWith("/api/agent-platform/projects"))).toBe(false);

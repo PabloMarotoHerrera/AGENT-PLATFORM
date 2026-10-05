@@ -425,7 +425,7 @@ describe("controlled execution client", () => {
     );
     expect(loaded?.kind).toBe("detail");
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(String(fetchMock.mock.calls[0][0])).toBe("/api/agent-platform/executions/4?board=alpha-board&task=t_alpha01&profile=review-profile");
+    expect(String(fetchMock.mock.calls[0][0])).toBe("/api/agent-platform/executions/4?board=alpha-board&task=t_alpha01");
     for (const call of fetchMock.mock.calls) {
       expect(call[1]?.method).toBeUndefined();
       expect(new Headers(call[1]?.headers).get("X-Hermes-Session-Token")).toBe("synthetic-session");
@@ -459,7 +459,7 @@ describe("controlled execution client", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     await expect(getQualifiedExecutionSource("missing-board", "t_alpha01", "default")).resolves.toBeNull();
     expect(fetchMock).toHaveBeenCalledOnce();
-    expect(String(fetchMock.mock.calls[0][0])).toBe("/api/agent-platform/executions?board=missing-board&task=t_alpha01&profile=default");
+    expect(String(fetchMock.mock.calls[0][0])).toBe("/api/agent-platform/executions?board=missing-board&task=t_alpha01");
   });
 
   it("rejects an invalid detail run ID before any source request", async () => {

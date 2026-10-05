@@ -21,7 +21,7 @@ export const EXECUTION_LIVE_SOURCE_CLASSIFICATION = Object.freeze({
   source: "pepper-controlled-execution" as const,
   reason: "Pepper exposes authenticated universal execution collection plus exact board/task/run detail.",
   storageBehavior: "GET reads may initialize or migrate the source Kanban database" as const,
-  profileBehavior: "selected profile is request context while run.profile remains a source fact" as const,
+  profileBehavior: "Pepper product authority is global; run.profile remains a source fact" as const,
   rawTransportExposure: "authenticated product response projected immediately through an allowlist" as const,
 });
 
@@ -126,7 +126,7 @@ export async function prepareControlledExecution(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ board_slug: board, task_id: task, profile: selectedProfile || null }),
+      body: JSON.stringify({ board_slug: board, task_id: task, profile: null }),
     },
   );
 }

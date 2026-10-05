@@ -83,7 +83,7 @@ export function ExecutionInspectorHeader({
         <Badge tone="secondary">Source: Pepper controlled executions</Badge>
         <Badge tone="success">Controlled source</Badge>
         <Badge tone={tone}>{state.phase}</Badge>
-        <span className="font-mono text-[var(--agent-platform-text-muted)]">Profile context: {profile}</span>
+        <span className="font-mono text-[var(--agent-platform-text-muted)]">Product authority: Pepper Default ({profile})</span>
         <span className="font-mono text-[var(--agent-platform-text-muted)]">Last success: {formatRefreshTime(state.lastSuccessAt)}</span>
       </div>
       {children}

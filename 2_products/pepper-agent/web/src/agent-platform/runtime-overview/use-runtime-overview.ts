@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 
-import { useProfileScope } from "@/contexts/useProfileScope";
 import { fetchJSON } from "@/lib/api";
 
 import {
@@ -137,46 +136,31 @@ export function createRuntimeOverviewPoller(
   });
 }
 
+/** Both sources belong to the product; chat-profile status has its own consumers. */
+export async function loadRuntimeOverview(): Promise<unknown> {
+  const [status, workflowControl] = await Promise.all([
+    fetchJSON<unknown>("/api/agent-platform/runtime-status"),
+    fetchJSON<unknown>("/api/agent-platform/workflow-control"),
+  ]);
+  return {
+    ...(status && typeof status === "object" && !Array.isArray(status) ? status : {}),
+    agent_platform_workflow_control: workflowControl,
+  };
+}
+
 export function useRuntimeOverview(): RuntimeOverviewState & { readonly refresh: () => void } {
-  const { profile } = useProfileScope();
-  const [stored, setStored] = useState<{
-    readonly profile: string;
-    readonly state: RuntimeOverviewState;
-  }>(() => ({ profile, state: INITIAL_RUNTIME_OVERVIEW_STATE }));
-  const pollerRef = useRef<{ profile: string; poller: RuntimeOverviewPoller } | null>(null);
+  const [state, setState] = useState(INITIAL_RUNTIME_OVERVIEW_STATE);
+  const pollerRef = useRef<RuntimeOverviewPoller | null>(null);
 
   useEffect(() => {
-    const workflowPath = profile
-      ? `/api/agent-platform/workflow-control?${new URLSearchParams({ profile })}`
-      : "/api/agent-platform/workflow-control";
-    const poller = createRuntimeOverviewPoller(
-      async () => {
-        const [status, workflowControl] = await Promise.all([
-          fetchJSON<unknown>("/api/status"),
-          fetchJSON<unknown>(workflowPath),
-        ]);
-        return {
-          ...(status && typeof status === "object" && !Array.isArray(status) ? status : {}),
-          agent_platform_workflow_control: workflowControl,
-        };
-      },
-      (state) => setStored({ profile, state }),
-    );
-    pollerRef.current = { profile, poller };
+    const poller = createRuntimeOverviewPoller(loadRuntimeOverview, setState);
+    pollerRef.current = poller;
     void poller.start();
-
     return () => {
       poller.stop();
-      if (pollerRef.current?.poller === poller) pollerRef.current = null;
+      if (pollerRef.current === poller) pollerRef.current = null;
     };
-  }, [profile]);
+  }, []);
 
-  const state = stored.profile === profile ? stored.state : INITIAL_RUNTIME_OVERVIEW_STATE;
-  return {
-    ...state,
-    refresh: () => {
-      const active = pollerRef.current;
-      if (active?.profile === profile) void active.poller.refresh();
-    },
-  };
+  return { ...state, refresh: () => { void pollerRef.current?.refresh(); } };
 }

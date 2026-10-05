@@ -93,10 +93,10 @@ export const en: Translations = {
     statusOverview: "Status overview",
     system: "System",
     webUi: "Web UI",
-    managingProfile: "Managing profile",
-    currentProfileOption: "this dashboard ({name})",
+    managingProfile: "Active profile",
+    currentProfileOption: "Pepper Default",
     managingProfileBanner:
-      "Managing profile \u201c{name}\u201d \u2014 config, keys, skills, MCPs, model, and new chats apply to that profile.",
+      "Managing profile \u201c{name}\u201d \u2014 config, keys, skills, MCPs, model, and new chats apply to that profile. Pepper governed workflow remains product-global. Profile chats may require their own provider setup.",
   },
 
   status: {

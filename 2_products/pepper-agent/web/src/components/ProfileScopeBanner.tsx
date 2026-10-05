@@ -22,7 +22,7 @@ export function ProfileScopeBanner() {
       <span>
         {(
           t.app.managingProfileBanner ??
-          "Managing profile “{name}” — config, keys, skills, MCPs, model, and new chats apply to that profile."
+          "Managing profile “{name}” — config, keys, skills, MCPs, model, and new chats apply to that profile. Pepper governed workflow remains product-global. Profile chats may require their own provider setup."
         ).replace("{name}", profile)}
       </span>
     </div>

@@ -134,8 +134,8 @@ export function useApprovalInbox(
   request: ApprovalInboxRequest,
   loader: ApprovalInboxLoader = loadApprovalInboxRequest,
 ): ApprovalInboxDataState & { readonly profile: string; readonly refresh: () => void } {
-  const { profile, currentProfile } = useProfileScope();
-  const selectedProfile = profile || currentProfile;
+  const { currentProfile } = useProfileScope();
+  const selectedProfile = currentProfile;
   const identity = approvalInboxRequestKey(request, selectedProfile);
   const [stored, setStored] = useState<{
     readonly identity: string;

@@ -133,8 +133,8 @@ export function createProjectsWorkspacePoller(
 export function useProjectsWorkspace(
   request: ProjectsWorkspaceRequest,
 ): ProjectsWorkspaceDataState & { readonly profile: string; readonly refresh: () => void } {
-  const { profile, currentProfile } = useProfileScope();
-  const selectedProfile = profile || currentProfile;
+  const { currentProfile } = useProfileScope();
+  const selectedProfile = currentProfile;
   const identity = projectsWorkspaceRequestKey(request, selectedProfile);
   const [stored, setStored] = useState<{
     readonly identity: string;

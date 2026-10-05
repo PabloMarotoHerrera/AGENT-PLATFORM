@@ -19,9 +19,9 @@ export function ProfileSwitcher({ collapsed }: ProfileSwitcherProps) {
   const { profile, currentProfile, profiles, setProfile } = useProfileScope();
   const { t } = useI18n();
 
-  const currentDashboardLabel = useMemo(
+  const defaultProfileLabel = useMemo(
     () =>
-      (t.app.currentProfileOption ?? "this dashboard ({name})").replace(
+      (t.app.currentProfileOption ?? "Pepper Default").replace(
         "{name}",
         currentProfile || "default",
       ),
@@ -32,7 +32,7 @@ export function ProfileSwitcher({ collapsed }: ProfileSwitcherProps) {
 
   const managed = profile || currentProfile || "default";
   const isOther = !!profile && profile !== currentProfile;
-  const managingLabel = t.app.managingProfile ?? "Managing profile";
+  const managingLabel = t.app.managingProfile ?? "Active profile";
 
   return (
     <div
@@ -49,6 +49,7 @@ export function ProfileSwitcher({ collapsed }: ProfileSwitcherProps) {
         )}
       />
 
+      <span className={collapsed ? "sr-only" : "text-xs text-text-tertiary"}>{managingLabel}</span>
       <Select
         className={cn(
           "min-w-0 flex-1",
@@ -64,7 +65,7 @@ export function ProfileSwitcher({ collapsed }: ProfileSwitcherProps) {
         onValueChange={setProfile}
         value={profile}
       >
-        <SelectOption value="">{currentDashboardLabel}</SelectOption>
+        <SelectOption value="">{defaultProfileLabel}</SelectOption>
 
         {profiles
           .filter((name) => name !== currentProfile)

@@ -83,10 +83,18 @@ const PROFILE_SCOPED_PREFIXES = [
 ];
 
 function withManagementProfile(url: string): string {
+  // Pepper control is product-global, including callers with an explicit
+  // selector query. Unknown endpoints in this namespace never inherit scope.
+  const [pathname, query] = url.split("?", 2);
+  if (pathname === "/api/agent-platform" || pathname.startsWith("/api/agent-platform/")) {
+    const params = new URLSearchParams(query);
+    params.delete("profile");
+    return `${pathname}${params.size ? `?${params}` : ""}`;
+  }
   if (!_managementProfile) return url;
   if (url.includes("profile=")) return url; // explicit param wins
   const path = url.split("?")[0];
-  if (!PROFILE_SCOPED_PREFIXES.some((p) => path.startsWith(p))) return url;
+  if (!PROFILE_SCOPED_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`))) return url;
   const sep = url.includes("?") ? "&" : "?";
   return `${url}${sep}profile=${encodeURIComponent(_managementProfile)}`;
 }

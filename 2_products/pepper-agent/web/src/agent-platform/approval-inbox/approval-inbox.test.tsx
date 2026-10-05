@@ -285,9 +285,9 @@ describe("controlled approval client", () => {
     await expect(getApproval("a1b2c3d4", "default")).resolves.toMatchObject({ source_system: "hermes-write-approval" });
     await expect(decideApproval("a1b2c3d4", "approve", "default")).resolves.toMatchObject({ applied: true });
     expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(String(fetchMock.mock.calls[0][0])).toBe("/api/agent-platform/approvals?profile=default");
-    expect(String(fetchMock.mock.calls[1][0])).toBe("/api/agent-platform/approvals/a1b2c3d4?profile=default");
-    expect(String(fetchMock.mock.calls[2][0])).toBe("/api/agent-platform/approvals/a1b2c3d4/decision?profile=default");
+    expect(String(fetchMock.mock.calls[0][0])).toBe("/api/agent-platform/approvals");
+    expect(String(fetchMock.mock.calls[1][0])).toBe("/api/agent-platform/approvals/a1b2c3d4");
+    expect(String(fetchMock.mock.calls[2][0])).toBe("/api/agent-platform/approvals/a1b2c3d4/decision");
     expect(fetchMock.mock.calls[2][1]?.method).toBe("POST");
     expect(new Headers(fetchMock.mock.calls[2][1]?.headers).get("X-Hermes-Session-Token")).toBe("synthetic-session");
   });

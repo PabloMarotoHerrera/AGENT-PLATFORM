@@ -314,6 +314,33 @@ def _product_runtime_http_error(exc: Exception) -> HTTPException:
     return HTTPException(status_code=400, detail=str(exc) or "invalid product runtime request")
 
 
+@contextmanager
+def _pepper_product_scope():
+    """Pin governed authority to the dashboard launch home, never a selector.
+
+    Context-local only: safe across awaits and concurrent profile requests.
+    Do not use the sticky CLI profile or resolve a request-supplied profile.
+    """
+    from hermes_constants import (
+        get_process_hermes_home,
+        reset_hermes_home_override,
+        set_hermes_home_override,
+    )
+
+    token = set_hermes_home_override(get_process_hermes_home())
+    try:
+        yield
+    finally:
+        reset_hermes_home_override(token)
+
+
+@app.get("/api/agent-platform/runtime-status", tags=["agent-platform"])
+async def get_agent_platform_runtime_status() -> dict[str, Any]:
+    """Product overview dependencies, independent of chat provider readiness."""
+    with _pepper_product_scope():
+        return await get_status()
+
+
 @app.get(
     "/api/agent-platform/approvals",
     summary="List Pepper controlled approval requests",
@@ -323,7 +350,7 @@ def list_agent_platform_approvals(profile: Optional[str] = None) -> dict[str, An
     """Return durable staged-write approvals through the product auth boundary."""
 
     try:
-        with _profile_scope(profile):
+        with _pepper_product_scope():
             return build_approval_inbox_source()
     except Exception as exc:
         raise _product_runtime_http_error(exc) from exc
@@ -341,7 +368,7 @@ def get_agent_platform_approval(
     """Return one exact durable approval identity without raw payload fields."""
 
     try:
-        with _profile_scope(profile):
+        with _pepper_product_scope():
             return build_approval_detail_source(approval_id)
     except Exception as exc:
         raise _product_runtime_http_error(exc) from exc
@@ -360,7 +387,7 @@ def decide_agent_platform_approval(
     """Apply approve/reject through existing memory/skill write-approval code."""
 
     try:
-        with _profile_scope(profile):
+        with _pepper_product_scope(), _profile_scope(None):
             return apply_approval_decision(approval_id, body)
     except Exception as exc:
         raise _product_runtime_http_error(exc) from exc
@@ -381,7 +408,7 @@ def list_agent_platform_executions(
     if (board is None) ^ (task is None):
         raise HTTPException(status_code=400, detail="board and task must be passed together")
     try:
-        with _profile_scope(profile):
+        with _pepper_product_scope():
             if board is not None and task is not None:
                 return build_task_execution_source(board, task)
             return build_execution_collection_source()
@@ -403,7 +430,7 @@ def get_agent_platform_execution(
     """Return one exact board/task/run source without process fallback."""
 
     try:
-        with _profile_scope(profile):
+        with _pepper_product_scope():
             return ensure_execution_exists(board, task, execution_id)
     except Exception as exc:
         raise _product_runtime_http_error(exc) from exc
@@ -421,7 +448,7 @@ def start_agent_platform_execution(
     """Prepare the accepted P15/P17 worker handoff without automating Git."""
 
     try:
-        with _profile_scope(body.profile or profile):
+        with _pepper_product_scope():
             return prepare_controlled_execution(body)
     except Exception as exc:
         raise _product_runtime_http_error(exc) from exc
@@ -437,7 +464,7 @@ def get_agent_platform_workflow_control(
 ) -> dict[str, Any]:
     """Return the default-mode control projection and remaining human smoke gate."""
 
-    with _profile_scope(profile):
+    with _pepper_product_scope():
         return build_workflow_control_snapshot()
 
 # ---------------------------------------------------------------------------

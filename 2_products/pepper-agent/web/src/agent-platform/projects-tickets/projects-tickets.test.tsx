@@ -330,9 +330,9 @@ describe("GET-only Kanban client boundary", () => {
     await getTicketSource("alpha-board", "t_alpha01", "review-profile");
 
     expect(requests.map((request) => request.input)).toEqual([
-      "/api/plugins/kanban/boards?include_archived=false&profile=review-profile",
-      "/api/plugins/kanban/board?board=alpha-board&include_archived=false&profile=review-profile",
-      "/api/plugins/kanban/tasks/t_alpha01?board=alpha-board&profile=review-profile",
+      "/api/plugins/kanban/boards?include_archived=false",
+      "/api/plugins/kanban/board?board=alpha-board&include_archived=false",
+      "/api/plugins/kanban/tasks/t_alpha01?board=alpha-board",
     ]);
     for (const request of requests) {
       expect(request.init?.method).toBeUndefined();

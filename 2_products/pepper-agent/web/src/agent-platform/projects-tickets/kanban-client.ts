@@ -64,7 +64,7 @@ export async function listProjectsSource(profile: string): Promise<unknown> {
   const profileParams = profileEntry(profile);
   if (!profileParams) return null;
   return fetchJSON<unknown>(
-    `${KANBAN_API_ROOT}/boards?${query([["include_archived", false], ...profileParams])}`,
+    `${KANBAN_API_ROOT}/boards?${query([["include_archived", false]])}`,
   );
 }
 
@@ -73,7 +73,7 @@ export async function getProjectSource(boardSlug: string, profile: string): Prom
   const profileParams = profileEntry(profile);
   if (!board || !profileParams) return null;
   return fetchJSON<unknown>(
-    `${KANBAN_API_ROOT}/board?${query([["board", board], ["include_archived", false], ...profileParams])}`,
+    `${KANBAN_API_ROOT}/board?${query([["board", board], ["include_archived", false]])}`,
   );
 }
 
@@ -87,7 +87,7 @@ export async function getTicketSource(
   const profileParams = profileEntry(profile);
   if (!board || !task || !profileParams) return null;
   return fetchJSON<unknown>(
-    `${KANBAN_API_ROOT}/tasks/${encodeURIComponent(task)}?${query([["board", board], ...profileParams])}`,
+    `${KANBAN_API_ROOT}/tasks/${encodeURIComponent(task)}?${query([["board", board]])}`,
   );
 }
 
