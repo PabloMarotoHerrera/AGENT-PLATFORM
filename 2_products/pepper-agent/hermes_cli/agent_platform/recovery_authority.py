@@ -157,6 +157,12 @@ def terminal_identity(record):
             run = kb.get_run(conn, int(record["latest_failed_run_id"]))
             task = kb.get_task(conn, record["kanban_task_id"])
             runs = kb.list_runs(conn, record["kanban_task_id"])
+            from .retry_workspace import preserves_previous
+
+            workspace_matches = task is not None and (
+                task.workspace_path == record.get("kanban_task_workspace_path")
+                or preserves_previous(conn, task, record)
+            )
         finally:
             conn.close()
         if (
@@ -166,7 +172,7 @@ def terminal_identity(record):
             or run.ended_at is None
             or (run.outcome or run.status) not in pr._GOVERNED_TICKET_FAILURE_OUTCOMES
             or run.profile != record["assignee_profile"]
-            or task.workspace_path != record.get("kanban_task_workspace_path")
+            or not workspace_matches
             or sum(item.id <= run.id for item in runs)
             != record["observed_attempt_count"]
             or any(

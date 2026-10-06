@@ -14281,6 +14281,7 @@ def _prepare_p18_9_0_retry_task_for_dispatch(
     task_id = str(projection["kanban_task_id"])
     conn = kanban_db.connect(board=board)
     try:
+        conn.execute("BEGIN IMMEDIATE")
         task = kanban_db.get_task(conn, task_id)
         if task is None:
             return {
@@ -14296,7 +14297,9 @@ def _prepare_p18_9_0_retry_task_for_dispatch(
             }
         task_unblocked = False
         if task.status == "blocked":
-            if not kanban_db.unblock_task(conn, task_id):
+            from .retry_workspace import unblock_for_allocation
+
+            if not unblock_for_allocation(conn, task):
                 return {
                     "task_prepare_status": "blocked",
                     "blocker_code": "KANBAN_UNBLOCK_FAILED",
@@ -14321,6 +14324,13 @@ def _prepare_p18_9_0_retry_task_for_dispatch(
             body = json.loads(task.body or "{}")
         except json.JSONDecodeError:
             body = {}
+        from . import retry_workspace
+
+        try:
+            body = retry_workspace.prepare(conn, task, projection, recovery_record)
+        except (OSError, ValueError) as exc:
+            conn.rollback()
+            return {"task_prepare_status": "blocked", "blocker_code": "RETRY_WORKSPACE_ALLOCATION_FAILED", "blocker_detail": str(exc)}
         if isinstance(body, dict):
             body["task_skills"] = []
             body["retry_start_authorized"] = True
@@ -16803,6 +16813,11 @@ def _reset_governed_dispatch_scratch_contents(
                         and _SAFE_SHA256.fullmatch(str(body.get("fresh_execution_request_SHA256") or ""))):
                     prepared = True
                     break
+        if body.get("retry_workspace_allocation") is not None:
+            from .retry_workspace import verify
+
+            verify(conn, task)
+            prepared = True
         if prepared:
             expected_workspace = workspace
     # Inspect lexical paths before resolving so junctions/symlinks cannot hide.
@@ -17369,6 +17384,10 @@ def _dispatch_exact_current_kanban_task(
                 # Reserve the new attempt exclusively before any materialization.
                 # Even a directory appearing after the claim must not be reused.
                 Path(claimed.workspace_path).mkdir(parents=True, exist_ok=False)
+            if json.loads(claimed.body or "{}").get("retry_workspace_allocation") is not None:
+                from .retry_workspace import verify
+
+                verify(conn, claimed)
             workspace = kanban_db.resolve_workspace(claimed, board=board)
             kanban_db.set_workspace_path(conn, claimed.id, str(workspace))
             kanban_db._maybe_emit_scratch_tip(conn, claimed.id, claimed.workspace_kind)

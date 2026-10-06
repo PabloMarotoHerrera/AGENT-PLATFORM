@@ -6,6 +6,7 @@ from pathlib import Path, PurePosixPath
 from . import execution_evidence as ev
 from . import manual_validation as mv
 from . import product_runtime as pr
+from . import retry_workspace
 
 OPERATIONS = {"list", "metadata", "content", "diff", "aggregate_diff"}
 MAX_FILE_BYTES = 1_000_000
@@ -38,11 +39,15 @@ def context(ticket_id, run_id, project_id):
         conn.close()
     if task.current_run_id or task.worker_pid or task.claim_lock:
         raise ValueError("current task still owned by execution")
-    if (
-        pr._load_current_ticket_review_prepare_record_raw(projection_record=p)
-        is not None
-    ):
-        raise ValueError("prepared review exists; use prepared-review inspection")
+    prepared = pr._load_current_ticket_review_prepare_record_raw(projection_record=p)
+    if prepared is not None:
+        if (
+            prepared.get("review_prepare_action_SHA256") != pr._review_prepare_record_digest(prepared)
+            or pr.load_current_ticket_review_prepare_record(
+                projection_record=p, allow_historical_mismatch=True,
+            ) is not None
+        ):
+            raise ValueError("prepared review exists; use prepared-review inspection")
     source = ev.source(p, run)
     scope = generation["work_packet_compilation_result"]["work_packet"][
         "repository_scope"
@@ -206,12 +211,21 @@ def inspect(
         "success": True,
         "read_only": True,
         "inspection_authority": "current_terminal_candidate",
+        **retry_workspace.freshness(task),
         "review_prepared": False,
         "review_preparation_recorded": False,
         "workflow_mutation": False,
         "manual_validation_satisfied": False,
         "manual_validation_recorded": False,
         "binding": identity,
+        "source_authority": {
+            "source_authority_kind": source["source_authority_kind"],
+            "source_HEAD": source.get("git_source_authority", {}).get("git_HEAD"),
+            "source_authority_SHA256": source["governed_source_authority_SHA256"],
+            "source_snapshot_SHA256": source["snapshot_SHA256"],
+            "snapshot_manifest_SHA256": source["snapshot_manifest_SHA256"],
+            "materialization_manifest_SHA256": source["materialization_manifest_SHA256"],
+        },
         "candidate_binding_SHA256": identity_sha,
         "workflow_status": "execution_completed_pending_manual_validation",
         "manual_validation_statuses": {x["validation_id"]: x["status"] for x in items},

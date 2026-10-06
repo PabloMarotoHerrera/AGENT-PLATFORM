@@ -47,11 +47,15 @@ def safe_path(path, root, *, missing=False):
     return path
 
 
-def read_json(path, root):
+def read_json(path, root, *, maximum=16_000_000):
     path = safe_path(path, root)
-    if path.stat().st_size > 16_000_000:
+    if path.stat().st_size > maximum:
         raise ValueError("evidence record exceeds inspection bound")
-    return json.loads(path.read_text(encoding="utf-8"))
+    with path.open("rb") as stream:
+        raw = stream.read(maximum + 1)
+    if len(raw) > maximum:
+        raise ValueError("evidence record exceeds inspection bound")
+    return json.loads(raw)
 
 
 def connection(path):
@@ -89,7 +93,12 @@ def run_context(p, run_id, *, latest=True):
     root = kb.kanban_home() / "kanban/workspaces"
     safe_path(workspace, root, missing=True)
     body = json.loads(task.body or "{}")
-    if workspace.name != task.id:
+    if body.get("retry_workspace_allocation") is not None:
+        from .retry_workspace import verify
+
+        with connection(kb.kanban_db_path(board=p["kanban_board_slug"])) as conn:
+            verify(conn, task)
+    if workspace.name != task.id or body.get("fresh_execution_attempt_number") is not None:
         attempt = body.get("fresh_execution_attempt_number")
         if (
             type(attempt) is not int
@@ -99,7 +108,9 @@ def run_context(p, run_id, *, latest=True):
             or body.get("fresh_execution_workspace_path") != str(workspace)
             or not body.get("fresh_execution_request_SHA256")
         ):
-            raise ValueError("workspace task identity mismatch")
+            from .retry_workspace import historical
+
+            historical(p, task, run, runs, workspace)
     if any(
         body.get(k) != p[v]
         for k, v in (
@@ -118,14 +129,18 @@ def _walk_error(error):
 
 def source(p, run):
     path = pr.governed_source_authority_record_path_for_run(p, run.id)
-    record = read_json(path, kb.kanban_home() / "agent-platform/source-authority")
+    record = read_json(path, kb.kanban_home() / "agent-platform/source-authority", maximum=32_000_000)
+    if not isinstance(record, dict) or not {"snapshot_root", "snapshot_manifest_path", "snapshot_file_count", "snapshot_total_bytes"} <= record.keys():
+        raise ValueError("source authority record identity incomplete")
     if (
         record.get("snapshot_file_count", 0) > 100000
-        or record.get("snapshot_total_bytes", 0) > 1_000_000_000
+        or record.get("snapshot_total_bytes", 0) > 2_000_000_000
     ):
         raise ValueError("source snapshot exceeds bounded inspection limits")
     root = safe_path(record["snapshot_root"], path.parent)
-    safe_path(record["snapshot_manifest_path"], path.parent)
+    manifest_path = safe_path(record["snapshot_manifest_path"], path.parent)
+    if manifest_path.stat().st_size > 32_000_000:
+        raise ValueError("source snapshot manifest exceeds inspection bound")
     # Reject redirects before the existing validator reads any file in the tree.
     for parent, dirs, files in os.walk(root, followlinks=False, onerror=_walk_error):
         for name in dirs + files:
@@ -899,6 +914,8 @@ def inspect(
         or type(run_id) is not int
     ):
         raise ValueError("invalid bounded evidence request")
+    from .retry_workspace import freshness
+
     p = pr._load_current_projection_record()
     if ticket_id != p["ticket_id"] or project_id not in (None, p["project_id"]):
         raise ValueError("current ticket authority mismatch")
@@ -941,6 +958,7 @@ def inspect(
         "run_status": run.status,
         "outcome": run.outcome,
         "workspace": str(workspace),
+        **freshness(task),
         "section": section,
     }
 
