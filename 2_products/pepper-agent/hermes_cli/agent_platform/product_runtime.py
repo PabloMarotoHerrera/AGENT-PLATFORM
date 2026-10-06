@@ -12209,6 +12209,9 @@ def start_current_ticket_execution(
     workflow = build_workflow_control_snapshot()
     if workflow.get("workflow_status") in {"zero_change_rejected_correction_required", "manual_validation_correction_authorized"}:
         raise ProductRuntimeConflict("corrective execution requires its separate run-bound authorization")
+    from .manual_validation_resolution import current as current_manual_resolution
+    if current_manual_resolution(projection) is not None:
+        raise ProductRuntimeConflict("manual validation resolution requires its separate run-bound authorization")
     workflow_next_action = workflow.get("next_action")
     workflow_next_action_id = (
         workflow_next_action.get("id") if isinstance(workflow_next_action, dict) else None
@@ -17302,6 +17305,15 @@ def _dispatch_exact_current_kanban_task(
                 runs=runs,
             )
         try:
+            if (
+                terminal_done_dispatch
+                and (prepared_dispatch or {}).get("fresh_execution_request_reference", {}).get(
+                    "fresh_execution_provenance"
+                ) == "human_manual_validation_failure_correction"
+            ):
+                # Reserve the new attempt exclusively before any materialization.
+                # Even a directory appearing after the claim must not be reused.
+                Path(claimed.workspace_path).mkdir(parents=True, exist_ok=False)
             workspace = kanban_db.resolve_workspace(claimed, board=board)
             kanban_db.set_workspace_path(conn, claimed.id, str(workspace))
             kanban_db._maybe_emit_scratch_tip(conn, claimed.id, claimed.workspace_kind)
@@ -17393,9 +17405,11 @@ def _dispatch_exact_current_kanban_task(
                     kwargs["board"] = board
                 if "env_overlay" in signature.parameters or accepts_kwargs:
                     kwargs["env_overlay"] = env_overlay
-                pid = spawn(claimed, str(workspace), **kwargs)
             except (TypeError, ValueError):
-                pid = spawn(claimed, str(workspace))
+                kwargs = {}
+            # A TypeError from the worker launcher is a failure, not permission
+            # to invoke it a second time with a different signature.
+            pid = spawn(claimed, str(workspace), **kwargs)
             if pid:
                 kanban_db._set_worker_pid(conn, claimed.id, int(pid))
         except Exception as exc:
@@ -21147,12 +21161,21 @@ def _claim_terminal_done_review_revision_task(
             prior_terminal_run_id = _int_or_none(
                 fresh_execution_request.get("prior_terminal_run_id")
             )
+            if (
+                fresh_execution_request.get("fresh_execution_provenance")
+                == "human_manual_validation_failure_correction"
+                and (Path(fresh_workspace_path).exists() or Path(fresh_workspace_path).is_symlink())
+            ):
+                raise _KanbanDispatchPreparationBlocked(
+                    "FRESH_EXECUTION_WORKSPACE_CONFLICT",
+                    "fresh corrective workspace already exists; historical workspaces cannot be reused",
+                )
             cur = conn.execute(
                 "UPDATE tasks SET status = 'ready', result = NULL, completed_at = NULL, "
                 "current_run_id = NULL, claim_lock = NULL, claim_expires = NULL, "
                 "worker_pid = NULL, consecutive_failures = 0, last_failure_error = NULL, "
                 "skills = ?, body = ?, workspace_path = ? "
-                "WHERE id = ? AND (status = 'done' OR (status = 'blocked' AND ? = 1)) AND current_run_id IS NULL "
+                "WHERE id = ? AND (status = 'done' OR (status IN ('blocked', 'triage', 'ready') AND ? = 1)) AND current_run_id IS NULL "
                 "AND claim_lock IS NULL AND worker_pid IS NULL",
                 (
                     json.dumps([]),
@@ -21165,7 +21188,7 @@ def _claim_terminal_done_review_revision_task(
             if cur.rowcount != 1:
                 raise _KanbanDispatchPreparationBlocked(
                     "KANBAN_TERMINAL_REARM_FAILED",
-                    "terminal done Kanban task could not be rearmed for fresh execution",
+                    "validated terminal Kanban task could not be rearmed for fresh execution",
                 )
             rearm_reason = _terminal_done_fresh_execution_rearm_reason(
                 fresh_execution_request

@@ -48,6 +48,32 @@ def start_consent(record):
     return f"{action(record['ticket_id'], record['run_id'])} DECISION {record['decision_SHA256']}"
 
 
+def fresh_request(record):
+    fresh = {
+        "fresh_execution_provenance": PROVENANCE,
+        "transition_classification": "HUMAN_MANUAL_VALIDATION_CORRECTION",
+        "prior_terminal_run_id": record["run_id"],
+        "prior_terminal_completion_SHA256": record["terminal_run_SHA256"],
+        "manual_validation_resolution_SHA256": record["decision_SHA256"],
+        "revision_source_base": "current_canonical_source",
+        "implementation_intent": record["corrective_guidance"],
+    }
+    fresh["fresh_execution_request_SHA256"] = ev.digest(fresh)
+    return fresh
+
+
+def start_authority(p, record):
+    auth = correction.read(path_for(p, record["run_id"], "start"))
+    if auth is not None and (
+        record["human_decision"] != IMPLEMENTATION
+        or auth.get("resolution_SHA256") != record["decision_SHA256"]
+        or auth.get("human_authorization_text") != start_consent(record)
+        or auth.get("fresh_execution_request") != fresh_request(record)
+    ):
+        raise pr.ProductRuntimeConflict("conflicting corrective start authority")
+    return auth
+
+
 def guidance(value):
     if not isinstance(value, str) or not 1 <= len(value.strip()) <= 8000:
         raise pr.ProductRuntimeConflict(
@@ -347,6 +373,7 @@ def apply_workflow(snapshot, blockers):
         "blocked_manual_validation_failed",
         STATE,
         "awaiting_material_revision",
+        "queued",
     }:
         return
     try:
@@ -358,6 +385,21 @@ def apply_workflow(snapshot, blockers):
                 snapshot["human_action_required"] = True
             return
         validate_current(record, p)
+        auth = start_authority(p, record)
+        if snapshot.get("workflow_status") == "queued":
+            # A failed pre-run dispatch replaces the general start record but
+            # does not consume the immutable, separately consented correction.
+            attempt = pr.load_p18_9_0_execution_start_record(projection_record=p)
+            if (
+                auth is None
+                or attempt is None
+                or attempt.get("corrective_start_authority_SHA256") != auth["decision_SHA256"]
+                or attempt.get("manual_validation_resolution_SHA256") != record["decision_SHA256"]
+                or attempt.get("dispatch_performed") is not False
+                or attempt.get("kanban_run_id") is not None
+                or attempt.get("execution_started") is not False
+            ):
+                raise pr.ProductRuntimeConflict("queued corrective start authority mismatch")
         material = record["human_decision"] == MATERIAL
         snapshot.update(
             human_action_required=True,
@@ -382,6 +424,13 @@ def apply_workflow(snapshot, blockers):
             snapshot.update(
                 material_revision_required=True,
                 material_revision_request_authority=record,
+            )
+        elif auth is not None:
+            snapshot["recovery_state"] = "manual_correction_start_retryable"
+            snapshot["next_action"].update(
+                retry_same_authority=True,
+                corrective_start_authority_SHA256=auth["decision_SHA256"],
+                label="Retry the recorded corrective-start authority; no fresh run has been created.",
             )
     except Exception as exc:
         # Do not advertise the legacy resolvable placeholder when its current
@@ -444,7 +493,7 @@ def corrective_blocker(p, fresh, *, task=None, runs=None):
                     "current terminal run changed inside dispatch transaction"
                 )
             require_terminal_candidate(p, task, runs[-1])
-        auth = correction.read(path_for(p, run_id, "start"))
+        auth = start_authority(p, record)
         if (
             record["human_decision"] != IMPLEMENTATION
             or not auth
@@ -496,18 +545,9 @@ def start(
         )
         if not provider.get("ok") or not probe.get("ok"):
             raise pr.ProductRuntimeConflict("corrective worker/provider unavailable")
-        fresh = {
-            "fresh_execution_provenance": PROVENANCE,
-            "transition_classification": "HUMAN_MANUAL_VALIDATION_CORRECTION",
-            "prior_terminal_run_id": run_id,
-            "prior_terminal_completion_SHA256": record["terminal_run_SHA256"],
-            "manual_validation_resolution_SHA256": decision_SHA256,
-            "revision_source_base": "current_canonical_source",
-            "implementation_intent": record["corrective_guidance"],
-        }
-        fresh["fresh_execution_request_SHA256"] = ev.digest(fresh)
+        fresh = fresh_request(record)
         validate_current(record, pr._load_current_projection_record())
-        auth = correction.read(path_for(p, run_id, "start"))
+        auth = start_authority(p, record)
         if auth is None:
             auth = {
                 "human_authorization_text": human_authorization_text,
