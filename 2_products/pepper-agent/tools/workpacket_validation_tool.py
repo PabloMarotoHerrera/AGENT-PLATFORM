@@ -2159,6 +2159,32 @@ def _run_command(
             completed_subcommand_count=0,
             all_subcommands_passed=False,
         )
+    if (
+        any(step.get("cli_entry") for step in command.execution_plan)
+        or any("node_modules/" in str(arg).replace("\\", "/") for arg in command.effective_argv)
+    ):
+        from hermes_cli.agent_platform.work_packet import npm_substrate
+
+        try:
+            workspace = Path(authority.resolved_workspace_root).resolve(strict=True)
+            package_rel = Path(command.working_directory).resolve(strict=True).relative_to(workspace).as_posix()
+            npm_substrate.verify(workspace, package_rel, _resolve_node_executable())
+        except (npm_substrate.SubstrateError, OSError, ValueError) as exc:
+            return tool_result(
+                success=False,
+                policy_id=GOVERNED_VALIDATION_POLICY_ID,
+                work_packet_id=authority.work_packet_id,
+                work_packet_SHA256=authority.work_packet_SHA256,
+                ticket_id=authority.ticket_id,
+                command=_public_command(command),
+                disposition="blocked",
+                failure_reason="validation_infrastructure_failed",
+                error_code=WORKPACKET_VALIDATION_RUNTIME_UNAVAILABLE,
+                error_detail=f"VALIDATION_INFRASTRUCTURE_FAILED: {exc}",
+                process_started=False,
+                exit_code=None,
+                execution_plan_SHA256=command.execution_plan_SHA256,
+            )
     if not command.runtime_available:
         return tool_result(
             success=False,

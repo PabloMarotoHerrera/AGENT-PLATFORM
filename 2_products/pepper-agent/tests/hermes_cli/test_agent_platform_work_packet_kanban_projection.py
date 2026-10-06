@@ -7512,6 +7512,22 @@ def test_dependency_substrate_recreates_package_local_and_workspace_dependency_t
     _make_directory_reparse_point_or_skip(linked_package, shared_package)
 
     canonical_web = source_root / web_package_rel
+    # Declared package dependencies require the same npm lock authority as
+    # production. Keep this topology fixture offline and version-independent.
+    _write_fixture_file(source_root, "2_products/pepper-agent/package.json", "{}")
+    _write_fixture_file(
+        source_root, "2_products/pepper-agent/package-lock.json",
+        json.dumps({"lockfileVersion": 3, "packages": {
+            "": {},
+            "web": {"dependencies": {
+                "@hermes/shared": "file:../apps/shared",
+                "@nous-research/ui": "0.18.2",
+            }},
+            "node_modules/@hermes/shared": {"link": True, "resolved": "apps/shared"},
+            "apps/shared": {},
+            "web/node_modules/@nous-research/ui": {},
+        }}),
+    )
     assert _node_import_meta_resolve(node, canonical_web, "@hermes/shared").returncode == 0
     assert (
         _node_import_meta_resolve(
@@ -7592,11 +7608,13 @@ def test_dependency_substrate_recreates_package_local_and_workspace_dependency_t
     ).is_file()
     assert not (workspace_after / f"{root_modules_rel}/@hermes/shared").is_symlink()
     assert record["dependency_install_performed"] is False
-    assert record["canonical_package_lock_materialized"] is False
+    assert record["canonical_package_lock_materialized"] is True
     assert record["local_package_sources_materialized"] is True
     assert record["local_package_source_copied_file_count"] >= 2
     assert sorted(record["product_diff_excluded_roots"]) == [
         "2_products/pepper-agent/node_modules",
+        "2_products/pepper-agent/package-lock.json",
+        "2_products/pepper-agent/package.json",
         "2_products/pepper-agent/web/node_modules",
     ]
     assert shared_package.joinpath("src/index.js").read_text(encoding="utf-8") == (

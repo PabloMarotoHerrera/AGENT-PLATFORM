@@ -14732,6 +14732,7 @@ def _materialize_workpacket_dependency_substrate(
     """Copy preinstalled validation dependencies into scratch when required."""
 
     from tools import workpacket_validation_tool as validation_tool
+    from hermes_cli.agent_platform.work_packet import npm_substrate
 
     source = (
         Path(source_root).expanduser()
@@ -14766,8 +14767,18 @@ def _materialize_workpacket_dependency_substrate(
     local_package_sources: list[dict[str, Any]] = []
     copied_local_package_source_roots: set[str] = set()
     local_package_source_copied_file_count = 0
+    dependency_contract_roots: set[str] = set()
     for requirement in package_requirements:
         package_rel = str(requirement["package_rel"])
+        try:
+            contract = npm_substrate.inspect(
+                resolved_source, package_rel, validation_tool._resolve_node_executable(),
+            )
+        except npm_substrate.SubstrateError as exc:
+            raise ProductRuntimeDependencyGap(
+                VALIDATION_RUNTIME_UNAVAILABLE,
+                f"VALIDATION_INFRASTRUCTURE_FAILED: {exc}",
+            ) from exc
         required_cli_entries = frozenset(requirement["required_cli_entries"])
         dependency_entries = _package_dependency_entries(resolved_source, package_rel)
         required_package_names = frozenset(
@@ -14847,6 +14858,32 @@ def _materialize_workpacket_dependency_substrate(
                 "at the authorized package cwd: "
                 + ", ".join(missing_scratch_entries[:3]),
             )
+        if contract is not None:
+            for relative, digest in contract["definitions"].items():
+                destination = workspace / relative
+                _assert_materialized_destination(destination, workspace_root=workspace)
+                if destination.exists():
+                    if _sha256_file_or_none(destination) != digest:
+                        raise ProductRuntimeDependencyGap(
+                            DEPENDENCY_PROVENANCE_MISMATCH,
+                            "VALIDATION_INFRASTRUCTURE_FAILED: workspace package/lock mismatch",
+                        )
+                else:
+                    _ensure_materialized_directory(destination.parent, workspace_root=workspace)
+                    shutil.copy2(resolved_source / relative, destination)
+                    dependency_contract_roots.add(relative)
+            receipt = npm_substrate.receipt_path(workspace, package_rel)
+            _ensure_materialized_directory(receipt.parent, workspace_root=workspace)
+            _assert_materialized_destination(receipt, workspace_root=workspace)
+            receipt.write_text(json.dumps(contract, sort_keys=True), encoding="utf-8")
+            dependency_contract_roots.add(f"{package_rel}/node_modules")
+            try:
+                npm_substrate.verify(workspace, package_rel, validation_tool._resolve_node_executable())
+            except npm_substrate.SubstrateError as exc:
+                raise ProductRuntimeDependencyGap(
+                    DEPENDENCY_PROVENANCE_MISMATCH,
+                    f"VALIDATION_INFRASTRUCTURE_FAILED: {exc}",
+                ) from exc
 
     total_files = sum(int(item["copied_file_count"]) for item in substrates)
     total_dirs = sum(int(item["copied_directory_count"]) for item in substrates)
@@ -14863,7 +14900,8 @@ def _materialize_workpacket_dependency_substrate(
             _SCRATCH_DEPENDENCY_EXCLUDED_DIR_NAMES
         ),
         "product_diff_excluded_roots": sorted(
-            item["scratch_dependency_root_relative"] for item in substrates
+            {item["scratch_dependency_root_relative"] for item in substrates}
+            | dependency_contract_roots
         ),
         "local_package_sources_materialized": bool(local_package_sources),
         "local_package_source_materializations": sorted(
@@ -14875,7 +14913,7 @@ def _materialize_workpacket_dependency_substrate(
         ),
         "local_package_source_copied_file_count": local_package_source_copied_file_count,
         "dependency_install_performed": False,
-        "canonical_package_lock_materialized": False,
+        "canonical_package_lock_materialized": bool(dependency_contract_roots),
     }
 
 
@@ -15343,6 +15381,7 @@ def _copy_dependency_substrate_root(
             copied_dirs += len(kept_dirnames)
             for filename in filenames:
                 source_file = root_path / filename
+                launcher_target = None
                 if is_reparse_or_symlink(source_file):
                     try:
                         resolved_file = source_file.resolve(strict=True)
@@ -15358,10 +15397,26 @@ def _copy_dependency_substrate_root(
                             "dependency source symlinked file target is not a file",
                         )
                     source_file = resolved_file
+                    if rel_root == ".bin":
+                        launcher_target = resolved_file.relative_to(resolved_dependency_root).as_posix()
                 dest_file = dest_root / filename
                 _assert_materialized_destination(dest_file, workspace_root=workspace_root)
                 size = source_file.stat().st_size
-                shutil.copy2(source_file, dest_file)
+                if launcher_target is not None:
+                    # A physical shell wrapper survives durable snapshots while
+                    # Node loads the real entry at its package-relative location.
+                    if any(c in launcher_target for c in ('"', '$', '`', '\\', '\n')):
+                        raise ProductRuntimeDependencyGap(
+                            DEPENDENCY_MATERIALIZATION_FAILED, "unsafe package launcher target",
+                        )
+                    dest_file.write_text(
+                        '#!/bin/sh\nexec "$(dirname "$0")/../'
+                        + launcher_target + '" "$@"\n', encoding="utf-8",
+                    )
+                    dest_file.chmod(0o755)
+                    size = dest_file.stat().st_size
+                else:
+                    shutil.copy2(source_file, dest_file)
                 copied_files += 1
                 copied_bytes += size
     except ProductRuntimeDependencyGap:
