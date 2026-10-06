@@ -33412,6 +33412,8 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
     from .manual_validation_resolution import apply_workflow as apply_manual_resolution
     apply_manual_resolution(snapshot, remaining_blockers)
     _apply_approved_ticket_execution_profile_authority(snapshot, remaining_blockers)
+    from .recovery_authority import apply_workflow as apply_recovery_authority
+    apply_recovery_authority(snapshot, remaining_blockers)
     snapshot["remaining_blockers"] = remaining_blockers
     snapshot["blocker_count"] = len(remaining_blockers)
     snapshot["next_action_label"] = _next_action_label(snapshot.get("next_action"))

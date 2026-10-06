@@ -6,6 +6,109 @@ import sqlite3
 from pathlib import Path
 
 
+def apply_workflow(snapshot, blockers):
+    """Publish current recovery authority after all historical overlays."""
+    from hermes_cli import kanban_db as kb
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    action = snapshot.get("next_action") or {}
+    ticket = snapshot.get("current_ticket_id")
+    if not ticket:
+        return
+    actions = pr.governed_ticket_lifecycle_action_ids(ticket)
+    if action.get("id") not in {actions["execution_recovery"], actions["retry_start"]}:
+        return
+    retry = action["id"] == actions["retry_start"]
+    try:
+        projection = pr._load_current_projection_record()
+        if projection["ticket_id"] != ticket:
+            raise pr.ProductRuntimeConflict("recovery projection targets a different ticket")
+        pr._validate_execution_start_authority(projection)
+        path = kb.kanban_db_path(board=projection["kanban_board_slug"])
+        with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True) as conn:
+            conn.row_factory = sqlite3.Row
+            task = kb.get_task(conn, projection["kanban_task_id"])
+            runs = kb.list_runs(conn, projection["kanban_task_id"])
+        allowed_states = {"blocked", "ready"} if retry else {"blocked"}
+        if task is None or not runs or task.status not in allowed_states or task.current_run_id is not None:
+            raise pr.ProductRuntimeConflict("recovery requires a terminal blocked task")
+        if any(pr._execution_is_active(pr._run_dict(item)) for item in runs) or int(snapshot.get("active_execution_count") or 0):
+            raise pr.ProductRuntimeConflict("recovery cannot authorize an active execution")
+        body = json.loads(task.body or "{}")
+        if not isinstance(body, dict) or body.get("WorkPacket_ID") != projection["work_packet_id"] or body.get("WorkPacket_SHA256") != projection["work_packet_SHA256"]:
+            raise pr.ProductRuntimeConflict("recovery task WorkPacket binding mismatch")
+        run = runs[-1]
+        binding = {
+            **pr._current_ticket_projection_identity_fields(projection),
+            "projection_SHA256": projection["projection_SHA256"],
+            "kanban_board_slug": projection["kanban_board_slug"],
+            "kanban_task_id": task.id,
+            "assignee_profile": projection["assignee_profile"],
+            "kanban_task_workspace_path": task.workspace_path,
+            "latest_failed_run_id": run.id,
+            "latest_failed_run_status": run.status,
+            "latest_failed_run_outcome": run.outcome,
+            "latest_failed_run_ended_at": run.ended_at,
+            "observed_attempt_count": len(runs),
+        }
+        binding["terminal_run_SHA256"] = terminal_identity(binding)
+        record = pr.load_current_ticket_recovery_action_record(projection_record=projection)
+        if retry:
+            if record is None or record["latest_failed_run_id"] != run.id:
+                raise pr.ProductRuntimeConflict("retry requires this failed run's recovery decision")
+            binding["recovery_action_SHA256"] = record["recovery_action_SHA256"]
+            text = f"I explicitly authorize the retry execution of {ticket} after failed run {run.id}."
+            tool = "start_current_ticket_execution"
+        else:
+            text = (
+                f"I explicitly authorize the governed recovery action {action['id']} "
+                f"for ticket {ticket}, run {run.id}. Recovery only. "
+                "Do not start a retry or a new execution as part of this action."
+            )
+            pr._validate_execution_recovery_authorization_text(
+                text, current_ticket_id=ticket, current_run_id=run.id,
+            )
+            tool = "recover_current_ticket_execution"
+        digest = hashlib.sha256(json.dumps(binding, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        snapshot["next_action"] = {
+            **action,
+            "tool": tool,
+            "run_id": run.id,
+            "required_human_action": "retry_start_authorization" if retry else "execution_recovery_authorization",
+            "required_human_authorization_text": text,
+            "required_human_authorization_text_SHA256": hashlib.sha256(text.encode()).hexdigest(),
+            "recovery_binding": binding,
+            "recovery_binding_SHA256": digest,
+            "recovery_action_SHA256": binding.get("recovery_action_SHA256"),
+            "failed_run": pr._run_dict(run),
+            "arguments": {
+                "project_id": projection["project_id"],
+                "ticket_id": ticket,
+                "next_action_id": action["id"],
+                "human_authorization_text": text,
+            },
+            "separate_retry_start_authorization_required": True,
+            "dispatch_performed": False,
+        }
+        snapshot["human_action_required"] = True
+        historical = snapshot.get("retry_start_authority") or {}
+        if historical and historical.get("kanban_task_id") != task.id:
+            snapshot.pop("retry_start_authority", None)
+    except (pr.ProductRuntimeError, OSError, sqlite3.Error, ValueError, KeyError, TypeError) as exc:
+        blocker = {"id": "RECOVERY-AUTHORITY-INVALID", "status": "blocked_by_invalid_recovery_authority", "evidence": str(exc)}
+        blockers.append(blocker)
+        snapshot.update({
+            "recovery_state": "blocked_invalid_recovery_authority",
+            "runtime_execution_authorized": False,
+            "next_action": {
+                "id": "RESOLVE_RECOVERY_AUTHORITY_BLOCKER",
+                "target_ticket_id": ticket,
+                "label": "Resolve invalid current execution-recovery authority.",
+                "blocker": blocker,
+            },
+        })
+
+
 def _projection(record, current):
     from hermes_cli.agent_platform import product_runtime as pr
     from hermes_cli.agent_platform.workflow import ticket_architect_bridge as bridge
