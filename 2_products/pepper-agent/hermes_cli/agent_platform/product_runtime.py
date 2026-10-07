@@ -11624,6 +11624,11 @@ def submit_current_ticket_review_decision(
         ):
             return _review_decision_operational_result(existing, idempotent_replay=True)
     target = _review_decision_target_from_prepared_review_or_governed_autonomy(projection)
+    if target.get("authority_kind") == "review_prepare":
+        from .review_readiness import prepared_review_decision_blocker
+        blocker = prepared_review_decision_blocker(build_workflow_control_snapshot(), projection)
+        if blocker is not None:
+            raise ProductRuntimeConflict(f"{blocker[0]}: {blocker[1]}")
     if request.reviewed_run_id not in {None, int(target["reviewed_run_id"])}:
         raise ProductRuntimeConflict(
             f"review decision targets run {target['reviewed_run_id']}, not {request.reviewed_run_id}"

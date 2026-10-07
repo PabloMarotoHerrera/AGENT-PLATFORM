@@ -629,6 +629,7 @@ def _review_readiness_fields(context: dict[str, Any]) -> dict[str, Any]:
     return {
         "blocker_inspection": workflow.get("blocker_inspection"),
         "review_preparation_eligibility": workflow.get("review_preparation_eligibility"),
+        "review_decision_eligibility": workflow.get("review_decision_eligibility"),
     }
 
 

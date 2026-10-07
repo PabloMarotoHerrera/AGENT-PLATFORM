@@ -50,15 +50,48 @@ def _recovery_source(projection):
     }
 
 
+def _prepared_review(projection, completion):
+    """Validate the durable package and its candidate against the current run.
+
+    The canonical loader may retain prepare-time validation command results.
+    That compatibility must not retain a different candidate or terminal run.
+    """
+    from . import product_runtime as pr
+
+    prepared = pr.load_current_ticket_review_prepare_record(projection_record=projection)
+    if prepared is not None:
+        if prepared["successful_run_id"] != completion.get("run_id"):
+            raise pr.ProductRuntimeConflict("prepared review current run mismatch")
+        durable = prepared["kanban_completion_result"]
+        for key in ("candidate_changes_reference", "source_materialization_reference"):
+            if durable.get(key) != completion.get(key):
+                raise pr.ProductRuntimeConflict(f"prepared review current {key} mismatch")
+    return prepared
+
+
 def _superseded_workspace_check(snapshot, projection, record):
     from hermes_cli import kanban_db as kb
     from . import product_runtime as pr, recovery_authority
 
-    manual = snapshot.get("manual_validation") or {}
-    if not (
+    completion = pr._current_review_round_completion_source(projection)
+    prepared = _prepared_review(projection, completion)
+    decision = pr.load_current_ticket_review_decision_record(projection_record=projection) if prepared else None
+    before_prepare = (
         snapshot.get("workflow_status") == "execution_completed"
         and snapshot.get("review_state") == "ready_for_review_validation"
-        and snapshot.get("recovery_state") == "not_required"
+    )
+    recovery_not_required = snapshot.get("recovery_state") == "not_required"
+    if decision and decision.get("review_decision") == "reject":
+        # Rejection demands separate authority for further work, not recovery
+        # of the already superseded failed attempt.
+        recovery_not_required |= snapshot.get("recovery_state") == "not_required_separate_authority_required"
+    manual = snapshot.get("manual_validation")
+    if manual is None and prepared is not None:
+        manual = pr._current_manual_validation_context(projection)
+    manual = manual or {}
+    if not (
+        (before_prepare or prepared is not None)
+        and recovery_not_required
         and snapshot.get("validation_contract_satisfied") is True
         and snapshot.get("reviewable_result") is True
         and manual.get("human_action_required") is False
@@ -73,9 +106,9 @@ def _superseded_workspace_check(snapshot, projection, record):
         return False
     recovery_authority.history(projection)
     pr.validate_p18_9_0_recovery_action_record(record, projection_record=projection)
-    completion = pr._current_review_round_completion_source(projection)
-    contract = pr._acceptance_contract_for_review_projection(projection)
-    if completion.get("blocker_code") or not pr._review_completion_validation_contract_satisfied(completion, contract):
+    contract = prepared["acceptance_contract"] if prepared else pr._acceptance_contract_for_review_projection(projection)
+    validated_completion = prepared["kanban_completion_result"] if prepared else completion
+    if completion.get("blocker_code") or not pr._review_completion_validation_contract_satisfied(validated_completion, contract):
         return False
     if pr._completion_current_terminal_run_authority_blocker(
         projection, completion, unavailable_code="CURRENT_RUN_UNAVAILABLE",
@@ -86,7 +119,7 @@ def _superseded_workspace_check(snapshot, projection, record):
     failed_id = record["latest_failed_run_id"]
     if type(current_id) is not int or type(failed_id) is not int or failed_id >= current_id:
         return False
-    if any(manual.get(key) != projection.get(key) for key in ("ticket_id", "work_packet_id", "work_packet_SHA256")) or manual.get("run_id") != current_id:
+    if manual.get("items") and (any(manual.get(key) != projection.get(key) for key in ("ticket_id", "work_packet_id", "work_packet_SHA256")) or manual.get("run_id") != current_id):
         return False
     path = kb.kanban_db_path(board=projection["kanban_board_slug"])
     with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True) as conn:
@@ -113,6 +146,46 @@ def _superseded_workspace_check(snapshot, projection, record):
     if record.get("terminal_run_SHA256", digest) != digest:
         return False
     return task.workspace_path != record.get("kanban_task_workspace_path")
+
+
+def prepared_review_decision_blocker(snapshot, projection):
+    """Shared gate for a prepared package; makes no human review decision."""
+    from . import product_runtime as pr
+
+    if snapshot.get("remaining_blockers"):
+        return "WORKFLOW_BLOCKER_PRESENT", "workflow blockers are present"
+    if snapshot.get("active_execution_count") != 0:
+        return "EXECUTION_ALREADY_ACTIVE", "current execution absence is not established"
+    if int(snapshot.get("pending_ticket_approval_count") or 0) != 0:
+        return "APPROVAL_STATE_GAP", "current ticket approval is not established"
+    if snapshot.get("recovery_state") != "not_required":
+        return "RECOVERY_REQUIRED", "current recovery authority must be resolved"
+    if snapshot.get("review_decision_recorded") is True:
+        return "REVIEW_DECISION_ALREADY_RECORDED", "a human review decision is already recorded"
+    try:
+        completion = pr._current_review_round_completion_source(projection)
+        prepared = _prepared_review(projection, completion)
+        if prepared is None:
+            return "REVIEW_PREPARE_AUTHORITY_UNAVAILABLE", "no current prepared review package"
+        if pr._completion_current_terminal_run_authority_blocker(
+            projection, completion, unavailable_code="CURRENT_RUN_UNAVAILABLE", mismatch_code="CURRENT_RUN_MISMATCH",
+        ):
+            return "CURRENT_RUN_MISMATCH", "prepared review is not bound to the current terminal run"
+        manual = snapshot.get("manual_validation") or pr._current_manual_validation_context(projection)
+        if manual.get("human_action_required") is not False:
+            return "MANUAL_VALIDATION_REQUIRED", "required manual validation needs explicit human evidence"
+        # Preserve the existing preparation/decision contract for legacy
+        # projections that omit this aggregate. Historical supersession above
+        # still requires independently satisfied validation, unconditionally.
+        if snapshot.get("validation_contract_satisfied") is False or any(
+            item.get("status") != "passed" for item in manual.get("items", [])
+        ):
+            return "VALIDATION_CONTRACT_UNSATISFIED", "current validation contract is not satisfied"
+        if snapshot.get("reviewable_result") is False:
+            return "CANDIDATE_NOT_REVIEWABLE", "current candidate is not reviewable"
+    except (pr.ProductRuntimeError, OSError, ValueError, KeyError, TypeError, sqlite3.Error):
+        return "REVIEW_PREPARE_AUTHORITY_INVALID", "prepared review authority or current candidate does not validate"
+    return None
 
 
 def _public(blocker):
@@ -145,13 +218,14 @@ def apply(snapshot, blockers):
 
     ticket = snapshot.get("current_ticket_id")
     historical = []
-    recovery_id = f"{str(ticket).replace('.', '-')}-RECOVERY-AUTHORITY"
+    recovery_ticket = ticket or snapshot.get("closed_predecessor_ticket_id")
+    recovery_id = f"{str(recovery_ticket).replace('.', '-')}-RECOVERY-AUTHORITY"
     for blocker in list(blockers):
         if blocker.get("id") != recovery_id:
             continue
         try:
             projection = pr._load_current_projection_record()
-            if projection["ticket_id"] != ticket:
+            if projection["ticket_id"] != recovery_ticket:
                 continue
             record, source = _recovery_source(projection)
             blocker.update(source, code="RECOVERY_AUTHORITY_INVALID", category="execution_recovery")
@@ -188,6 +262,23 @@ def apply(snapshot, blockers):
         "read_only": True, "review_preparation_recorded": False,
     }
     action = snapshot.get("next_action") or {}
+    if ticket and snapshot.get("current_ticket_review_prepare_present") is True and action.get("id") == pr._review_decision_request_action_id(ticket):
+        try:
+            decision_blocked = prepared_review_decision_blocker(snapshot, pr._load_current_projection_record())
+        except (pr.ProductRuntimeError, OSError, ValueError, KeyError, TypeError):
+            decision_blocked = ("REVIEW_PREPARE_AUTHORITY_INVALID", "current review authority is unavailable")
+        snapshot["review_decision_eligibility"] = {
+            "available": decision_blocked is None, "scope": "prepared_review_gate",
+            "blocker_code": decision_blocked[0] if decision_blocked else None,
+            "blocker_detail": decision_blocked[1] if decision_blocked else None,
+            "read_only": True, "review_decision_recorded": False,
+        }
+        if decision_blocked:
+            snapshot["next_action"] = {
+                "id": f"RESOLVE_{str(ticket).replace('.', '_')}_REVIEW_BLOCKER",
+                "target_ticket_id": ticket, "label": "Resolve the current review prerequisite.",
+                "blocker_code": decision_blocked[0], "required_human_action": "resolve_review_prerequisite",
+            }
     if ticket and blocked and action.get("id") == pr.governed_ticket_lifecycle_action_ids(ticket)["review_prepare"]:
         snapshot.update(readiness="review_prerequisite_blocked", review_state="blocked_review_prerequisite", next_action={
             "id": f"RESOLVE_{str(ticket).replace('.', '_')}_REVIEW_BLOCKER",
