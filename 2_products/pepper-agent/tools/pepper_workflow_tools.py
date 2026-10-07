@@ -1565,6 +1565,15 @@ def _attest_current_ticket_zero_change_for_review_prepare(
 
 
 def _inspect_current_ticket_review_candidate(args: dict[str, Any], **_kwargs) -> str:
+    if args.get("operation") == "handoff_script":
+        from hermes_cli.agent_platform import handoff_rendering
+        try:
+            return _result(handoff_rendering.inspect(**{key: value for key, value in args.items() if key != "operation"}))
+        except Exception as exc:
+            return _result({"success": False, "read_only": True, "inspection_status": "blocked",
+                            "blocker_code": "HANDOFF_SCRIPT_UNAVAILABLE", "blocker_detail": str(exc)[:500],
+                            "workflow_mutation": False, "handoff_regenerated": False,
+                            "materialization_performed": False, "Git_commands_executed": 0})
     if args.get("operation") == "post_accept_history":
         from hermes_cli.agent_platform import post_accept_material_revision
         try:
@@ -1576,6 +1585,11 @@ def _inspect_current_ticket_review_candidate(args: dict[str, Any], **_kwargs) ->
                 evidence_offset=args.get("evidence_offset", 0),
                 candidate_path=args.get("candidate_path"), max_bytes=args.get("max_bytes"),
             ))
+        except FileNotFoundError:
+            return _result({"success": False, "read_only": True, "inspection_status": "blocked",
+                            "blocker_code": "POST_ACCEPT_HISTORY_UNAVAILABLE",
+                            "blocker_detail": "Requested material-revision transition evidence is absent. Current prepared handoff retrieval uses handoff_script with its exact authority guards; it does not require a later revision transition.",
+                            "workflow_mutation": False})
         except Exception as exc:
             return tool_error(str(exc) or "historical post-accept evidence unavailable", success=False)
     if str(args.get("operation", "")).strip().startswith("pre_review_"):
@@ -2466,13 +2480,16 @@ _ATTEST_CURRENT_TICKET_ZERO_CHANGE_FOR_REVIEW_PREPARE_SCHEMA = {
 _INSPECT_CURRENT_TICKET_REVIEW_CANDIDATE_SCHEMA = {
     "type": "object",
     "properties": {
+        **{key: {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Required exact persisted authority guard for handoff_script only."}
+           for key in ("handoff_prepare_identity_SHA256", "handoff_prepare_record_SHA256", "P17_7_handoff_package_SHA256", "materialization_plan_SHA256", "rendered_powershell_SHA256")},
         "work_packet_SHA256": {"type": "string", "description": "Exact prior WorkPacket guard for post_accept_history only; returns immutable prior review/candidate/handoff authority."},
         "operation": {
             "type": "string",
-            "enum": ["list", "metadata", "content", "diff", "aggregate_diff", "execution_evidence", "post_accept_history", "pre_review_list", "pre_review_metadata", "pre_review_content", "pre_review_diff", "pre_review_aggregate_diff"],
+            "enum": ["list", "metadata", "content", "diff", "aggregate_diff", "execution_evidence", "post_accept_history", "handoff_script", "pre_review_list", "pre_review_metadata", "pre_review_content", "pre_review_diff", "pre_review_aggregate_diff"],
             "description": (
                 "Read-only inspection operation for the current prepared review candidate. "
                 "Use list first, then diff or content for an exact returned candidate_path."
+                " For the existing human Git script use handoff_script with ticket_id, reviewed_run_id and all five handoff digest guards. Returns complete persisted UTF-8/LF text, canonical rendered digest and separate raw script bytes SHA256; never prepares or executes. post_accept_history is only for an explicit historical material-revision transition."
                 " At pending manual validation use pre_review_list with exact ticket_id and reviewed_run_id, then pre_review_* with its candidate_binding_SHA256. No review preparation or human validation is performed."
             ),
         },
