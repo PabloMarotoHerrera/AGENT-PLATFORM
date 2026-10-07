@@ -31308,10 +31308,41 @@ def _current_manual_validation_context(projection: dict[str, Any]) -> dict[str, 
     }
 
 
-def inspect_current_ticket_manual_validation() -> dict[str, Any]:
+def inspect_current_ticket_manual_validation(
+    *, ticket_id: str | None = None, revision: int | None = None,
+    expected_authority_sha256: str | None = None, provenance_only: bool = False,
+) -> dict[str, Any]:
     """Read exact contract wording and evidence without making a human decision."""
+    from hermes_cli.agent_platform import material_revision_provenance
+
+    if provenance_only:
+        if ticket_id is None:
+            ticket_id = _load_current_projection_record()["ticket_id"]
+        return {"material_revision_provenance": material_revision_provenance.inspect(
+            ticket_id=ticket_id, revision=revision,
+            expected_authority_sha256=expected_authority_sha256,
+        )}
     projection = _load_current_projection_record()
-    return _current_manual_validation_context(projection)
+    if ticket_id is not None and ticket_id != projection["ticket_id"]:
+        raise ProductRuntimeConflict("manual validation ticket differs from current ticket")
+    context = _current_manual_validation_context(projection)
+    context["material_revision_provenance"] = material_revision_provenance.inspect(
+        ticket_id=projection["ticket_id"], revision=revision,
+        expected_authority_sha256=expected_authority_sha256,
+    )
+    provenance = context["material_revision_provenance"]
+    if provenance["status"] == "PROVEN" and any(
+        provenance[public] != projection[canonical] for public, canonical in (
+            ("ticket_spec_sha256", "ticket_spec_SHA256"),
+            ("work_packet_id", "work_packet_id"),
+            ("work_packet_sha256", "work_packet_SHA256"),
+        )
+    ):
+        provenance.update(
+            status="AUTHORITY_MISMATCH",
+            classification="MATERIAL_REVISION_VALIDATION_BINDING_MISMATCH",
+        )
+    return context
 
 
 def attest_current_ticket_manual_validation(

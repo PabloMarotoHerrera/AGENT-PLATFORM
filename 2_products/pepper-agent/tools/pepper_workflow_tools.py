@@ -1496,7 +1496,7 @@ def _inspect_current_ticket_manual_validation(args: dict[str, Any], **_kwargs) -
     try:
         return _result({
             "source_tool": "inspect_current_ticket_manual_validation",
-            "manual_validation": _runtime().inspect_current_ticket_manual_validation(),
+            "manual_validation": _runtime().inspect_current_ticket_manual_validation(**args),
             "read_only": True, "auto_validation": False,
         })
     except Exception as exc:
@@ -3151,8 +3151,13 @@ registry.register(
     name="inspect_current_ticket_manual_validation", toolset=TOOLSET,
     schema={
         "name": "inspect_current_ticket_manual_validation",
-        "description": "Read required manual validation items, exact contract wording, run/WorkPacket binding, evidence status and required human attestation texts. Makes no decision.",
-        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        "description": "Read manual validation and durable material-revision provenance. Use provenance_only with ticket_id and revision to inspect a specific revision, independently of candidate state. Expected authority SHA is only a comparison, never evidence. Makes no decision or attestation.",
+        "parameters": {"type": "object", "properties": {
+            "ticket_id": {"type": "string"},
+            "revision": {"type": "integer", "minimum": 1},
+            "expected_authority_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+            "provenance_only": {"type": "boolean", "default": False},
+        }, "additionalProperties": False},
     },
     handler=_inspect_current_ticket_manual_validation, emoji="V", max_result_size_chars=24000,
 )

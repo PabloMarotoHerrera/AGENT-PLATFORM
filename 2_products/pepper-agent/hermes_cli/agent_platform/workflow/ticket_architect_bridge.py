@@ -6072,6 +6072,11 @@ def _load_existing_reconciliation(path: Path, bridge_sha256: str) -> dict[str, A
 
 
 def _write_json_atomic(path: Path, record: dict[str, Any]) -> None:
+    if "revision_authority" in record and "bridge_SHA256" in record:
+        # The complete provenance envelope must cross the same atomic boundary
+        # as the new generation, even if the subsequent history append fails.
+        from hermes_cli.agent_platform.material_revision_provenance import validate_record
+        validate_record(record)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(
