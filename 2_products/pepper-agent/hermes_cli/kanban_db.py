@@ -332,6 +332,30 @@ def _relative_age(ts: Optional[int], now: Optional[int] = None) -> str:
 # ---------------------------------------------------------------------------
 
 DEFAULT_BOARD = "default"
+_READ_ONLY_CONNECTION_FACTORY: ContextVar[Any] = ContextVar(
+    "hermes_kanban_read_only_connection_factory", default=None,
+)
+
+
+@contextlib.contextmanager
+def scoped_read_only_connections(factory):
+    """Use query-only evidence images for inspection, without schema migration.
+
+    Context-local so a concurrent execution/decision keeps its normal database
+    connection. The caller supplies the existing immutable evidence reader.
+    """
+    token = _READ_ONLY_CONNECTION_FACTORY.set(factory)
+    try:
+        yield
+    finally:
+        _READ_ONLY_CONNECTION_FACTORY.reset(token)
+
+
+def read_only_connections_active() -> bool:
+    """Whether this context is inspecting immutable database evidence."""
+    return _READ_ONLY_CONNECTION_FACTORY.get() is not None
+
+
 _CURRENT_BOARD_OVERRIDE: ContextVar[str | None] = ContextVar(
     "hermes_kanban_current_board_override",
     default=None,
@@ -1708,6 +1732,9 @@ def connect(
         path = db_path
     else:
         path = kanban_db_path(board=board)
+    read_only_factory = _READ_ONLY_CONNECTION_FACTORY.get()
+    if read_only_factory is not None:
+        return read_only_factory(path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
     # Fast path: once THIS process has initialized this path, the expensive
@@ -1841,6 +1868,8 @@ def init_db(
         path = db_path
     else:
         path = kanban_db_path(board=board)
+    if _READ_ONLY_CONNECTION_FACTORY.get() is not None:
+        return path
     path.parent.mkdir(parents=True, exist_ok=True)
     resolved = str(path.resolve())
     # Clear the cache entry so the underlying connect() re-runs the

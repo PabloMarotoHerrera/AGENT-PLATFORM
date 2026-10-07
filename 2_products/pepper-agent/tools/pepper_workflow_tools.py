@@ -624,10 +624,32 @@ def _get_current_ticket(args: dict[str, Any], **_kwargs) -> str:
     })
 
 
+def _review_readiness_fields(context: dict[str, Any]) -> dict[str, Any]:
+    workflow = context.get("workflow_control", context)
+    return {
+        "blocker_inspection": workflow.get("blocker_inspection"),
+        "review_preparation_eligibility": workflow.get("review_preparation_eligibility"),
+    }
+
+
 def _get_workflow_control(args: dict[str, Any], **_kwargs) -> str:
+    if args.get("blockers_only") is True:
+        from hermes_cli import kanban_db
+        from hermes_cli.agent_platform import execution_evidence
+        with kanban_db.scoped_read_only_connections(execution_evidence.connection):
+            ctx = _runtime().build_workflow_control_snapshot()
+        return _result({
+            "source_tool": "get_workflow_control", "read_only": True,
+            "current_ticket_id": ctx["current_ticket_id"],
+            "blocker_count": ctx["blocker_count"],
+            "next_action": {key: str(value)[:300] for key, value in (ctx.get("next_action") or {}).items()
+                            if key in {"id", "target_ticket_id", "label", "required_human_action", "blocker_code"}},
+            **_review_readiness_fields(ctx),
+        })
     ctx = _context()
     return _result({
         "source_tool": "get_workflow_control",
+        **_review_readiness_fields(ctx),
         "alternative_actions": ctx.get("alternative_actions", []),
         "source_system": ctx["source_system"],
         "manual_validation": ctx.get("manual_validation"),
@@ -839,9 +861,13 @@ def _get_execution_status(args: dict[str, Any], **_kwargs) -> str:
         record for record in executions
         if isinstance(record, dict) and pr._execution_is_active(record)
     ]
+    workflow = pr.build_workflow_control_snapshot()
     return _result({
         "source_tool": "get_execution_status",
-        "manual_validation": pr.build_workflow_control_snapshot().get("manual_validation"),
+        **_review_readiness_fields(workflow),
+        "manual_validation": workflow.get("manual_validation"),
+        "next_action": workflow.get("next_action"),
+        "review_state": workflow.get("review_state"),
         "source_system": source.get("source_system", pr.CONTROLLED_EXECUTION_SOURCE_SYSTEM),
         "execution_state": "active_executions" if active else "no_active_executions",
         "execution_count": len(executions),
@@ -857,6 +883,7 @@ def _get_review_status(args: dict[str, Any], **_kwargs) -> str:
     ctx = _context()
     return _result({
         "source_tool": "get_review_status",
+        **_review_readiness_fields(ctx),
         "source_system": ctx["source_system"],
         "manual_validation": ctx.get("manual_validation"),
         "workflow_status": ctx["workflow_status"],
@@ -896,6 +923,7 @@ def _get_next_action(args: dict[str, Any], **_kwargs) -> str:
     ctx = _context()
     return _result({
         "source_tool": "get_next_action",
+        **_review_readiness_fields(ctx),
         "alternative_actions": ctx.get("alternative_actions", []),
         "source_system": ctx["source_system"],
         "manual_validation": ctx.get("manual_validation"),
@@ -2689,8 +2717,10 @@ registry.register(
     toolset=TOOLSET,
     schema={
         "name": "get_workflow_control",
-        "description": "Read Pepper workflow-control state from the product runtime projection.",
-        "parameters": _EMPTY_SCHEMA,
+        "description": "Read Pepper workflow-control state. blockers_only returns bounded current/historical blocker provenance and review-gate eligibility without full workflow payloads. Read-only; makes no decision.",
+        "parameters": {"type": "object", "properties": {
+            "blockers_only": {"type": "boolean", "default": False},
+        }, "additionalProperties": False},
     },
     handler=_get_workflow_control,
     emoji="W",

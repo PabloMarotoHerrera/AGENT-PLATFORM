@@ -5836,6 +5836,8 @@ def _reconcile_kanban_board_lifecycle(
     try:
         from hermes_cli import kanban_db
 
+        if kanban_db.read_only_connections_active():
+            return
         kanban_db.detect_crashed_workers(conn)
         if task_id:
             kanban_db.reconcile_orphaned_active_run(
@@ -25389,6 +25391,16 @@ def _review_prepare_workflow_blocker(
         return "MANUAL_VALIDATION_REQUIRED", "required manual validation needs explicit human evidence"
     if workflow.get("workflow_status") == "blocked_manual_validation_failed":
         return "MANUAL_VALIDATION_FAILED", "failed manual validation requires governed correction"
+    if workflow.get("remaining_blockers"):
+        return "WORKFLOW_BLOCKER_PRESENT", "workflow blockers are present"
+    if int(workflow.get("pending_ticket_approval_count") or 0):
+        return "APPROVAL_STATE_GAP", "pending ticket approval remains"
+    if (workflow.get("manual_validation") or {}).get("human_action_required") is True:
+        return "MANUAL_VALIDATION_REQUIRED", "required manual validation needs explicit human evidence"
+    if workflow.get("validation_contract_satisfied") is False:
+        return "VALIDATION_CONTRACT_UNSATISFIED", "validation contract is not satisfied"
+    if workflow.get("reviewable_result") is False:
+        return "CANDIDATE_NOT_REVIEWABLE", "current candidate is not reviewable"
     if workflow.get("workflow_status") != "execution_completed":
         return "PEPPER_REVIEW_PREPARE_ACTION_GAP", "workflow status is not execution_completed"
     next_action = workflow.get("next_action")
@@ -25408,8 +25420,6 @@ def _review_prepare_workflow_blocker(
         return "PEPPER_REVIEW_PREPARE_ACTION_GAP", "validation state is not pending validation"
     if workflow.get("review_state") != "ready_for_review_validation":
         return "PEPPER_REVIEW_PREPARE_ACTION_GAP", "review state is not ready for validation"
-    if workflow.get("remaining_blockers"):
-        return "WORKFLOW_BLOCKER_PRESENT", "workflow blockers are present"
     return None
 
 
@@ -33464,6 +33474,8 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
     _apply_approved_ticket_execution_profile_authority(snapshot, remaining_blockers)
     from .recovery_authority import apply_workflow as apply_recovery_authority
     apply_recovery_authority(snapshot, remaining_blockers)
+    from .review_readiness import apply as apply_review_readiness
+    apply_review_readiness(snapshot, remaining_blockers)
     snapshot["remaining_blockers"] = remaining_blockers
     snapshot["blocker_count"] = len(remaining_blockers)
     snapshot["next_action_label"] = _next_action_label(snapshot.get("next_action"))
