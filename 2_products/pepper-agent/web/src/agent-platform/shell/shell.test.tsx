@@ -17,12 +17,19 @@ const identity: Readonly<ProductBrandIdentity> = Object.freeze({
     id: "synthetic-product",
     displayName: "Synthetic Product",
     version: "2.3.4-test",
+    initials: "SP",
   }),
   upstream: Object.freeze({
     displayName: "Synthetic Upstream",
     version: "8.9.0",
     commit: "0123456789abcdef0123456789abcdef01234567",
     shortCommit: "0123456789ab",
+  }),
+  lockup: Object.freeze({
+    primaryLabel: "Synthetic Product",
+    decorativeInitials: "SP",
+    upstreamAttribution: "Synthetic Upstream 8.9.0",
+    versionLabel: "2.3.4-test",
   }),
 });
 
@@ -87,10 +94,12 @@ describe("product brand lockup", () => {
     );
 
     expect(markup).toContain("Synthetic Product");
+    expect(markup).toContain("SP");
     expect(markup).toContain("2.3.4-test");
     expect(markup).toContain("Synthetic Upstream");
     expect(markup).toContain("8.9.0");
-    expect(markup).toContain("0123456789ab");
+    expect(markup).toContain("aria-hidden=\"true\"");
+    expect(markup).toContain("role=\"presentation\"");
     expect(markup).not.toContain("Fallback");
   });
 

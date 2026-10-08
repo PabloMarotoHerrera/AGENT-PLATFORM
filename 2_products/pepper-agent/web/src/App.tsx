@@ -652,10 +652,8 @@ export default function App() {
 
                 <ProductBrandLockup
                   fallback={
-                    <Typography className="font-bold text-[1.125rem] leading-[0.95] tracking-[0.0525rem] text-midground uppercase">
-                      Hermes
-                      <br />
-                      Agent
+                    <Typography className="font-bold text-[1.125rem] leading-[0.95] tracking-[0.0525rem] text-[var(--agent-platform-text-primary)] uppercase">
+                      Pepper
                     </Typography>
                   }
                   identity={productBrandIdentity}

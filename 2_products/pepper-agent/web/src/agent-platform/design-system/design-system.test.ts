@@ -14,9 +14,11 @@ import { ProductConfigurationProvider } from "../product-config-provider";
 import type { ProductConfiguration } from "../product-config";
 import { groupShellNavigation } from "../shell";
 import { BUILTIN_THEMES } from "../../themes/presets";
-import { createProductBrandIdentity } from "./brand";
+import { createProductBrandIdentity, createProductInitials } from "./brand";
 import {
   PRODUCT_DESIGN_TOKENS,
+  getProductDesignToken,
+  productDesignTokenVar,
   type ProductDesignTokenCategory,
 } from "./tokens";
 
@@ -67,6 +69,7 @@ const TOKEN_CATEGORIES = new Set<ProductDesignTokenCategory>([
 ]);
 
 const CSS_PATH = fileURLToPath(new URL("./tokens.css", import.meta.url));
+const INDEX_CSS_PATH = fileURLToPath(new URL("../../index.css", import.meta.url));
 const BRAND_SOURCE_PATH = fileURLToPath(new URL("./brand.ts", import.meta.url));
 const PROVIDER_SOURCE_PATH = fileURLToPath(
   new URL("../product-config-provider.tsx", import.meta.url),
@@ -129,6 +132,16 @@ describe("product design token catalog", () => {
     expect(Object.isFrozen(PRODUCT_DESIGN_TOKENS)).toBe(true);
     expect(PRODUCT_DESIGN_TOKENS.every(Object.isFrozen)).toBe(true);
   });
+
+  it("exposes bounded lookup and CSS variable helpers", () => {
+    expect(getProductDesignToken("--agent-platform-action-primary")).toEqual({
+      name: "--agent-platform-action-primary",
+      category: "action",
+    });
+    expect(productDesignTokenVar("--agent-platform-action-primary")).toBe(
+      "var(--agent-platform-action-primary)",
+    );
+  });
 });
 
 describe("product token stylesheet", () => {
@@ -157,12 +170,13 @@ describe("product token stylesheet", () => {
     }
   });
 
-  it("contains semantic variables only", () => {
-    expect(css).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+  it("contains bounded semantic variables and Pepper primitives only", () => {
     expect(css).not.toMatch(/\b(?:rgb|rgba|hsl|hsla)\s*\(/i);
     expect(css).not.toMatch(/url\s*\(|@font-face|@import/i);
-    expect(css).not.toMatch(/Pepper|Hermes Agent|\/agent-platform/i);
+    expect(css).not.toMatch(/Hermes Agent|\/agent-platform/i);
     expect(css).not.toMatch(/(?:^|\})\s*(?:html|body|#root|\.[a-z])/m);
+    expect(css).toContain("--agent-platform-action-primary: var(--pepper-blue-500)");
+    expect(css).toContain("--agent-platform-status-info: var(--pepper-blue-400)");
   });
 });
 
@@ -177,6 +191,7 @@ describe("product brand identity", () => {
         id: "synthetic-product",
         displayName: "Synthetic Product",
         version: "2.3.4-test",
+        initials: "SP",
       },
       upstream: {
         displayName: "Synthetic Upstream",
@@ -184,11 +199,24 @@ describe("product brand identity", () => {
         commit: "0123456789abcdef0123456789abcdef01234567",
         shortCommit: "0123456789ab",
       },
+      lockup: {
+        primaryLabel: "Synthetic Product",
+        decorativeInitials: "SP",
+        upstreamAttribution: "Synthetic Upstream 8.9.0",
+        versionLabel: "2.3.4-test",
+      },
     });
     expect(JSON.stringify(configuration)).toBe(before);
     expect(Object.isFrozen(identity)).toBe(true);
     expect(Object.isFrozen(identity?.product)).toBe(true);
     expect(Object.isFrozen(identity?.upstream)).toBe(true);
+    expect(Object.isFrozen(identity?.lockup)).toBe(true);
+  });
+
+  it("creates bounded decorative initials without replacing product text", () => {
+    expect(createProductInitials("Pepper")).toBe("P");
+    expect(createProductInitials("Synthetic Product Runtime")).toBe("SPR");
+    expect(createProductInitials("   ")).toBe("P");
   });
 
   it("returns null without configuration", () => {
@@ -223,6 +251,23 @@ describe("existing theme compatibility", () => {
       expect(theme.layout.radius).toBeDefined();
       expect(theme.layout.density).toBeDefined();
     }
+  });
+
+  it("keeps the default rendered identity Pepper Graphite instead of Hermes teal", () => {
+    const defaultTheme = BUILTIN_THEMES.default;
+    expect(defaultTheme.label).toBe("Pepper Graphite");
+    expect(defaultTheme.description).toContain("Pepper-blue");
+    expect(defaultTheme.palette.background.hex).toBe("#090b0f");
+    expect(defaultTheme.colorOverrides?.primary).toBe("#3b82f6");
+    expect(BUILTIN_THEMES["default-large"].label).toBe("Pepper Graphite (Large)");
+
+    const indexCss = readFileSync(INDEX_CSS_PATH, "utf8");
+    expect(indexCss).toContain("--pepper-graphite-950: #090b0f");
+    expect(indexCss).toContain("--pepper-blue-500: #3b82f6");
+    expect(indexCss).toContain("--color-primary: var(--pepper-blue-500)");
+    expect(indexCss).not.toContain("Hermes Teal");
+    expect(indexCss).not.toContain("#041c1c");
+    expect(indexCss).not.toContain("#ffe6cb");
   });
 });
 

@@ -40,18 +40,48 @@ const DEFAULT_LAYOUT: ThemeLayout = {
 
 export const defaultTheme: DashboardTheme = {
   name: "default",
-  label: "Hermes Teal",
-  description: "Classic dark teal — the canonical Hermes look",
+  label: "Pepper Graphite",
+  description: "Dark graphite shell with restrained Pepper-blue product accents",
   palette: {
-    background: { hex: "#041c1c", alpha: 1 },
-    midground: { hex: "#ffe6cb", alpha: 1 },
+    background: { hex: "#090b0f", alpha: 1 },
+    midground: { hex: "#e5edf7", alpha: 1 },
     foreground: { hex: "#ffffff", alpha: 0 },
-    warmGlow: "rgba(255, 189, 56, 0.35)",
-    noiseOpacity: 1,
+    warmGlow: "rgba(59, 130, 246, 0.26)",
+    noiseOpacity: 0.65,
   },
   typography: DEFAULT_TYPOGRAPHY,
   layout: DEFAULT_LAYOUT,
-  terminalBackground: "#000000",
+  terminalBackground: "#090b0f",
+  terminalForeground: "#e5edf7",
+  colorOverrides: {
+    card: "#0d1117",
+    popover: "#0d1117",
+    primary: "#3b82f6",
+    primaryForeground: "#eff6ff",
+    secondary: "#11161f",
+    muted: "#151b26",
+    accent: "#1d2b44",
+    accentForeground: "#dbeafe",
+    ring: "#60a5fa",
+    success: "#4ade80",
+    warning: "#ffbd38",
+    destructive: "#fb2c36",
+  },
+  componentStyles: {
+    sidebar: {
+      background: "linear-gradient(180deg, #0d1117, #090b0f)",
+      borderImage: "linear-gradient(180deg, rgba(59,130,246,0.42), rgba(148,163,184,0.1)) 1",
+      clipPath: "inset(0 round 0)",
+    },
+    header: {
+      background: "rgba(13,17,23,0.94)",
+    },
+  },
+  seriesColors: {
+    inputTokenAccent: "#94a3b8",
+    outputTokenAccent: "#60a5fa",
+  },
+  swatchColors: ["#090b0f", "#3b82f6", "#151b26"],
 };
 
 export const midnightTheme: DashboardTheme = {
@@ -214,8 +244,8 @@ export const nousBlueTheme: DashboardTheme = {
  */
 export const defaultLargeTheme: DashboardTheme = {
   name: "default-large",
-  label: "Hermes Teal (Large)",
-  description: "Hermes Teal with bigger fonts and roomier spacing",
+  label: "Pepper Graphite (Large)",
+  description: "Pepper Graphite with bigger fonts and roomier spacing",
   palette: defaultTheme.palette,
   typography: {
     ...DEFAULT_TYPOGRAPHY,
@@ -226,6 +256,12 @@ export const defaultLargeTheme: DashboardTheme = {
     ...DEFAULT_LAYOUT,
     density: "spacious",
   },
+  terminalBackground: defaultTheme.terminalBackground,
+  terminalForeground: defaultTheme.terminalForeground,
+  colorOverrides: defaultTheme.colorOverrides,
+  componentStyles: defaultTheme.componentStyles,
+  seriesColors: defaultTheme.seriesColors,
+  swatchColors: defaultTheme.swatchColors,
 };
 
 export const BUILTIN_THEMES: Record<string, DashboardTheme> = {

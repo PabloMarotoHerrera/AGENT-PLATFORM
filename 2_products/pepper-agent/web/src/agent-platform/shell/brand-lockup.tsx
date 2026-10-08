@@ -17,43 +17,60 @@ export function ProductBrandLockup({
 
   return (
     <div
-      className={`flex min-w-0 flex-col leading-tight ${
-        variant === "mobile" ? "max-w-[calc(100vw-5rem)]" : "max-w-40"
+      className={`flex min-w-0 items-center gap-2 ${
+        variant === "mobile" ? "max-w-[calc(100vw-5rem)]" : "max-w-44"
       }`}
       data-agent-platform-brand-lockup={variant}
     >
       <span
-        className={
-          variant === "mobile"
-            ? "truncate text-[0.95rem] font-bold tracking-[0.05em] text-midground"
-            : "whitespace-nowrap text-[0.8rem] font-bold tracking-[0.04em] text-midground"
-        }
-        style={{ fontFamily: "var(--agent-platform-font-display)" }}
-        title={identity.product.displayName}
+        aria-hidden="true"
+        role="presentation"
+        className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border text-[0.68rem] font-bold tracking-[0.08em]"
+        style={{
+          borderColor: "color-mix(in srgb, var(--agent-platform-action-primary) 45%, transparent)",
+          background:
+            "linear-gradient(135deg, color-mix(in srgb, var(--agent-platform-action-primary) 22%, transparent), color-mix(in srgb, var(--agent-platform-surface-panel) 86%, transparent))",
+          color: "var(--agent-platform-action-primary)",
+          fontFamily: "var(--agent-platform-font-display)",
+        }}
       >
-        {identity.product.displayName}
+        {identity.lockup.decorativeInitials}
       </span>
-      {variant === "mobile" ? (
+      <span className="flex min-w-0 flex-col leading-tight">
         <span
-          className="truncate text-[0.625rem] tracking-[0.06em]"
-          style={{ color: "var(--agent-platform-text-muted)" }}
-          title={`${identity.upstream.displayName} ${identity.upstream.version} ${identity.upstream.commit}`}
+          className={
+            variant === "mobile"
+              ? "truncate text-[0.95rem] font-bold tracking-[0.05em]"
+              : "whitespace-nowrap text-[0.82rem] font-bold tracking-[0.04em]"
+          }
+          style={{
+            color: "var(--agent-platform-text-primary)",
+            fontFamily: "var(--agent-platform-font-display)",
+          }}
+          title={identity.lockup.primaryLabel}
         >
-          {identity.product.version} / {identity.upstream.displayName}{" "}
-          {identity.upstream.version} @ {identity.upstream.shortCommit}
+          {identity.lockup.primaryLabel}
         </span>
-      ) : (
-        <span
-          className="flex flex-col text-[0.625rem] tracking-[0.05em]"
-          style={{ color: "var(--agent-platform-text-muted)" }}
-          title={identity.upstream.commit}
-        >
-          <span>{identity.product.version}</span>
-          <span>
-            {identity.upstream.displayName} {identity.upstream.version}
+        {variant === "mobile" ? (
+          <span
+            className="truncate text-[0.625rem] tracking-[0.06em]"
+            style={{ color: "var(--agent-platform-text-muted)" }}
+            title={`${identity.lockup.upstreamAttribution} ${identity.upstream.commit}`}
+          >
+            {identity.lockup.versionLabel} / {identity.lockup.upstreamAttribution} @{" "}
+            {identity.upstream.shortCommit}
           </span>
-        </span>
-      )}
+        ) : (
+          <span
+            className="flex flex-col text-[0.625rem] tracking-[0.05em]"
+            style={{ color: "var(--agent-platform-text-muted)" }}
+            title={identity.upstream.commit}
+          >
+            <span>{identity.lockup.versionLabel}</span>
+            <span>{identity.lockup.upstreamAttribution}</span>
+          </span>
+        )}
+      </span>
     </div>
   );
 }

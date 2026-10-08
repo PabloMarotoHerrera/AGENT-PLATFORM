@@ -55,3 +55,26 @@ export const PRODUCT_DESIGN_TOKENS: readonly Readonly<ProductDesignTokenDefiniti
     token("--agent-platform-motion-fast", "motion"),
     token("--agent-platform-motion-standard", "motion"),
   ]);
+
+export type ProductDesignTokenName =
+  (typeof PRODUCT_DESIGN_TOKENS)[number]["name"];
+
+const PRODUCT_DESIGN_TOKENS_BY_NAME: ReadonlyMap<
+  ProductDesignTokenName,
+  Readonly<ProductDesignTokenDefinition>
+> = new Map(PRODUCT_DESIGN_TOKENS.map((definition) => [definition.name, definition]));
+
+export function getProductDesignToken(
+  name: ProductDesignTokenName,
+): Readonly<ProductDesignTokenDefinition> {
+  const definition = PRODUCT_DESIGN_TOKENS_BY_NAME.get(name);
+  if (definition === undefined) {
+    throw new Error(`Unknown product design token: ${name}`);
+  }
+  return definition;
+}
+
+export function productDesignTokenVar(name: ProductDesignTokenName): `var(${ProductDesignTokenName})` {
+  getProductDesignToken(name);
+  return `var(${name})`;
+}
