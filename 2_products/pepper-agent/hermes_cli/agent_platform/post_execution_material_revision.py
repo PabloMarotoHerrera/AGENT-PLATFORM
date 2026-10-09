@@ -36,10 +36,16 @@ def path_for(generation):
     )
 
 
-def validate_record(record, generation):
+def validate_record(record, generation, _depth=0):
     binding = record["request_binding"]
     if record.get("material_revision_request_SHA256") != digest(record):
         raise ValueError("post-execution material request digest mismatch")
+    if "reconciliation_authority" in record:
+        from . import material_revision_reconciliation as reconciliation
+        authority = reconciliation.validate(record["reconciliation_authority"], generation, _depth)
+        if record != reconciliation.effective(authority):
+            raise ValueError("reconciled material request mismatch")
+        return record
     expected = {"policy_id": POLICY, "reason_code": REASON,
                 "human_authorization_text": consent(binding),
                 "successor_generated": False, "execution_started": False,
@@ -65,7 +71,11 @@ def load(generation):
         raw = stream.read(MAX_BYTES + 1)
     if len(raw) > MAX_BYTES:
         raise ValueError("material request exceeds bound")
-    return validate_record(json.loads(raw), generation)
+    original = validate_record(json.loads(raw), generation)
+    if "reconciliation_authority" in original:
+        raise ValueError("original request cannot be replaced by reconciled authority")
+    from .material_revision_reconciliation import resolve
+    return resolve(generation, original)
 
 
 def context(projection):
@@ -134,6 +144,9 @@ def validate_current(record, projection):
     if (record["request_binding"] != binding or record["historical_authority"] != history
             or load(generation) != record):
         raise ValueError("post-execution material request current authority changed")
+    if "reconciliation_authority" in record:
+        from .material_revision_reconciliation import context as reconciliation_context
+        reconciliation_context(projection)
     return record
 
 
@@ -237,7 +250,16 @@ def apply_workflow(snapshot, blockers):
         snapshot.pop("command_validation_action", None)
     except (ValueError, OSError, KeyError, TypeError) as exc:
         if exists:
+            from .material_revision_reconciliation import inspect as inspect_reconciliation
+            reconciliation = inspect_reconciliation(projection)
             snapshot.update(workflow_status="material_revision_authority_blocked", alternative_actions=[],
-                            next_action={"id": "RECONCILE_MATERIAL_REVISION_AUTHORITY",
-                                         "required_human_action": "authority_reconciliation"})
+                            required_human_action="authority_reconciliation",
+                            material_revision_reconciliation=reconciliation,
+                            command_validation_available=False, reviewable_result=False,
+                            ticket_execution_authorized=False, WorkPacket_execution_authorized=False,
+                            runtime_execution_authorized=False,
+                            next_action=reconciliation.get("next_action", {
+                                "id": "RECONCILE_MATERIAL_REVISION_AUTHORITY",
+                                "required_human_action": "authority_reconciliation"}))
+            snapshot.pop("command_validation_action", None)
             blockers.append({"id": "POST-EXECUTION-MATERIAL-REVISION-AUTHORITY", "status": "blocked", "evidence": str(exc)[:300]})

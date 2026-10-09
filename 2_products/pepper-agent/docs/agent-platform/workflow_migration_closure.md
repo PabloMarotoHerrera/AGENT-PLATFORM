@@ -653,3 +653,28 @@ commands or modify evidence. A material revision still needs its own explicit
 human authorization through the existing executor. Copy the complete approved
 array before proposing a narrow command change; supplied validation_steps replace
 the array rather than merging individual entries.
+
+### Source-only material-revision authority reconciliation
+
+When a valid post-execution material-revision request becomes stale solely because
+the canonical source fingerprint changed, workflow exposes
+`RECONCILE_MATERIAL_REVISION_AUTHORITY`. Use the existing
+`request_current_ticket_material_revision` tool with `origin=post_execution` and
+`operation=inspect_reconciliation` to obtain the exact `reconciliation_binding`
+and human authorization text. `operation=reconcile` requires that entire binding,
+the action ID and the exact consent. Generic confirmation is insufficient.
+
+Reconciliation preserves the original request byte-for-byte. An exclusive durable
+record under `post-execution-material-revision/reconciliations/<prior-request-SHA>.json`
+links the prior request, current authority, approved artifact identity and distinct
+human consent. Its digest determines a new effective request authority. Subsequent
+source changes require fresh consent; at most eight immutable links are supported,
+with the existing 4 MiB authority bound. Corrupt/conflicting links fail closed.
+
+Only source fingerprint fields may drift: ticket/revision, WorkPacket, terminal
+completion, projection, validation contract, defect details and historical evidence
+must remain identical. A changed source root/policy, active execution, superseding
+review/handoff or changed approved artifact cannot be reconciled by this operation.
+Inspection writes nothing. Reconciliation creates no revision, approval, run or
+validation evidence; it returns to the existing separately authorized `REVISE`
+boundary. C93 inspection remains available for a fresh approved-contract read.

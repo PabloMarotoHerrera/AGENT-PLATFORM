@@ -1098,6 +1098,15 @@ def _request_current_ticket_material_revision(args: dict[str, Any], **kwargs) ->
         from hermes_cli.agent_platform import post_execution_material_revision as revision
         try:
             operation = args.get("operation", "request")
+            if operation in {"inspect_reconciliation", "reconcile"}:
+                from hermes_cli.agent_platform import material_revision_reconciliation as reconciliation
+                if operation == "inspect_reconciliation" and set(args) == {"origin", "operation"}:
+                    return _result({"source_tool": "request_current_ticket_material_revision", **reconciliation.inspect()})
+                if operation != "reconcile" or set(args) - {"origin", "operation", "reconciliation_binding", "human_authorization_text", "next_action_id"}:
+                    raise ValueError("reconciliation requires its exact exposed binding")
+                return _result({"source_tool": "request_current_ticket_material_revision", **reconciliation.reconcile(
+                    binding=args.get("reconciliation_binding"), human_authorization_text=args.get("human_authorization_text"),
+                    next_action_id=args.get("next_action_id"))})
             if operation == "inspect" and set(args) == {"origin", "operation"}:
                 return _result({"source_tool": "request_current_ticket_material_revision", **revision.inspect()})
             if operation != "request" or set(args) - {"origin", "operation", "human_authorization_text", "request_binding", "next_action_id"}:
@@ -3324,7 +3333,8 @@ registry.register(
             "type": "object",
             "properties": {
                 "origin": {"type": "string", "enum": ["retry_pending", "post_accept", "post_execution"]},
-                "operation": {"type": "string", "enum": ["inspect", "request"], "description": "post_execution: inspect is read-only; request requires exact separately authorized binding."},
+                "operation": {"type": "string", "enum": ["inspect", "request", "inspect_reconciliation", "reconcile"], "description": "post_execution: inspect/inspect_reconciliation are read-only. request/reconcile require their distinct exact binding and human consent; neither generates a revision."},
+                "reconciliation_binding": {"type": "object", "description": "Exact binding from inspect_reconciliation for source-only authority reconciliation."},
                 "request_binding": {"type": "object", "description": "Exact complete request_binding returned by the relevant material-revision inspection or alternative action."},
                 "next_action_id": {"type": "string"},
                 "human_authorization_text": {"type": "string"},
@@ -3339,6 +3349,8 @@ registry.register(
                 {"required": ["human_authorization_text", "ticket_id", "failed_run_id", "work_packet_SHA256", "recovery_action_SHA256", "reason_code"], "properties": {"origin": {"enum": ["retry_pending"]}}},
                 {"required": ["human_authorization_text", "origin", "request_binding", "next_action_id"], "properties": {"origin": {"const": "post_accept"}}},
                 {"required": ["origin", "operation"], "properties": {"origin": {"const": "post_execution"}, "operation": {"const": "inspect"}}},
+                {"required": ["origin", "operation"], "properties": {"origin": {"const": "post_execution"}, "operation": {"const": "inspect_reconciliation"}}},
+                {"required": ["origin", "operation", "reconciliation_binding", "next_action_id", "human_authorization_text"], "properties": {"origin": {"const": "post_execution"}, "operation": {"const": "reconcile"}}},
                 {"required": ["origin", "request_binding", "next_action_id", "human_authorization_text"], "properties": {"origin": {"const": "post_execution"}, "operation": {"const": "request"}}},
             ],
             "additionalProperties": False,
