@@ -29941,6 +29941,11 @@ def _governed_autonomy_current_review_round_completion_source(
 
 
 def _current_review_round_completion_source(projection: dict[str, Any]) -> dict[str, Any]:
+    from .command_validation import enrich
+    return enrich(projection, _current_review_round_completion_source_raw(projection))
+
+
+def _current_review_round_completion_source_raw(projection: dict[str, Any]) -> dict[str, Any]:
     promoted = _terminal_review_selection_authority(projection)
     if promoted is not None:
         return promoted["completion"]
@@ -31305,6 +31310,10 @@ def _current_manual_validation_context(projection: dict[str, Any]) -> dict[str, 
     if not _review_prepare_eligible_result(completion, contract, zero_change_authority=zero):
         raise ProductRuntimeConflict("candidate or zero-change authority must be resolved first")
     items = manual_validation.inspect(contract, completion)
+    from .command_validation import dependencies, manual_blocker
+    for item in items:
+        item["evidence_dependencies"] = dependencies(item, contract)
+        item["pending_evidence_dependencies"] = manual_blocker(item, contract, completion, items)
     satisfied = _review_completion_validation_contract_satisfied(completion, contract)
     return {
         "items": items,
@@ -31382,19 +31391,33 @@ def attest_current_ticket_manual_validation(
     item = next((item for item in context["items"] if item["validation_id"] == validation_id), None)
     if item is None or item["binding_SHA256"] != binding_sha256:
         raise ProductRuntimeConflict("manual validation item/binding mismatch")
+    if status == "passed" and item["status"] == "pending":
+        from .command_validation import manual_blocker
+        dependencies = manual_blocker(
+            item, _acceptance_contract_for_review_projection(projection),
+            _current_review_round_completion_source(projection), context["items"],
+        )
+        if dependencies:
+            raise ProductRuntimeConflict("manual validation evidence prerequisites pending: " + ", ".join(dependencies))
     if item["status"] == "pending":
+        from .command_validation import action_id as command_validation_action_id
         workflow = build_workflow_control_snapshot()
         if (
             workflow.get("workflow_status") != "execution_completed_pending_manual_validation"
-            or (workflow.get("next_action") or {}).get("id") != next_action_id
+            or (workflow.get("next_action") or {}).get("id") not in {next_action_id, command_validation_action_id(ticket_id)}
             or workflow.get("current_ticket_id") != ticket_id
             or int(workflow.get("active_execution_count") or 0) != 0
             or workflow.get("recovery_state") != "not_required"
         ):
             raise ProductRuntimeConflict("manual validation is not the current human action")
+    from .command_validation import dependency_evidence
     record, replay = manual_validation.persist(
         item["binding"], status=status, human_attestation_text=human_attestation_text,
         evidence=evidence, actor="pepper-chat-human",
+        dependency_evidence=dependency_evidence(
+            item, _acceptance_contract_for_review_projection(projection),
+            _current_review_round_completion_source(projection), context["items"],
+        ) if status == "passed" else None,
     )
     return {
         "manual_validation": _current_manual_validation_context(projection),
@@ -31410,7 +31433,9 @@ def attest_current_ticket_manual_validation(
 def _manual_validation_review_overlay(projection: dict[str, Any]) -> dict[str, Any] | None:
     context = _current_manual_validation_context(projection)
     if not context["items"]:
-        return None
+        from .command_validation import overlay
+        return overlay(projection, _current_review_round_completion_source(projection),
+                       _acceptance_contract_for_review_projection(projection), []) or None
     failed = any(item["status"] == "failed" for item in context["items"])
     pending = context["human_action_required"]
     overlay = {"manual_validation": context, **{
@@ -31429,6 +31454,11 @@ def _manual_validation_review_overlay(projection: dict[str, Any]) -> dict[str, A
                 "required_human_action": "manual_validation_failure_resolution" if failed else "manual_validation_attestation",
             },
         })
+    from .command_validation import overlay as command_overlay
+    overlay.update(command_overlay(
+        projection, _current_review_round_completion_source(projection),
+        _acceptance_contract_for_review_projection(projection), context["items"],
+    ))
     return overlay
 
 
@@ -33553,6 +33583,9 @@ def build_lead_agent_operational_context() -> dict[str, Any]:
         "pending_approval_count": pending_approval_count,
         "pending_ticket_approval_count": int(workflow.get("pending_ticket_approval_count") or 0),
         "alternative_actions": workflow.get("alternative_actions", []),
+        "validation_lifecycle_phase": workflow.get("validation_lifecycle_phase"),
+        "command_validation_complete": workflow.get("command_validation_complete"),
+        "command_validation_action": workflow.get("command_validation_action"),
         "material_revision_request_authority": workflow.get("material_revision_request_authority"),
         "manual_validation": workflow.get("manual_validation"),
         "queue_state": _workflow_value(workflow, "queue_state", "unavailable"),

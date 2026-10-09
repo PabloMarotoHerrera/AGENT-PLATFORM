@@ -589,6 +589,9 @@ def _get_current_project(args: dict[str, Any], **_kwargs) -> str:
         "source_tool": "get_current_project",
         "source_system": ctx["source_system"],
         "manual_validation": ctx.get("manual_validation"),
+        "validation_lifecycle_phase": ctx.get("validation_lifecycle_phase"),
+        "command_validation_complete": ctx.get("command_validation_complete"),
+        "command_validation_action": ctx.get("command_validation_action"),
         "product_id": ctx["product_id"],
         "project_id": ctx["project_id"],
         "project_name": ctx["project_name"],
@@ -609,6 +612,9 @@ def _get_current_ticket(args: dict[str, Any], **_kwargs) -> str:
         "source_tool": "get_current_ticket",
         "source_system": ctx["source_system"],
         "manual_validation": ctx.get("manual_validation"),
+        "validation_lifecycle_phase": ctx.get("validation_lifecycle_phase"),
+        "command_validation_complete": ctx.get("command_validation_complete"),
+        "command_validation_action": ctx.get("command_validation_action"),
         "available": ctx["available"],
         "message": ctx["message"],
         "project_id": ctx["project_id"],
@@ -654,6 +660,9 @@ def _get_workflow_control(args: dict[str, Any], **_kwargs) -> str:
         "alternative_actions": ctx.get("alternative_actions", []),
         "source_system": ctx["source_system"],
         "manual_validation": ctx.get("manual_validation"),
+        "validation_lifecycle_phase": ctx.get("validation_lifecycle_phase"),
+        "command_validation_complete": ctx.get("command_validation_complete"),
+        "command_validation_action": ctx.get("command_validation_action"),
         "product_id": ctx["product_id"],
         "project_id": ctx["project_id"],
         "current_ticket_id": ctx["current_ticket_id"],
@@ -867,6 +876,9 @@ def _get_execution_status(args: dict[str, Any], **_kwargs) -> str:
         "source_tool": "get_execution_status",
         **_review_readiness_fields(workflow),
         "manual_validation": workflow.get("manual_validation"),
+        "validation_lifecycle_phase": workflow.get("validation_lifecycle_phase"),
+        "command_validation_complete": workflow.get("command_validation_complete"),
+        "command_validation_action": workflow.get("command_validation_action"),
         "next_action": workflow.get("next_action"),
         "review_state": workflow.get("review_state"),
         "source_system": source.get("source_system", pr.CONTROLLED_EXECUTION_SOURCE_SYSTEM),
@@ -887,6 +899,9 @@ def _get_review_status(args: dict[str, Any], **_kwargs) -> str:
         **_review_readiness_fields(ctx),
         "source_system": ctx["source_system"],
         "manual_validation": ctx.get("manual_validation"),
+        "validation_lifecycle_phase": ctx.get("validation_lifecycle_phase"),
+        "command_validation_complete": ctx.get("command_validation_complete"),
+        "command_validation_action": ctx.get("command_validation_action"),
         "workflow_status": ctx["workflow_status"],
         "validation_state": ctx["validation_state"],
         "review_state": ctx["review_state"],
@@ -928,6 +943,9 @@ def _get_next_action(args: dict[str, Any], **_kwargs) -> str:
         "alternative_actions": ctx.get("alternative_actions", []),
         "source_system": ctx["source_system"],
         "manual_validation": ctx.get("manual_validation"),
+        "validation_lifecycle_phase": ctx.get("validation_lifecycle_phase"),
+        "command_validation_complete": ctx.get("command_validation_complete"),
+        "command_validation_action": ctx.get("command_validation_action"),
         "project_id": ctx["project_id"],
         "current_ticket_id": ctx["current_ticket_id"],
         "next_ticket_id": ctx["next_ticket_id"],
@@ -1479,6 +1497,21 @@ def _continue_current_ticket_governed_autonomy(args: dict[str, Any], **_kwargs) 
 
 
 def _prepare_current_ticket_review(args: dict[str, Any], **_kwargs) -> str:
+    operation = args.get("operation", "prepare")
+    if operation in {"inspect_commands", "run_commands"}:
+        try:
+            from hermes_cli.agent_platform import command_validation as cv
+            allowed = {"operation"} if operation == "inspect_commands" else {"operation", "binding", "human_authorization_text"}
+            if set(args) != allowed:
+                raise ValueError("command validation requires exact arguments; shell text is not accepted")
+            result = cv.inspect() if operation == "inspect_commands" else cv.execute(
+                binding=args["binding"], human_authorization_text=args["human_authorization_text"],
+            )
+            return _result({"source_tool": "prepare_current_ticket_review", "operation": operation, **cv.public(result)})
+        except Exception as exc:
+            return tool_error(str(exc), success=False, error_code="COMMAND_VALIDATION_AUTHORITY_DENIED")
+    if operation != "prepare":
+        return tool_error("unknown review/command validation operation", success=False)
     pr = _runtime()
     try:
         context = pr.build_lead_agent_operational_context()
@@ -2418,6 +2451,10 @@ _CONTINUE_CURRENT_TICKET_GOVERNED_AUTONOMY_SCHEMA = {
 _PREPARE_CURRENT_TICKET_REVIEW_SCHEMA = {
     "type": "object",
     "properties": {
+        "operation": {"type": "string", "enum": ["prepare", "inspect_commands", "run_commands"],
+                      "description": "Default prepare. inspect_commands reads pre-review command authority. run_commands executes it with exact binding and explicit human consent, without preparing review."},
+        "binding": {"type": "object", "description": "Exact binding returned by inspect_commands; required for run_commands."},
+        "human_authorization_text": {"type": "string", "description": "Exact human command-validation consent returned by inspect_commands; required for run_commands."},
         "human_request_text": {
             "type": "string",
             "description": "Exact user phrase explicitly asking to prepare current-ticket review validation.",
@@ -2435,7 +2472,7 @@ _PREPARE_CURRENT_TICKET_REVIEW_SCHEMA = {
             "description": "Optional next-action guard. Must be PREPARE_<current-ticket>_REVIEW if supplied.",
         },
     },
-    "required": ["human_request_text"],
+    "required": [],
     "additionalProperties": False,
 }
 
@@ -2980,13 +3017,14 @@ registry.register(
         "description": (
             "Prepare the completed current Pepper ticket run for governed review "
             "validation by binding completion evidence to the ticket acceptance contract. "
+            "inspect_commands/run_commands provide separately human-authorized command evidence before final manual validation without preparing review. "
             "Does not accept, close, rerun, retry, mutate Git, invoke Docker, or invoke Graphify."
         ),
         "parameters": _PREPARE_CURRENT_TICKET_REVIEW_SCHEMA,
     },
     handler=_prepare_current_ticket_review,
     emoji="P",
-    max_result_size_chars=24000,
+    max_result_size_chars=48000,
 )
 
 

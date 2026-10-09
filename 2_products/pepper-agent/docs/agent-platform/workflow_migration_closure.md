@@ -567,3 +567,43 @@ Expected P18.R candidates:
 | result_SHA256 | `f2b91050b0be6696339765e3b756da4fba56eb17e25694bf0ac000b5710db70a` |
 
 P18 is closed as a workflow migration. Production readiness remains false because P18 did not define production deployment readiness.
+
+
+## Pre-review governed command validation
+
+Terminal candidate or explicitly attested zero-change authority can enter command
+validation before final manual evidence is complete. The existing
+`prepare_current_ticket_review` tool exposes `inspect_commands` (read-only) and
+`run_commands` (exact returned binding plus explicit human authorization text).
+These operations produce validation evidence and do not prepare or decide review.
+
+The derived phases are `manual_validation_preliminary_pending`,
+`command_validation_pending`, `manual_validation_final_pending`, and
+`command_validation_complete`. Independent manual items remain individually
+attestable. Explicit cross-item references/ranges and known-debt or regression
+failure conclusions require recorded prerequisite evidence. Command success never
+passes a manual item. Newly recorded dependent human evidence retains the digests
+it aggregates without changing immutable item bindings or attestation wording.
+
+Command plans come exclusively from the approved WorkPacket. The pre-review
+adapter supports explicit repository test-wrapper paths and a unique authorized
+npm package's test/typecheck/build scripts. It invokes the existing shell-free
+runner; source text is not interpreted by a shell. Missing test paths produce a
+bounded blocked result, never a silently narrowed test suite. Worker command
+permissions remain unchanged.
+
+A read-only terminal run may have no candidate source snapshot. After explicit
+zero-change authority, its separate validation context can bind the current
+canonical repository source fingerprint. This is new validation input authority,
+not a retrospective claim that the worker validated that source. Inspection does
+not copy sources or execute commands. Execution rechecks the fingerprint and
+installed dependency provenance, requires exact human consent, and rejects source
+drift. It creates no worker run, revision, review decision or Git authority.
+
+Complete command results are stored under
+`agent-platform/pre-review-command-validation`; reuse requires current ticket,
+revision, TicketSpec, WorkPacket, terminal result, validation contract, source
+context and evidence digests. A failed/blocked result can inform human debt
+classification but cannot satisfy review. Review preparation remains downstream
+of all required passing command and manual evidence. Existing immutable manual
+bindings and zero-change authority require no migration.

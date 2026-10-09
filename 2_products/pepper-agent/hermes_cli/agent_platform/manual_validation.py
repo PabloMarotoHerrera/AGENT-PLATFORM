@@ -154,6 +154,7 @@ def inspect(contract: dict, completion: dict) -> list[dict]:
             "status": record["status"] if record else "pending",
             "evidence_SHA256": record["evidence_SHA256"] if record else None,
             "evidence": record["evidence"] if record else None,
+            "dependency_evidence": record.get("dependency_evidence") if record else None,
             "source_authority": POLICY,
             "human_action_required": record is None,
             "required_attestation_text": {
@@ -161,6 +162,11 @@ def inspect(contract: dict, completion: dict) -> list[dict]:
                 for status in ("passed", "failed")
             },
         })
+    from .command_validation import dependency_evidence
+    for item in items:
+        if item["status"] == "passed" and item.get("dependency_evidence") is not None:
+            if item["dependency_evidence"] != dependency_evidence(item, contract, completion, items):
+                raise ValueError("manual validation dependency evidence changed; governed resolution required")
     return items
 
 
@@ -171,6 +177,7 @@ def persist(
     human_attestation_text: str,
     evidence: str,
     actor: str,
+    dependency_evidence: dict | None = None,
 ) -> tuple[dict, bool]:
     if status not in {"passed", "failed"}:
         raise ValueError("manual validation status must be passed or failed")
@@ -186,6 +193,8 @@ def persist(
         "evidence": evidence,
         "actor": actor,
     }
+    if dependency_evidence:
+        record["dependency_evidence"] = dependency_evidence
     record["evidence_SHA256"] = digest(record)
     validate_record(record, identity)
     path = record_path(identity)

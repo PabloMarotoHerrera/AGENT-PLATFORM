@@ -188,6 +188,7 @@ def workpacket_validation_tool(
 
 def resolve_governed_workpacket_validation_authority(
     env: Mapping[str, str] | None = None,
+    *, pre_review: bool = False,
 ) -> tuple[file_guard.WorkPacketFileAuthority, Any]:
     """Resolve active governed WorkPacket authority and return its WorkPacket."""
 
@@ -214,7 +215,7 @@ def resolve_governed_workpacket_validation_authority(
         raise file_guard.WorkPacketAuthorityUnavailable("WorkPacket digest mismatch")
     if work_packet.ticket_id != authority.ticket_id:
         raise file_guard.WorkPacketAuthorityUnavailable("WorkPacket ticket mismatch")
-    if _ticket_type(work_packet) != "implementation":
+    if not pre_review and _ticket_type(work_packet) != "implementation":
         raise file_guard.WorkPacketAuthorityUnavailable(
             "governed validation command authority requires an implementation WorkPacket"
         )
@@ -441,6 +442,7 @@ def validate_review_prepare_validation_authority(
     requested_ticket_id: str | None = None,
     requested_next_action_id: str | None = None,
     authorized_specs: tuple[GovernedValidationCommandSpec, ...] = (),
+    pre_review_binding: Mapping[str, Any] | None = None,
 ) -> None:
     """Validate PREPARE authority independently from product runtime request guards."""
 
@@ -457,6 +459,11 @@ def validate_review_prepare_validation_authority(
     project_id = _required_text(projection, "project_id")
     ticket_id = _required_text(projection, "ticket_id")
     expected_action = _review_prepare_action_id(ticket_id)
+    if pre_review_binding is not None:
+        from hermes_cli.agent_platform import command_validation as cv
+        if dict(pre_review_binding) != cv.identity(projection, completion, acceptance_contract):
+            raise ValueError("pre-review validation current authority mismatch")
+        expected_action = cv.action_id(ticket_id)
     _require_equal("requested project", requested_project_id, project_id)
     _require_equal("requested ticket", requested_ticket_id, ticket_id)
     _require_equal("requested PREPARE action", requested_next_action_id, expected_action)
@@ -497,11 +504,21 @@ def validate_review_prepare_validation_authority(
     if not _completion_is_terminal_for_prepare(completion):
         raise ValueError("completion is not terminal/current")
     _validate_canonical_current_terminal_run_binding(projection, completion)
-    _validate_review_prepare_validation_context(
-        authority=authority,
-        completion=completion,
-        validation_context=validation_context,
-    )
+    if pre_review_binding is not None and pre_review_binding.get("canonical_validation_source"):
+        from hermes_cli.agent_platform.command_validation_context import POLICY, fingerprint
+        source = pre_review_binding["canonical_validation_source"]
+        if (not isinstance(validation_context, Mapping)
+                or validation_context.get("validation_origin") != "pre_review_canonical_repository"
+                or validation_context.get("validation_workspace_policy_id") != POLICY
+                or validation_context.get("canonical_validation_source") != source
+                or validation_context.get("workspace_path") != source["source_root"]
+                or authority.resolved_workspace_root != Path(source["source_root"])
+                or fingerprint(authority.resolved_workspace_root) != {k: source[k] for k in ("source_files_SHA256", "source_file_count", "source_bytes")}):
+            raise ValueError("pre-review canonical source context mismatch")
+    else:
+        _validate_review_prepare_validation_context(
+            authority=authority, completion=completion, validation_context=validation_context,
+        )
 
     completion_sha = completion.get("kanban_completion_result_SHA256")
     if isinstance(completion_sha, str) and completion_sha:
@@ -605,6 +622,7 @@ def run_review_prepare_validation_commands(
     requested_project_id: str | None = None,
     requested_ticket_id: str | None = None,
     requested_next_action_id: str | None = None,
+    pre_review_binding: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Resolve, authorize, and run review-PREPARE validation commands.
 
@@ -621,7 +639,10 @@ def run_review_prepare_validation_commands(
             else review_prepare_validation_requirements(acceptance_contract)
         )
     )
-    authority, work_packet = resolve_governed_workpacket_validation_authority(worker_env)
+    authority, work_packet = (
+        resolve_governed_workpacket_validation_authority(worker_env, pre_review=True)
+        if pre_review_binding is not None else resolve_governed_workpacket_validation_authority(worker_env)
+    )
     specs = build_governed_validation_command_specs(authority, work_packet)
     try:
         validate_review_prepare_validation_authority(
@@ -634,17 +655,27 @@ def run_review_prepare_validation_commands(
             requested_ticket_id=requested_ticket_id,
             requested_next_action_id=requested_next_action_id,
             authorized_specs=specs,
+            pre_review_binding=pre_review_binding,
         )
     except ValueError as exc:
         return _review_prepare_validation_denied_result(
             normalized_requirements,
             failure_detail=f"{REVIEW_PREPARE_VALIDATION_AUTHORITY_DENIED}: {exc}",
         )
+    if pre_review_binding is not None:
+        from tools.pre_review_validation_commands import extend_specs
+        specs = extend_specs(authority, work_packet, specs)
+        if pre_review_binding.get("canonical_validation_source"):
+            specs = _finalize_command_specs(tuple(replace(s, execution_plan=tuple(
+                {**step, "canonical_validation_source": True} for step in _command_plan(s)
+            )) for s in specs))
     results: list[dict[str, Any]] = []
     selected: list[tuple[dict[str, Any], GovernedValidationCommandSpec]] = []
     reusable: list[tuple[dict[str, Any], dict[str, Any]]] = []
     missing: list[dict[str, Any]] = []
-    existing_results = review_prepare_validation_result_records(completion)
+    # Pre-review persistence/replay validates exact current run and digests in
+    # command_validation. Do not promote legacy unbound worker records here.
+    existing_results = () if pre_review_binding is not None else review_prepare_validation_result_records(completion)
     for requirement in normalized_requirements:
         spec = _review_prepare_validation_spec_for_requirement(
             specs,
@@ -686,6 +717,17 @@ def run_review_prepare_validation_commands(
         requested_ticket_id=requested_ticket_id,
         requested_next_action_id=requested_next_action_id,
     )
+    if pre_review_binding is not None:
+        authority_record.update(
+            authority_kind="pre_review_command_validation",
+            policy_id="pepper-pre-review-command-validation-v1",
+            command_execution_authority="explicit_human_command_validation_action",
+            pre_review_binding=dict(pre_review_binding),
+        )
+        authority_record["review_prepare_validation_authority_SHA256"] = _digest_payload(
+            _REVIEW_PREPARE_VALIDATION_AUTHORITY_DIGEST_ALGORITHM,
+            {k: v for k, v in authority_record.items() if k != "review_prepare_validation_authority_SHA256"},
+        )
     for requirement, existing in reusable:
         results.append(
             review_prepare_validation_result_record(
@@ -752,7 +794,8 @@ def run_review_prepare_validation_commands(
                 or "validation command did not satisfy requirement",
                 limit=300,
             )
-            break
+            if pre_review_binding is None:
+                break
     return {
         "validation_executed": bool(selected),
         "validation_complete": len(results) == len(normalized_requirements),
@@ -1877,6 +1920,9 @@ def _public_plan_step(step: Mapping[str, Any]) -> dict[str, Any]:
         if step.get(key) is not None
     }
     return {
+        **({"repository_test_wrapper": True, "wrapper_files": step["wrapper_files"]}
+           if step.get("repository_test_wrapper") else {}),
+        **({"canonical_validation_source": True} if step.get("canonical_validation_source") else {}),
         "subcommand_id": step.get("subcommand_id"),
         "effective_argv": list(step.get("effective_argv") or ()),
         "working_directory": step.get("working_directory"),
@@ -2168,7 +2214,10 @@ def _run_command(
         try:
             workspace = Path(authority.resolved_workspace_root).resolve(strict=True)
             package_rel = Path(command.working_directory).resolve(strict=True).relative_to(workspace).as_posix()
-            npm_substrate.verify(workspace, package_rel, _resolve_node_executable())
+            if command.execution_plan and all(s.get("canonical_validation_source") is True for s in command.execution_plan):
+                npm_substrate.inspect(workspace, package_rel, _resolve_node_executable())
+            else:
+                npm_substrate.verify(workspace, package_rel, _resolve_node_executable())
         except (npm_substrate.SubstrateError, OSError, ValueError) as exc:
             return tool_result(
                 success=False,
@@ -2252,6 +2301,10 @@ def _script_identity_drift_reason(
     command: GovernedValidationCommandSpec,
 ) -> str | None:
     for step in _command_plan(command):
+        if step.get("repository_test_wrapper"):
+            for path, expected in step["wrapper_files"].items():
+                if _file_sha256(Path(path)) != expected:
+                    return "repository test wrapper identity drifted"
         package_rel = step.get("package_relative_path")
         script_name = step.get("package_script_name")
         expected_script = step.get("package_script")
@@ -2302,6 +2355,8 @@ def _run_launch_payload(
         )
         environment = vcr._minimal_environment()  # noqa: SLF001 - substrate reuse
         environment["CI"] = "1"
+        if step_public.get("repository_test_wrapper"):
+            environment["HERMES_PYTHON"] = str(Path(sys.executable).resolve(strict=True))
         launch = vcr._launch_and_capture(  # noqa: SLF001 - deliberate substrate reuse
             launch_spec,
             environment,
