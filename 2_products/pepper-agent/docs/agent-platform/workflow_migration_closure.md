@@ -607,3 +607,27 @@ context and evidence digests. A failed/blocked result can inform human debt
 classification but cannot satisfy review. Review preparation remains downstream
 of all required passing command and manual evidence. Existing immutable manual
 bindings and zero-change authority require no migration.
+
+### Post-execution validation-reference material revision
+
+Before review preparation, a current terminal candidate or attested zero-change
+result may expose `REQUEST_<ticket>_POST_EXECUTION_MATERIAL_REVISION` when an
+approved repository test-wrapper command contains demonstrably missing test paths.
+This is a narrow reference-defect boundary; arbitrary requests and ordinary test
+failures do not qualify. Inspection creates no authority or validation evidence.
+
+Use `request_current_ticket_material_revision` with `origin=post_execution` and
+`operation=inspect` to read the defect, exact current binding and consent text.
+`operation=request` requires that binding, action ID and explicit human consent.
+The immutable request retains terminal/zero-change/contract history and binds the
+validation IDs, missing references and source context. It exposes
+`awaiting_material_revision` / `material_revision_required` and `REVISE_<ticket>`;
+it does not generate a successor revision, approve, dispatch or validate anything.
+
+The existing `revise_current_ticket_for_material_contract_failure` remains the
+only revision executor and requires a separate human-authorized structured
+contract. A narrow command correction inherits unrelated fields and retains the
+existing generator's provenance additions. The successor requires fresh approval;
+prior execution, zero-change and manual evidence remain historical and are never
+copied into passing successor validation. A changed request/source identity blocks
+revision instead of silently rebinding the human decision.

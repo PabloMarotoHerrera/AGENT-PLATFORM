@@ -1075,6 +1075,22 @@ def _revise_generated_successor_ticket(args: dict[str, Any], **_kwargs) -> str:
 
 
 def _request_current_ticket_material_revision(args: dict[str, Any], **kwargs) -> str:
+    if "operation" in args and args.get("origin") != "post_execution":
+        return tool_error("operation is supported only for origin=post_execution", success=False)
+    if args.get("origin") == "post_execution":
+        from hermes_cli.agent_platform import post_execution_material_revision as revision
+        try:
+            operation = args.get("operation", "request")
+            if operation == "inspect" and set(args) == {"origin", "operation"}:
+                return _result({"source_tool": "request_current_ticket_material_revision", **revision.inspect()})
+            if operation != "request" or set(args) - {"origin", "operation", "human_authorization_text", "request_binding", "next_action_id"}:
+                raise ValueError("post-execution request accepts only its exact exposed binding")
+            return _result({"source_tool": "request_current_ticket_material_revision", **revision.public(revision.request(
+                binding=args.get("request_binding"), human_authorization_text=args.get("human_authorization_text"),
+                next_action_id=args.get("next_action_id"),
+            ))})
+        except Exception as exc:
+            return tool_error(str(exc), success=False, error_code="POST_EXECUTION_MATERIAL_REVISION_DENIED")
     if args.get("origin") == "post_accept":
         from hermes_cli.agent_platform import post_accept_material_revision
         try:
@@ -3281,12 +3297,13 @@ registry.register(
     toolset=TOOLSET,
     schema={
         "name": "request_current_ticket_material_revision",
-        "description": "Request the separately human-authorized material-revision gate from retry_pending or origin=post_accept from accepted review with an unexecuted handoff. Use the exact alternative action binding and consent; never infer it from dirty state. Preserves historical authority and does not generate, approve, execute, validate, materialize or mutate Git. A separate REVISE decision remains required.",
+        "description": "Request the separately human-authorized material-revision gate from retry_pending, origin=post_accept from accepted review with an unexecuted handoff, or origin=post_execution for proven immutable command-reference defects before review. Use the exact alternative action binding and consent; never infer it from dirty state. Preserves historical authority and does not generate, approve, execute, validate, materialize or mutate Git. A separate REVISE decision remains required.",
         "parameters": {
             "type": "object",
             "properties": {
-                "origin": {"type": "string", "enum": ["retry_pending", "post_accept"]},
-                "request_binding": {"type": "object", "description": "Exact complete request_binding returned by the post-accept alternative action."},
+                "origin": {"type": "string", "enum": ["retry_pending", "post_accept", "post_execution"]},
+                "operation": {"type": "string", "enum": ["inspect", "request"], "description": "post_execution: inspect is read-only; request requires exact separately authorized binding."},
+                "request_binding": {"type": "object", "description": "Exact complete request_binding returned by the relevant material-revision inspection or alternative action."},
                 "next_action_id": {"type": "string"},
                 "human_authorization_text": {"type": "string"},
                 "ticket_id": {"type": "string"},
@@ -3295,10 +3312,12 @@ registry.register(
                 "recovery_action_SHA256": {"type": "string"},
                 "reason_code": {"type": "string", "enum": ["required_validation_command_authority_missing", "governed_validation_command_incompatible"]},
             },
-            "required": ["human_authorization_text"],
+            "required": [],
             "oneOf": [
-                {"required": ["ticket_id", "failed_run_id", "work_packet_SHA256", "recovery_action_SHA256", "reason_code"], "properties": {"origin": {"enum": ["retry_pending"]}}},
-                {"required": ["origin", "request_binding", "next_action_id"], "properties": {"origin": {"const": "post_accept"}}},
+                {"required": ["human_authorization_text", "ticket_id", "failed_run_id", "work_packet_SHA256", "recovery_action_SHA256", "reason_code"], "properties": {"origin": {"enum": ["retry_pending"]}}},
+                {"required": ["human_authorization_text", "origin", "request_binding", "next_action_id"], "properties": {"origin": {"const": "post_accept"}}},
+                {"required": ["origin", "operation"], "properties": {"origin": {"const": "post_execution"}, "operation": {"const": "inspect"}}},
+                {"required": ["origin", "request_binding", "next_action_id", "human_authorization_text"], "properties": {"origin": {"const": "post_execution"}, "operation": {"const": "request"}}},
             ],
             "additionalProperties": False,
         },

@@ -5995,6 +5995,11 @@ def revise_current_ticket_for_material_contract_failure(
         if material_request is not None and material_request.get("policy_id") == retry_material_revision.POLICY:
             retry_material_revision.validate_current(material_request, projection)
         if material_request is None:
+            from . import post_execution_material_revision
+            material_request = post_execution_material_revision.load(generation)
+            if material_request is not None:
+                post_execution_material_revision.validate_current(material_request, projection)
+        if material_request is None:
             from . import manual_validation_resolution
             material_request = manual_validation_resolution.current(projection)
             if material_request is not None:
@@ -33506,6 +33511,8 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
     apply_post_accept_revision(snapshot, remaining_blockers)
     from .manual_validation_resolution import apply_workflow as apply_manual_resolution
     apply_manual_resolution(snapshot, remaining_blockers)
+    from .post_execution_material_revision import apply_workflow as apply_post_execution_revision
+    apply_post_execution_revision(snapshot, remaining_blockers)
     _apply_approved_ticket_execution_profile_authority(snapshot, remaining_blockers)
     from .recovery_authority import apply_workflow as apply_recovery_authority
     apply_recovery_authority(snapshot, remaining_blockers)
