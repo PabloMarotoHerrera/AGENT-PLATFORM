@@ -760,6 +760,23 @@ def _inspect_pending_approval(args: dict[str, Any], **_kwargs) -> str:
 
 
 def _inspect_pending_approval_artifact_section(args: dict[str, Any], **_kwargs) -> str:
+    scope = args.get("authority_scope", "pending")
+    if scope == "current_approved":
+        from hermes_cli.agent_platform.approved_artifact_inspection import inspect
+        try:
+            if set(args) - {"authority_scope", "approval_id", "section_id", "expected_binding", "chunk_index", "max_chars"}:
+                raise ValueError("unsupported current approved artifact inspection arguments")
+            source = inspect(ticket_id=args.get("approval_id"), section_id=args.get("section_id"),
+                             expected_binding=args.get("expected_binding"),
+                             chunk_index=args.get("chunk_index"), max_chars=args.get("max_chars"))
+        except Exception:
+            return tool_error("current approved artifact inspection failed: unavailable, invalid, or mismatched authority", success=False)
+        result = _result({"source_tool": "inspect_pending_approval_artifact_section", **source})
+        if len(result) > 35000:
+            return tool_error("artifact response exceeds bound; request a smaller max_chars", success=False)
+        return result
+    if scope != "pending" or "expected_binding" in args:
+        return tool_error("invalid approval artifact authority scope", success=False)
     pr = _runtime()
     approval_id = str(args.get("approval_id") or "").strip()
     section_id = str(args.get("section_id") or "").strip()
@@ -2837,20 +2854,25 @@ registry.register(
     schema={
         "name": "inspect_pending_approval_artifact_section",
         "description": (
-            "Read one exact validated artifact section for a pending ticket approval "
+            "Read one exact validated artifact section for a pending ticket approval or, "
+            "with authority_scope=current_approved, its current approved TicketSpec/validation_steps. "
+            "Use returned artifact_binding as expected_binding to pin subsequent reads. "
             "without approving, rejecting, regenerating, or executing it."
         ),
         "parameters": {
             "type": "object",
             "properties": {
+                "authority_scope": {"type": "string", "enum": ["pending", "current_approved"]},
+                "expected_binding": {"type": "object", "description": "Exact artifact_binding from a current_approved inspection; mismatches fail closed."},
                 "approval_id": {
                     "type": "string",
-                    "description": "Pending ticket approval id.",
+                    "description": "Ticket approval id (ticket_id for current_approved). No paths accepted.",
                 },
                 "section_id": {
                     "type": "string",
                     "enum": [
                         "ticket_spec",
+                        "validation_steps",
                         "work_packet",
                         "dependency_plan",
                         "lint_result",

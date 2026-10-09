@@ -631,3 +631,25 @@ existing generator's provenance additions. The successor requires fresh approval
 prior execution, zero-change and manual evidence remain historical and are never
 copied into passing successor validation. A changed request/source identity blocks
 revision instead of silently rebinding the human decision.
+
+### Exact current approved contract inspection
+
+`inspect_pending_approval_artifact_section` also accepts
+`authority_scope=current_approved`, `approval_id=<current ticket_id>` and
+`section_id=ticket_spec|validation_steps`. This read-only scope returns the stored
+approved publication body, preserving every field, null and validation item.
+The default pending-approval scope is unchanged. No caller-provided paths are read.
+
+`artifact_binding` identifies the project, ticket, revision, TicketSpec, WorkPacket,
+generation, publication and human approval. Supply that complete object as
+`expected_binding` to pin later reads. A pending/rejected current generation,
+stale binding, corrupt evidence or authority change fails closed; inspection never
+falls back to an older approved revision. Large sections use the existing bounded
+canonical JSON chunks and section SHA256. Concatenate every chunk with the same
+binding and digest before decoding or copying a complete validation_steps array.
+
+Inspection does not request or authorize revision, generate a successor, run
+commands or modify evidence. A material revision still needs its own explicit
+human authorization through the existing executor. Copy the complete approved
+array before proposing a narrow command change; supplied validation_steps replace
+the array rather than merging individual entries.
