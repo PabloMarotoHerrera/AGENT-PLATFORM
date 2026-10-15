@@ -1,4 +1,5 @@
 import importlib
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -352,40 +353,46 @@ def test_prior_exports_remain_prefix_available(exported_name: str) -> None:
     assert hasattr(work_packet, exported_name)
 
 
+def assert_public_contract(interface, groups, *, private_names=()) -> None:
+    """Historical names keep their canonical objects; additions have no position."""
+    exports = interface.__all__
+    assert len(exports) == len(set(exports)), "duplicate public export"
+    assert not any(name.startswith("_") for name in exports)
+    for module_name, names in groups:
+        canonical = importlib.import_module(
+            "hermes_cli.agent_platform.work_packet." + module_name
+        )
+        for name in names:
+            # Early modules declare public names through the package reexports;
+            # later modules additionally maintain their own public boundary.
+            if hasattr(canonical, "__all__"):
+                assert name in canonical.__all__, (module_name, name)
+            assert name in exports, name
+            assert getattr(interface, name) is getattr(canonical, name), name
+    for name in private_names:
+        assert name not in exports, name
+        assert not hasattr(interface, name), name
+
+
+P17_2_PUBLIC_GROUPS = (
+    ("compiler", P17_0_EXPORTS),
+    ("workspace_allocator", P17_1_EXPORTS),
+    ("tool_permissions", P17_2_EXPORTS),
+)
+PRIVATE_EXECUTORS = (
+    "execute_tool", "SingleAgentTicketExecutor", "ValidationCommandRunner",
+)
+
+
 def test_public_export_prefix_and_counts() -> None:
-    prior_exports = P17_0_EXPORTS + P17_1_EXPORTS
-    assert work_packet.__all__[: len(prior_exports)] == prior_exports
-    assert (
-        work_packet.__all__[len(prior_exports) : len(prior_exports) + 25]
-        == P17_2_EXPORTS
-    )
-    assert len(work_packet.__all__) >= 81
-    assert work_packet.__all__[:81] == prior_exports + P17_2_EXPORTS
-    assert len(set(work_packet.__all__)) == len(work_packet.__all__)
-    assert not any(name.startswith("_") for name in work_packet.__all__)
-    assert not hasattr(work_packet, "execute_tool")
-    assert not hasattr(work_packet, "SingleAgentTicketExecutor")
-    assert not hasattr(work_packet, "ValidationCommandRunner")
+    assert_public_contract(work_packet, P17_2_PUBLIC_GROUPS, private_names=PRIVATE_EXECUTORS)
 
 
 def test_import_smoke_exact_output() -> None:
-    required = (
-        "WorkPacket",
-        "WorkspaceAllocation",
-        "ToolPermissionProfile",
-        "ToolPermissionDecisionEvidence",
-        "build_tool_permission_profile",
-        "evaluate_tool_permission",
-    )
-    assert (
-        len(work_packet.__all__),
-        len(set(work_packet.__all__)),
-        all(hasattr(work_packet, name) for name in required),
-        hasattr(work_packet, "execute_tool"),
-        hasattr(work_packet, "SingleAgentTicketExecutor"),
-        hasattr(work_packet, "ValidationCommandRunner"),
-    ) == (len(work_packet.__all__), len(work_packet.__all__), True, False, False, False)
-    assert work_packet.__all__[:81] == P17_0_EXPORTS + P17_1_EXPORTS + P17_2_EXPORTS
+    # Exercise the supported package import, including every historical symbol.
+    imported = importlib.import_module("hermes_cli.agent_platform.work_packet")
+    assert imported is work_packet
+    assert_public_contract(imported, P17_2_PUBLIC_GROUPS, private_names=PRIVATE_EXECUTORS)
 
 
 def test_function_import_smoke_exact_output() -> None:
@@ -1373,3 +1380,42 @@ def test_permission_decision_smoke_outputs(
     )
     assert sum(item.decision is ToolPermissionDecision.ALLOW for item in decisions) == 1
     assert sum(item.decision is ToolPermissionDecision.DENY for item in decisions) == 6
+
+
+@pytest.mark.parametrize("violation", (
+    "remove", "wrong_identity", "private_attribute", "private_export", "duplicate",
+    "remove_earlier_capability",
+))
+def test_public_contract_rejects_interface_violations(violation: str) -> None:
+    names = ("WorkPacket", "ToolPermissionProfile")
+    groups = (("compiler", names[:1]), ("tool_permissions", names[1:]))
+    interface = SimpleNamespace(
+        __all__=names, **{name: getattr(work_packet, name) for name in names},
+    )
+    if violation == "remove":
+        interface.__all__ = names[:1]
+    elif violation == "wrong_identity":
+        interface.ToolPermissionProfile = object()
+    elif violation == "private_attribute":
+        interface.execute_tool = object()
+    elif violation == "private_export":
+        interface.__all__ += ("execute_tool",)
+    elif violation == "duplicate":
+        interface.__all__ += names[:1]
+    else:
+        interface.__all__ = names[1:]
+    with pytest.raises(AssertionError):
+        assert_public_contract(interface, groups, private_names=PRIVATE_EXECUTORS)
+
+
+def test_public_contract_accepts_noncontractual_addition_order() -> None:
+    names = ("WorkPacket", "ToolPermissionProfile")
+    groups = (("compiler", names[:1]), ("tool_permissions", names[1:]))
+    for exports in (
+        ("FutureA", *names, "FutureB"), ("FutureB", *reversed(names), "FutureA"),
+    ):
+        interface = SimpleNamespace(
+            __all__=exports, FutureA=object(), FutureB=object(),
+            **{name: getattr(work_packet, name) for name in names},
+        )
+        assert_public_contract(interface, groups, private_names=PRIVATE_EXECUTORS)

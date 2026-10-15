@@ -58,6 +58,7 @@ from hermes_cli.agent_platform.work_packet.single_agent_execution import (
     SingleAgentActionExecutionRequest,
     SingleAgentExecutionRequest,
 )
+from tests.hermes_cli.test_agent_platform_work_packet_tool_permissions import assert_public_contract
 from tests.hermes_cli import test_agent_platform_work_packet_outcome_envelopes as p17_5
 from tests.hermes_cli.test_agent_platform_work_packet_compiler import (
     build_bundle,
@@ -694,21 +695,20 @@ def test_all_p17_6_exports_exist(exported_name: str) -> None:
     assert hasattr(dar, exported_name)
 
 
+P17_6_PUBLIC_GROUPS = (
+    # Explicit historical expectations, independent of production __all__.
+    ("compiler", p17_5.P17_0_EXPORTS),
+    ("workspace_allocator", p17_5.P17_1_EXPORTS),
+    ("tool_permissions", p17_5.P17_2_EXPORTS),
+    ("single_agent_execution", p17_5.P17_3_EXPORTS),
+    ("validation_command_runner", p17_5.P17_4_EXPORTS),
+    ("outcome_envelopes", p17_5.P17_5_EXPORTS),
+    ("diff_artifact_review", P17_6_EXPORTS),
+)
+
+
 def test_prior_172_exports_remain_exact_prefix() -> None:
-    prior = (
-        p17_5.P17_0_EXPORTS
-        + p17_5.P17_1_EXPORTS
-        + p17_5.P17_2_EXPORTS
-        + p17_5.P17_3_EXPORTS
-        + p17_5.P17_4_EXPORTS
-        + p17_5.P17_5_EXPORTS
-    )
-    assert len(prior) == 172
-    assert work_packet.__all__[:172] == prior
-    assert work_packet.__all__[172:201] == P17_6_EXPORTS
-    assert len(work_packet.__all__) >= 201
-    assert len(set(work_packet.__all__)) == len(work_packet.__all__)
-    assert not any(name.startswith("_") for name in work_packet.__all__)
+    assert_public_contract(work_packet, P17_6_PUBLIC_GROUPS)
 
 
 @pytest.mark.parametrize("name", FORBIDDEN_PUBLIC_NAMES)

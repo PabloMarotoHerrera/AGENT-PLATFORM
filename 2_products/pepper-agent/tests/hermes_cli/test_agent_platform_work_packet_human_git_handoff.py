@@ -40,6 +40,7 @@ from hermes_cli.agent_platform.work_packet import (
     validate_human_git_handoff_request,
     validate_human_git_handoff_result,
 )
+from tests.hermes_cli.test_agent_platform_work_packet_tool_permissions import assert_public_contract
 from tests.hermes_cli import (
     test_agent_platform_work_packet_diff_artifact_review as p17_6,
 )
@@ -524,22 +525,13 @@ def test_all_p17_7_exports_exist(exported_name: str) -> None:
     assert hasattr(hgh, exported_name)
 
 
+P17_7_PUBLIC_GROUPS = p17_6.P17_6_PUBLIC_GROUPS + (
+    ("human_git_handoff", P17_7_EXPORTS),
+)
+
+
 def test_p17_0_through_p17_6_exports_remain_exact_prefix() -> None:
-    prior = (
-        p17_6.p17_5.P17_0_EXPORTS
-        + p17_6.p17_5.P17_1_EXPORTS
-        + p17_6.p17_5.P17_2_EXPORTS
-        + p17_6.p17_5.P17_3_EXPORTS
-        + p17_6.p17_5.P17_4_EXPORTS
-        + p17_6.p17_5.P17_5_EXPORTS
-        + p17_6.P17_6_EXPORTS
-    )
-    assert len(prior) == 201
-    assert work_packet.__all__[:201] == prior
-    assert work_packet.__all__[201:228] == P17_7_EXPORTS
-    assert len(work_packet.__all__) >= 228
-    assert len(set(work_packet.__all__)) == len(work_packet.__all__)
-    assert not any(name.startswith("_") for name in work_packet.__all__)
+    assert_public_contract(work_packet, P17_7_PUBLIC_GROUPS)
 
 
 def test_import_smoke_exact_output() -> None:
@@ -577,9 +569,14 @@ def test_function_import_smoke_exact_names(function, expected: str) -> None:
 
 
 def test_legacy_instruction_renderer_is_not_public_or_package_level() -> None:
-    assert work_packet.__all__[227] == "render_human_git_handoff_powershell"
-    assert not hasattr(work_packet, "render_human_git_handoff_instructions")
-    assert "render_human_git_handoff_instructions" not in hgh.__all__
+    legacy = "render_human_git_handoff_instructions"
+    assert_public_contract(
+        work_packet,
+        (("human_git_handoff", ("render_human_git_handoff_powershell",)),),
+        private_names=(legacy,),
+    )
+    assert legacy not in hgh.__all__
+    assert not hasattr(hgh, legacy)
 
 
 @pytest.mark.parametrize(

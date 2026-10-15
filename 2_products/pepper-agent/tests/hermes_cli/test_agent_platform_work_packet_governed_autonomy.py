@@ -58,6 +58,10 @@ from hermes_cli.agent_platform.work_packet import (
     validate_governed_autonomy_continuation,
     validate_governed_autonomy_envelope,
 )
+from tests.hermes_cli.test_agent_platform_work_packet_human_git_handoff import (
+    P17_7_PUBLIC_GROUPS,
+)
+from tests.hermes_cli.test_agent_platform_work_packet_tool_permissions import assert_public_contract
 from tests.hermes_cli import test_agent_platform_work_packet_execution_mvp_closure as p17_r
 from tests.hermes_cli.test_agent_platform_work_packet_single_agent_execution import (
     action as single_action,
@@ -71,7 +75,55 @@ from tests.hermes_cli.test_agent_platform_work_packet_validation_command_runner 
 )
 
 
-P01AH_EXPORTS = autonomy.__all__
+# Supported historical public names, independent of the production export list.
+P01AH_EXPORTS = (
+    "GOVERNED_AUTONOMY_SCHEMA_VERSION",
+    "GOVERNED_AUTONOMY_POLICY_ID",
+    "GOVERNED_AUTONOMY_BOUNDARY_CLASSIFICATION",
+    "GovernedAutonomyReuseDisposition",
+    "CapabilityGapKind",
+    "CapabilityGapDisposition",
+    "TaskLocalToolLanguage",
+    "TaskLocalToolMaterializationState",
+    "AutonomyCommandDecision",
+    "AutonomyCommandDenialReason",
+    "AutonomyCommandDisposition",
+    "AutonomyCommandFailureReason",
+    "AutonomyCommandStreamKind",
+    "AutonomyContinuationState",
+    "AutonomyContinuationStopReason",
+    "GovernedAutonomyBudget",
+    "GovernedAutonomyReuseAssessment",
+    "GovernedAutonomyEnvelope",
+    "CapabilityGapEvidence",
+    "TaskLocalCapabilityContract",
+    "ToolCandidate",
+    "TaskLocalToolMaterializationResult",
+    "AutonomyCommandProposal",
+    "AutonomyCommandEvaluation",
+    "AutonomyCommandCapturedStream",
+    "AutonomyCommandExecutionResult",
+    "AutonomyContinuationLineage",
+    "GovernedAutonomyError",
+    "GovernedAutonomyInputError",
+    "GovernedAutonomyIntegrityError",
+    "GovernedAutonomyPolicyError",
+    "GovernedAutonomyExecutionError",
+    "GovernedAutonomyStateError",
+    "build_governed_autonomy_reuse_matrix",
+    "build_governed_autonomy_envelope",
+    "classify_capability_gap",
+    "build_task_local_capability_contract",
+    "build_tool_candidate",
+    "materialize_task_local_tool",
+    "propose_autonomy_command",
+    "evaluate_autonomy_command",
+    "execute_autonomy_command",
+    "start_governed_autonomy_continuation",
+    "advance_governed_autonomy_continuation",
+    "validate_governed_autonomy_envelope",
+    "validate_governed_autonomy_continuation",
+)
 PUBLIC_MODELS = (
     GovernedAutonomyBudget,
     GovernedAutonomyReuseAssessment,
@@ -285,10 +337,11 @@ def test_01ah_exports_are_present(exported_name: str) -> None:
 
 
 def test_01ah_exports_append_after_p17_r() -> None:
-    assert work_packet.__all__[255:283] == p17_r.P17_R_EXPORTS
-    assert work_packet.__all__[283 : 283 + len(P01AH_EXPORTS)] == P01AH_EXPORTS
-    assert len(set(work_packet.__all__)) == len(work_packet.__all__)
-    assert not any(name.startswith("_") for name in work_packet.__all__)
+    assert_public_contract(work_packet, P17_7_PUBLIC_GROUPS + (
+        ("non_critical_ticket_pilot", p17_r.p17_8.P17_8_EXPORTS),
+        ("work_packet_execution_mvp_closure", p17_r.P17_R_EXPORTS),
+        ("governed_autonomy", P01AH_EXPORTS),
+    ))
 
 
 def test_constants_are_canonical() -> None:

@@ -67,6 +67,8 @@ from tests.hermes_cli.test_agent_platform_work_packet_single_agent_execution imp
     profile_result,
 )
 from tests.hermes_cli.test_agent_platform_work_packet_tool_permissions import (
+    P17_2_PUBLIC_GROUPS,
+    assert_public_contract,
     P17_1_EXPORTS,
     P17_2_EXPORTS,
 )
@@ -322,14 +324,14 @@ def test_p17_4_exports_are_present(exported_name: str) -> None:
     assert hasattr(work_packet, exported_name)
 
 
+P17_4_PUBLIC_GROUPS = P17_2_PUBLIC_GROUPS + (
+    ("single_agent_execution", P17_3_EXPORTS),
+    ("validation_command_runner", P17_4_EXPORTS),
+)
+
+
 def test_prior_113_exports_remain_exact_prefix() -> None:
-    prior = P17_0_EXPORTS + P17_1_EXPORTS + P17_2_EXPORTS + P17_3_EXPORTS
-    assert len(prior) == 113
-    assert work_packet.__all__[:113] == prior
-    assert work_packet.__all__[113:145] == P17_4_EXPORTS
-    assert len(work_packet.__all__) >= 145
-    assert len(set(work_packet.__all__)) == len(work_packet.__all__)
-    assert not any(name.startswith("_") for name in work_packet.__all__)
+    assert_public_contract(work_packet, P17_4_PUBLIC_GROUPS)
 
 
 @pytest.mark.parametrize("forbidden_name", FORBIDDEN_PUBLIC_NAMES)

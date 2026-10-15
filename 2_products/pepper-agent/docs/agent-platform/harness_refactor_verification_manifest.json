@@ -3370,5 +3370,342 @@
       "comparison_only": "CRLF-to-LF comparison proves the two untouched checkout files match tested committed content. No test/source file was normalized or rewritten."
     }
   },
-  "selection_file_hash_scope": "files[].sha256 retains the HAR-00 historical inventory; HAR-01 parent/candidate hashes and run identities are recorded separately."
+  "selection_file_hash_scope": "files[].sha256 retains the HAR-00 historical inventory; HAR-01 parent/candidate hashes and run identities are recorded separately.",
+  "har02_verification": {
+    "status": "HAR-02-PUBLIC-BEHAVIORAL-COMPATIBILITY-READY-FOR-REVIEW",
+    "human_accepted": false,
+    "prepared_date": "2026-10-15",
+    "timezone": "Europe/Madrid",
+    "accepted_parent": "20706caca7e2399e75b961825af7c5fd31662694",
+    "branch": "p18-manual-to-hermes-workflow-migration",
+    "HAR01_human_acceptance_authority": "Human HAR-02 ticket: accepted, committed and pushed at 20706ca; source SHA verified read-only in Windows and WSL. HAR-01 as-executed records remain unchanged.",
+    "legacy_top_level_fields_scope": "All pre-existing top-level fields retain HAR-00/HAR-01 historical meaning, statuses, approvals, selections and results. This namespace is the fresh HAR-02 state; no old result was reclassified.",
+    "initial_preflight": {
+      "HEAD": "20706caca7e2399e75b961825af7c5fd31662694",
+      "untracked": {
+        "2_products/pepper-agent/tests/hermes_cli/test_c64_validation_authority_boundary.py": "c7999a16042f07390e41e2d040c2fa387096719c744f508c546f6897076cb862",
+        "2_products/pepper-agent/web/src/agent-platform/c80-r1-chat-lifecycle.test.tsx": "64e9756d9d8d105ed4da36fd182117e02b1cd49a4f6631409dca8f6f199d3277",
+        "HAR/HAR-00_architecture_decisions_and_execution_baseline.md": "fb1b1d18cca4d17d8ac86ff6e0ecad6ff76d5ef28e9e23c9d01d71b99d479674",
+        "HAR/HAR_roadmap_refactorizacion_harnes.md": "3bc700b77e6e36ba297bf0e3f6f2c85e1b25b497679db3912a5399a167b72513",
+        "mermaid-diagram.png": "c9625e35830957f005f695fe3372eacdb6e57ffb961bea2dd5f5feca2acbc169",
+        "mermaid-diagram2.png": "654d3f3ad0b52ab78ea9f8bf8708e0da70b62426670b508249b4d9026a367721",
+        "mermaid-diagram3.png": "45ddde0a639b51eda2f95712ef4da57663e69e44a96e3b31f6f08b49b953b359"
+      },
+      "status": "?? 2_products/pepper-agent/tests/hermes_cli/test_c64_validation_authority_boundary.py\n?? 2_products/pepper-agent/web/src/agent-platform/c80-r1-chat-lifecycle.test.tsx\n?? HAR/\n?? mermaid-diagram.png\n?? mermaid-diagram2.png\n?? mermaid-diagram3.png\n"
+    },
+    "full_results": {
+      "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-02-20261015\\verification-results.json",
+      "SHA256": "1d81a9a86c3374e879ba97bb517082ee5f03d0bde29bf2baf041a161975660b9"
+    },
+    "evidence_root_windows": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-02-20261015",
+    "evidence_root_wsl": "/tmp/har02-20261015-zd4_rl7i/evidence",
+    "test_substrate": "Independent git-archive source reconstructions; isolated HOME and pytest HERMES_HOME; existing dependency venv, no installs/repairs. Canonical wrapper with explicit manifest file lists.",
+    "interpreter": {
+      "parent": {
+        "executable": "/tmp/har02-20261015-zd4_rl7i/parent/2_products/pepper-agent/.venv/bin/python",
+        "realpath": "/home/pablo/miniforge/bin/python3.12",
+        "python": "3.12.12 | packaged by conda-forge | (main, Oct 22 2025, 23:25:55) [GCC 14.3.0]",
+        "pytest": "9.0.2",
+        "pydantic": "2.13.4",
+        "source": "/tmp/har02-20261015-zd4_rl7i/parent/2_products/pepper-agent/hermes_cli/agent_platform/work_packet/__init__.py"
+      },
+      "candidate": {
+        "executable": "/tmp/har02-20261015-zd4_rl7i/candidate-complete/2_products/pepper-agent/.venv/bin/python",
+        "realpath": "/home/pablo/miniforge/bin/python3.12",
+        "python": "3.12.12 | packaged by conda-forge | (main, Oct 22 2025, 23:25:55) [GCC 14.3.0]",
+        "pytest": "9.0.2",
+        "pydantic": "2.13.4",
+        "source": "/tmp/har02-20261015-zd4_rl7i/candidate-complete/2_products/pepper-agent/hermes_cli/agent_platform/work_packet/__init__.py"
+      }
+    },
+    "source_overlays": [
+      {
+        "path": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_work_packet_validation_command_runner.py",
+        "parent_SHA256": "a755b7ba023305c153d1ca8a8b937bc81a369cf5fd1ec5cedac2e36fa5e73110",
+        "candidate_SHA256": "1d4b4ec3c5498746c17ffdd7dbd154c050e6022011673b3c656e2b5ab94e8dfd"
+      },
+      {
+        "path": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_work_packet_diff_artifact_review.py",
+        "parent_SHA256": "128b8c9b2b1e969ef0191ffe0050e53e6de703a5e268b8c0302932171b753524",
+        "candidate_SHA256": "466134f41c12fe3a12cf8ef1452e900a52921de85b2e3d83964061779abd59bb"
+      },
+      {
+        "path": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_work_packet_human_git_handoff.py",
+        "parent_SHA256": "2100905e5b725b640bfcddc32f1b9e4d0b9dbc661ba5dc4cd27e86babf6dad89",
+        "candidate_SHA256": "453321b6849444afe33fdbc9cd3fdb615bf64ef2bf028e91d1ebbff270a0b6c1"
+      },
+      {
+        "path": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_work_packet_tool_permissions.py",
+        "parent_SHA256": "bac48a05e0af61a07fe1e453f5b3af5663e82336961c30ac84d44f9f018d884e",
+        "candidate_SHA256": "477ca2cb8d2eeb66ccb73e1aef587a863d9edf6351b8150cccb3106b3d7c3084"
+      },
+      {
+        "path": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_work_packet_governed_autonomy.py",
+        "parent_SHA256": "0287170a3ced51bd42a8e4d784f6b6da0b3a682032e571d4b7bb74937e785170",
+        "candidate_SHA256": "9d7e28384bdc7f7529fe23bac0aadbff2a66c54a569c9f561bbffec4a1627615"
+      }
+    ],
+    "source_identity_limit": "Committed source bytes plus five byte-for-byte Windows test overlays. Architecture and manifest reporting updated afterward; no executable source changes after final test snapshot.",
+    "source_provenance": "Per-selection exact argv, wrapper and every test file hash, Windows/tested line-ending relations and snapshot preservation are in verification-results.json. All final five test overlays equal Windows bytes.",
+    "seven_failure_classification": [
+      {
+        "node": "tests/hermes_cli/test_agent_platform_work_packet_validation_command_runner.py::test_prior_113_exports_remain_exact_prefix",
+        "parent_source": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_work_packet_validation_command_runner.py:325",
+        "classification": "STRUCTURAL_ASSERTION_ONLY",
+        "candidate_source": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_work_packet_validation_command_runner.py:333",
+        "source_evidence": [
+          "hermes_cli/agent_platform/work_packet/__init__.py explicit reexports and __all__",
+          "1d32ba9a34617996e6fb73265a93d047a5fed69a C36 additive compiler API commit"
+        ],
+        "decision": "Retain named historical exports and canonical objects; enumeration position/count is not contractual."
+      },
+      {
+        "node": "tests/hermes_cli/test_agent_platform_work_packet_diff_artifact_review.py::test_prior_172_exports_remain_exact_prefix",
+        "parent_source": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_work_packet_diff_artifact_review.py:697",
+        "classification": "STRUCTURAL_ASSERTION_ONLY",
+        "candidate_source": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_work_packet_diff_artifact_review.py:710",
+        "source_evidence": [
+          "hermes_cli/agent_platform/work_packet/__init__.py explicit reexports and __all__",
+          "1d32ba9a34617996e6fb73265a93d047a5fed69a C36 additive compiler API commit"
+        ],
+        "decision": "Retain named historical exports and canonical objects; enumeration position/count is not contractual."
+      },
+      {
+        "node": "tests/hermes_cli/test_agent_platform_work_packet_human_git_handoff.py::test_p17_0_through_p17_6_exports_remain_exact_prefix",
+        "parent_source": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_work_packet_human_git_handoff.py:527",
+        "classification": "STRUCTURAL_ASSERTION_ONLY",
+        "candidate_source": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_work_packet_human_git_handoff.py:533",
+        "source_evidence": [
+          "hermes_cli/agent_platform/work_packet/__init__.py explicit reexports and __all__",
+          "1d32ba9a34617996e6fb73265a93d047a5fed69a C36 additive compiler API commit"
+        ],
+        "decision": "Retain named historical exports and canonical objects; enumeration position/count is not contractual."
+      },
+      {
+        "node": "tests/hermes_cli/test_agent_platform_work_packet_human_git_handoff.py::test_legacy_instruction_renderer_is_not_public_or_package_level",
+        "parent_source": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_work_packet_human_git_handoff.py:579",
+        "classification": "STRUCTURAL_ASSERTION_ONLY",
+        "candidate_source": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_work_packet_human_git_handoff.py:571",
+        "source_evidence": [
+          "hermes_cli/agent_platform/work_packet/__init__.py explicit reexports and __all__",
+          "1d32ba9a34617996e6fb73265a93d047a5fed69a C36 additive compiler API commit"
+        ],
+        "decision": "Retain named historical exports and canonical objects; enumeration position/count is not contractual."
+      },
+      {
+        "node": "tests/hermes_cli/test_agent_platform_work_packet_tool_permissions.py::test_public_export_prefix_and_counts",
+        "parent_source": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_work_packet_tool_permissions.py:355",
+        "classification": "STRUCTURAL_ASSERTION_ONLY",
+        "candidate_source": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_work_packet_tool_permissions.py:387",
+        "source_evidence": [
+          "hermes_cli/agent_platform/work_packet/__init__.py explicit reexports and __all__",
+          "1d32ba9a34617996e6fb73265a93d047a5fed69a C36 additive compiler API commit"
+        ],
+        "decision": "Retain named historical exports and canonical objects; enumeration position/count is not contractual."
+      },
+      {
+        "node": "tests/hermes_cli/test_agent_platform_work_packet_tool_permissions.py::test_import_smoke_exact_output",
+        "parent_source": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_work_packet_tool_permissions.py:371",
+        "classification": "STRUCTURAL_ASSERTION_ONLY",
+        "candidate_source": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_work_packet_tool_permissions.py:391",
+        "source_evidence": [
+          "hermes_cli/agent_platform/work_packet/__init__.py explicit reexports and __all__",
+          "1d32ba9a34617996e6fb73265a93d047a5fed69a C36 additive compiler API commit"
+        ],
+        "decision": "Retain named historical exports and canonical objects; enumeration position/count is not contractual."
+      },
+      {
+        "node": "tests/hermes_cli/test_agent_platform_work_packet_governed_autonomy.py::test_01ah_exports_append_after_p17_r",
+        "parent_source": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_work_packet_governed_autonomy.py:287",
+        "classification": "STRUCTURAL_ASSERTION_ONLY",
+        "candidate_source": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_work_packet_governed_autonomy.py:339",
+        "source_evidence": [
+          "hermes_cli/agent_platform/work_packet/__init__.py explicit reexports and __all__",
+          "1d32ba9a34617996e6fb73265a93d047a5fed69a C36 additive compiler API commit"
+        ],
+        "decision": "Retain named historical exports and canonical objects; enumeration position/count is not contractual."
+      }
+    ],
+    "renderer_decision": {
+      "public_name": "render_human_git_handoff_powershell",
+      "unsupported_legacy_name": "render_human_git_handoff_instructions",
+      "classification": "STRUCTURAL_ASSERTION_ONLY",
+      "package_public_identity_preserved": true,
+      "legacy_absent_from_package_and_module_attributes_and_exports": true,
+      "sources": [
+        "work_packet/human_git_handoff.py:120-148,896",
+        "work_packet/__init__.py:62-89,585",
+        "docs/agent-platform/work_packet_human_git_handoff.md:49",
+        "initial P17.7 commit 9b995fc",
+        "C36 commit 1d32ba9a34617996e6fb73265a93d047a5fed69a"
+      ],
+      "qualified_matrix": "Architecture HAR-02 section and HAR-02-report.txt; no production visibility change."
+    },
+    "import_smoke_disposition": "In-process import, every historical name, canonical identity, export uniqueness and forbidden generic executor absence; original test did not promise process stdout.",
+    "api_contract_observation": {
+      "runtime_parent_candidate_equal": true,
+      "all_parent_names_covered": true,
+      "observed_names": 330,
+      "count_is_test_expectation": false,
+      "properties": [
+        "canonical package and defining-module object identity",
+        "named historical public availability",
+        "model JSON schema inventory equality",
+        "function signature inventory equality",
+        "enum and constant inventory equality",
+        "duplicate and underscore export rejection",
+        "intentionally private membership/attribute absence"
+      ],
+      "evidence": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-02-20261015\\public-api-comparison.json"
+    },
+    "targeted_verification": {
+      "parent_counts": {
+        "passed": 3,
+        "failed": 7,
+        "error": 0
+      },
+      "candidate_counts": {
+        "passed": 17,
+        "failed": 0,
+        "error": 0
+      },
+      "all_seven_original_nodes_pass": true,
+      "synthetic_rejection_cases": 6,
+      "synthetic_noncontractual_order_case": 1,
+      "other_existing_smoke_passes": 3,
+      "evidence": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-02-20261015\\final-targeted-results.json",
+      "SHA256": "0c2fd1d3b02ab04894ff68a3c60cee8c43be13ab1a5ce303f5fc8e7390d59c08"
+    },
+    "selection_comparison_summary": {
+      "baseline": {
+        "parent_counts": {
+          "passed": 2113,
+          "failed": 6,
+          "errors": 0
+        },
+        "candidate_counts": {
+          "passed": 2117,
+          "failed": 2,
+          "errors": 0
+        },
+        "parent_exit_code": 1,
+        "candidate_exit_code": 1,
+        "unresolved_failed_error_nodes": [
+          "tests/hermes_cli/test_agent_platform_ticket_architect_bridge.py::test_c26_active_execution_still_preempts_pending_successor_projection",
+          "tests/hermes_cli/test_agent_platform_ticket_architect_bridge.py::test_c26_rejected_successor_revision_preempts_stale_review_prepare_projection"
+        ],
+        "candidate_only_failed_error_nodes": [],
+        "eliminated_failed_error_nodes": [
+          "tests/hermes_cli/test_agent_platform_work_packet_diff_artifact_review.py::test_prior_172_exports_remain_exact_prefix",
+          "tests/hermes_cli/test_agent_platform_work_packet_human_git_handoff.py::test_legacy_instruction_renderer_is_not_public_or_package_level",
+          "tests/hermes_cli/test_agent_platform_work_packet_human_git_handoff.py::test_p17_0_through_p17_6_exports_remain_exact_prefix",
+          "tests/hermes_cli/test_agent_platform_work_packet_validation_command_runner.py::test_prior_113_exports_remain_exact_prefix"
+        ],
+        "commands_and_source_metadata": {
+          "parent": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-02-20261015\\parent-baseline-run.json",
+          "candidate": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-02-20261015\\candidate-complete-baseline-run.json"
+        }
+      },
+      "first_slice": {
+        "parent_counts": {
+          "passed": 219,
+          "failed": 0,
+          "errors": 0
+        },
+        "candidate_counts": {
+          "passed": 219,
+          "failed": 0,
+          "errors": 0
+        },
+        "parent_exit_code": 0,
+        "candidate_exit_code": 0,
+        "unresolved_failed_error_nodes": [],
+        "candidate_only_failed_error_nodes": [],
+        "eliminated_failed_error_nodes": [],
+        "commands_and_source_metadata": {
+          "parent": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-02-20261015\\parent-first_slice-run.json",
+          "candidate": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-02-20261015\\candidate-complete-first_slice-run.json"
+        }
+      },
+      "compatibility": {
+        "parent_counts": {
+          "passed": 716,
+          "failed": 0,
+          "errors": 0
+        },
+        "candidate_counts": {
+          "passed": 716,
+          "failed": 0,
+          "errors": 0
+        },
+        "parent_exit_code": 0,
+        "candidate_exit_code": 0,
+        "unresolved_failed_error_nodes": [],
+        "candidate_only_failed_error_nodes": [],
+        "eliminated_failed_error_nodes": [],
+        "commands_and_source_metadata": {
+          "parent": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-02-20261015\\parent-compatibility-run.json",
+          "candidate": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-02-20261015\\candidate-complete-compatibility-run.json"
+        }
+      },
+      "authority_security": {
+        "parent_counts": {
+          "passed": 1164,
+          "failed": 3,
+          "errors": 0
+        },
+        "candidate_counts": {
+          "passed": 1174,
+          "failed": 0,
+          "errors": 0
+        },
+        "parent_exit_code": 1,
+        "candidate_exit_code": 0,
+        "unresolved_failed_error_nodes": [],
+        "candidate_only_failed_error_nodes": [],
+        "eliminated_failed_error_nodes": [
+          "tests/hermes_cli/test_agent_platform_work_packet_governed_autonomy.py::test_01ah_exports_append_after_p17_r",
+          "tests/hermes_cli/test_agent_platform_work_packet_tool_permissions.py::test_import_smoke_exact_output",
+          "tests/hermes_cli/test_agent_platform_work_packet_tool_permissions.py::test_public_export_prefix_and_counts"
+        ],
+        "commands_and_source_metadata": {
+          "parent": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-02-20261015\\parent-authority_security-run.json",
+          "candidate": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-02-20261015\\candidate-complete-authority_security-run.json"
+        }
+      }
+    },
+    "historical_preservation": {
+      "HAR01_full_results": {
+        "path": "C:/Users/pablo/.codex/har-evidence/HAR-01-20261015-08pqco2o/verification-results.json",
+        "SHA256": "a577f02f7a6dc87af3ae4ab315c72c735d1d2be20f540b8c9b6cc096016b93ac"
+      },
+      "HAR01_manifest_objects_unchanged": true,
+      "C91_C94_selected_tests_unchanged": true,
+      "C26_file_and_functions_unchanged": true,
+      "non_target_functions_AST_preserved": 366,
+      "evidence": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-02-20261015\\unchanged-function-preservation.json",
+      "production_and_wrapper_unchanged": true,
+      "excluded_untracked_bytes_preserved": true,
+      "roadmap_unchanged": true
+    },
+    "gap_disposition": {
+      "GAP-PUBLIC-API": "Seven structural test defects corrected within authorized scope, ready for human review; no public API redesign.",
+      "GAP-C26": "OPEN; both exact parent failures retained, owned by HAR-03.",
+      "D09": "Conceptual human approval unchanged. Public contract test correction qualified in HAR-02; C26 specifics still require HAR-03.",
+      "G0": "PENDING_HAR03"
+    },
+    "limitations": [
+      "Four explicit selections, not whole repository suite or arbitrary external callers.",
+      "No production API change, no historical authority rewrite.",
+      "Architecture and manifest metadata appended after executable verification.",
+      "Archive optional git-based precompile warning is best-effort; unchanged wrapper runs every explicit selection.",
+      "Superseded intermediate reconstructions/logs are not final evidence."
+    ],
+    "git_mutation": false,
+    "live_authority_access": false,
+    "deployment": false,
+    "provider_or_external_service_calls": false,
+    "graphify_or_docker": false,
+    "next_gate": "Human review/staging/commit/push of HAR-02; separately authorized HAR-03 owns C26/G0. No HAR-03 implementation."
+  }
 }

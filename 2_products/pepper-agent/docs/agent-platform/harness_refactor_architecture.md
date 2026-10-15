@@ -447,3 +447,84 @@ no relaja guards ni inicia HAR-02. Revisión y commit/push humano de HAR-01 sigu
 siendo obligatorios antes del siguiente ticket. G0 queda pendiente hasta HAR-03.
 No se concede consentimiento para ninguna operación viva P18.9.13 ni para un
 refactor de producción por registrar esta aprobación.
+
+## 7. HAR-02 — Contrato público comprobable (candidatura para revisión humana)
+
+Preflight 2026-10-15: Windows y WSL coinciden en el padre aceptado HAR-01
+`20706caca7e2399e75b961825af7c5fd31662694`, rama
+`p18-manual-to-hermes-workflow-migration`, índices y árboles rastreados limpios.
+La aceptación/commit/push de HAR-01 procede del ticket humano HAR-02; los
+resultados originales HAR-00/HAR-01 del manifiesto se conservan íntegros.
+D08 y las aprobaciones D01–D10 permanecen vigentes. Este apartado documenta una
+corrección de tests autorizada; no declara aceptada por el humano su candidatura.
+
+### Disposición de los siete fallos
+
+Referencias relativas al producto. Los nombres de test se conservan para mantener
+los node IDs históricos aunque sus aserciones ya no usan prefijos/posiciones.
+Cada nodo se clasifica **STRUCTURAL_ASSERTION_ONLY** por los motivos siguientes:
+
+| Archivo / nodo exacto | Contrato conservado y evidencia |
+|---|---|
+| `test_agent_platform_work_packet_validation_command_runner.py::test_prior_113_exports_remain_exact_prefix` | P17.0–P17.4: nombres históricos de compiler, allocator, permisos, ejecución y runner, con identidad del módulo canónico. `work_packet/__init__.py:3–29,198–291,322–412` reexporta explícitamente esos objetos. |
+| `test_agent_platform_work_packet_diff_artifact_review.py::test_prior_172_exports_remain_exact_prefix` | P17.0–P17.6, incluidos outcomes/review; `__init__.py:31–60,293–320` y `diff_artifact_review.__all__` establecen la superficie. |
+| `test_agent_platform_work_packet_human_git_handoff.py::test_p17_0_through_p17_6_exports_remain_exact_prefix` | P17.0–P17.7, conservando cada nombre anterior y la API human-only; `__init__.py:62–89` y `human_git_handoff.py:120–148`. |
+| `test_agent_platform_work_packet_human_git_handoff.py::test_legacy_instruction_renderer_is_not_public_or_package_level` | Renderer PowerShell público canónico; nombre legado ausente del paquete y del módulo. Solo la posición 227 era incorrecta; evidencia histórica y matriz más abajo. |
+| `test_agent_platform_work_packet_tool_permissions.py::test_public_export_prefix_and_counts` | Nombres P17.0–P17.2, identidad y unicidad; ejecutores genéricos prohibidos. `__init__.py:232–257` mantiene los reexports; el prefijo truncado perdía `validate_tool_permission_decision` en la comparación. |
+| `test_agent_platform_work_packet_tool_permissions.py::test_import_smoke_exact_output` | Import real del paquete y todos los nombres históricos de esas tres capacidades, identidad de objetos, sin ejecutores genéricos. El test anterior no lanzaba un proceso ni prometía stdout: comparaba una tupla y un prefijo. |
+| `test_agent_platform_work_packet_governed_autonomy.py::test_01ah_exports_append_after_p17_r` | Contrato acumulado P17.0–P17.8/cierre/01AH, incluidos los símbolos del piloto. Nombres 01AH explícitos independientes de `autonomy.__all__`; reexports `__init__.py:91–196` y módulos respectivos. |
+
+La causa está documentada en el commit histórico
+`1d32ba9a34617996e6fb73265a93d047a5fed69a` (C36): añadió explícitamente
+`WorkPacketValidationCommandAuthority` tanto a los imports/exports del paquete
+como a `EXPECTED_EXPORTS`, los modelos públicos y las pruebas del compilador.
+No se trata de asumir que cualquier símbolo añadido es seguro por ser importable.
+Los prefijos antiguos conservaron cantidades/índices anteriores a esa adición.
+No hay evidencia de obligación contractual de orden de enumeración. Los nombres
+históricos soportados y su módulo canónico sí constituyen una obligación.
+
+### Matriz del renderer
+
+| Pregunta | Decisión basada en evidencia |
+|---|---|
+| ¿Es público el renderer? | `render_human_git_handoff_powershell` sí: commit de introducción P17.7 `9b995fc`, `human_git_handoff.__all__:147`, reexport de paquete y documentación `work_packet_human_git_handoff.md:49`. |
+| ¿Es intencional la ausencia del nombre legado en el paquete? | Sí: el test histórico ya exigía `not hasattr(work_packet, "render_human_git_handoff_instructions")` y ausencia en `hgh.__all__`. No existe definición con ese nombre en P17.7 ni en el padre HAR-01. |
+| ¿Cambió la visibilidad en HAR-02? | No. Producción no se modifica. El módulo original P17.7 conserva la misma lista y el mismo renderer; el paquete conserva el reexport. |
+| ¿Solo era incorrecto el índice? | Sí: posición 227 contiene el validador; la adición C36 desplazó el renderer. |
+| ¿Preserva el límite una prueba directa? | Sí: nombre público en `__all__` e identidad con `hgh`; nombre legado ausente en ambos `__all__` y atributos de paquete/módulo. No existe ruta de import explícito del nombre legado. |
+
+Consumidores existentes: `product_runtime.py:27542–27609` importa y usa el
+renderer público del paquete. Las rutas canónicas de import se mantienen.
+Las pruebas de determinismo/render, modelos, esquemas, bindings, firmas usadas
+por los consumidores, rechazo de datos y autoridad human-only permanecen intactas.
+No se introduce una promesa de compatibilidad sobre todos los detalles internos.
+
+### Invariante y sensibilidad
+
+El helper compartido vive en el test permitido de permisos; varias capacidades
+comparten exactamente el contrato de nombre/identidad/unicidad. Consulta módulos
+canónicos por sus rutas establecidas, nunca obtiene las expectativas históricas
+del `__all__` vigente. Para módulos antiguos sin `__all__`, el contrato se expresa
+por los reexports explícitos del paquete; para los que lo declaran también exige
+la pertenencia al `__all__` del módulo. Ningún helper de producción cambia.
+
+Interfaces sintéticas, sin modificar módulos reales, prueban: retirar un símbolo;
+sustituir su objeto; exponer un atributo privado incluso sin exportarlo; exportar
+un privado; duplicar un export; retirar funcionalidad histórica de otra capacidad.
+Una interfaz con adiciones y orden diferente conserva el contrato. Los resultados
+frescos y node IDs constan en la sección `har02_verification` del manifiesto y la
+evidencia externa HAR-02. Las versiones intermedias están marcadas superseded.
+
+D09 conserva **C26 pendiente de HAR-03**. Esta candidatura resuelve únicamente las
+aserciones estructurales de API autorizadas, sin alterar publicness, aliases,
+schemas, implementaciones ni política de Git. G0 continúa pendiente; no se inicia
+HAR-03 ni se lee o muta autoridad Pepper viva.
+
+Comparación aislada HAR-02: las expectativas acumuladas cubren todos los nombres
+públicos del padre (330 observados; no es una cantidad exigida por los tests).
+Inventarios runtime padre/candidato comparan iguales: superficie, módulo/objeto
+canónico, firmas de funciones, schemas JSON de modelos y valores de enums.
+`public-api-comparison.json` e inventarios adjuntos conservan la observación.
+La búsqueda acotada en `hermes_cli/` y `tools/` no encontró consumidores de
+índices de `work_packet.__all__`. Los tests nuevos permiten reordenar nombres
+manteniendo identidad, unicidad y ausencia de las superficies prohibidas.
