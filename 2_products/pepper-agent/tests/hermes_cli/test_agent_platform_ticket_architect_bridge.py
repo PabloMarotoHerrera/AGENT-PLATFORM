@@ -5369,12 +5369,66 @@ def test_c26_pending_successor_approval_preempts_stale_review_prepare_projection
     ) is None
 
 
+def _har03_queued_predecessor(home, monkeypatch):
+    """Real generated/approved WorkPacket and queued task; no execution grant."""
+    from tests.hermes_cli import test_agent_platform_work_packet_kanban_projection as kt
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    monkeypatch.setenv("HERMES_KANBAN_HOME", str(home))
+    monkeypatch.setenv("LOCALAPPDATA", str(home.parent / "local-appdata"))
+    monkeypatch.setenv("USERPROFILE", str(home.parent))
+    kt._install_implementation_profile(monkeypatch, home)
+    generation, decision = kt._approve_next_ticket()
+    projected = kt._project_next_ticket_direct()
+    authority = kt._projection_authority_record(projected)
+    assert authority["ticket_spec_SHA256"] == generation["ticket_spec_SHA256"]
+    assert authority["work_packet_SHA256"] == generation["work_packet_SHA256"]
+    assert decision["decision"] == "approve"
+    assert not pr.execution_start_record_path_for_ticket("P18.9.1").exists()
+    return pr, kt, generation, projected, authority
+
+
+def _har03_active_predecessor(home, monkeypatch, *, successor_decision="pending"):
+    from hermes_cli import kanban_db
+
+    pr, kt, generation, projected, authority = _har03_queued_predecessor(home, monkeypatch)
+    started = kt._start_p18_9_1_execution(pr, monkeypatch, pid=5321)
+    # No process is launched. Only liveness of the synthetic run is simulated.
+    monkeypatch.setattr(kanban_db, "_pid_alive", lambda pid: int(pid) == 5321)
+    pr._validate_execution_start_authority(authority)
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        task = kanban_db.get_task(conn, projected["kanban_task_id"])
+        run = kanban_db.get_run(conn, started["kanban_run_id"])
+        assert task.current_run_id == run.id == started["kanban_run_id"]
+        assert run.task_id == task.id
+        assert run.status == "running"
+    finally:
+        conn.close()
+    bridge.generate_current_ticket(workflow=_p18_9_2_workflow())
+    if successor_decision == "reject":
+        bridge.apply_ticket_approval_decision(
+            ticket_id="P18.9.2", decision="reject", actor="human.p18.9",
+        )
+    return pr, projected, authority, started
+
+
+def _har03_durable_bytes(home):
+    return {
+        str(path.relative_to(home)): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in home.rglob("*") if path.is_file()
+    }
+
+
 def test_c26_rejected_successor_revision_preempts_stale_review_prepare_projection(
     bridge_home,
     monkeypatch,
 ) -> None:
-    from hermes_cli.agent_platform import product_runtime as pr
+    from hermes_cli import kanban_db
 
+    pr, _kt, _generation, projected, _authority = _har03_queued_predecessor(
+        bridge_home, monkeypatch,
+    )
     bridge.generate_current_ticket(workflow=_p18_9_2_workflow())
     rejected = bridge.load_generation_record(ticket_id="P18.9.2")
     assert rejected is not None
@@ -5383,10 +5437,20 @@ def test_c26_rejected_successor_revision_preempts_stale_review_prepare_projectio
         decision="reject",
         actor="human.p18.9",
     )
-    _install_c26_stale_predecessor_review_prepare_projection(monkeypatch, pr)
+    # The stale overlay is derived UI data. Real authority proves a queued task
+    # without a run/start or terminal review, not a completed predecessor.
+    conn = kanban_db.connect(board=projected["kanban_board_slug"])
+    try:
+        assert kanban_db.list_runs(conn, projected["kanban_task_id"]) == []
+    finally:
+        conn.close()
+    stale = _c26_stale_predecessor_review_prepare_overlay()
+    monkeypatch.setattr(pr, "_p18_9_0_generation_overlay", lambda: (dict(stale), None))
+    before_inspection = _har03_durable_bytes(bridge_home)
 
     snapshot = pr.build_workflow_control_snapshot()
 
+    assert _har03_durable_bytes(bridge_home) == before_inspection
     assert snapshot["current_ticket_id"] is None
     assert snapshot["generated_successor_ticket_id"] == "P18.9.2"
     assert snapshot["next_ticket_id"] == "P18.9.2"
@@ -5441,23 +5505,20 @@ def test_c26_active_execution_still_preempts_pending_successor_projection(
     bridge_home,
     monkeypatch,
 ) -> None:
-    from hermes_cli.agent_platform import product_runtime as pr
-
-    bridge.generate_current_ticket(workflow=_p18_9_2_workflow())
-    _install_c26_stale_predecessor_review_prepare_projection(
-        monkeypatch,
-        pr,
-        active_execution_count=1,
-    )
+    pr, _projected, _authority, _started = _har03_active_predecessor(bridge_home, monkeypatch)
+    before = _har03_durable_bytes(bridge_home)
 
     snapshot = pr.build_workflow_control_snapshot()
 
     assert snapshot["current_ticket_id"] == "P18.9.1"
     assert snapshot["execution_state"] == "active_executions"
     assert snapshot["active_execution_count"] == 1
-    assert snapshot["next_action"]["id"] == "PREPARE_P18_9_1_REVIEW"
+    assert snapshot["next_action"]["id"] == "MONITOR_P18_9_1_EXECUTION"
+    assert snapshot["review_preparation_eligibility"]["available"] is False
     assert snapshot.get("generated_successor_ticket_id") != "P18.9.2"
     assert bridge.load_approval_decision_record(ticket_id="P18.9.2") is None
+    assert not pr.execution_start_record_path_for_ticket("P18.9.2").exists()
+    assert _har03_durable_bytes(bridge_home) == before
 
 
 def test_c26_stale_review_prepare_multiple_pending_successors_fail_closed(
@@ -6489,3 +6550,131 @@ def test_chat_duplicate_same_decision_is_idempotent_and_opposite_conflicts(
     assert "opposite" in opposite["error"]
     assert decision is not None
     assert decision["decision"] == "approve"
+
+
+@pytest.mark.parametrize("decision, status, action", (
+    ("pending", "awaiting_ticket_approval", "APPROVE_P18_9_2"),
+    ("reject", "awaiting_correction", "REVISE_P18_9_2"),
+))
+def test_har03_execution_and_successor_decision_targets_are_distinct(
+    bridge_home, monkeypatch, decision, status, action,
+):
+    pr, _projected, _authority, _started = _har03_active_predecessor(
+        bridge_home, monkeypatch, successor_decision=decision,
+    )
+    before = _har03_durable_bytes(bridge_home)
+    snapshot = pr.build_workflow_control_snapshot()
+    record = bridge.load_generation_record(ticket_id="P18.9.2", allow_terminal_rejected_historical=True)
+    human_target = bridge.generated_record_to_workflow_overlay(record)
+    assert snapshot["current_ticket_id"] == "P18.9.1"
+    assert snapshot["next_action"]["id"] == "MONITOR_P18_9_1_EXECUTION"
+    assert human_target["workflow_status"] == status
+    assert human_target["next_action"]["id"] == action
+    assert human_target["next_action"]["target_ticket_id"] == "P18.9.2"
+    assert snapshot["review_preparation_eligibility"]["available"] is False
+    assert human_target["ticket_execution_authorized"] is False
+    assert not pr.execution_start_record_path_for_ticket("P18.9.2").exists()
+    assert _har03_durable_bytes(bridge_home) == before
+
+
+def test_har03_active_run_cannot_prepare_review_or_gain_validation_authority(
+    bridge_home, monkeypatch,
+):
+    pr, _projected, _authority, _started = _har03_active_predecessor(bridge_home, monkeypatch)
+    before = _har03_durable_bytes(bridge_home)
+    snapshot = pr.build_workflow_control_snapshot()
+    # An incomplete/failed validation claim cannot make this active run terminal.
+    snapshot["validation_contract_satisfied"] = False
+    assert pr._review_prepare_workflow_blocker(snapshot) is not None
+    result = pr.prepare_current_ticket_review(
+        project_id="PEPPER", ticket_id="P18.9.1", next_action_id="PREPARE_P18_9_1_REVIEW",
+    )
+    assert result["review_prepare_status"] == "blocked"
+    assert result["review_preparation_recorded"] is False
+    assert result["execution_started"] is False
+    assert result["Git_mutation"] is False
+    assert _har03_durable_bytes(bridge_home) == before
+
+
+@pytest.mark.parametrize("conflict", ("missing_start", "corrupt_start"))
+def test_har03_inconsistent_current_run_authority_fails_closed(
+    bridge_home, monkeypatch, conflict,
+):
+    pr, _projected, _authority, _started = _har03_active_predecessor(bridge_home, monkeypatch)
+    path = pr.execution_start_record_path_for_ticket("P18.9.1")
+    if conflict == "missing_start":
+        path.unlink()  # Only this synthetic test's isolated authority.
+    else:
+        record = json.loads(path.read_text())
+        record["work_packet_SHA256"] = "f" * 64
+        path.write_text(json.dumps(record))
+    before = _har03_durable_bytes(bridge_home)
+    snapshot = pr.build_workflow_control_snapshot()
+    assert snapshot["review_preparation_eligibility"]["available"] is False
+    assert snapshot["next_action"]["id"] != "PREPARE_P18_9_1_REVIEW"
+    assert snapshot["remaining_blockers"]
+    assert snapshot["current_ticket_id"] == "P18.9.1"
+    assert snapshot["workflow_status"] == "execution_authority_blocked"
+    action = snapshot["next_action"]
+    assert action["id"] == "RESOLVE_P18_9_1_EXECUTION_AUTHORITY"
+    assert action["executable"] is False
+    assert action["read_only"] is True
+    assert snapshot["ticket_execution_authorized"] is False
+    assert snapshot["WorkPacket_execution_authorized"] is False
+    assert snapshot["runtime_execution_authorized"] is False
+    assert not pr.execution_start_record_path_for_ticket("P18.9.2").exists()
+    assert bridge.load_approval_decision_record(ticket_id="P18.9.2") is None
+    assert _har03_durable_bytes(bridge_home) == before
+
+
+def test_har03_partial_projection_is_a_diagnostic_not_review_authority(
+    bridge_home, monkeypatch,
+):
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    _install_c26_stale_predecessor_review_prepare_projection(monkeypatch, pr, active_execution_count=1)
+    from hermes_cli import kanban_db
+    from hermes_cli.agent_platform import execution_evidence
+
+    before = _har03_durable_bytes(bridge_home)
+    # Use the existing blockers-only inspection connection scope. An unscoped
+    # cold dashboard read may initialize storage; that is not this read-only API.
+    with kanban_db.scoped_read_only_connections(execution_evidence.connection):
+        snapshot = pr.build_workflow_control_snapshot()
+    assert snapshot["review_preparation_eligibility"]["available"] is False
+    assert snapshot["next_action"]["id"] == "RESOLVE_P18_9_1_REVIEW_BLOCKER"
+    assert snapshot["next_action"]["required_human_action"] == "resolve_review_prerequisite"
+    # The diagnostic ID is rejected by the real preparation request guards;
+    # no corresponding generic recovery capability is invented.
+    with pytest.raises(pr.ProductRuntimeError):
+        pr.prepare_current_ticket_review(
+            project_id="PEPPER", ticket_id="P18.9.1",
+            next_action_id=snapshot["next_action"]["id"],
+        )
+    assert _har03_durable_bytes(bridge_home) == before
+
+
+def test_har03_terminal_review_ready_run_requires_full_authority_and_is_read_only(
+    bridge_home, monkeypatch,
+):
+    from tests.hermes_cli import test_agent_platform_work_packet_kanban_projection as kt
+    from hermes_cli.agent_platform import product_runtime as pr
+
+    monkeypatch.setenv("HERMES_KANBAN_HOME", str(bridge_home))
+    kt._install_execution_profile(monkeypatch, bridge_home)
+    # Construct the real terminal/manual-validation boundary, stopping before
+    # the fixture's final preparation effect rather than forging readiness.
+    with monkeypatch.context() as setup:
+        setup.setattr(pr, "prepare_current_ticket_review", lambda **_kwargs: None)
+        _generation, _projected, started, _review = kt._prepare_completed_review_package(monkeypatch)
+    before = _har03_durable_bytes(bridge_home)
+    snapshot = pr.build_workflow_control_snapshot()
+    assert snapshot["current_ticket_id"] == "P18.9.0"
+    assert snapshot["active_execution_count"] == 0
+    assert snapshot["next_action"]["id"] == "PREPARE_P18_9_0_REVIEW"
+    eligibility = snapshot["review_preparation_eligibility"]
+    assert eligibility["available"] is True
+    assert eligibility["run_id"] == started["kanban_run_id"]
+    assert eligibility["review_preparation_recorded"] is False
+    assert pr._review_prepare_workflow_blocker(snapshot) is None
+    assert _har03_durable_bytes(bridge_home) == before

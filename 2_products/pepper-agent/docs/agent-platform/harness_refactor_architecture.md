@@ -528,3 +528,120 @@ canónico, firmas de funciones, schemas JSON de modelos y valores de enums.
 La búsqueda acotada en `hermes_cli/` y `tools/` no encontró consumidores de
 índices de `work_packet.__all__`. Los tests nuevos permiten reordenar nombres
 manteniendo identidad, unicidad y ausencia de las superficies prohibidas.
+
+## 8. HAR-03 — Semántica C26 cualificada y candidatura G0
+
+Padre aceptado, verificado read-only el 2026-10-15 en Windows y WSL:
+`4d9f5192aac30d5c7b7ae9cb192b1f34771db83b`, rama
+`p18-manual-to-hermes-workflow-migration`; índices y árboles rastreados limpios.
+HAR-00–HAR-02 aceptados/commit/push según el ticket humano HAR-03. Sus resultados,
+hashes y aprobaciones anteriores permanecen históricos, sin reclasificarlos.
+Esta sección prepara revisión humana de G0; no lo declara aprobado ni inicia HAR-04.
+
+### Hechos, objetivos y traducción del campo legado
+
+D02/D03/D08 permanecen vigentes. Se distinguen tres conceptos sin crear otro
+registro ni adoptar prematuramente contratos HAR-04:
+
+- **Execution target:** generación aprobada, TicketSpec/WorkPacket vinculados,
+  proyección Kanban validada y task/run/start de ese ticket. Un contador o un
+  overlay no sustituye esos registros. Con un run activo válido, el contexto
+  primario permanece en ese ticket y su acción existente es `MONITOR_*_EXECUTION`.
+- **Decision target:** generación/publicación canónica y decisión de aprobación o
+  rechazo validada contra esa generación. Un rechazo requiere `REVISE` independiente;
+  no concede ejecución. Con otro ticket activo, esa decisión sigue existiendo en
+  sus registros/overlay de publicación y espera; no desplaza el monitor ni se ejecuta.
+- **Review target:** proyección/run terminal vigente, contrato satisfecho,
+  atestaciones humanas exigidas y gate completo de review. No se deriva del texto
+  `execution_completed` o del nombre PREPARE en una proyección vieja.
+
+`current_ticket_id` conserva su traducción por contexto; no se redefine como un
+campo universal de permiso de ejecución. Para un sucesor pendiente sin precedencia
+activa se conserva la publicación vigente como contexto (C61). Para un sucesor
+rechazado cualificado sin precedencia vigente del anterior se conserva el mapping
+existente `current_ticket_id=None`, `next_ticket_id=<sucesor>` y
+`next_action.target_ticket_id=<sucesor>`, acción `REVISE_<sucesor>`.
+Consumidores: `product_runtime._workflow_ticket`/`build_lead_agent_operational_context`,
+`tools/pepper_workflow_tools._get_current_ticket`/`_get_workflow_control` y
+`web/src/agent-platform/runtime-overview/contract.ts::parseWorkflowControl`.
+El campo nullable y los IDs de acción/contexto permanecen utilizables sin nuevos
+campos de execution_target/decision_target ni un registry de lifecycle paralelo.
+
+### Matriz de precedencia y continuación
+
+Las etiquetas OBSERVATION/HUMAN_DECISION/SAFE_STOP siguientes explican semántica;
+no son tipos de runtime nuevos de HAR-04. Todos los registros son de fixtures
+sintéticas aisladas; no se consultó autoridad P18.9.13 viva.
+
+| Escenario | Autoridad/objetivos | Review y continuación |
+|---|---|---|
+| Predecesor activo válido, sucesor pendiente | Approval/generation/WorkPacket/projection/start/task.current_run_id/run coherentes; decisión separada en generación sucesora pendiente | `current_ticket_id` del activo; `MONITOR_<activo>_EXECUTION` como observación/wait. Review denegado; no aprobar/start sucesor. |
+| Predecesor activo válido, sucesor rechazado | Misma ejecución retenida; rechazo vinculado a generación sucesora, decisión `REVISE` separada | Monitor del activo. El rechazo no se pierde ni se convierte en ejecución/revisión automática. |
+| Predecesor terminal, sucesor rechazado | Validez del terminal/review/completion se comprueba en loaders y precedencia durable; publicación sucesora debe ser canónica | Solo gate completo habilita review. Sin precedencia vigente retenida, decisión cualificada `REVISE`; autoridad contradictoria bloquea. Ningún PREPARE stale acredita elegibilidad. |
+| Predecesor stale sin ejecución/review vigentes, sucesor rechazado | Fixture real de generación aprobada/proyección/task en cola sin runs/start/terminal; overlay UI antiguo se declara derivado; rechazo real del sucesor | Mapping legado null y REVISE del sucesor. Todos los permisos de ejecución siguen false. Inspección no escribe. |
+| Run activo con validación incompleta/fallida | El run activo se acredita por la cadena durable, no por validation_state inyectado | Monitor/wait, nunca PREPARE. Gate/executor de preparación deniega incluso con una invocación explícita. |
+| Terminal review-ready sin decisión competidora | Run terminal exacto, evidencia de comandos y atestaciones manuales construidas por infraestructura existente | PREPARE del terminal solo tras `_review_prepare_workflow_blocker`; observar no crea review ni acepta nada. |
+| Identidad actual conflictiva/start ausente o corrupto | No heredar permiso de proyección. Un run persistido sin start no equivale a «nunca iniciado» | Blocker explícito y contexto diagnóstico; nueva traducción pública aprobada abajo. Sin START, PREPARE, executor o reconciliación implícita. |
+| Proyección parcial/contradictoria | Contador/status no acreditan autoridad; blocker derivado permite diagnóstico | RESOLVE_REVIEW_BLOCKER es diagnóstico; guard real rechaza ese ID como request de PREPARE. Inspección explícita usa conexiones read-only. |
+
+### Causas y alcance ejecutado
+
+Caso A: `_correction_successor_records_for_precedence` llamaba a
+`generated_record_to_workflow_overlay` sin importarlo. `except Exception` ocultaba
+el NameError, por lo que el selector devolvía cero rechazos. Se añade el import
+local; el mapping null/REVISE ya estaba implementado. Se valida con generación,
+rechazo y proyección durables; no con ausencia asumida de información.
+
+Caso B: el fixture anterior solo insertaba `active_execution_count=1` en un
+snapshot también marcado completed. No tenía approval/proyección/start/run que
+acreditara ejecución vigente. El fixture corregido usa la infraestructura existente
+con spawn/PID sintéticos; construye y valida aprobación, WorkPacket, proyección y
+run activo. El resultado MONITOR ya existía en producción y en tests de Kanban;
+PREPARE durante ejecución contradecía el gate. No se altera ese guard para verde.
+
+Las pruebas nuevas descubrieron otra contradicción: start ausente, run activo,
+status queued y oferta START sin blocker. Antes de ejecutar su cambio público se
+pidió la decisión exigida por HAR-03 §§4/7. **Pablo aprobó durante HAR-03** conservar
+`current_ticket_id` como contexto diagnóstico y publicar:
+
+- `workflow_status=execution_authority_blocked`;
+- `next_action.id=RESOLVE_<ticket>_EXECUTION_AUTHORITY`;
+- `next_action.executable=false`, `next_action.read_only=true`;
+- blocker explícito y retirada de START/PREPARE, sin nuevo executor, permiso ni
+  reconciliación automática.
+
+La aprobación textual y su pregunta exacta constan en `human-semantic-decision.json`
+del directorio externo HAR-03. No se infirió esta decisión desde D09 conceptual.
+Se conserva el contador observado; flags de permiso quedan false. La lectura
+específica del run reutiliza `execution_evidence.connection`/`evidence_sqlite`
+(imagen DB/WAL en memoria), sin crear DB/sidecars, reap ni recrear start authority.
+El bloqueo se aplica al ticket actual con ejecución activa y blocker de su start,
+al final de overlays y antes de publicar elegibilidad de review.
+
+Solo cambian tres funciones de `product_runtime.py`: selector de correcciones,
+`_current_ticket_execution_start_overlay` y `build_workflow_control_snapshot`.
+No cambia `review_readiness.py`, el bridge de generación, ningún executor,
+consentimiento/approval/retry/review guard, ni mecanismos C91–C94. No hay rama
+nueva por P18.9.1/P18.9.2/C26 ni mutación de los registros inspeccionados.
+
+### Evidencia, límites y gate siguiente
+
+Dos nodos originales corregidos; cinco funciones nuevas aportan siete casos de
+regresión. Con los otros C26, la selección focalizada tiene 12 casos. Registros
+sintéticos se comparan por bytes antes/después de observar; los casos negativos
+corrompen/retiran únicamente su propia autoridad temporal para comprobar rechazo.
+Las cuatro selecciones y comparaciones frescas constan en `har03_verification`.
+Todos los campos históricos del manifiesto HAR-00/HAR-01/HAR-02 se conservan.
+
+Límite observado: un dashboard general sin scope read-only puede inicializar una
+DB vacía; el bootstrap de `model_tools.handle_function_call` también puede crear
+SOUL/state antes del handler. Eso no se presenta como inspección global sin efectos
+ni se corrige en este ámbito. La inspección explícita de blockers usa el scope
+read-only ya existente; su núcleo y las observaciones con autoridad construida
+se verifican sin cambios durables. Evidencia/limites no equivalen a garantías sobre
+un runtime vacío o todos los callers del repositorio.
+
+G0 solo puede quedar **READY_FOR_HUMAN_REVIEW** con la baseline seleccionada sin
+fallos/errores y sin regresiones nuevas. Cualquier cierre de G0 y habilitación de
+HAR-04 requiere aceptación humana separada. HAR-03 no inicia HAR-04 ni operaciones
+Pepper vivas, Git, deploy/restart, proveedores, Docker o Graphify.

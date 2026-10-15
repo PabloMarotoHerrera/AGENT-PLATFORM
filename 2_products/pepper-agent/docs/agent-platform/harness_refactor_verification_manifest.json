@@ -3707,5 +3707,295 @@
     "provider_or_external_service_calls": false,
     "graphify_or_docker": false,
     "next_gate": "Human review/staging/commit/push of HAR-02; separately authorized HAR-03 owns C26/G0. No HAR-03 implementation."
+  },
+  "har03_verification": {
+    "status": "HAR-03-C26-LIFECYCLE-SEMANTICS-G0-READY-FOR-HUMAN-REVIEW",
+    "human_accepted": false,
+    "prepared_date": "2026-10-15",
+    "timezone": "Europe/Madrid",
+    "accepted_parent": "4d9f5192aac30d5c7b7ae9cb192b1f34771db83b",
+    "branch": "p18-manual-to-hermes-workflow-migration",
+    "HAR00_HAR01_HAR02_acceptance_authority": "Human HAR-03 ticket states accepted, committed and pushed. Windows/WSL 4d9f519 full SHA/branch clean checked read-only; no synchronization.",
+    "legacy_top_level_fields_scope": "Every pre-existing field retains its HAR-00/HAR-01/HAR-02 historical meaning/status/results/approvals. This namespace records current HAR-03 state; old results have not been reclassified.",
+    "full_results": {
+      "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-03-20261015\\verification-results.json",
+      "SHA256": "0fe4f4c8e6e014cf7bb4a45e64d39e3a94654cb7e452e438e429b3e24ed7ff3d"
+    },
+    "evidence_root_windows": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-03-20261015",
+    "evidence_root_wsl": "/tmp/har03-20261015-y7yzh8wu/evidence",
+    "initial_preflight": {
+      "HEAD": "4d9f5192aac30d5c7b7ae9cb192b1f34771db83b",
+      "branch": "p18-manual-to-hermes-workflow-migration",
+      "status": "?? 2_products/pepper-agent/tests/hermes_cli/test_c64_validation_authority_boundary.py\n?? 2_products/pepper-agent/web/src/agent-platform/c80-r1-chat-lifecycle.test.tsx\n?? HAR/\n?? mermaid-diagram.png\n?? mermaid-diagram2.png\n?? mermaid-diagram3.png\n",
+      "untracked": {
+        "2_products/pepper-agent/tests/hermes_cli/test_c64_validation_authority_boundary.py": "c7999a16042f07390e41e2d040c2fa387096719c744f508c546f6897076cb862",
+        "2_products/pepper-agent/web/src/agent-platform/c80-r1-chat-lifecycle.test.tsx": "64e9756d9d8d105ed4da36fd182117e02b1cd49a4f6631409dca8f6f199d3277",
+        "HAR/HAR-00_architecture_decisions_and_execution_baseline.md": "fb1b1d18cca4d17d8ac86ff6e0ecad6ff76d5ef28e9e23c9d01d71b99d479674",
+        "HAR/HAR_roadmap_refactorizacion_harnes.md": "3bc700b77e6e36ba297bf0e3f6f2c85e1b25b497679db3912a5399a167b72513",
+        "mermaid-diagram.png": "c9625e35830957f005f695fe3372eacdb6e57ffb961bea2dd5f5feca2acbc169",
+        "mermaid-diagram2.png": "654d3f3ad0b52ab78ea9f8bf8708e0da70b62426670b508249b4d9026a367721",
+        "mermaid-diagram3.png": "45ddde0a639b51eda2f95712ef4da57663e69e44a96e3b31f6f08b49b953b359"
+      }
+    },
+    "source_overlays": [
+      {
+        "path": "2_products/pepper-agent/hermes_cli/agent_platform/product_runtime.py",
+        "parent_SHA256": "c6722ab4b2e57f44a78137af344ef84e6ddb5bdf433faf73a9d03c41f4c42fcd",
+        "candidate_SHA256": "5d7a055406145b3d6ea1f523673f73e74338d2ccafca946349d0b6e96a2b676d"
+      },
+      {
+        "path": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_ticket_architect_bridge.py",
+        "parent_SHA256": "3f6787f7443238b9e05ea7c4b9ff8353cc20d97af83322f29e353e1973e585d2",
+        "candidate_SHA256": "d285bbaef863d97476bbcd56511d8450a5942fcbffefa721264655355055dbb8"
+      }
+    ],
+    "runtime_source_limit": "Two executable files overlaid byte-for-byte from Windows; documentation and manifest result metadata added afterward to Windows only. Parent is committed blob bytes; product_runtime Windows pre-existing CRLF preserved, Git semantic diff only the three named functions.",
+    "interpreter_and_wrapper_identity": "Per-selection run JSON records interpreter realpath/version/source, pytest/pydantic versions, wrapper/runner hashes and every explicit selected test-file SHA256. Parent committed bytes, candidate two exact Windows executable overlays; metadata docs appended afterward.",
+    "selection_comparison_summary": {
+      "baseline": {
+        "parent_counts": {
+          "passed": 2117,
+          "failed": 2,
+          "errors": 0
+        },
+        "candidate_counts": {
+          "passed": 2126,
+          "failed": 0,
+          "errors": 0
+        },
+        "parent_exit_code": 1,
+        "candidate_exit_code": 0,
+        "parent_failed_error_nodes": [
+          "tests/hermes_cli/test_agent_platform_ticket_architect_bridge.py::test_c26_active_execution_still_preempts_pending_successor_projection",
+          "tests/hermes_cli/test_agent_platform_ticket_architect_bridge.py::test_c26_rejected_successor_revision_preempts_stale_review_prepare_projection"
+        ],
+        "candidate_failed_error_nodes": [],
+        "candidate_only_failed_error_nodes": [],
+        "parent_only_failed_error_nodes": [
+          "tests/hermes_cli/test_agent_platform_ticket_architect_bridge.py::test_c26_active_execution_still_preempts_pending_successor_projection",
+          "tests/hermes_cli/test_agent_platform_ticket_architect_bridge.py::test_c26_rejected_successor_revision_preempts_stale_review_prepare_projection"
+        ],
+        "exact_commands_source_and_environment": {
+          "parent": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-03-20261015\\parent-baseline-run.json",
+          "candidate": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-03-20261015\\candidate-qualified-baseline-run.json"
+        }
+      },
+      "first_slice": {
+        "parent_counts": {
+          "passed": 219,
+          "failed": 0,
+          "errors": 0
+        },
+        "candidate_counts": {
+          "passed": 219,
+          "failed": 0,
+          "errors": 0
+        },
+        "parent_exit_code": 0,
+        "candidate_exit_code": 0,
+        "parent_failed_error_nodes": [],
+        "candidate_failed_error_nodes": [],
+        "candidate_only_failed_error_nodes": [],
+        "parent_only_failed_error_nodes": [],
+        "exact_commands_source_and_environment": {
+          "parent": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-03-20261015\\parent-first_slice-run.json",
+          "candidate": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-03-20261015\\candidate-qualified-first_slice-run.json"
+        }
+      },
+      "compatibility": {
+        "parent_counts": {
+          "passed": 716,
+          "failed": 0,
+          "errors": 0
+        },
+        "candidate_counts": {
+          "passed": 716,
+          "failed": 0,
+          "errors": 0
+        },
+        "parent_exit_code": 0,
+        "candidate_exit_code": 0,
+        "parent_failed_error_nodes": [],
+        "candidate_failed_error_nodes": [],
+        "candidate_only_failed_error_nodes": [],
+        "parent_only_failed_error_nodes": [],
+        "exact_commands_source_and_environment": {
+          "parent": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-03-20261015\\parent-compatibility-run.json",
+          "candidate": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-03-20261015\\candidate-qualified-compatibility-run.json"
+        }
+      },
+      "authority_security": {
+        "parent_counts": {
+          "passed": 1174,
+          "failed": 0,
+          "errors": 0
+        },
+        "candidate_counts": {
+          "passed": 1174,
+          "failed": 0,
+          "errors": 0
+        },
+        "parent_exit_code": 0,
+        "candidate_exit_code": 0,
+        "parent_failed_error_nodes": [],
+        "candidate_failed_error_nodes": [],
+        "candidate_only_failed_error_nodes": [],
+        "parent_only_failed_error_nodes": [],
+        "exact_commands_source_and_environment": {
+          "parent": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-03-20261015\\parent-authority_security-run.json",
+          "candidate": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-03-20261015\\candidate-qualified-authority_security-run.json"
+        }
+      }
+    },
+    "targeted_verification": {
+      "original_parent": {
+        "passed": 0,
+        "failed": 2,
+        "error": 0
+      },
+      "qualified_candidate": {
+        "passed": 12,
+        "failed": 0,
+        "error": 0
+      },
+      "supplemental_diagnostic_start_guards": {
+        "passed": 2,
+        "failed": 0,
+        "error": 0
+      },
+      "new_test_functions": 5,
+      "new_parameterized_cases": 7,
+      "original_target_node_ids_retained": true,
+      "original_case_A": "Missing local import restored existing null/REVISE translation; fixture now builds actual approved queued predecessor without runs/start and validated successor rejection.",
+      "original_case_B": "Contradictory integer-only fixture replaced by durable approved WorkPacket/projection/start/task/run with simulated spawn/PID; expected existing MONITOR, never active PREPARE.",
+      "XML_evidence": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-03-20261015\\targeted-results.json"
+    },
+    "semantic_qualification": {
+      "conceptual_authority": "HAR-03 sections3,5,6; D09 conceptual separation plus evidence of existing null/REVISE and valid active MONITOR translations.",
+      "initial_pre_edit_matrix": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-03-20261015\\semantic-qualification.json",
+      "current_matrix": "harness_refactor_architecture.md section8; exact additional conflict projection qualified by direct human answer.",
+      "new_public_projection_human_approval": {
+        "authority": "Direct human answer to HAR-03 semantic decision during this task",
+        "date": "2026-10-15",
+        "question": "HAR-03 §§4/7 exige una decisión sobre la proyección cuando existe un run activo pero su autoridad de start falta o está corrupta. ¿Apruebas conservar current_ticket_id como contexto diagnóstico, publicar workflow_status=execution_authority_blocked y next_action=RESOLVE_<ticket>_EXECUTION_AUTHORITY con executable=false y read_only=true, retirar START/PREPARE y añadir un blocker explícito, sin crear executor, permisos ni reconciliación automática?",
+        "answer": "Aprobar ese bloqueo explícito y continuar HAR-03 (Recomendado)",
+        "scope": "Active current run with missing/corrupt execution-start authority. Exact public projection qualified by human; no new effects."
+      },
+      "targets": "Execution authority from generation/approval/WorkPacket/projection/start/task/run; human decision authority from separate generation-bound approval/rejection; review from exact current terminal evidence and full workflow/manual gate. No new target fields or registry.",
+      "precedence": "Valid active predecessor retains primary monitor context; separately rejected/pending successor does not grant execution. Qualified rejection without retained predecessor execution/review authority selects existing null/REVISE mapping. Conflict with observed current active run and missing/corrupt start publishes blocked diagnostic, no START/PREPARE.",
+      "diagnostic_not_executor": true,
+      "inspection_scope": "Explicit read-only connections reuse immutable DB/WAL image reader; qualified initialized authority observations hash unchanged. Unscoped cold bootstrap effects remain identified debt."
+    },
+    "actual_modification_scope": {
+      "production_file": "2_products/pepper-agent/hermes_cli/agent_platform/product_runtime.py",
+      "production_functions": [
+        "_correction_successor_records_for_precedence",
+        "_current_ticket_execution_start_overlay",
+        "build_workflow_control_snapshot"
+      ],
+      "new_production_functions": 0,
+      "test_file": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_ticket_architect_bridge.py",
+      "docs": [
+        "2_products/pepper-agent/docs/agent-platform/harness_refactor_architecture.md",
+        "2_products/pepper-agent/docs/agent-platform/harness_refactor_verification_manifest.json"
+      ],
+      "no_ticket_ID_specific_branch": true,
+      "new_lifecycle_engine_or_registry": false,
+      "review_readiness_bridge_and_C91_C94_unchanged": true
+    },
+    "historical_preservation": {
+      "prior_manifest_objects_unchanged": true,
+      "prior_full_results_hashes": {
+        "har01_verification": {
+          "path": "C:/Users/pablo/.codex/har-evidence/HAR-01-20261015-08pqco2o/verification-results.json",
+          "SHA256": "a577f02f7a6dc87af3ae4ab315c72c735d1d2be20f540b8c9b6cc096016b93ac"
+        },
+        "har02_verification": {
+          "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-02-20261015\\verification-results.json",
+          "SHA256": "1d81a9a86c3374e879ba97bb517082ee5f03d0bde29bf2baf041a161975660b9"
+        }
+      },
+      "function_preservation": {
+        "2_products/pepper-agent/hermes_cli/agent_platform/product_runtime.py": {
+          "allowed_changed_functions": [
+            "_correction_successor_records_for_precedence",
+            "_current_ticket_execution_start_overlay",
+            "build_workflow_control_snapshot"
+          ],
+          "all_other_original_functions_unchanged": true,
+          "preserved_original_functions": 769,
+          "new_functions": [],
+          "current_function_lines": {
+            "_correction_successor_records_for_precedence": 3856,
+            "_current_ticket_execution_start_overlay": 31680,
+            "build_workflow_control_snapshot": 33061
+          }
+        },
+        "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_ticket_architect_bridge.py": {
+          "allowed_changed_functions": [
+            "test_c26_active_execution_still_preempts_pending_successor_projection",
+            "test_c26_rejected_successor_revision_preempts_stale_review_prepare_projection"
+          ],
+          "all_other_original_functions_unchanged": true,
+          "preserved_original_functions": 156,
+          "new_functions": [
+            "_har03_active_predecessor",
+            "_har03_durable_bytes",
+            "_har03_queued_predecessor",
+            "test_har03_active_run_cannot_prepare_review_or_gain_validation_authority",
+            "test_har03_execution_and_successor_decision_targets_are_distinct",
+            "test_har03_inconsistent_current_run_authority_fails_closed",
+            "test_har03_partial_projection_is_a_diagnostic_not_review_authority",
+            "test_har03_terminal_review_ready_run_requires_full_authority_and_is_read_only"
+          ],
+          "current_function_lines": {
+            "_har03_queued_predecessor": 5372,
+            "_har03_active_predecessor": 5391,
+            "_har03_durable_bytes": 5416,
+            "test_c26_rejected_successor_revision_preempts_stale_review_prepare_projection": 5423,
+            "test_c26_active_execution_still_preempts_pending_successor_projection": 5504,
+            "test_har03_execution_and_successor_decision_targets_are_distinct": 6559,
+            "test_har03_active_run_cannot_prepare_review_or_gain_validation_authority": 6580,
+            "test_har03_inconsistent_current_run_authority_fails_closed": 6600,
+            "test_har03_partial_projection_is_a_diagnostic_not_review_authority": 6630,
+            "test_har03_terminal_review_ready_run_requires_full_authority_and_is_read_only": 6657
+          }
+        }
+      },
+      "WorkPacket_public_API_unchanged": true,
+      "human_approval_revision_start_review_guards_unchanged": true,
+      "untracked_byte_hashes_preserved": true,
+      "roadmap_unchanged": true,
+      "live_authority_preservation": "No live access or write; not a live hash comparison."
+    },
+    "G0": {
+      "status": "READY_FOR_HUMAN_REVIEW_NOT_CLOSED",
+      "human_acceptance_required": true,
+      "human_acceptance_recorded": false,
+      "selected_critical_baseline_green": true,
+      "candidate_only_failures_or_errors": false,
+      "C26_semantics_resolved_in_selected_scope": true,
+      "technical_criteria_1_through_14": "Evidence in report A-L, architecture section8 and fresh comparisons. Repository-wide bootstrap/inspection debt explicitly bounded; no whole-suite/global-read-only claim.",
+      "criterion_15": "PENDING_HUMAN_ACCEPTANCE_BEFORE_HAR04",
+      "HAR04_started": false,
+      "HAR04_enabled_by_Codex": false
+    },
+    "limitations": [
+      "Four explicit manifest selections, not the entire repository suite.",
+      "Synthetic fixture spawn/PID and provider credential readiness are stubbed; durable generation/approval/projection/WorkPacket/task/run/review records use actual implementations.",
+      "Existing general unscoped dashboard reads may initialize storage; model-tools bootstrap may create SOUL/state. Explicit scoped read-only inspection and initialized qualified authority observations were verified without durable changes.",
+      "Archive optional Git precompile warning is best-effort; unchanged wrapper executes all explicit files.",
+      "Windows product_runtime pre-existing CRLF preserved. All candidate executable overlays copied byte-for-byte; docs/manifest reporting appended after runtime verification.",
+      "No arbitrary concurrent-state, external caller or full runtime empty-bootstrap guarantee."
+    ],
+    "superseded_intermediate_sides": [
+      "candidate",
+      "candidate-final"
+    ],
+    "git_mutation": false,
+    "live_authority_access": false,
+    "provider_or_external_calls": false,
+    "Docker_Graphify_deploy_restart": false,
+    "next_gate": "Human review of HAR-03 diff and G0 evidence; human-only Git; separately authorize HAR-04 only after human G0 acceptance."
   }
 }

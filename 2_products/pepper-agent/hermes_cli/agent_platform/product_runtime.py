@@ -3856,6 +3856,7 @@ def _pending_ticket_approval_records_or_blocker() -> tuple[
 def _correction_successor_records_for_precedence() -> list[dict[str, Any]]:
     try:
         from hermes_cli.agent_platform.workflow.ticket_architect_bridge import (
+            generated_record_to_workflow_overlay,
             load_generation_record,
         )
     except Exception:
@@ -31689,6 +31690,38 @@ def _current_ticket_execution_start_overlay(
             "evidence": _safe_text(exc, limit=300),
         }
     if record is None:
+        # A persisted active run cannot be advertised as awaiting a fresh start
+        # merely because its separate start authority is missing. Observe only;
+        # do not reap runs, create a DB, or reconstruct human authorization.
+        from hermes_cli import kanban_db
+        import sqlite3
+
+        try:
+            path = kanban_db.kanban_db_path(board=projection["kanban_board_slug"])
+            if path.is_file():
+                from .execution_evidence import connection
+
+                conn = connection(path)
+                try:
+                    task = kanban_db.get_task(conn, projection["kanban_task_id"])
+                    runs = kanban_db.list_runs(conn, projection["kanban_task_id"])
+                finally:
+                    conn.close()
+                if task is not None and (
+                    task.current_run_id or any(_execution_is_active(_run_dict(run)) for run in runs)
+                ):
+                    return None, {
+                        "id": f"{binding.ticket_hyphen_token}-EXECUTION-START-AUTHORITY",
+                        "status": "blocked_by_invalid_execution_start_authority",
+                        "code": "EXECUTION_START_AUTHORITY_MISSING",
+                        "evidence": "current Kanban run exists without execution-start authority",
+                    }
+        except (OSError, ValueError, KeyError, sqlite3.Error) as exc:
+            return None, {
+                "id": f"{binding.ticket_hyphen_token}-EXECUTION-START-AUTHORITY",
+                "status": "blocked_by_invalid_execution_start_authority",
+                "evidence": _safe_text(exc, limit=300),
+            }
         return None, None
     dispatched_failure = (
         record.get("start_status") == "blocked"
@@ -33516,6 +33549,28 @@ def build_workflow_control_snapshot() -> dict[str, Any]:
     _apply_approved_ticket_execution_profile_authority(snapshot, remaining_blockers)
     from .recovery_authority import apply_workflow as apply_recovery_authority
     apply_recovery_authority(snapshot, remaining_blockers)
+    # HAR-03 human-qualified projection: retain an active ticket as diagnostic
+    # context when its start authority cannot validate, never offer START/review.
+    current_ticket = str(snapshot.get("current_ticket_id") or "").strip()
+    start_blocker_id = f"{current_ticket.replace('.', '-')}-EXECUTION-START-AUTHORITY"
+    if current_ticket and int(snapshot.get("active_execution_count") or 0) > 0 and any(
+        item.get("id") == start_blocker_id for item in remaining_blockers
+    ):
+        snapshot.update(
+            readiness="execution_authority_blocked",
+            execution_state="active_executions",
+            workflow_status="execution_authority_blocked",
+            workflow_state=f"{current_ticket}-EXECUTION-AUTHORITY-BLOCKED",
+            ticket_execution_authorized=False, WorkPacket_execution_authorized=False,
+            runtime_execution_authorized=False, worker_execution=False, Kanban_dispatch=False,
+            next_action={
+                "id": f"RESOLVE_{current_ticket.replace('.', '_')}_EXECUTION_AUTHORITY",
+                "target_ticket_id": current_ticket,
+                "label": "Execution authority is blocked; inspect its records before any further action.",
+                "required_human_action": "inspect_execution_authority",
+                "executable": False, "read_only": True,
+            },
+        )
     from .review_readiness import apply as apply_review_readiness
     apply_review_readiness(snapshot, remaining_blockers)
     snapshot["remaining_blockers"] = remaining_blockers
