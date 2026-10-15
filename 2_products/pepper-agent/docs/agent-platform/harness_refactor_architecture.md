@@ -958,3 +958,169 @@ No hay consumidor existente de esos módulos. No hay acceso/copia de autoridad v
 P18.9.13, Git mutador, Graphify, Docker, instalación, deploy/restart ni proveedor.
 HAR-06 requiere revisión/aceptación humana separada de HAR-05. G1 sigue OPEN y no
 es elegible para cierre; HAR-06 no se implementa aquí.
+
+
+## 11. HAR-06 — Catálogo declarativo y correspondencia pasiva Hermes
+
+### Alcance reformulado y autoridad humana
+
+Padre Windows/WSL verificado: `b9a297690582882db68666b94e77b395f306aa0d`, rama
+`p18-manual-to-hermes-workflow-migration`; índice y archivos rastreados limpios.
+El ticket humano declara HAR-05 aceptado/commit/push y G0 cerrado. Los namespaces
+y estados históricos permanecen intactos; HAR-06 no cierra G1 ni inicia HAR-07.
+
+Se detectó que el ticket inicial excluía el binding mientras el roadmap HAR-06
+exige descriptores pre-review/material revision y correspondencia con handlers.
+El humano rechazó una excepción al roadmap y posteriormente **aprobó expresamente**
+la reformulación: catálogo puro, descriptores concretos, correspondencia pasiva
+fuera del núcleo, continuaciones reales y procedencia con resultados calificados.
+La ampliación autoriza nuevos módulos bajo agent_platform; ningún módulo histórico
+de ejecución/registro cambia. No se modifica el roadmap ni se difiere esta
+correspondencia a HAR-09. human-scope-approval.txt y esta conversación conservan
+la aprobación de alcance; no equivalen a aceptación del resultado HAR-06.
+
+### Arquitectura y separación de responsabilidades
+
+- `harness/catalog.py`: catálogo genérico puro; depende solo de contratos/validación
+  HAR-04, enum/hashlib/typing/Pydantic. No contiene IDs Pepper ni imports de producto.
+- `handler_correspondence.py`: adaptador de análisis estático de bytes explícitos;
+  AST/stdlib y modelos HAR-04. No abre rutas ni importa el registro inspeccionado.
+- `pre_review_catalog.py`: declaraciones del primer ámbito y plantillas tipadas;
+  depende del catálogo puro y del adaptador pasivo. Nunca registra herramientas.
+- Dos módulos nuevos de tests HAR-06; HAR-04/HAR-05 y sus exports intactos.
+
+El registro Hermes existente sigue siendo el único propietario de handlers.
+No se crea registry global, dispatcher, service locator, catálogo de herramientas
+alternativo ni vínculo invocable de Python dentro del núcleo. Los nombres públicos
+se conservan mediante HandlerDeclaration.tool_name; O01–O08/P01–P03 son IDs de
+operaciones de la matriz AS-IS, no nombres de herramientas registrados nuevos.
+
+| Etapa | HAR-06 |
+|---|---|
+| Declaración | Descriptor y versión exacta, consistencia y contenido de snapshot |
+| Correspondencia | Referencia de herramienta/selector y símbolo de handler comprobados pasivamente contra fuente explícita |
+| Disponibilidad | No comprobada; ningún check_fn, override dinámico, salud de proveedor o recursos |
+| Admisibilidad | No evaluada; requiere hechos/actor/autoridad/política de HAR-07 |
+| Ejecución | No realizada ni activada; requiere revalidación final y executor histórico |
+
+### Catálogo y API pura
+
+CatalogSnapshot contiene schema_version=1, catalog ContractRef, capabilities y
+transitions canónicas HAR-04 y declaration_inputs ContentRef opcionales. No se crean
+descriptores paralelos. Colecciones: hasta 64 capabilities, 128 transitions y 16
+inputs de declaración; referencias internas de cada descriptor conservan límites
+HAR-04 de 32. El catálogo vacío está explícitamente admitido.
+
+Rechaza duplicados idénticos o contradictorios por identidad/versión, capability
+no declarada de una transición, efecto diferente y autoridad de transición que
+omita kinds requeridos por su capability. Varias versiones pueden coexistir; no
+hay latest automático. Los namespaces capability/transition se resuelven por API
+tipada. Solo transition.capability es una referencia que el catálogo promete
+resolver. Schemas, policies, inspector/prerrequisitos, adapter, evidence y recovery
+son referencias externas opacas, no implementaciones disponibles inferidas.
+
+build_catalog construye y valida; list_capabilities/list_transitions devuelven
+modelos inmutables; resolve_capability/resolve_transition exigen ContractRef exacta;
+transitions_for lista coincidencias exactas y external_references explicita refs
+no resueltas aquí. CatalogLookup distingue DECLARED/NOT_DECLARED/UNSUPPORTED_VERSION/
+INVALID_REFERENCE/CATALOG_INCONSISTENCY. UNSUPPORTED_VERSION significa ID conocido
+sin esa versión declarada en el snapshot, no incompatibilidad global del proveedor.
+Un fallo no muta el snapshot ni produce descriptor, ALLOW o ExecutionRequest.
+
+Entradas e inputs de declaración se ordenan canónicamente por identidad/versión;
+las secuencias internas de descriptores conservan su orden HAR-04. Snapshot máximo
+900000 bytes: CatalogDocument(snapshot, content) mantiene el transporte global
+HAR-04 de 1 MiB, sin ampliarlo. Su digest SHA256 usa el prefijo nuevo
+harness-catalog-snapshot-v1 y JSON canónico, excluyendo únicamente el campo derivado
+de digest que está fuera del snapshot. deserialize_catalog comprueba ese digest.
+No cambia ningún algoritmo histórico. Se revalidan objetos directamente antes de
+serializar, evitando normalizar copias Pydantic no validadas en los límites nuevos.
+
+### Descriptores concretos e integración del primer ámbito
+
+ProductOperation agrupa descriptor HAR-04, transición, HandlerDeclaration, inspector,
+policy e invalidation; recovery/evidence figuran también en el descriptor canónico.
+Policy e inspector se incluyen como referencias de prerrequisitos. El snapshot
+incorpora un ContentRef del contenido completo de las declaraciones de producto,
+incluidos selectores y referencias de política, usando identidad nueva separada.
+Cambiar esos metadatos cambia la identidad; cambiar una implementación externa
+cambia la prueba de fuente, sin convertir el catálogo declarativo en identidad de
+implementación ni permiso. Las reglas externas aún requieren resolución futura.
+
+15 descriptores cubren la matriz aprobada de sección 4:
+
+| Operaciones | Herramienta / selección |
+|---|---|
+| O01/O02 | prepare_current_ticket_review, inspect_commands / run_commands |
+| O03.ticket_spec/O03.validation_steps | inspect_pending_approval_artifact_section, current_approved y section_id exacto |
+| O04/O05 | request_current_ticket_material_revision, post_execution, inspect / request |
+| O06/O07 | Mismo tool/origin, inspect_reconciliation / reconcile |
+| O08 | revise_current_ticket_for_material_contract_failure |
+| P01 | inspect_current_ticket_manual_validation |
+| P02.passed/P02.failed | attest_current_ticket_manual_validation, status passed / failed |
+| P03.workflow/P03.review/P03.prepare | get_workflow_control(blockers_only=true), get_review_status, prepare_current_ticket_review(operation=prepare) |
+
+Las plantillas clasifican inspecciones como OBSERVATION; decisiones pendientes
+como HUMAN_DECISION con decision_target; operaciones solicitadas como
+EXECUTABLE_CAPABILITY solo con referencia y correspondencia comprobada. La
+construcción de una continuación ejecutable exige volver a comprobar los bytes
+explícitos suministrados, no confiar en un status de evidencia copiado. Esto sigue
+siendo construcción de datos, no evaluación del consentimiento o del estado actual.
+RESOLVE_EXECUTION_AUTHORITY se clasifica SAFE_STOP y RESOLVE_REVIEW_BLOCKER como
+EXTERNAL_REMEDIATION: familias diagnósticas sin binding invocable. Son plantillas,
+no sustituciones ni nuevos IDs de dispatch de las acciones legadas por ticket.
+Los templates no se seleccionan automáticamente desde el workflow vivo.
+
+### Correspondencia estática y calificación de evidencia
+
+inspect_correspondence recibe bytes y HandlerDeclaration explícitos, sin discovery,
+rutas, eval/exec/import dinámico ni ejecución del código fuente. Límites: 2 MiB,
+100000 nodos AST, hasta ocho selectores y ocho enlaces de asignación de schemas.
+Verifica registro top-level único, propietario declarado tools.registry.registry,
+símbolo de handler local/único/no decorado/definido antes del registro, ausencia de
+reasignaciones/imports ambiguos y selectores literales enum/const/boolean cuando
+se han declarado. No evalúa predicados, cuerpos ni expresiones de creación de schemas.
+
+BindingEvidence contiene declaración, status, reason_code, ContentRef de fuente,
+líneas de import del registro/registro/handler y SHA256 AST del registro y handler.
+Estados: VERIFIED, ABSENT, AMBIGUOUS, CONTRADICTORY, UNVERIFIABLE. VERIFIED acredita
+correspondencia declarada en esa fuente, no el contenido de un registry ya cargado,
+importabilidad, disponibilidad, ABI ejecutable ni corrección de control de flujo.
+Las comprobaciones de selectores son de pertenencia de propiedades, no validación
+completa de oneOf ni demostración de cada ruta del handler. Sin selectores el
+schema puede seguir opaco, como el schema construido de O08; no se evalúa para
+obtener una falsa validación completa. Las combinaciones del primer ámbito se
+corresponden con la matriz AS-IS y conservan los guards históricos comprobados.
+
+Se verificaron las 15 correspondencias contra bytes de fuente del archive aceptado
+y contra Windows. Los SHA raw pueden distinguir CRLF; sus huellas AST coinciden.
+final-product-correspondence.json registra ambas procedencias y todos los resultados.
+No se importó tools.registry, pepper_workflow_tools o model_tools para descubrirlas.
+No se ejecutaron availability callbacks, handlers, comandos o workflow vivo.
+
+### Verificación y límites
+
+registry-investigation.json inventaría diez representaciones: identidad, versión,
+metadata/implementación, schemas, efectos, autoridad, disponibilidad, registro,
+executor, efectos laterales y reutilización. Hallazgos estáticos se distinguen de
+la evidencia dinámica histórica HAR-05; no se repite bootstrap para descubrir tools.
+get_definitions y discover_builtin_tools permanecen excluidos: ejecutan callbacks
+u otras importaciones. get_entry/get_schema pasivos existentes no se invocan aquí.
+
+Tests HAR-06 verifican modelos públicos, versiones/digests, referencias, monotonía
+de autoridad, límites reales de bytes, no ejecución de fuente/callbacks, pruebas
+negativas del propietario y procedencia y continuaciones sin concesión de autoridad.
+Un intérprete nuevo importa y opera catálogo/adaptadores bajo guard de imports y
+auditoría de escrituras/SQLite/red/procesos. Mutaciones en copias desechables prueban
+fallos por imports privados/storage/registry/provider/adaptador HAR-05 y eliminación
+de guards de efecto, autoridad o selector; nunca se muta el candidato para ello.
+Resultados y comparaciones canónicas constan en har06_verification y evidencia externa.
+
+El catálogo prueba declaraciones, no verdad externa ni vigencia de autoridad. Los
+hashes no son firmas o aprobación. Las referencias externas no resueltas no se
+convierten en disponibilidad. No hay cache ALLOW, evaluación HAR-07, journal,
+recuperación, migración de consumidores, activación, aprobación ni ejecución.
+Se preservan contratos/exports HAR-04, puerto/adaptador HAR-05, C26 y C91–C94,
+roadmap, entradas HAR originales, C64/C80-R1 y PNGs. Git sigue humano; P18.9.13
+permanece congelado sin lectura/copia de autoridad viva. HAR-07 requiere aceptación
+humana separada; G1 sigue abierto y no elegible para cierre.

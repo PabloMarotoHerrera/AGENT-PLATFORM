@@ -4343,5 +4343,228 @@
     "G1": "OPEN_NOT_ELIGIBLE_FOR_CLOSURE",
     "HAR06_started": false,
     "next_gate": "Human HAR-05 review and acceptance; selective staging/commit/push remain human-only. Separately authorize HAR-06."
+  },
+  "har06_verification": {
+    "status": "HAR-06-DECLARATIVE-CAPABILITY-TRANSITION-CATALOG-READY-FOR-HUMAN-REVIEW",
+    "human_accepted": false,
+    "prepared_date": "2026-10-15",
+    "timezone": "Europe/Madrid",
+    "accepted_parent": "b9a297690582882db68666b94e77b395f306aa0d",
+    "branch": "p18-manual-to-hermes-workflow-migration",
+    "human_prior_acceptance": "Human HAR-06 ticket declares HAR-05 accepted, committed/pushed and G0 CLOSED.",
+    "human_reformulated_scope_approval": {
+      "approved": true,
+      "authority": "Explicit human approval in this conversation after roadmap discrepancy analysis",
+      "record": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-06-20261015\\human-scope-approval.txt",
+      "SHA256": "c247dfc48f039acfbc50affb1c1bfadb96ed95c78dcb38a8abd879fb66547e1a",
+      "roadmap_exception": false,
+      "handler_correspondence_deferred": false
+    },
+    "legacy_fields_scope": "All previous manifest objects/statuses/results/approvals retain historical meaning and are unchanged.",
+    "full_results": {
+      "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-06-20261015\\verification-results.json",
+      "SHA256": "bdf695d0b798b0fa67142d1f1aa8d57164ca4ddaccf49770bb9c9729339631c7"
+    },
+    "evidence_root_windows": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-06-20261015",
+    "evidence_root_wsl": "/tmp/har06-20261015-zth_g6sd/evidence",
+    "source_overlays": {
+      "2_products/pepper-agent/hermes_cli/agent_platform/harness/catalog.py": "75886f89b84bc3b7b4191ecccf790bb7e0197ea915140c75db21cc795f3a8e3a",
+      "2_products/pepper-agent/hermes_cli/agent_platform/handler_correspondence.py": "adb0cbc94e72c38c67a4becac2bb31d879d6c2fd1ac702316c539c56f615ce7f",
+      "2_products/pepper-agent/hermes_cli/agent_platform/pre_review_catalog.py": "3e3addc28fb74c3659ce7b1b57fe5152edf5bd98c913d09ce060de9cda674634",
+      "2_products/pepper-agent/tests/hermes_cli/test_har06_catalog.py": "3ca2e2be9cd68e959d2f7a3d970a441203f3b368c97d264b7725eccd223918e3",
+      "2_products/pepper-agent/tests/hermes_cli/test_har06_purity.py": "7f1c00ee9276d929ba536506e4544deabc6594793e95e9d385aed9da156bc176"
+    },
+    "new_production": [
+      "harness/catalog.py",
+      "handler_correspondence.py",
+      "pre_review_catalog.py"
+    ],
+    "selected_scope": "15 concrete declarations for O01-O08/P01-P03; no new tool names or executable registry.",
+    "static_correspondence": {
+      "Windows_verified": 15,
+      "archive_verified": 15,
+      "source_file": "tools/pepper_workflow_tools.py",
+      "proof": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-06-20261015\\final-product-correspondence.json",
+      "SHA256": "8df9176470c513550acfbfbbc473244dbfc977c0c8047eaeb5fed14f5284ac1e",
+      "meaning": "Unique source-declared Hermes registry owner/tool/handler and declared selector property membership. Not live registry binding, importability, availability, full schema validation, authorization or execution."
+    },
+    "stages": {
+      "declaration": "implemented",
+      "source_correspondence": "implemented",
+      "availability": "NOT_EVALUATED",
+      "admissibility": "NOT_EVALUATED",
+      "execution": "NOT_PERFORMED"
+    },
+    "selection_comparison_summary": {
+      "baseline": {
+        "parent": {
+          "passed": 2126,
+          "failed": 0,
+          "errors": 0
+        },
+        "candidate": {
+          "passed": 2126,
+          "failed": 0,
+          "errors": 0
+        },
+        "candidate_only_failed_error_nodes": []
+      },
+      "first_slice": {
+        "parent": {
+          "passed": 219,
+          "failed": 0,
+          "errors": 0
+        },
+        "candidate": {
+          "passed": 219,
+          "failed": 0,
+          "errors": 0
+        },
+        "candidate_only_failed_error_nodes": []
+      },
+      "compatibility": {
+        "parent": {
+          "passed": 716,
+          "failed": 0,
+          "errors": 0
+        },
+        "candidate": {
+          "passed": 716,
+          "failed": 0,
+          "errors": 0
+        },
+        "candidate_only_failed_error_nodes": []
+      },
+      "authority_security": {
+        "parent": {
+          "passed": 1174,
+          "failed": 0,
+          "errors": 0
+        },
+        "candidate": {
+          "passed": 1174,
+          "failed": 0,
+          "errors": 0
+        },
+        "candidate_only_failed_error_nodes": []
+      }
+    },
+    "focused": {
+      "parent_HAR04_HAR05": 128,
+      "candidate_HAR04": 76,
+      "candidate_HAR05": 52,
+      "candidate_HAR06": 34,
+      "failed": 0,
+      "errors": 0,
+      "argv": [
+        "bash",
+        "scripts/run_tests.sh",
+        "tests/hermes_cli/test_har06_catalog.py",
+        "tests/hermes_cli/test_har06_purity.py",
+        "tests/hermes_cli/test_har04_harness_contracts.py",
+        "tests/hermes_cli/test_har04_harness_purity.py",
+        "tests/hermes_cli/test_har05_observation.py",
+        "-j",
+        "3"
+      ]
+    },
+    "mutation_sensitivity": {
+      "effect": {
+        "passed": 32,
+        "failed": 1,
+        "errors": 0
+      },
+      "authority": {
+        "passed": 32,
+        "failed": 1,
+        "errors": 0
+      },
+      "selector": {
+        "passed": 32,
+        "failed": 1,
+        "errors": 0
+      },
+      "private": {
+        "passed": 0,
+        "failed": 1,
+        "errors": 0
+      },
+      "storage": {
+        "passed": 0,
+        "failed": 1,
+        "errors": 0
+      },
+      "registry": {
+        "passed": 0,
+        "failed": 1,
+        "errors": 0
+      },
+      "provider": {
+        "passed": 0,
+        "failed": 1,
+        "errors": 0
+      },
+      "observation_adapter": {
+        "passed": 0,
+        "failed": 1,
+        "errors": 0
+      }
+    },
+    "preservation": {
+      "historical_full_results": {
+        "har01_verification": {
+          "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-01-20261015-08pqco2o\\verification-results.json",
+          "SHA256": "a577f02f7a6dc87af3ae4ab315c72c735d1d2be20f540b8c9b6cc096016b93ac"
+        },
+        "har02_verification": {
+          "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-02-20261015\\verification-results.json",
+          "SHA256": "1d81a9a86c3374e879ba97bb517082ee5f03d0bde29bf2baf041a161975660b9"
+        },
+        "har03_verification": {
+          "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-03-20261015\\verification-results.json",
+          "SHA256": "0fe4f4c8e6e014cf7bb4a45e64d39e3a94654cb7e452e438e429b3e24ed7ff3d"
+        },
+        "har04_verification": {
+          "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-04-20261015\\verification-results.json",
+          "SHA256": "c690cc6d8b9995346d2d009c718c47515f684650b6fed8aa8d014d87081d347f"
+        },
+        "har05_verification": {
+          "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-05-20261015\\verification-results.json",
+          "SHA256": "b2e6bee3c2e8d5256275253449afd516ae1c8d0ae04b669fa266204e3ad7094f"
+        }
+      },
+      "untracked": {
+        "2_products/pepper-agent/tests/hermes_cli/test_c64_validation_authority_boundary.py": "c7999a16042f07390e41e2d040c2fa387096719c744f508c546f6897076cb862",
+        "2_products/pepper-agent/web/src/agent-platform/c80-r1-chat-lifecycle.test.tsx": "64e9756d9d8d105ed4da36fd182117e02b1cd49a4f6631409dca8f6f199d3277",
+        "HAR/HAR-00_architecture_decisions_and_execution_baseline.md": "fb1b1d18cca4d17d8ac86ff6e0ecad6ff76d5ef28e9e23c9d01d71b99d479674",
+        "HAR/HAR_roadmap_refactorizacion_harnes.md": "3bc700b77e6e36ba297bf0e3f6f2c85e1b25b497679db3912a5399a167b72513",
+        "mermaid-diagram.png": "c9625e35830957f005f695fe3372eacdb6e57ffb961bea2dd5f5feca2acbc169",
+        "mermaid-diagram2.png": "654d3f3ad0b52ab78ea9f8bf8708e0da70b62426670b508249b4d9026a367721",
+        "mermaid-diagram3.png": "45ddde0a639b51eda2f95712ef4da57663e69e44a96e3b31f6f08b49b953b359"
+      },
+      "all_existing_production_tests_exports_unchanged": true,
+      "roadmap_unchanged": true,
+      "index_empty": true,
+      "live_records": "Not accessed; no live hash comparison"
+    },
+    "existing_harness_exports_unchanged": true,
+    "limitations": [
+      "Only declaration and passive source correspondence. No availability/admissibility/execution grant.",
+      "Opaque external schemas/policies/adapters/evidence/recovery refs remain unresolved.",
+      "Source VERIFIED does not prove initialized registry content, handler routing correctness, full oneOf schema, or runtime reachability.",
+      "Source proof and catalog digests are not signatures, current authority or consent.",
+      "Only selected suites, not whole-repository acceptance.",
+      "Existing HAR-05 dashboard/bootstrap debt remains unchanged.",
+      "No runtime consumer activation, live workflow access or historical migration."
+    ],
+    "roadmap_unchanged": true,
+    "git_mutation": false,
+    "live_authority_access": false,
+    "availability_callback_handler_or_provider_execution": false,
+    "dependency_packaging_changes": false,
+    "Docker_Graphify_deploy_restart": false,
+    "G1": "OPEN_NOT_ELIGIBLE_FOR_CLOSURE",
+    "HAR07_started": false,
+    "next_gate": "Separate human HAR-06 review/acceptance, selective human-only Git; then separately authorize HAR-07."
   }
 }
