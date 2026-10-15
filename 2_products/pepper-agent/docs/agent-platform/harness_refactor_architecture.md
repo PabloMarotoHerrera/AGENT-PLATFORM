@@ -787,3 +787,174 @@ HAR-05–HAR-09 podrán consumir estas referencias mediante adaptadores; HAR-07 
 la evaluación real y HAR-12 el journal. G1 permanece abierto. No se activa el core,
 no se inspecciona ni muta P18.9.13 vivo y no se ejecuta HAR-05, Graphify, Docker,
 proveedores, deploy ni restart.
+
+
+## 10. HAR-05 — Puerto de observación y fuentes explícitas sin inicialización
+
+### Aceptación previa y dirección de dependencias
+
+El ticket humano HAR-05 declara HAR-04 aceptado, committed/pushed y G0 CLOSED.
+Padre verificado Windows/WSL: `3a3b10fda7f2c010b48a1b8da886ef6aa6f475f4`,
+rama `p18-manual-to-hermes-workflow-migration`; índice y archivos rastreados limpios.
+Los estados históricos HAR-00–HAR-04 se conservan; `har05_verification` registra
+esta aceptación posterior. El roadmap HAR-05 coincide con este ámbito: observación
+separada de inicialización/mantenimiento/reconciliación, versiones/frescura y
+medición inicial; no migración simultánea de endpoints ni transacción global.
+
+Se añaden solamente `harness/observation.py`, `observation_adapter.py` fuera del
+núcleo y `tests/hermes_cli/test_har05_observation.py`. Los contratos, exports y
+tests HAR-04 permanecen intactos. No hay consumidor/route nuevo ni activación.
+
+- `harness.observation` → `harness.contracts`, enum, typing, Pydantic.
+- `observation_adapter` → puertos/contratos puros, `evidence_sqlite` existente y
+  stdlib (Path, SQLite, JSON, hashing, dataclass, regex).
+- `evidence_sqlite` → stdlib; nunca runtime, registry o bootstrap.
+- Ninguna arista desde el núcleo hacia SQLite, Kanban, runtime o herramientas.
+
+### Contratos y puerto puro
+
+Los modelos nuevos heredan versión de envelope 1, frozen/strict/extra=forbid y
+transporte canónico HAR-04 sin cambiarlo. SourceRef contiene source_id, kind
+(FACT/AUTHORITY/EVIDENCE) y format ContractRef. ObservationRequest contiene source,
+scope, actor, expected_content opcional y hasta cuatro related_sources únicos.
+ObservedRecord contiene record_id, content ContentRef y state opcional opaco.
+
+Observation contiene source/scope/actor, status, reason_code, source_content,
+observed_schema_version, records, authority opcional, integrity, structure, binding,
+consistency, completeness, currentness y observational. Cada check distingue
+UNVERIFIED/VERIFIED/FAILED; status distingue ABSENT/PRESENT/INVALID/CONFLICT/
+UNSUPPORTED/UNSTABLE/UNAVAILABLE. PRESENT significa fuente estable observada;
+no significa validación completa del dominio. Requiere contenido, scope vinculado,
+STABLE_CAPTURE y BOUND_SOURCE_ONLY. Un fallo/ausencia no publica registros completos.
+Las versiones desconocidas no se migran. No hay reloj o ID aleatorio en los hechos.
+
+ObservationPort es un Protocol inyectable con observe_fact, observe_authority y
+observe_related. No tiene inicialización, mantenimiento, dispatch, reparación o
+método de ejecución. El puerto admite readers sintéticos sin arrancar el producto.
+Los imports se hacen desde el módulo nuevo explícito; __init__/__all__ HAR-04
+no se amplían. No hay registry ni framework de inyección.
+
+### Adaptador y alcance de fuentes
+
+BoundObservationReader recibe de un caller local confiable una tupla de hasta 16
+SourceBinding inmutables. Cada binding registra request de identidad/scope/actor,
+root absoluto, 1–8 componentes literales de ruta, record_format y task_id cuando
+corresponda. No obtiene HOME desde entorno ni busca directorios, perfiles, tickets,
+boards o autoridad adicional. Sin binding exacto se rechaza antes de abrir fuentes.
+No se admiten componentes de escape, rutas absolutas embebidas ni symlinks en la
+ruta o sus ancestros. El binding no equivale a autenticación del operador o ACL.
+
+Formatos iniciales explícitos, versión externa 1:
+
+| Formato | Lectura y calificación |
+|---|---|
+| harness-authority | AuthorityReference HAR-04 validada, actor sujeto y scope exactos; un claim CURRENT se devuelve UNVERIFIED en la observación; original sin reescribir |
+| pepper-projection | Cabecera v1/policy pepper-workpacket-kanban-projection-v1, project/ticket/task vinculados; structure UNVERIFIED, sin validar ni recomputar todos los digests/dependencias históricos |
+| json-evidence | JSON opaco v1 con project/workflow/resources/actor explícitos; structure UNVERIFIED, ningún ALLOW/consentimiento/callback contenido se interpreta |
+| kanban-task | DB explícita y exactamente un task resource; body project/ticket/task coherente; runs solo de ese task con metadata ticket coincidente; status se conserva como hecho opaco |
+
+Las referencias de contenido calculan SHA256 de bytes de archivo, o un digest
+nuevo con framing de la captura SQLite DB/WAL/SHM/journal. No sustituyen hashes
+TicketSpec/WorkPacket/projection/start históricos. VERIFIED en integrity exige un
+expected_content suministrado que coincida; sin él el hash es identidad observada,
+no integridad contrastada. structure VERIFIED se limita al formato HAR-04 que se
+ha validado; binding VERIFIED cubre el scope/actor registrado y los campos de
+vínculo inspeccionados, no una cadena de autoridad completa.
+
+El resultado siempre tiene currentness UNVERIFIED. Referencias históricas o
+superseded pueden conservar su clasificación negativa sin adquirir vigencia.
+Ni presencia, hash, claims CURRENT/ALLOW, proyección START, aprobación textual ni
+contadores demuestran permiso. La evidencia dependiente se solicita explícitamente,
+sin recorrer relaciones: profundidad máxima uno, hasta cuatro fuentes hijas, cada
+una con su propio binding. No se afirma consistencia transaccional entre fuentes.
+HAR-07 y adaptadores futuros deben revalidar autoridad antes del efecto.
+
+### SQLite, filesystem y límites
+
+Se reutiliza `evidence_sqlite.connect` sin modificarlo: reconstruye DB/WAL en
+memoria, valida frames/checksums/commits y deriva una imagen rollback query_only.
+Nunca se abre la fuente mediante SQLite normal, URI mode=ro o fallback writable.
+No se migra, checkpointa, limpia locks/journals, reap PID/run, agenda retry o
+reconstruye autoridad. Journal no vacío, imagen corrupta o cambiante falla cerrada.
+SHM no participa en reconstruir páginas: su corrupción no se repara ni impide
+leer una imagen DB/WAL válida; sus bytes/existencia sí se conservan y vigilan.
+
+Capturas externas comparan stamps (device/inode/size/mtime/ctime) y bytes antes y
+después, incluyendo sidecars; drift conocido devuelve UNSTABLE. JSON usa lecturas
+acotadas a 1 MiB, profundidad 16, objetos y claves únicas, sin NaN. DB/sidecar:
+16 MiB por archivo para capturas externas, cuatro nombres fijos como máximo por
+fuente SQLite. El helper compartido conserva su propio límite previo de 512 MiB;
+si un writer hace crecer la fuente durante su lectura puede existir asignación
+transitoria mayor que 16 MiB antes de rechazar deriva. No se promete un límite de
+memoria contra crecimiento hostil ni timeout de I/O del sistema operativo.
+
+Consultas fijas parametrizadas sobre tablas tasks/task_runs reales, sin SQL del
+caller; authorizer rechaza otras acciones/tablas, longitud de columna máxima
+1 MiB y presupuesto de 100000 pasos VM. Hasta 32 registros incluyendo task; un
+exceso se rechaza completo, sin truncar y afirmar completitud. Tipos SQLite JSON
+malformados producen INVALID. Metadatos ausentes/incoherentes no se adivinan.
+Una captura estable detecta deriva observada, no prueba atomicidad global ni
+inmutabilidad futura; atime del filesystem no forma parte de la garantía de bytes.
+
+Medición sintética inicial: archivo JSON existente, dos opens rb; fuente con
+DB/WAL/SHM, tres opens DB, tres WAL, dos SHM y una conexión :memory:, cero escaneos
+de directorios. Journal ausente no se abre. Datos exactos: source-read-metrics.json.
+Se prioriza coherencia y reutilización del decoder existente sobre optimizar estas
+relecturas en HAR-05; no se crea cache ALLOW.
+
+### Inventario de rutas heredadas y deuda explícita
+
+read-path-inventory.json contiene entry point, propósito, storage, comportamiento,
+efectos, ausencia, interpretación de autoridad, tratamiento y fuentes/líneas para
+12 grupos. read-path-probes.json conserva auditoría/stacks de probes fríos
+sintéticos; model-tools-import-probe.json separa importación de dispatch.
+
+- Dashboard: build_workflow_control_snapshot → _execution_operational_summary →
+  build_execution_collection_source → init_db/connect crea kanban.db e init.lock.
+  El reconciler no scoped puede detectar workers caídos y reconciliar runs
+  huérfanos. Lo primero se observó en frío; lo segundo está caracterizado por
+  código y no se ejecutó contra workers vivos ni se declara medido globalmente.
+- scoped_read_only_connections evita init/migration y salta ese reconciler. El
+  dashboard frío bajo ese scope no produjo archivos en el caso probado. No cubre
+  el bootstrap de otros callers ni habilita usar el dashboard como nuevo puerto.
+- load_config y load_config_readonly comparten _load_config_impl → ensure_hermes_home:
+  ambos crean skeleton/chmod y SOUL.md en frío. readonly significa evitar deepcopy,
+  no ausencia de efectos persistentes. Crear perfiles también es inicialización
+  explícita; no se llama desde el adaptador.
+- Importar model_tools ya alcanza process_registry → restore_undelivered_completions
+  → async_delegation._connect/recover_abandoned_delegations, creando state.db.
+  Importar tools.approval carga allowlist/config y puede sembrar SOUL. Se observó
+  también con un tool inexistente; ningún handler real se invocó. El probe bloqueó
+  socket.__new__, introspección gethostname y preparación de /dev/null de una
+  introspección platform/subprocess; no acredita llamadas externas realizadas.
+- Tool Search config llama load_config; availability check_fn y discovery son
+  callbacks con potencial I/O, no contratos puros. No se afirma que todas las
+  herramientas o proveedores se hayan sondeado.
+- Los loaders de generación/publicación/approval/projection/start/review y evidencia
+  manual/comandos siguen conservando sus validadores y semántica histórica. Algunos
+  read_text no están acotados y sus validadores recorren otras fuentes privadas;
+  no se importan ni reutilizan como lectores generales dentro del nuevo límite.
+
+No se cambia una entrada pública: separar bootstrap/recuperación y observation
+necesita inventariar dependencia de callers y autorización propia. Se propone el
+ámbito HAR-BOOTSTRAP-OBSERVATION-01 para imports/availability/config-state; catálogo
+HAR-06 revisará descriptores/checks sin ejecutarlos, y HAR-09 calificará adaptadores
+históricos completos. No se abre ni implementa automáticamente otro ticket.
+La barrera HAR-03 de execution_authority_blocked/RESOLVE diagnóstico permanece.
+
+### Verificación, preservación y gate
+
+Tests nuevos ejercitan fuentes sintéticas reales, DB/WAL/SHM antes/después,
+ausencia/corrupción/drift/errores/bounds y scope; un proceso fresco rechaza cualquier
+conexión SQLite a disco, escritura, import privado/provider, red o proceso durante
+la observación calificada. El módulo puro nuevo pasa el guard de importación HAR-04.
+Mutaciones desechables comprueban sensibilidad al scope, deriva, conexión writable
+e inicialización oculta. No se debilita ningún test o guard histórico.
+
+El manifiesto añade solamente har05_verification; evidencia y estados previos se
+conservan. Las selecciones canónicas comparan código histórico sin cambios en
+archives aislados; los tests focalizados verifican los bytes finales nuevos.
+No hay consumidor existente de esos módulos. No hay acceso/copia de autoridad viva
+P18.9.13, Git mutador, Graphify, Docker, instalación, deploy/restart ni proveedor.
+HAR-06 requiere revisión/aceptación humana separada de HAR-05. G1 sigue OPEN y no
+es elegible para cierre; HAR-06 no se implementa aquí.

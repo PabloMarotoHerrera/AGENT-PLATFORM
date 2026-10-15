@@ -4155,5 +4155,193 @@
       "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-04-20261015\\existing-source-hashes.json",
       "SHA256": "0ae03d83dd52c0fef8ff4ff0edf0af948fa935e7b15d3b01a24c518cf3c32753"
     }
+  },
+  "har05_verification": {
+    "status": "HAR-05-SIDE-EFFECT-FREE-FACT-AUTHORITY-READS-READY-FOR-HUMAN-REVIEW",
+    "human_accepted": false,
+    "prepared_date": "2026-10-15",
+    "timezone": "Europe/Madrid",
+    "accepted_parent": "3a3b10fda7f2c010b48a1b8da886ef6aa6f475f4",
+    "branch": "p18-manual-to-hermes-workflow-migration",
+    "human_prior_acceptance": {
+      "authority": "Human HAR-05 ticket header and section 1",
+      "HAR04": "accepted, committed and pushed",
+      "G0": "CLOSED",
+      "prior_pending_records_preserved": true
+    },
+    "legacy_fields_scope": "All previous manifest objects, statuses, evidence hashes and schema meanings remain historical and unchanged.",
+    "full_results": {
+      "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-05-20261015\\verification-results.json",
+      "SHA256": "b2e6bee3c2e8d5256275253449afd516ae1c8d0ae04b669fa266204e3ad7094f"
+    },
+    "evidence_root_windows": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-05-20261015",
+    "evidence_root_wsl": "/tmp/har05-20261015-wa_r1jp6/evidence",
+    "source_overlays": {
+      "2_products/pepper-agent/hermes_cli/agent_platform/harness/observation.py": "5f02b70771c0a37b763757900730625a3052c8cd8ba7b71fb85ac8aa69e1d85c",
+      "2_products/pepper-agent/hermes_cli/agent_platform/observation_adapter.py": "5207e6e3ea36a39c87fbc416a7216d3577b88cca0f1a82f48a227cc9970dfd47",
+      "2_products/pepper-agent/tests/hermes_cli/test_har05_observation.py": "f226fcf6948162581d1c693447cedcc0fbe50e7cb6773f097d635b7078ba0d93"
+    },
+    "selection_comparison_summary": {
+      "baseline": {
+        "parent": {
+          "passed": 2126,
+          "failed": 0,
+          "errors": 0
+        },
+        "candidate": {
+          "passed": 2126,
+          "failed": 0,
+          "errors": 0
+        },
+        "new_failed_error_nodes": []
+      },
+      "first_slice": {
+        "parent": {
+          "passed": 219,
+          "failed": 0,
+          "errors": 0
+        },
+        "candidate": {
+          "passed": 219,
+          "failed": 0,
+          "errors": 0
+        },
+        "new_failed_error_nodes": []
+      },
+      "compatibility": {
+        "parent": {
+          "passed": 716,
+          "failed": 0,
+          "errors": 0
+        },
+        "candidate": {
+          "passed": 716,
+          "failed": 0,
+          "errors": 0
+        },
+        "new_failed_error_nodes": []
+      },
+      "authority_security": {
+        "parent": {
+          "passed": 1174,
+          "failed": 0,
+          "errors": 0
+        },
+        "candidate": {
+          "passed": 1174,
+          "failed": 0,
+          "errors": 0
+        },
+        "new_failed_error_nodes": []
+      }
+    },
+    "focused": {
+      "HAR05": {
+        "passed": 52,
+        "failed": 0,
+        "errors": 0
+      },
+      "HAR04_parent": {
+        "passed": 76,
+        "failed": 0,
+        "errors": 0
+      },
+      "HAR04_candidate": {
+        "passed": 76,
+        "failed": 0,
+        "errors": 0
+      },
+      "argv": [
+        "bash",
+        "scripts/run_tests.sh",
+        "tests/hermes_cli/test_har05_observation.py",
+        "tests/hermes_cli/test_har04_harness_contracts.py",
+        "tests/hermes_cli/test_har04_harness_purity.py",
+        "-j",
+        "3"
+      ]
+    },
+    "observation_scope": "Up to 16 trusted explicit bindings: HAR-04 authority, Pepper projection header, opaque scoped JSON evidence, one selected Kanban task/runs. No discovery or production consumer.",
+    "preservation": {
+      "initial_untracked_hashes_preserved": {
+        "2_products/pepper-agent/tests/hermes_cli/test_c64_validation_authority_boundary.py": "c7999a16042f07390e41e2d040c2fa387096719c744f508c546f6897076cb862",
+        "2_products/pepper-agent/web/src/agent-platform/c80-r1-chat-lifecycle.test.tsx": "64e9756d9d8d105ed4da36fd182117e02b1cd49a4f6631409dca8f6f199d3277",
+        "HAR/HAR-00_architecture_decisions_and_execution_baseline.md": "fb1b1d18cca4d17d8ac86ff6e0ecad6ff76d5ef28e9e23c9d01d71b99d479674",
+        "HAR/HAR_roadmap_refactorizacion_harnes.md": "3bc700b77e6e36ba297bf0e3f6f2c85e1b25b497679db3912a5399a167b72513",
+        "mermaid-diagram.png": "c9625e35830957f005f695fe3372eacdb6e57ffb961bea2dd5f5feca2acbc169",
+        "mermaid-diagram2.png": "654d3f3ad0b52ab78ea9f8bf8708e0da70b62426670b508249b4d9026a367721",
+        "mermaid-diagram3.png": "45ddde0a639b51eda2f95712ef4da57663e69e44a96e3b31f6f08b49b953b359"
+      },
+      "historical_full_results": {
+        "har01_verification": {
+          "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-01-20261015-08pqco2o\\verification-results.json",
+          "SHA256": "a577f02f7a6dc87af3ae4ab315c72c735d1d2be20f540b8c9b6cc096016b93ac"
+        },
+        "har02_verification": {
+          "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-02-20261015\\verification-results.json",
+          "SHA256": "1d81a9a86c3374e879ba97bb517082ee5f03d0bde29bf2baf041a161975660b9"
+        },
+        "har03_verification": {
+          "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-03-20261015\\verification-results.json",
+          "SHA256": "0fe4f4c8e6e014cf7bb4a45e64d39e3a94654cb7e452e438e429b3e24ed7ff3d"
+        },
+        "har04_verification": {
+          "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-04-20261015\\verification-results.json",
+          "SHA256": "c690cc6d8b9995346d2d009c718c47515f684650b6fed8aa8d014d87081d347f"
+        }
+      },
+      "existing_production_tests_and_HAR04_exports_unchanged": true,
+      "roadmap_unchanged": true,
+      "index_empty": true,
+      "live_authority": "Not accessed; no live hash comparison claimed."
+    },
+    "pure_core_existing_files_and_exports_unchanged": true,
+    "authority_currentness_emitted": "UNVERIFIED; negative historical/superseded claim may be retained inside reference; no qualified CURRENT resolver or grant.",
+    "existing_debt": {
+      "dashboard": "Unscoped cold dashboard creates DB/init lock; reconcilers may maintain active runs. Not changed.",
+      "config": "Both load_config and load_config_readonly initialize skeleton and SOUL on cold HOME.",
+      "model_tools": "Import alone reaches delegation recovery and config/allowlist initialization, creating state.db and SOUL.",
+      "disposition": "New adapter isolates these paths; separate bounded HAR-BOOTSTRAP-OBSERVATION-01 proposal, HAR-06 availability review and HAR-09 full legacy adapters; no new ticket executed."
+    },
+    "mutation_sensitivity": {
+      "scope": {
+        "passed": 49,
+        "failed": 3,
+        "errors": 0
+      },
+      "drift": {
+        "passed": 51,
+        "failed": 1,
+        "errors": 0
+      },
+      "writable": {
+        "passed": 37,
+        "failed": 15,
+        "errors": 0
+      },
+      "initialization": {
+        "passed": 48,
+        "failed": 4,
+        "errors": 0
+      }
+    },
+    "limitations": [
+      "No global transaction/currentness, authentication, ACL, or execution authorization.",
+      "Legacy projection/evidence structure remains UNVERIFIED; no complete legacy digest/dependency resolver.",
+      "Stable captures detect observed drift, not arbitrary hostile rename-and-restore races.",
+      "Shared immutable reader retains 512MiB prechecked bound; hostile growth may allocate beyond 16MiB outer capture bound before drift rejection.",
+      "No guaranteed OS file-I/O timeout or hard memory limit under adversarial writers.",
+      "Filesystem atime is excluded from byte/existence guarantees.",
+      "Selected suites only; no whole-repository acceptance.",
+      "Existing dashboard/config/model-tools bootstrap remains effectful."
+    ],
+    "git_mutation": false,
+    "live_authority_access": false,
+    "provider_or_process_execution": false,
+    "dependency_installation_or_packaging_changes": false,
+    "Docker_Graphify_deploy_restart": false,
+    "G1": "OPEN_NOT_ELIGIBLE_FOR_CLOSURE",
+    "HAR06_started": false,
+    "next_gate": "Human HAR-05 review and acceptance; selective staging/commit/push remain human-only. Separately authorize HAR-06."
   }
 }
