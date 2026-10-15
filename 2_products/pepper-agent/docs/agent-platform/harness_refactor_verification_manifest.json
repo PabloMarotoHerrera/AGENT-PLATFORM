@@ -4782,5 +4782,79 @@
   "HAR09_implemented": false,
   "live_access": false,
   "git_mutation": false
+},
+  "har09_verification": {
+  "status": "READY_FOR_HUMAN_REVIEW_NOT_ACCEPTED",
+  "baseline": "577971ed473907f30acc0ed05d7d49d58b12bf08",
+  "date": "2026-10-15",
+  "timezone": "Europe/Madrid",
+  "approval": "HAR-09-R2-IMPLEMENTATION-AUTHORIZED; human correction to 33 actual returns",
+  "entrypoint": "tools/pepper_workflow_tools.py",
+  "handler_count": 8,
+  "return_count": 33,
+  "code_SHA256": {
+    "tools/pepper_workflow_tools.py": "cd3384d8f90062b1a40152c78e23c1aee5f3a559a1e385f4f6f26884198bc70e",
+    "hermes_cli/agent_platform/shadow_entry.py": "26682cec0ca51e468b110c7287f02f16a00a6479f938b9dcaf135853719f06f5",
+    "hermes_cli/agent_platform/shadow_adapters.py": "d89c9399737176d34ff7bd474bd3f0ae3a5a0639ee48b1cc4cc6592da746602f",
+    "hermes_cli/agent_platform/harness/shadow.py": "257059329bc09c6fe806bae4b2561ff07d938177e863971270f230105c2974c3",
+    "tests/hermes_cli/test_har09_shadow_adapters.py": "c777e99f71a5056ded29143f3bb02363d5d1fbf4b8a496c492e76da3384e2b98",
+    "tests/hermes_cli/test_har09_shadow_comparison.py": "1e6152d3aad572e655351238c082a63ff8f4c70aa96ad48c5be9cb248607a712",
+    "tests/hermes_cli/test_har09_shadow_entry.py": "325b43fdb09ae361bf4f19eae15d4d73c349f876803232b1e8a82535bcbc1414",
+    "tests/hermes_cli/test_har09_shadow_purity.py": "d32aca5d29bde8a1a441be7427279fe351951a6f0b313f4bb6597ff24f9df20c"
+  },
+  "catalog": {
+    "content_id": "pepper-pre-review-material-revision",
+    "schema_version": 1,
+    "sha256": "baeda1c3bdaaac39cec302577e4afbfd21494e13832b2fb74ca4228c5ec1ab5c"
+  },
+  "fresh_verified_bindings": 15,
+  "prior_contract_code_changes": false,
+  "default_off": true,
+  "shadow_dispatch": false,
+  "verification_archive": "/tmp/har09-20261015-aaud6zn5/delivery-candidate",
+  "identical_source_compatibility_repeat_archive": null,
+  "new_focused": 137,
+  "prior_focused_parent": 381,
+  "combined_focused": 518,
+  "canonical_passed": {
+    "baseline": 2126,
+    "first_slice": 219,
+    "compatibility": 716,
+    "authority_security": 1174
+  },
+  "canonical_failed": 0,
+  "canonical_errors": 0,
+  "initial_parent_compatibility_failure": "715 passed/1 failed: test_fresh_corrective_dispatch[executable], recent_success; unchanged full repeat 716 passed. All attempts retained.",
+  "candidate_compatibility_initial_attempt": {
+    "passed": 716,
+    "failed": 0,
+    "errors": 0
+  },
+  "mutant_failure_counts": {
+    "disabled-call": 1,
+    "changed-result": 1,
+    "unqualified-c94": 1,
+    "hidden-critical": 9
+  },
+  "corpus_count": 60,
+  "corpus_parity": 50,
+  "corpus_qualification_gaps": 8,
+  "corpus_unsupported": 2,
+  "corpus_unexplained": 0,
+  "corpus_safety_critical": 0,
+  "empirical_captures": 4,
+  "empirical_parity": 0,
+  "unqualified_boundaries": 45,
+  "G0": "CLOSED_HUMAN_APPROVED",
+  "G1": "OPEN_NOT_CLOSED",
+  "evidence": "C:/Users/pablo/.codex/har-evidence/HAR-09-20261015/verification/HAR-09-verification-summary.json",
+  "evidence_SHA256": "4f440b6f01a87a36f4be977061c37563a1b878b59db1aa35d15c7d782e25e9ff",
+  "limits": [
+    "No live access or currentness owner",
+    "Explicit synthetic trust only for positive qualification",
+    "Hermes entrypoints integrated; HTTP/direct runtime preserved, not independently shadow-wired",
+    "Historical timing-sensitive C69 baseline variability",
+    "Operational authority and G1 closure not established"
+  ]
 }
 }

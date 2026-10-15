@@ -1245,3 +1245,58 @@ negative witnesses, node inventories and regressions are in `har08_verification`
 and `C:/Users/pablo/.codex/har-evidence/HAR-08-20261015`. Production currentness,
 full validation-item DAGs, temporal/concurrent histories, runtime availability and
 shadow comparison remain unsupported here; HAR-09 needs separate authorization.
+
+
+## HAR-09 — First-slice shadow comparison (2026-10-15)
+
+Candidate for human review, not human acceptance. Baseline
+`577971ed473907f30acc0ed05d7d49d58b12bf08`. Human approval
+HAR-09-R2-IMPLEMENTATION-AUTHORIZED allows only the existing tools module to
+change, plus the original HAR-09 additions/documentation. The human separately
+corrected the agent's arithmetic inventory: 33 actual returns in eight handlers,
+not 35. Earlier decorator proposals remain historical and were never applied.
+
+`tools/pepper_workflow_tools.py` retains the original registered functions,
+schemas, guards and expression order. A private None slot gates delivery of
+already completed immutable results. Disabled: no shadow imports/calls/reads or
+new persistence/logging. Enabled only by explicit trusted disposable-test
+injection: protected lazy delivery, bounded diagnostics, no second legacy call.
+No tool, HTTP, environment or production configuration enables this mode.
+
+New `shadow_entry.py` captures results; `shadow_adapters.py` assembles explicit
+HAR-04/HAR-07 facts without I/O or manufactured qualification; `harness/shadow.py`
+compares typed observations without dispatch or product runtime imports. The
+pure comparator handles diagnostic kinds without Pepper operation-name rules.
+Absent/null/false remain distinct. Withheld public offers retain a separate
+candidate reference so missing owner qualification cannot hide a wrong legacy
+action ID/human action/flags. An inspector's offer of a different next operation
+is explicitly unobserved at the current operation's public-action boundary.
+
+HAR-06 verifier/catalog and HAR-07/HAR-08 code are unchanged. All 15 bindings are
+fresh VERIFIED proofs with new source/handler AST identities; registration ASTs
+are preserved. Old proof hashes are not reused. Five public operation families
+remain mapped and ten have no standalone action. Two diagnostics are noninvocable.
+HTTP/direct runtime consumers are preserved, not independently shadow-wired.
+
+Final isolated checks: HAR-09 137 passed; HAR-04–HAR-09 518 passed (381 prior).
+Parent/candidate canonical selections: 2126/219/716/1174 passed, zero failures or
+errors. Historical C69 recent_success variability is retained, including an
+initial parent failure and unchanged passing full parent repeat. Every candidate
+attempt is retained; no source/test change bypasses that guard. Four disposable
+mutations detected 1/1/1/9 failures.
+Exact commands, environment/source hashes, JUnit nodes, attempts and test-owner
+call counts are in the har09_verification manifest entry and external evidence.
+
+Bounded corpus: 60 cases, 50 parity under declared provenance, eight qualification
+gaps, two unsupported operations, zero unexplained/critical differences. Four
+actual isolated C91–C94 inspections each call their owner once and add no durable
+changes during the observed call; all four are INSUFFICIENT_EVIDENCE for complete
+guard/currentness comparison. They are not empirical positive parity. The 45
+human/external HAR-08 boundaries remain unqualified. A captured CURRENT claim,
+static correspondence or serialized ALLOW never becomes operational permission.
+
+G0 remains human-approved; G1 remains OPEN and is not closed/proposed closed by
+this change. Operational readiness/currentness and empirical coverage of every
+effectful path remain unproved. No live P18.9.13 data was read or changed, no Git
+mutation, deployment or HAR-10 work occurred. These source/document additions may
+change the historical broad source fingerprint; no live reconciliation is implied.

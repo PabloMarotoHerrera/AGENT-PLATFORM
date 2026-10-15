@@ -15,6 +15,23 @@ DEFAULT_LIMIT = 20
 MAX_LIMIT = 100
 CURRENT_PROJECT_ID = "PEPPER"
 
+# Test-only injection. Never populated from tool arguments, environment or HTTP.
+_HAR09_VERIFICATION = None
+
+
+def _har09_observe_completed(entry: str, result: str) -> None:
+    """Deliver a completed result only; never change legacy result/error handling."""
+    try:
+        from hermes_cli.agent_platform.shadow_entry import observe_completed
+        observe_completed(_HAR09_VERIFICATION, entry, result)
+    except Exception:
+        # Import/transport failures are verification diagnostics, not tool errors.
+        try:
+            _HAR09_VERIFICATION.fail("shadow_delivery_failed")
+        except Exception:
+            pass
+
+
 
 def _limit(args: dict[str, Any], default: int = DEFAULT_LIMIT) -> int:
     try:
@@ -645,7 +662,7 @@ def _get_workflow_control(args: dict[str, Any], **_kwargs) -> str:
         from hermes_cli.agent_platform import execution_evidence
         with kanban_db.scoped_read_only_connections(execution_evidence.connection):
             ctx = _runtime().build_workflow_control_snapshot()
-        return _result({
+        _har09_result = _result({
             "source_tool": "get_workflow_control", "read_only": True,
             "current_ticket_id": ctx["current_ticket_id"],
             "blocker_count": ctx["blocker_count"],
@@ -653,8 +670,11 @@ def _get_workflow_control(args: dict[str, Any], **_kwargs) -> str:
                             if key in {"id", "target_ticket_id", "label", "required_human_action", "blocker_code"}},
             **_review_readiness_fields(ctx),
         })
+        if _HAR09_VERIFICATION is not None:
+            _har09_observe_completed("get_workflow_control", _har09_result)
+        return _har09_result
     ctx = _context()
-    return _result({
+    _har09_result = _result({
         "source_tool": "get_workflow_control",
         **_review_readiness_fields(ctx),
         "alternative_actions": ctx.get("alternative_actions", []),
@@ -704,6 +724,9 @@ def _get_workflow_control(args: dict[str, Any], **_kwargs) -> str:
         "evidence_version": ctx["evidence_version"],
         "workflow_control": ctx["workflow_control"],
     })
+    if _HAR09_VERIFICATION is not None:
+        _har09_observe_completed("get_workflow_control", _har09_result)
+    return _har09_result
 
 
 def _get_pending_approvals(args: dict[str, Any], **_kwargs) -> str:
@@ -770,20 +793,38 @@ def _inspect_pending_approval_artifact_section(args: dict[str, Any], **_kwargs) 
                              expected_binding=args.get("expected_binding"),
                              chunk_index=args.get("chunk_index"), max_chars=args.get("max_chars"))
         except Exception:
-            return tool_error("current approved artifact inspection failed: unavailable, invalid, or mismatched authority", success=False)
+            _har09_result = tool_error("current approved artifact inspection failed: unavailable, invalid, or mismatched authority", success=False)
+            if _HAR09_VERIFICATION is not None:
+                _har09_observe_completed("inspect_pending_approval_artifact_section", _har09_result)
+            return _har09_result
         result = _result({"source_tool": "inspect_pending_approval_artifact_section", **source})
         if len(result) > 35000:
-            return tool_error("artifact response exceeds bound; request a smaller max_chars", success=False)
-        return result
+            _har09_result = tool_error("artifact response exceeds bound; request a smaller max_chars", success=False)
+            if _HAR09_VERIFICATION is not None:
+                _har09_observe_completed("inspect_pending_approval_artifact_section", _har09_result)
+            return _har09_result
+        _har09_result = result
+        if _HAR09_VERIFICATION is not None:
+            _har09_observe_completed("inspect_pending_approval_artifact_section", _har09_result)
+        return _har09_result
     if scope != "pending" or "expected_binding" in args:
-        return tool_error("invalid approval artifact authority scope", success=False)
+        _har09_result = tool_error("invalid approval artifact authority scope", success=False)
+        if _HAR09_VERIFICATION is not None:
+            _har09_observe_completed("inspect_pending_approval_artifact_section", _har09_result)
+        return _har09_result
     pr = _runtime()
     approval_id = str(args.get("approval_id") or "").strip()
     section_id = str(args.get("section_id") or "").strip()
     if not approval_id:
-        return tool_error("approval_id is required")
+        _har09_result = tool_error("approval_id is required")
+        if _HAR09_VERIFICATION is not None:
+            _har09_observe_completed("inspect_pending_approval_artifact_section", _har09_result)
+        return _har09_result
     if not section_id:
-        return tool_error("section_id is required")
+        _har09_result = tool_error("section_id is required")
+        if _HAR09_VERIFICATION is not None:
+            _har09_observe_completed("inspect_pending_approval_artifact_section", _har09_result)
+        return _har09_result
     chunk_index = args.get("chunk_index")
     max_chars = args.get("max_chars")
     try:
@@ -794,12 +835,18 @@ def _inspect_pending_approval_artifact_section(args: dict[str, Any], **_kwargs) 
             max_chars=int(max_chars) if max_chars is not None else None,
         )
     except Exception as exc:
-        return tool_error(str(exc) or "approval artifact section inspection failed")
-    return _result({
+        _har09_result = tool_error(str(exc) or "approval artifact section inspection failed")
+        if _HAR09_VERIFICATION is not None:
+            _har09_observe_completed("inspect_pending_approval_artifact_section", _har09_result)
+        return _har09_result
+    _har09_result = _result({
         "source_tool": "inspect_pending_approval_artifact_section",
         **source,
         "auto_approval": False,
     })
+    if _HAR09_VERIFICATION is not None:
+        _har09_observe_completed("inspect_pending_approval_artifact_section", _har09_result)
+    return _har09_result
 
 
 def _decide_pending_approval(args: dict[str, Any], **_kwargs) -> str:
@@ -911,7 +958,7 @@ def _get_execution_status(args: dict[str, Any], **_kwargs) -> str:
 
 def _get_review_status(args: dict[str, Any], **_kwargs) -> str:
     ctx = _context()
-    return _result({
+    _har09_result = _result({
         "source_tool": "get_review_status",
         **_review_readiness_fields(ctx),
         "source_system": ctx["source_system"],
@@ -950,6 +997,9 @@ def _get_review_status(args: dict[str, Any], **_kwargs) -> str:
         "evidence_timestamp": ctx["evidence_timestamp"],
         "evidence_version": ctx["evidence_version"],
     })
+    if _HAR09_VERIFICATION is not None:
+        _har09_observe_completed("get_review_status", _har09_result)
+    return _har09_result
 
 
 def _get_next_action(args: dict[str, Any], **_kwargs) -> str:
@@ -1093,7 +1143,10 @@ def _revise_generated_successor_ticket(args: dict[str, Any], **_kwargs) -> str:
 
 def _request_current_ticket_material_revision(args: dict[str, Any], **kwargs) -> str:
     if "operation" in args and args.get("origin") != "post_execution":
-        return tool_error("operation is supported only for origin=post_execution", success=False)
+        _har09_result = tool_error("operation is supported only for origin=post_execution", success=False)
+        if _HAR09_VERIFICATION is not None:
+            _har09_observe_completed("request_current_ticket_material_revision", _har09_result)
+        return _har09_result
     if args.get("origin") == "post_execution":
         from hermes_cli.agent_platform import post_execution_material_revision as revision
         try:
@@ -1101,22 +1154,37 @@ def _request_current_ticket_material_revision(args: dict[str, Any], **kwargs) ->
             if operation in {"inspect_reconciliation", "reconcile"}:
                 from hermes_cli.agent_platform import material_revision_reconciliation as reconciliation
                 if operation == "inspect_reconciliation" and set(args) == {"origin", "operation"}:
-                    return _result({"source_tool": "request_current_ticket_material_revision", **reconciliation.inspect()})
+                    _har09_result = _result({"source_tool": "request_current_ticket_material_revision", **reconciliation.inspect()})
+                    if _HAR09_VERIFICATION is not None:
+                        _har09_observe_completed("request_current_ticket_material_revision", _har09_result)
+                    return _har09_result
                 if operation != "reconcile" or set(args) - {"origin", "operation", "reconciliation_binding", "human_authorization_text", "next_action_id"}:
                     raise ValueError("reconciliation requires its exact exposed binding")
-                return _result({"source_tool": "request_current_ticket_material_revision", **reconciliation.reconcile(
+                _har09_result = _result({"source_tool": "request_current_ticket_material_revision", **reconciliation.reconcile(
                     binding=args.get("reconciliation_binding"), human_authorization_text=args.get("human_authorization_text"),
                     next_action_id=args.get("next_action_id"))})
+                if _HAR09_VERIFICATION is not None:
+                    _har09_observe_completed("request_current_ticket_material_revision", _har09_result)
+                return _har09_result
             if operation == "inspect" and set(args) == {"origin", "operation"}:
-                return _result({"source_tool": "request_current_ticket_material_revision", **revision.inspect()})
+                _har09_result = _result({"source_tool": "request_current_ticket_material_revision", **revision.inspect()})
+                if _HAR09_VERIFICATION is not None:
+                    _har09_observe_completed("request_current_ticket_material_revision", _har09_result)
+                return _har09_result
             if operation != "request" or set(args) - {"origin", "operation", "human_authorization_text", "request_binding", "next_action_id"}:
                 raise ValueError("post-execution request accepts only its exact exposed binding")
-            return _result({"source_tool": "request_current_ticket_material_revision", **revision.public(revision.request(
+            _har09_result = _result({"source_tool": "request_current_ticket_material_revision", **revision.public(revision.request(
                 binding=args.get("request_binding"), human_authorization_text=args.get("human_authorization_text"),
                 next_action_id=args.get("next_action_id"),
             ))})
+            if _HAR09_VERIFICATION is not None:
+                _har09_observe_completed("request_current_ticket_material_revision", _har09_result)
+            return _har09_result
         except Exception as exc:
-            return tool_error(str(exc), success=False, error_code="POST_EXECUTION_MATERIAL_REVISION_DENIED")
+            _har09_result = tool_error(str(exc), success=False, error_code="POST_EXECUTION_MATERIAL_REVISION_DENIED")
+            if _HAR09_VERIFICATION is not None:
+                _har09_observe_completed("request_current_ticket_material_revision", _har09_result)
+            return _har09_result
     if args.get("origin") == "post_accept":
         from hermes_cli.agent_platform import post_accept_material_revision
         try:
@@ -1126,9 +1194,15 @@ def _request_current_ticket_material_revision(args: dict[str, Any], **kwargs) ->
                 human_authorization_text=args.get("human_authorization_text", ""),
                 binding=args.get("request_binding"), next_action_id=args.get("next_action_id"),
             )
-            return _result({"source_tool": "request_current_ticket_material_revision", **result})
+            _har09_result = _result({"source_tool": "request_current_ticket_material_revision", **result})
+            if _HAR09_VERIFICATION is not None:
+                _har09_observe_completed("request_current_ticket_material_revision", _har09_result)
+            return _har09_result
         except Exception as exc:
-            return tool_error(str(exc) or "post-accept revision request denied", success=False)
+            _har09_result = tool_error(str(exc) or "post-accept revision request denied", success=False)
+            if _HAR09_VERIFICATION is not None:
+                _har09_observe_completed("request_current_ticket_material_revision", _har09_result)
+            return _har09_result
     from hermes_cli.agent_platform import retry_material_revision
     try:
         result = retry_material_revision.request(
@@ -1140,9 +1214,15 @@ def _request_current_ticket_material_revision(args: dict[str, Any], **kwargs) ->
             reason_code=str(args.get("reason_code") or ""),
         )
         workflow = _runtime().build_workflow_control_snapshot()
-        return _result({"source_tool": "request_current_ticket_material_revision", **result, "workflow_status": workflow["workflow_status"], "next_action": workflow["next_action"]})
+        _har09_result = _result({"source_tool": "request_current_ticket_material_revision", **result, "workflow_status": workflow["workflow_status"], "next_action": workflow["next_action"]})
+        if _HAR09_VERIFICATION is not None:
+            _har09_observe_completed("request_current_ticket_material_revision", _har09_result)
+        return _har09_result
     except Exception as exc:
-        return tool_error(str(exc) or "material revision request failed", success=False)
+        _har09_result = tool_error(str(exc) or "material revision request failed", success=False)
+        if _HAR09_VERIFICATION is not None:
+            _har09_observe_completed("request_current_ticket_material_revision", _har09_result)
+        return _har09_result
 
 
 def _revise_current_ticket_for_material_contract_failure(args: dict[str, Any], **_kwargs) -> str:
@@ -1180,13 +1260,19 @@ def _revise_current_ticket_for_material_contract_failure(args: dict[str, Any], *
     except Exception as exc:
         failure_envelope = getattr(exc, "failure_envelope", None)
         if isinstance(failure_envelope, dict):
-            return tool_error(
+            _har09_result = tool_error(
                 str(exc) or "current ticket material revision failed",
                 success=False,
                 **failure_envelope,
             )
-        return tool_error(str(exc) or "current ticket material revision failed", success=False)
-    return _result({
+            if _HAR09_VERIFICATION is not None:
+                _har09_observe_completed("revise_current_ticket_for_material_contract_failure", _har09_result)
+            return _har09_result
+        _har09_result = tool_error(str(exc) or "current ticket material revision failed", success=False)
+        if _HAR09_VERIFICATION is not None:
+            _har09_observe_completed("revise_current_ticket_for_material_contract_failure", _har09_result)
+        return _har09_result
+    _har09_result = _result({
         "source_tool": "revise_current_ticket_for_material_contract_failure",
         "human_authorization_text": human_authorization_text,
         **result,
@@ -1213,6 +1299,9 @@ def _revise_current_ticket_for_material_contract_failure(args: dict[str, Any], *
         "auto_retry": False,
         "auto_rollback": False,
     })
+    if _HAR09_VERIFICATION is not None:
+        _har09_observe_completed("revise_current_ticket_for_material_contract_failure", _har09_result)
+    return _har09_result
 
 
 def _reconcile_invalid_current_generation_authority(args: dict[str, Any], **_kwargs) -> str:
@@ -1549,11 +1638,20 @@ def _prepare_current_ticket_review(args: dict[str, Any], **_kwargs) -> str:
             result = cv.inspect() if operation == "inspect_commands" else cv.execute(
                 binding=args["binding"], human_authorization_text=args["human_authorization_text"],
             )
-            return _result({"source_tool": "prepare_current_ticket_review", "operation": operation, **cv.public(result)})
+            _har09_result = _result({"source_tool": "prepare_current_ticket_review", "operation": operation, **cv.public(result)})
+            if _HAR09_VERIFICATION is not None:
+                _har09_observe_completed("prepare_current_ticket_review", _har09_result)
+            return _har09_result
         except Exception as exc:
-            return tool_error(str(exc), success=False, error_code="COMMAND_VALIDATION_AUTHORITY_DENIED")
+            _har09_result = tool_error(str(exc), success=False, error_code="COMMAND_VALIDATION_AUTHORITY_DENIED")
+            if _HAR09_VERIFICATION is not None:
+                _har09_observe_completed("prepare_current_ticket_review", _har09_result)
+            return _har09_result
     if operation != "prepare":
-        return tool_error("unknown review/command validation operation", success=False)
+        _har09_result = tool_error("unknown review/command validation operation", success=False)
+        if _HAR09_VERIFICATION is not None:
+            _har09_observe_completed("prepare_current_ticket_review", _har09_result)
+        return _har09_result
     pr = _runtime()
     try:
         context = pr.build_lead_agent_operational_context()
@@ -1569,8 +1667,11 @@ def _prepare_current_ticket_review(args: dict[str, Any], **_kwargs) -> str:
         )
         updated_context = pr.build_lead_agent_operational_context()
     except Exception as exc:
-        return tool_error(str(exc) or "current ticket review preparation failed", success=False)
-    return _result({
+        _har09_result = tool_error(str(exc) or "current ticket review preparation failed", success=False)
+        if _HAR09_VERIFICATION is not None:
+            _har09_observe_completed("prepare_current_ticket_review", _har09_result)
+        return _har09_result
+    _har09_result = _result({
         "source_tool": "prepare_current_ticket_review",
         "human_request_text": human_request_text,
         **result,
@@ -1594,25 +1695,40 @@ def _prepare_current_ticket_review(args: dict[str, Any], **_kwargs) -> str:
         "auto_retry": False,
         "auto_rollback": False,
     })
+    if _HAR09_VERIFICATION is not None:
+        _har09_observe_completed("prepare_current_ticket_review", _har09_result)
+    return _har09_result
 
 
 def _inspect_current_ticket_manual_validation(args: dict[str, Any], **_kwargs) -> str:
     try:
-        return _result({
+        _har09_result = _result({
             "source_tool": "inspect_current_ticket_manual_validation",
             "manual_validation": _runtime().inspect_current_ticket_manual_validation(**args),
             "read_only": True, "auto_validation": False,
         })
+        if _HAR09_VERIFICATION is not None:
+            _har09_observe_completed("inspect_current_ticket_manual_validation", _har09_result)
+        return _har09_result
     except Exception as exc:
-        return tool_error(str(exc), success=False)
+        _har09_result = tool_error(str(exc), success=False)
+        if _HAR09_VERIFICATION is not None:
+            _har09_observe_completed("inspect_current_ticket_manual_validation", _har09_result)
+        return _har09_result
 
 
 def _attest_current_ticket_manual_validation(args: dict[str, Any], **_kwargs) -> str:
     try:
         result = _runtime().attest_current_ticket_manual_validation(**args)
-        return _result({"source_tool": "attest_current_ticket_manual_validation", **result})
+        _har09_result = _result({"source_tool": "attest_current_ticket_manual_validation", **result})
+        if _HAR09_VERIFICATION is not None:
+            _har09_observe_completed("attest_current_ticket_manual_validation", _har09_result)
+        return _har09_result
     except Exception as exc:
-        return tool_error(str(exc), success=False)
+        _har09_result = tool_error(str(exc), success=False)
+        if _HAR09_VERIFICATION is not None:
+            _har09_observe_completed("attest_current_ticket_manual_validation", _har09_result)
+        return _har09_result
 
 
 def _attest_current_ticket_zero_change_for_review_prepare(
