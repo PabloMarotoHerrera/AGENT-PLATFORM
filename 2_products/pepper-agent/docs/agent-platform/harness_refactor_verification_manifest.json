@@ -4653,4 +4653,134 @@
   "G1": "OPEN",
   "HAR08_implemented": false
 }
+,
+  "har08_verification": {
+  "ticket_id": "HAR-08",
+  "date": "2026-10-15",
+  "baseline": "bc998b2b19e501348d0c2e1ecb81d63f2d508f7b",
+  "status": "HAR-08-BOUNDED-COVERAGE-REFERENCE-MODEL-READY-FOR-HUMAN-REVIEW",
+  "evidence_root": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-08-20261015",
+  "full_results_SHA256": "5b0ef7b073eeb311d48d1885752ea4f68995fc61a924e9fa5625d627e8ce8e89",
+  "candidate_overlay_identity": "b8aeabd089f820d86037f8905a6fe75d3699c3dedfc95f00183d04c292680819",
+  "new_files": {
+    "2_products/pepper-agent/hermes_cli/agent_platform/harness/coverage.py": "6c7d2aac4f60fc0e49f049d9c5f2b1384ea678365ee6c372723b88340955c815",
+    "2_products/pepper-agent/hermes_cli/agent_platform/harness/reference_model.py": "7b732d4dbbef02491c5bc0fe39d216b1c25b0d4365a17b71a1da1fc08e3eb339",
+    "2_products/pepper-agent/hermes_cli/agent_platform/pre_review_reference_model.py": "a0548dd7e9b9eb0ad159b8654485485f59290a0b0ebf142cbbe6cfbbb5fbb400",
+    "2_products/pepper-agent/tests/hermes_cli/test_har08_coverage.py": "fecaf4954b76005d3db70c5ef1973684ed3ddb3f59d087a2c5016e6d0993fd4a",
+    "2_products/pepper-agent/tests/hermes_cli/test_har08_reference_model.py": "e539a712a2053f59f5fb4eab18dde0d3ac1ab0b7dd831405a1dc2fe281b567f4",
+    "2_products/pepper-agent/tests/hermes_cli/test_har08_purity.py": "7667396941e2b2a35b35cc49a8e8c7b36b395cede978f2821306548f34f34dfb"
+  },
+  "selected_results": {
+    "parent/baseline": {
+      "passed": 2126,
+      "failed": 0,
+      "errors": 0
+    },
+    "parent/first_slice": {
+      "passed": 219,
+      "failed": 0,
+      "errors": 0
+    },
+    "parent/compatibility": {
+      "passed": 716,
+      "failed": 0,
+      "errors": 0
+    },
+    "parent/authority_security": {
+      "passed": 1174,
+      "failed": 0,
+      "errors": 0
+    },
+    "final-candidate/baseline": {
+      "passed": 2126,
+      "failed": 0,
+      "errors": 0
+    },
+    "final-candidate/first_slice": {
+      "passed": 219,
+      "failed": 0,
+      "errors": 0
+    },
+    "final-candidate/compatibility": {
+      "passed": 716,
+      "failed": 0,
+      "errors": 0
+    },
+    "final-candidate/authority_security": {
+      "passed": 1174,
+      "failed": 0,
+      "errors": 0
+    },
+    "parent/focused-old": {
+      "passed": 268,
+      "failed": 0,
+      "errors": 0
+    },
+    "final-candidate/focused-new": {
+      "passed": 381,
+      "failed": 0,
+      "errors": 0
+    },
+    "final-candidate/test_har08_coverage": {
+      "passed": 46,
+      "failed": 0,
+      "errors": 0
+    },
+    "final-candidate/test_har08_reference_model": {
+      "passed": 58,
+      "failed": 0,
+      "errors": 0
+    },
+    "final-candidate/test_har08_purity": {
+      "passed": 9,
+      "failed": 0,
+      "errors": 0
+    }
+  },
+  "model_summary": {
+    "model": {
+      "schema_version": 1,
+      "content_id": "har08-reference-model",
+      "sha256": "894ed1909bc016a92fe237db2697177b503d64cfb40b56cf7fa62fd8d05d9321"
+    },
+    "report": {
+      "schema_version": 1,
+      "content_id": "har08-model-check-report",
+      "sha256": "9af5290f7aef00d052e9af806e7444143116b5fcd276d2b88425786dcfccfa88"
+    },
+    "operations": 15,
+    "evidence": 61,
+    "boundaries": 45,
+    "default_classification": "INCOMPLETE",
+    "conditional_classification": "COVERED_WITH_EXTERNAL_ASSUMPTIONS",
+    "scenarios": 56,
+    "runtime_scenarios": 53,
+    "structural_scenarios": 3,
+    "states": 29,
+    "transitions": 53,
+    "depth": 1,
+    "negative_witnesses": 38,
+    "violations": 0,
+    "bound_hits": []
+  },
+  "machine_files": {
+    "coverage-default.json": "f4d93d509f7f7ffa51dc33ec913026946056f087176b11dbe5c4e1cdea672361",
+    "coverage-conditional.json": "c1ac4d0e11f933d2756b3e8993f0bc3440d190a63238d01dfe4491dafdb283b1",
+    "reference-model.json": "4ad8317584df4212be47f0cfd47aaac14dd5241a51f31a00e433b5ffe6e10682",
+    "model-check.json": "097f8367d4096e7b73aae213f86d21233b7409e0d8ee2cb05656d832d0257688",
+    "executed-har08-nodes.json": "312b1020c6896640da3813050b8ae455be4845a52b24cb56ec35c2973e776fb4",
+    "source-identity.json": "ad4cb0d866de23a71e20b16d90333d487309fee8f00a596798d9072dd997d75f"
+  },
+  "mutation_failures": {
+    "executor": 5,
+    "unreachable": 1,
+    "cycle": 1,
+    "consent-stop": 1
+  },
+  "preserved_old_source_files": 3394,
+  "G1": "OPEN",
+  "HAR09_implemented": false,
+  "live_access": false,
+  "git_mutation": false
+}
 }

@@ -1182,3 +1182,66 @@ recorded in `har07_verification` and the external evidence directory
 
 No executor, live projection replacement, HAR-09 comparison, concurrency
 guarantee, Git mutation, workflow operation, deployment or Graphify run occurred.
+
+
+## HAR-08 — Bounded coverage and reference model (2026-10-15)
+
+Accepted parent `bc998b2b19e501348d0c2e1ecb81d63f2d508f7b`. Candidate ready for human review, not human
+acceptance. D01–D10 and the roadmap are preserved. G0 stays closed; G1 remains
+open/not eligible. HAR-09 is not implemented or activated.
+
+New pure modules `harness/coverage.py` and `harness/reference_model.py` reuse
+HAR-04 contracts, HAR-06 catalog and the HAR-07 evaluator. The passive product
+builder `pre_review_reference_model.py` accounts for all 15 first-slice operations.
+It receives source proofs/provenance; it never discovers or invokes handlers.
+Evidence-production relationships are explicit, not joins on matching names.
+
+Operation prerequisites are AND, evidence providers explicit OR or unique
+ownership. Human/external boundaries default unavailable. Qualified initial seeds,
+declared effects, invalidation, unsupported requirements, missing/ambiguous
+executors, exact versions/contracts and cyclic producer dependencies are checked.
+A seeded/alternative-resolved cycle is distinguished from an unconditional cycle.
+Recovery references remain unimplemented remediation assumptions and grant no
+authority. Abstract effective-request views are explicitly declared projections,
+not production schemas or new implementations.
+
+The default graph is INCOMPLETE: 45 human/external boundaries, including the
+future HAR-07 qualification owner, are not established as available. Under
+explicit synthetic assumptions it is COVERED_WITH_EXTERNAL_ASSUMPTIONS, never
+currently satisfied, available or authorized. Inspection outputs, command results
+(which may fail), human attestations, material requests, reconciled provenance,
+pending publication and pending human review remain distinct. O08 invalidates old
+evidence and leaves approval/execution pending; REQUEST/RECONCILE grant no consent
+for the next operation. Public mappings are checked against HAR-07 translation.
+
+The independent oracle consists of authored expected outcomes/successor states
+and the ticket's safety assertions. It calls HAR-07 for actual admission, never
+uses that answer as its expected result. Deliberately weakened policies/bad
+abstract successors demonstrate independent detection. Generator order/seed and
+canonical identities are deterministic. Supplied roots represent separate
+conditional cases, not one simultaneous real-world history.
+
+The finite corpus contains 56 cases (53 admission and 3 structural). It explores
+29 abstract states and 53 labeled transitions, depth 1; 38 negative witnesses,
+zero violated properties and no bound hits. This is complete only relative to the
+declared corpus/roots/assumptions, not all possible workflows. Bounds: 32 operations,
+128 evidence nodes, 1024 graph edges, 4096 representable states (512 default),
+depth 16 (4 default), 1024 cases (256 default), 100000 exploration work units.
+The existing strict 1 MiB HAR-04 transport bound applies. Work units count closure
+steps and state expansions, not a wall-clock/serialization-cost guarantee.
+Bound hits report incomplete coverage. Environment is supplied as synthetic roots;
+there is no arbitrary environmental-transition scripting interface.
+
+Canonical parent/candidate selections pass 2126/219/716/1174 with zero failures or
+errors. Focused parent 268, candidate 381; HAR-08 alone 113 (46 graph, 58 reference,
+9 purity/canaries). Four disposable mutations are detected: executor, unreachable
+producer, cycle and consent safety. Old source files remain byte-identical in
+archives; historical metadata and unrelated untracked hashes are preserved.
+No live records, providers, storage, registry/runtime bootstrap, worker commands,
+Git mutation, Graphify, Docker, installation or deployment/restart was used.
+
+Exact reports, bounds, model/scenario/state/transition identities, source proofs,
+negative witnesses, node inventories and regressions are in `har08_verification`
+and `C:/Users/pablo/.codex/har-evidence/HAR-08-20261015`. Production currentness,
+full validation-item DAGs, temporal/concurrent histories, runtime availability and
+shadow comparison remain unsupported here; HAR-09 needs separate authorization.
