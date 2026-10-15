@@ -4567,4 +4567,90 @@
     "HAR07_started": false,
     "next_gate": "Separate human HAR-06 review/acceptance, selective human-only Git; then separately authorize HAR-07."
   }
+,
+  "har07_verification": {
+  "ticket_id": "HAR-07",
+  "date": "2026-10-15",
+  "baseline": "43a37968c07e3ea4502c838bf97b344aff3f88bd",
+  "status": "HAR-07-SHARED-ADMISSIBILITY-TYPED-PROJECTION-READY-FOR-HUMAN-REVIEW",
+  "evidence_root": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-07-20261015",
+  "full_results_SHA256": "306063dad31086c2bb7467233f624baed600abab895d10785602432912827fd0",
+  "candidate_overlay_identity": "a36ebb5b7200d0eb3a60d3605946ed4c25f7656385d5fdb37b5bc0b82becf3dd",
+  "new_source_files": {
+    "2_products/pepper-agent/hermes_cli/agent_platform/harness/admissibility.py": "121c34c3d36edf053aaa5514b2eb2f887bd656513fb5c14a4a73d8b62f2d4ee0",
+    "2_products/pepper-agent/hermes_cli/agent_platform/admissibility_projection.py": "bbafe618e6880bff89453df7c8aec554fac526b7f0227b8079229a10a60a9e6e",
+    "2_products/pepper-agent/tests/hermes_cli/test_har07_admissibility.py": "9b0b760757b9381cc15af89e2cd4f848979cd586fa7ff97272c70fa58ffb13ad",
+    "2_products/pepper-agent/tests/hermes_cli/test_har07_admissibility_purity.py": "cfe0b460562aa8798a6a854b92c817732fbe7a4d499d40feb7517791ddca85d9"
+  },
+  "canonical_results": {
+    "parent/baseline": {
+      "passed": 2126,
+      "failed": 0,
+      "errors": 0
+    },
+    "parent/first_slice": {
+      "passed": 219,
+      "failed": 0,
+      "errors": 0
+    },
+    "parent/compatibility": {
+      "passed": 716,
+      "failed": 0,
+      "errors": 0
+    },
+    "parent/authority_security": {
+      "passed": 1174,
+      "failed": 0,
+      "errors": 0
+    },
+    "review-candidate/baseline": {
+      "passed": 2126,
+      "failed": 0,
+      "errors": 0
+    },
+    "review-candidate/first_slice": {
+      "passed": 219,
+      "failed": 0,
+      "errors": 0
+    },
+    "review-candidate/compatibility": {
+      "passed": 716,
+      "failed": 0,
+      "errors": 0
+    },
+    "review-candidate/authority_security": {
+      "passed": 1174,
+      "failed": 0,
+      "errors": 0
+    },
+    "parent/focused-old": {
+      "passed": 162,
+      "failed": 0,
+      "errors": 0
+    },
+    "review-candidate/focused-new": {
+      "passed": 268,
+      "failed": 0,
+      "errors": 0
+    }
+  },
+  "focused_counts": {
+    "HAR-04": 76,
+    "HAR-05": 52,
+    "HAR-06": 34,
+    "HAR-07": 106
+  },
+  "mutation_failures": {
+    "consent": 5,
+    "precedence": 11,
+    "continuation": 1,
+    "private-import": 1
+  },
+  "static_bindings_verified": 15,
+  "preserved_old_source_files": 3390,
+  "live_access": false,
+  "git_mutation": false,
+  "G1": "OPEN",
+  "HAR08_implemented": false
+}
 }

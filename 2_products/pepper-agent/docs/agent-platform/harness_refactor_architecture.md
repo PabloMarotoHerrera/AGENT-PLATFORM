@@ -1124,3 +1124,61 @@ Se preservan contratos/exports HAR-04, puerto/adaptador HAR-05, C26 y C91–C94,
 roadmap, entradas HAR originales, C64/C80-R1 y PNGs. Git sigue humano; P18.9.13
 permanece congelado sin lectura/copia de autoridad viva. HAR-07 requiere aceptación
 humana separada; G1 sigue abierto y no elegible para cierre.
+
+
+## HAR-07 — Shared admissibility and passive action translation (2026-10-15)
+
+Candidate based on accepted HAR-06 parent `43a37968c07e3ea4502c838bf97b344aff3f88bd`.
+Ready for human review; this is not human acceptance. G0 remains closed and G1
+open. Roadmap and D01–D10 are preserved. HAR-08 is not implemented.
+
+`harness/admissibility.py` adds immutable versioned requirements, explicit
+qualification inputs and the single pure `evaluate` function. HAR-04 decisions,
+state, authority and continuation contracts are reused. A bounded explanation
+wrapper retains all reasons and the exact qualification context. Evaluation
+identity binds the source-input digest, trusted-owner reference and qualification;
+CURRENT alone, a HAR-05 PRESENT capture or a HAR-06 source binding cannot allow.
+
+Precedence is explicit: identity/schema/conflict safety failures, confirmed
+refusal, missing authority/consent, unmet prerequisites, then ALLOW. Reasons are
+deduplicated and ordered by priority/code; later checks cannot replace blockers.
+WAIT recommendations do not retry automatically. Safe stops and remediation have
+no capability/handler binding. ALLOW never constructs an ExecutionRequest.
+
+`admissibility_projection.py` declares concrete policies for all 15 HAR-06
+operations and passively qualifies supplied legacy selections. Their full legacy
+guard-result prerequisites require positive qualification by a future trusted
+owner: this module neither implements those guards nor converts PRESENT into a
+successful guard result. Terminal operations require bound inactive completion;
+review preparation additionally requires approved publication, passed validation
+and review readiness. All effectful operations preserve their consent kinds.
+
+The trusted-owner parameters are an explicit D04 trust precondition, not an
+authentication mechanism. HAR-07 implements no production producer/currentness
+resolver. Qualification must never be accepted from model/tool arguments. Tests
+inject isolated synthetic owner evidence; no live authority is read or forged.
+Policy provenance and interpretation belong to that future owner. Unknown rules
+can be declared unsupported and fail closed; opaque references alone do not pass.
+
+Supported public families retain VALIDATE/REQUEST/RECONCILE/REVISE/PREPARE IDs,
+ticket targets and supplied labels/human-action fields, including absent optional
+fields. Legacy executable=false/read_only=true cannot be promoted. RESOLVE
+execution-authority and review-blocker diagnostics remain noninvocable, with
+their distinct historical token/flag conventions. Inspections and attestations
+without standalone action IDs are explicitly UNMAPPED. C26 active context and
+separate successor decisions are retained; monitor/start evaluation is outside
+this slice, never guessed. No production consumer or flag activates this code.
+
+Verification: parent/candidate canonical baseline 2126, first_slice 219,
+compatibility 716 and authority_security 1174 passed each, zero failures/errors.
+Focused parent 162; candidate 268 (HAR-04 76, HAR-05 52, HAR-06 34, HAR-07 106).
+Four disposable mutations are detected: consent, precedence, continuation and
+private import. Fresh-process import/evaluation probes prohibit writes, SQLite,
+network/process and runtime/registry/provider dependencies. All 15 accepted source
+handler correspondences remain VERIFIED, without claiming availability/admission.
+44 invariant mappings, exact argv/file inventories, source hashes and reports are
+recorded in `har07_verification` and the external evidence directory
+`C:/Users/pablo/.codex/har-evidence/HAR-07-20261015`.
+
+No executor, live projection replacement, HAR-09 comparison, concurrency
+guarantee, Git mutation, workflow operation, deployment or Graphify run occurred.
