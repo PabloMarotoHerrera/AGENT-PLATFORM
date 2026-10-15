@@ -3997,5 +3997,163 @@
     "provider_or_external_calls": false,
     "Docker_Graphify_deploy_restart": false,
     "next_gate": "Human review of HAR-03 diff and G0 evidence; human-only Git; separately authorize HAR-04 only after human G0 acceptance."
+  },
+  "har04_verification": {
+    "status": "HAR-04-PURE-VERSIONED-HARNESS-CONTRACTS-READY-FOR-HUMAN-REVIEW",
+    "human_accepted": false,
+    "prepared_date": "2026-10-15",
+    "timezone": "Europe/Madrid",
+    "accepted_parent": "0dd2a42c16cba6921dc9cdf60ba8d837aa76d4e2",
+    "branch": "p18-manual-to-hermes-workflow-migration",
+    "human_G0_acceptance": {
+      "authority": "Human HAR-04 ticket sections 1 and header",
+      "status": "HUMAN_APPROVED",
+      "HAR00_HAR03_accepted_committed_pushed": true,
+      "historical_HAR03_pending_record_preserved": true
+    },
+    "legacy_fields_scope": "All pre-existing namespaces, statuses, approvals, commands, schemas, digests and evidence retain their historical meaning; only this namespace records HAR-04.",
+    "new_production": [
+      "2_products/pepper-agent/hermes_cli/agent_platform/harness/__init__.py",
+      "2_products/pepper-agent/hermes_cli/agent_platform/harness/contracts.py",
+      "2_products/pepper-agent/hermes_cli/agent_platform/harness/validation.py"
+    ],
+    "new_tests": [
+      "2_products/pepper-agent/tests/hermes_cli/test_har04_harness_contracts.py",
+      "2_products/pepper-agent/tests/hermes_cli/test_har04_harness_purity.py"
+    ],
+    "evidence_root_windows": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-04-20261015",
+    "evidence_root_wsl": "/tmp/har04-20261015-53fgl7k9/evidence",
+    "focused": {
+      "passed": 76,
+      "failed": 0,
+      "errors": 0,
+      "command": [
+        "bash",
+        "scripts/run_tests.sh",
+        "tests/hermes_cli/test_har04_harness_contracts.py",
+        "tests/hermes_cli/test_har04_harness_purity.py",
+        "-j",
+        "2"
+      ]
+    },
+    "implementation_scope": "15 immutable schema-v1 models, 7 enums, four pure transport/integrity helpers; no production consumer, executor, evaluator or authorization grant.",
+    "preservation": {
+      "untracked_exact_hashes": {
+        "2_products/pepper-agent/tests/hermes_cli/test_c64_validation_authority_boundary.py": "c7999a16042f07390e41e2d040c2fa387096719c744f508c546f6897076cb862",
+        "2_products/pepper-agent/web/src/agent-platform/c80-r1-chat-lifecycle.test.tsx": "64e9756d9d8d105ed4da36fd182117e02b1cd49a4f6631409dca8f6f199d3277",
+        "HAR/HAR-00_architecture_decisions_and_execution_baseline.md": "fb1b1d18cca4d17d8ac86ff6e0ecad6ff76d5ef28e9e23c9d01d71b99d479674",
+        "HAR/HAR_roadmap_refactorizacion_harnes.md": "3bc700b77e6e36ba297bf0e3f6f2c85e1b25b497679db3912a5399a167b72513",
+        "mermaid-diagram.png": "c9625e35830957f005f695fe3372eacdb6e57ffb961bea2dd5f5feca2acbc169",
+        "mermaid-diagram2.png": "654d3f3ad0b52ab78ea9f8bf8708e0da70b62426670b508249b4d9026a367721",
+        "mermaid-diagram3.png": "45ddde0a639b51eda2f95712ef4da57663e69e44a96e3b31f6f08b49b953b359"
+      },
+      "historical_full_results": {
+        "har01_verification": {
+          "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-01-20261015-08pqco2o\\verification-results.json",
+          "SHA256": "a577f02f7a6dc87af3ae4ab315c72c735d1d2be20f540b8c9b6cc096016b93ac"
+        },
+        "har02_verification": {
+          "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-02-20261015\\verification-results.json",
+          "SHA256": "1d81a9a86c3374e879ba97bb517082ee5f03d0bde29bf2baf041a161975660b9"
+        },
+        "har03_verification": {
+          "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-03-20261015\\verification-results.json",
+          "SHA256": "0fe4f4c8e6e014cf7bb4a45e64d39e3a94654cb7e452e438e429b3e24ed7ff3d"
+        }
+      },
+      "existing_production_and_tests_tracked_diff_empty": true,
+      "roadmap_unchanged": true,
+      "index_empty": true,
+      "live_authority": "Not accessed. No live digest comparison claimed."
+    },
+    "G1": "NOT_ELIGIBLE_FOR_CLOSURE",
+    "HAR05_started": false,
+    "live_access": false,
+    "git_mutation": false,
+    "dependency_or_packaging_changes": false,
+    "limitations": [
+      "Structural validation is not authentication, currentness, signature verification, policy evaluation or authorization.",
+      "Four explicit selected suites, not whole-repository acceptance.",
+      "Fresh import probe in UTF-8 existing environment; no sandbox claim against hostile Python.",
+      "Bounded JSON transport requires parse_contract; unchecked Pydantic construction/copy is not trusted.",
+      "No live P18.9.13 access, hash comparison, or runtime activation.",
+      "Archive optional Git precompile warning is expected; wrapper remains unchanged."
+    ],
+    "next_gate": "Separate human HAR-04 review/acceptance and human-only Git before HAR-05; G1 remains open.",
+    "full_results": {
+      "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-04-20261015\\verification-results.json",
+      "SHA256": "c690cc6d8b9995346d2d009c718c47515f684650b6fed8aa8d014d87081d347f"
+    },
+    "contract_inventory": {
+      "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-04-20261015\\contract-inventory.json",
+      "SHA256": "ec41e5b8ed38e728c16630f9ac6d2ce6cefd8a87b8b2c606ec1693ea216ae95c"
+    },
+    "source_overlays": {
+      "2_products/pepper-agent/hermes_cli/agent_platform/harness/contracts.py": "818aaa1b517d01eec0722c9f4a37c9bb05a582f8db08fe79782133f906db175f",
+      "2_products/pepper-agent/hermes_cli/agent_platform/harness/validation.py": "c89f1721addb30a43df2943b39bc5e7505bd697957a497a5310504a16eba5f63",
+      "2_products/pepper-agent/hermes_cli/agent_platform/harness/__init__.py": "37142c0a11be53ccec32034bc9c45c58b450678ee913a713d4e127445f965d55",
+      "2_products/pepper-agent/tests/hermes_cli/test_har04_harness_contracts.py": "851c843237f90bb428fdb0efb4a47700bd530f2b79fce56aaec298c6e2e420ed",
+      "2_products/pepper-agent/tests/hermes_cli/test_har04_harness_purity.py": "be0fc00ce788381b42660dc9485e4a47b2ed53e944c58546d73baaccf716f22a"
+    },
+    "selection_comparison_summary": {
+      "baseline": {
+        "parent": {
+          "passed": 2126,
+          "failed": 0,
+          "errors": 0
+        },
+        "candidate": {
+          "passed": 2126,
+          "failed": 0,
+          "errors": 0
+        },
+        "new_failed_error_nodes": []
+      },
+      "first_slice": {
+        "parent": {
+          "passed": 219,
+          "failed": 0,
+          "errors": 0
+        },
+        "candidate": {
+          "passed": 219,
+          "failed": 0,
+          "errors": 0
+        },
+        "new_failed_error_nodes": []
+      },
+      "compatibility": {
+        "parent": {
+          "passed": 716,
+          "failed": 0,
+          "errors": 0
+        },
+        "candidate": {
+          "passed": 716,
+          "failed": 0,
+          "errors": 0
+        },
+        "new_failed_error_nodes": []
+      },
+      "authority_security": {
+        "parent": {
+          "passed": 1174,
+          "failed": 0,
+          "errors": 0
+        },
+        "candidate": {
+          "passed": 1174,
+          "failed": 0,
+          "errors": 0
+        },
+        "new_failed_error_nodes": []
+      }
+    },
+    "import_mutations_detected": 5,
+    "contract_mutations_detected": 3,
+    "historical_source_hashes_file": {
+      "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-04-20261015\\existing-source-hashes.json",
+      "SHA256": "0ae03d83dd52c0fef8ff4ff0edf0af948fa935e7b15d3b01a24c518cf3c32753"
+    }
   }
 }

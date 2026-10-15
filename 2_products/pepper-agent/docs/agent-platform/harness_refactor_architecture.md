@@ -645,3 +645,145 @@ G0 solo puede quedar **READY_FOR_HUMAN_REVIEW** con la baseline seleccionada sin
 fallos/errores y sin regresiones nuevas. Cualquier cierre de G0 y habilitación de
 HAR-04 requiere aceptación humana separada. HAR-03 no inicia HAR-04 ni operaciones
 Pepper vivas, Git, deploy/restart, proveedores, Docker o Graphify.
+
+
+## 9. HAR-04 — Contratos puros versionados de plataforma
+
+### Autoridad y límite de activación
+
+El ticket humano HAR-04 declara HAR-00–HAR-03 aceptados, committed/pushed y G0
+**HUMAN APPROVED**. Padre verificado en Windows/WSL:
+`0dd2a42c16cba6921dc9cdf60ba8d837aa76d4e2`, rama
+`p18-manual-to-hermes-workflow-migration`. Esta aceptación posterior se registra
+en `har04_verification`; el estado pendiente histórico de HAR-03 no se reescribe.
+HAR-04 deja una candidatura para revisión humana. G1 aún no es elegible.
+
+El paquete `hermes_cli.agent_platform.harness` no tiene consumidores de producción.
+No modifica enums, schemas, exports ni algoritmos TicketSpec/WorkPacket anteriores.
+Los futuros adaptadores dependen del harness; el harness no importa adaptadores.
+No contiene registry, executor, dispatch, evaluator, journal, reconciliación,
+consentimiento ni intérprete de predicados. No hay requisito Git de completitud.
+
+### Reutilización y estructura
+
+Se inspeccionaron `workflow/governed_state_machine.py`, `work_packet/`,
+`runtime_adapter/contracts.py`, `provider_worker/contracts.py`,
+`ticket_factory/specs.py` y `tools/registry.py`. Sus vínculos de dominio, políticas,
+handlers, imports y hashes no son contratos genéricos intercambiables.
+Se reutilizan las convenciones Pydantic ya instaladas de inmutabilidad, campos
+cerrados y versiones explícitas; no sus clases ni serializaciones especializadas.
+Pydantic evita implementar otro parser de modelos, validación y errores tipados;
+no se instala dependencia ni se cambia packaging. La búsqueda setuptools vigente
+incluye `hermes_cli.*` y descubre el subpaquete nuevo sin alterar la configuración.
+
+Grafo de imports directos comprobado por AST fuera de los tests:
+
+- `harness/__init__.py` → `contracts`, `validation` (exports propios explícitos).
+- `contracts.py` → `enum`, `typing`, `pydantic`.
+- `validation.py` → `contracts`, `hashlib`, `hmac`, `json`, `typing`.
+
+### Inventario y semántica
+
+Todos los modelos públicos tienen `schema_version=1` y son inmutables mediante
+las APIs validadas. El inventario de campos/tipos exactos se conserva en
+`contract-inventory.json` de la evidencia HAR-04; el resumen siguiente distingue
+identidades, observaciones y solicitudes sin introducir un permiso ejecutable.
+
+| Modelo | Información |
+|---|---|
+| ContractRef | contract_id, version externa opaca |
+| ContentRef | content_id, sha256 |
+| ActorRef | actor_id, trust_model=trusted_local_operator |
+| Scope | project_id, workflow_id, resource_ids explícitos |
+| CapabilityDescriptor | capability, input_schema, output_schema, effect, required_authority_kinds, evidence_contract, execution_adapter, recovery_policy opcional |
+| TransitionDescriptor | transition, source_requirement, capability, prerequisites, required_authority_kinds, effect, target_rule, failure_code, conflict_code, continuation_rule |
+| StateDimension | definition, value, support SUPPORTED/UNKNOWN/UNSUPPORTED |
+| WorkflowState | publication, execution, validation, review, completion, authority_currentness independientes |
+| Continuation | continuation_id, scope, actor, kind, reason_code, policy, capability/decision_target según tipo |
+| AuthorityReference | authority_id, kind, issuer, subject, scope, policy, record, dependencies, currentness, superseded_by |
+| AdmissibilityDecision | decision_id, scope, actor, capability, transition, outcome, reason_code, policy, required_authority_kinds, current_authorities, expected_authority_version, prerequisites, effect, observational |
+| ExecutionRequest | operation_id, capability, scope, actor, authorities, input, implementation, effect, admissibility_observation, expected_authority_version, idempotency_key, replay_ref |
+| EvidenceReference | evidence_id, evidence_type, sha256, producer_operation_id, producer_capability, producer_actor, scope, input, storage_locator, integrity, retention |
+| ExecutionResult | operation_id, capability, scope, actor, request, input, outcome, effect_status, reason_code, output, evidence, replay_ref |
+| WorkflowProjection | projection_id, scope, actor, observed_authority_version, observed_state_version, state, continuations, pending_human_decisions, wait_conditions, safe_stops, diagnostics, observational |
+
+Los efectos OBSERVE/COMPUTE/WRITE_ARTIFACT/EXTERNAL_WRITE/PHYSICAL_CONTROL son
+clasificaciones independientes; una simulación no autoriza control físico.
+Las continuaciones distinguen exactamente EXECUTABLE_CAPABILITY, HUMAN_DECISION,
+OBSERVATION, EXTERNAL_REMEDIATION y SAFE_STOP. Solo una oferta ejecutable lleva
+capability; solo HUMAN_DECISION lleva decision_target. Ninguna lleva handler.
+Un ID `RESOLVE_*` permanece metadato opaco y no adquiere executor ni consentimiento.
+
+### Versiones, transporte y límites
+
+La versión de envelope admitida es el entero estricto 1 (no bool, float ni string).
+Una ContractRef admite versión externa entera 1–65535 sin resolverla o afirmar su
+soporte. StateDimension hace explícita esa incertidumbre. Campos desconocidos,
+coerciones Python, callbacks, expresiones de código y campos requeridos ausentes
+se rechazan. Identificadores: 1–128 caracteres ASCII alfanuméricos con `._:-`;
+digests: exactamente 64 hex minúsculas. Locators: texto opaco de 1–512 caracteres,
+sin controles; nunca se abren. Cada colección tiene máximo 32 elementos; Scope
+requiere 1–32 recursos distintos. No hay campos recursivos ni dicts arbitrarios.
+
+`parse_contract(tipo_confiable, JSON)` limita el transporte UTF-8 a 1 MiB y rechaza
+claves duplicadas antes de validar. No carga código según nombres serializados.
+Usar este helper es requisito para el límite de transporte; los métodos nativos
+Pydantic no sustituyen ese límite. `canonical_json` revalida, ordena claves y usa
+JSON compacto UTF-8; recursos se normalizan como conjunto ordenado, otras secuencias
+conservan el orden declarado. Igualdad es estructural, sin timestamp aleatorio.
+`sha256_bytes` y `verify_content_digest` solo reciben bytes suministrados: una
+referencia bien formada no permite detectar contenido alterado sin esos bytes.
+Un SHA coincidente no es firma, autenticación ni aprobación humana.
+
+### Invariantes de autoridad y límites de garantía
+
+AuthorityReference conserva issuer y subject separados y dependencias explícitas.
+Superseded requiere successor; CURRENT es solo una afirmación de quien produce los
+datos. Solicitudes y observaciones ALLOW rechazan referencias declaradas históricas,
+no verificadas, conflictivas o superseded; ALLOW exige versión esperada y los kinds
+requeridos. Esto detecta contradicciones locales, no evalúa políticas ni demuestra
+vigencia. DENY/WAIT/SAFE_STOP pueden conservar observaciones históricas sin elevarlas.
+
+Scope y actor coinciden exactamente entre envelope y sus referencias vinculadas;
+ni un proyecto más amplio ni otro recurso heredan permiso. La proyección valida
+kinds y ámbitos de continuaciones; pendiente humano no es aprobación. Descriptores,
+proyecciones, decisiones y continuaciones no son AuthorityReference ni ExecutionRequest.
+Construir una ExecutionRequest tampoco autoriza ejecución: un adaptador futuro debe
+revalidar autoridad actual y versión esperada inmediatamente antes de los efectos.
+La validez del contenido, issuer, versión externa, policy o claim CURRENT no se
+resuelve aquí. No se ofrece autenticación remota ni aislamiento multiusuario.
+
+UNKNOWN exige effect_status UNKNOWN; SUCCESS exige efectos confirmados y referencias
+a output/evidence. DENIED exige NOT_APPLIED. FAILURE/CANCELLED pueden conservar
+incertidumbre sobre efectos sin autorizar retry. La evidencia de un resultado debe
+coincidir en operación, capability, input, actor y scope. Éxito no promueve review,
+completitud, evidencia verificada ni autoridad. Replay es una referencia; no se ejecuta.
+
+La inmutabilidad cubre la API normal validada. `model_construct`, `model_copy` sin
+validación y manipulación hostil de objetos Python no son fronteras de confianza;
+el transporte canónico revalida, pero el código Python en el proceso sigue siendo
+confiable. Ninguno de estos modelos debe aceptarse como un token de autorización.
+
+### Verificación y siguiente gate
+
+Los tests nuevos HAR-04 ejercitan todos los modelos, round-trip, límites, errores,
+invariantes y relaciones, sin leer texto de fuentes. El probe separado arranca un
+intérprete `-I -B`, HOME temporal y origen de código comprobado. Intercepta imports
+privados/provider/storage y audita escrituras, red y procesos antes de importar el
+paquete. Canarios comprueban que esos controles fallan; mutaciones en copias
+independientes añaden imports prohibidos y eliminan guards para probar sensibilidad.
+Esta prueba cubre el import observado, no es un sandbox contra Python hostil ni
+una afirmación sobre la pureza de todo Hermes. El inicializador ancestral conserva
+su lógica UTF-8 histórica; el entorno comprobado usa UTF-8.
+
+Resultados exactos, comandos, entorno, hashes y comparaciones padre/candidato están
+en `har04_verification` y su evidencia externa. Las cuatro selecciones son explícitas,
+no aceptación de toda la suite; usan archivos comprometidos en reconstrucciones
+separadas, sin incluir C64/C80-R1 untracked. El wrapper permanece intacto; su
+precompile opcional emite el aviso esperado de archivo sin `.git` y continúa.
+
+HAR-05 requiere revisión y aceptación humana separadas de HAR-04 y Git humano.
+HAR-05–HAR-09 podrán consumir estas referencias mediante adaptadores; HAR-07 hará
+la evaluación real y HAR-12 el journal. G1 permanece abierto. No se activa el core,
+no se inspecciona ni muta P18.9.13 vivo y no se ejecuta HAR-05, Graphify, Docker,
+proveedores, deploy ni restart.
