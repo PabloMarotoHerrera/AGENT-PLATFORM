@@ -1,6 +1,7 @@
 import re
 import sys
 from enum import Enum
+from pathlib import Path
 
 import pytest
 from pydantic import BaseModel, ValidationError
@@ -365,7 +366,7 @@ def terminal_context(
             status_state["status"] = " M docs/new.md"
     single_result = complete_single_agent_execution(session)
     runtime = build_validation_command_runtime_binding(
-        python_executable=sys.executable,
+        python_executable=Path(sys.executable).resolve(strict=True).as_posix(),
         allocation_result=allocated,
     )
     command_steps = tuple(

@@ -1,7 +1,9 @@
 # HAR — Decisiones arquitectónicas y contrato del primer ámbito
 
 Fecha de preparación: 2026-10-15 (Europe/Madrid). Ticket: **HAR-00**.
-Estado: **PROPOSED — READY FOR HUMAN REVIEW**. Propietario de las decisiones: Pablo.
+Estado: **HUMAN_APPROVED_ARCHITECTURAL_DIRECTION** (registrado por HAR-01 el
+2026-10-15). Propietario de las decisiones: Pablo. D09 conserva detalles pendientes
+de HAR-02/HAR-03; aprobación conceptual no equivale a implementación ni a G0.
 
 Este documento es el propietario canónico de las decisiones HAR. El
 [roadmap](harness_refactor_roadmap.md) conserva el backlog y sus gates; el
@@ -14,8 +16,12 @@ preservadas, no un segundo catálogo de decisiones vigentes.
 El ticket humano fija la dirección B (contratos declarativos) mediante A
 (adaptación incremental), con C limitado (coordinación durable). No autoriza una
 reescritura, event sourcing completo ni la aceptación unilateral de D01–D10.
-Todas las decisiones de este documento siguen **PROPOSED**, sin aprobación
-registrada. HAR-01 y posteriores requieren su ticket completo y revisión humana.
+En HAR-00 las decisiones quedaron propuestas. El ticket humano HAR-01, secciones
+1 y 6.5, comunica la aceptación, commit y push de HAR-00 y aprueba la dirección
+D01–D10. Esta es una decisión del proyecto HAR, no un registro de aprobación
+Pepper. D09 aprueba solo la separación conceptual de ejecución/objetivo humano;
+la matriz C26 y las garantías públicas siguen pendientes de HAR-02/HAR-03.
+Cada ticket posterior requiere su alcance completo y revisión humana propios.
 
 Baseline canónico inspeccionado: rama
 `p18-manual-to-hermes-workflow-migration`, HEAD
@@ -24,12 +30,21 @@ Baseline canónico inspeccionado: rama
 sin cambios al comenzar. La comparación de cada ticket posterior usará su padre
 aceptado; este SHA no se convierte en baseline permanente de HAR.
 
-WSL fue inspeccionado de nuevo, mediante Git read-only, el 2026-10-15:
+Observación histórica HAR-00, superada por el preflight HAR-01 siguiente:
+WSL fue inspeccionado mediante Git read-only el 2026-10-15:
 `/home/pablo/work/AGENT-PLATFORM` continúa en
 `75185e79e46424e7f495dfaad59ebdde7f45db93`, en la misma rama, con candidatos C94
 sin commit y sin el objeto del HEAD canónico. Estado:
 **HUMAN_SYNC_REQUIRED_BEFORE_HAR01_VERIFICATION**. Se puede completar HAR-00 desde
 Windows. No se sincroniza WSL ni se valida ejecución contra su fuente atrasada.
+
+**Preflight HAR-01 (2026-10-15):** Windows y WSL se verificaron en
+`4e640c41a43a8c999a21f11988f825c5dd3bd3bf`, misma rama, índices y árboles
+rastreados limpios antes de editar. La sincronización fue realizada por el humano;
+la necesidad histórica de sincronización queda resuelta para este padre. Las
+pruebas HAR-01 usan reconstrucciones independientes del padre mediante lectura
+Git y HOME temporal, nunca el checkout servido ni el estado vivo. Resultados y
+metadatos frescos constan en el manifiesto, sin sustituir la evidencia HAR-00/C94.
 
 HAR-00 solo produce este documento, el roadmap y el manifiesto declarativo.
 No ejecuta tests, imports del proyecto, builds, Graphify, Docker, instalaciones,
@@ -78,7 +93,8 @@ existentes; **PROPOSED**, diseño pendiente. No se repite la auditoría completa
 
 ### D01 — Frontera plataforma/producto y ubicación del paquete
 
-**Estado:** PROPOSED. **Propietario/aprobador:** Pablo. **Aprobación:** pendiente.
+**Estado:** HUMAN_APPROVED. **Propietario/aprobador:** Pablo.
+**Aprobación:** ticket humano HAR-01 (§1/§6.5), registrada el 2026-10-15.
 
 - **Problema/evidencia:** F06/F08/F11; E01–E04. Los contratos ejecutables actuales
   viven en el producto; `3_platform/_governed_skeleton/core/README.md` declara un
@@ -100,7 +116,8 @@ existentes; **PROPOSED**, diseño pendiente. No se repite la auditoría completa
 
 ### D02 — Estado y tipos de continuación
 
-**Estado:** PROPOSED. **Propietario/aprobador:** Pablo. **Aprobación:** pendiente.
+**Estado:** HUMAN_APPROVED. **Propietario/aprobador:** Pablo.
+**Aprobación:** ticket humano HAR-01 (§1/§6.5), registrada el 2026-10-15.
 
 - **Problema/evidencia:** F01/F03/F12; E03–E04/E09/E19. Enums, hechos Kanban y
   overlays no comparten un significado único de acción disponible.
@@ -122,7 +139,8 @@ existentes; **PROPOSED**, diseño pendiente. No se repite la auditoría completa
 
 ### D03 — Admisibilidad compartida y revalidación en el efecto
 
-**Estado:** PROPOSED. **Propietario/aprobador:** Pablo. **Aprobación:** pendiente.
+**Estado:** HUMAN_APPROVED. **Propietario/aprobador:** Pablo.
+**Aprobación:** ticket humano HAR-01 (§1/§6.5), registrada el 2026-10-15.
 
 - **Problema/evidencia:** F01/F03/F10/F12; E03/E05/E11/E14–E15. La proyección y
   los guards del ejecutor se deciden en rutas distintas.
@@ -143,7 +161,8 @@ existentes; **PROPOSED**, diseño pendiente. No se repite la auditoría completa
 
 ### D04 — Actor, recurso y confianza
 
-**Estado:** PROPOSED. **Propietario/aprobador:** Pablo. **Aprobación:** pendiente.
+**Estado:** HUMAN_APPROVED. **Propietario/aprobador:** Pablo.
+**Aprobación:** ticket humano HAR-01 (§1/§6.5), registrada el 2026-10-15.
 
 - **Problema/evidencia:** F06/F10; E11/E14. El handler usa convenciones como
   `pepper-chat-human` y validadores específicos; ello no acredita autenticación
@@ -165,7 +184,8 @@ existentes; **PROPOSED**, diseño pendiente. No se repite la auditoría completa
 
 ### D05 — Dependencias y significado de la validación
 
-**Estado:** PROPOSED. **Propietario/aprobador:** Pablo. **Aprobación:** pendiente.
+**Estado:** HUMAN_APPROVED. **Propietario/aprobador:** Pablo.
+**Aprobación:** ticket humano HAR-01 (§1/§6.5), registrada el 2026-10-15.
 
 - **Problema/evidencia:** F02/F07; E05/E07. C91 deriva referencias/rangos y deuda
   desde prosa. Evidencia existente puede ser fallida y permitir clasificación,
@@ -188,7 +208,8 @@ existentes; **PROPOSED**, diseño pendiente. No se repite la auditoría completa
 
 ### D06 — Identidad e invalidación de autoridad
 
-**Estado:** PROPOSED. **Propietario/aprobador:** Pablo. **Aprobación:** pendiente.
+**Estado:** HUMAN_APPROVED. **Propietario/aprobador:** Pablo.
+**Aprobación:** ticket humano HAR-01 (§1/§6.5), registrada el 2026-10-15.
 
 - **Problema/evidencia:** F05/F10/F13; E06/E08–E10. El fingerprint amplio liga
   la solicitud humana a cambios de implementación además de inputs consumidos.
@@ -213,7 +234,8 @@ existentes; **PROPOSED**, diseño pendiente. No se repite la auditoría completa
 
 ### D07 — Durabilidad, concurrencia y replay
 
-**Estado:** PROPOSED. **Propietario/aprobador:** Pablo. **Aprobación:** pendiente.
+**Estado:** HUMAN_APPROVED. **Propietario/aprobador:** Pablo.
+**Aprobación:** ticket humano HAR-01 (§1/§6.5), registrada el 2026-10-15.
 
 - **Problema/evidencia:** F04; E12–E13. Exclusividad de archivo y rename protegen
   pasos locales; promoción, eliminación de aprobación, history y proceso cruzan
@@ -236,7 +258,8 @@ existentes; **PROPOSED**, diseño pendiente. No se repite la auditoría completa
 
 ### D08 — Historia, versiones y rollout
 
-**Estado:** PROPOSED. **Propietario/aprobador:** Pablo. **Aprobación:** pendiente.
+**Estado:** HUMAN_APPROVED. **Propietario/aprobador:** Pablo.
+**Aprobación:** ticket humano HAR-01 (§1/§6.5), registrada el 2026-10-15.
 
 - **Problema/evidencia:** F04/F11; E08–E12. Los registros llevan policy/schema y
   digests históricos; cambiar serialización o interpretación puede invalidarlos.
@@ -256,7 +279,8 @@ existentes; **PROPOSED**, diseño pendiente. No se repite la auditoría completa
 
 ### D09 — Semántica C26 y compatibilidad pública
 
-**Estado:** PROPOSED. **Propietario/aprobador:** Pablo. **Aprobación:** pendiente.
+**Estado:** HUMAN_APPROVED_CONCEPT_ONLY; detalles HAR-02/HAR-03 pendientes. **Propietario/aprobador:** Pablo.
+**Aprobación:** ticket humano HAR-01 (§1/§6.5), registrada el 2026-10-15.
 
 **Problema/evidencia:** F01/F07/F11/F12; E14–E18. Los resultados siguientes son
 históricos de la candidatura C94 contra C93, no una reproducción HAR-00.
@@ -279,7 +303,9 @@ históricos de la candidatura C94 contra C93, no una reproducción HAR-00.
 3. Mantener conducta actual provisionalmente, sin declarar resueltas las dos
    discrepancias; bloquear G0 hasta adjudicación y fixtures representativas.
 
-**Recomendación pendiente:** alternativa 2 como política conceptual. Definir en
+**Dirección conceptual aprobada:** separar ejecución y objetivo de decisión,
+como en alternativa 2. Sus valores de campos/compatibilidad concretos continúan
+como recomendación pendiente, no como resolución de C26. Definir en
 HAR-03 la matriz y traducción del campo legado antes de cambiar código/tests.
 Usar campos conceptuales separados de ejecución/decisión no obliga a romper APIs.
 En el escenario sin ejecución válida, recomendar compatibilidad `current_ticket_id`
@@ -304,7 +330,8 @@ Tickets posteriores afectados: HAR-07, HAR-17, HAR-21–HAR-23.
 
 ### D10 — Finalización por dominio y alcance de efectos
 
-**Estado:** PROPOSED. **Propietario/aprobador:** Pablo. **Aprobación:** pendiente.
+**Estado:** HUMAN_APPROVED. **Propietario/aprobador:** Pablo.
+**Aprobación:** ticket humano HAR-01 (§1/§6.5), registrada el 2026-10-15.
 
 - **Problema/evidencia:** F06/F10; E20. La política software de Pepper no puede
   convertirse en requisito universal de Git para aceptar un artefacto técnico.
@@ -405,14 +432,18 @@ o parada segura justificada no debe forzarse hasta permitir ejecución.
 8. G4/G5 necesitan autorización específica: HAR-26 lectura real separada,
    HAR-27 consentimiento fresco por operación. No prometer autoridad R0002 para R0003.
 
-## 6. Checklist de decisión del propietario
+## 6. Registro de aprobación y gates que permanecen pendientes
 
-Revisar D01–D10 registrando para cada una aceptada/rechazada/alternativa y alcance,
-sin interpretar silencio como aceptación. Son especialmente bloqueantes:
-ubicación y dirección de dependencias (HAR-04), política pública HAR-02/C26
-(HAR-02/03), trust/concurrencia (HAR-04/12) y garantías durables (HAR-12/13).
-HAR-01 puede preparar su corte de fixtures solo tras revisión HAR-00 y
-sincronización humana del checkout de verificación; jamás relajando guards.
+HAR-00 está aceptado y comprometido en el padre HAR-01 según el ticket humano.
+D01 conserva la ubicación transitoria bajo el paquete existente y la dirección
+de dependencias: contratos puros no importan selectores privados Pepper.
+D02–D08/D10 están aprobadas como dirección arquitectónica, no implementadas.
+D09 está aprobada en concepto; las dos aserciones C26 y las cuatro expectativas
+estructurales públicas siguen sin resolver, con propietarios HAR-03 y HAR-02.
+No se aprueban por transitividad los valores de campos legados recomendados.
 
-Resultado documental: las propuestas y los gaps quedan concretos para revisar;
-no se declara verde el baseline ni implementado el arnés TO-BE.
+HAR-01 solo corrige construcción de fixtures autorizadas y reproduce selecciones;
+no relaja guards ni inicia HAR-02. Revisión y commit/push humano de HAR-01 siguen
+siendo obligatorios antes del siguiente ticket. G0 queda pendiente hasta HAR-03.
+No se concede consentimiento para ninguna operación viva P18.9.13 ni para un
+refactor de producción por registrar esta aprobación.

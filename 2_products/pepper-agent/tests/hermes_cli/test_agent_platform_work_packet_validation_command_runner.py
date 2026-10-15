@@ -210,7 +210,7 @@ def completed_single_agent_context(
             status_state["status"] = status
     single_result = complete_single_agent_execution(session)
     runtime = build_validation_command_runtime_binding(
-        python_executable=sys.executable,
+        python_executable=Path(sys.executable).resolve(strict=True).as_posix(),
         allocation_result=allocated,
     )
     command_steps = tuple(
@@ -488,6 +488,7 @@ def test_strict_boolean_posture_rejects_strings(
 
 def test_runtime_binding_current_interpreter_passes(prepared_context) -> None:
     binding = prepared_context["runtime"]
+    assert binding.python_executable == Path(sys.executable).resolve(strict=True).as_posix()
     assert (
         binding.resolved_python_executable == Path(sys.executable).resolve().as_posix()
     )
@@ -527,6 +528,32 @@ def test_runtime_binding_rejects_directory_interpreter(
         )
 
 
+def test_runtime_binding_rejects_missing_absolute_interpreter(
+    prepared_context, tmp_path
+) -> None:
+    missing = tmp_path / "missing-python"
+    assert missing.is_absolute() and not missing.exists()
+    with pytest.raises(vcr.ValidationCommandRunnerInputError, match="must be a regular file"):
+        build_validation_command_runtime_binding(
+            python_executable=missing.as_posix(),
+            allocation_result=prepared_context["allocation"],
+        )
+
+
+def test_runtime_binding_rejects_different_regular_interpreter(
+    prepared_context, tmp_path
+) -> None:
+    other = tmp_path / "other-python"
+    other.write_bytes(b"deliberately not the current interpreter\n")
+    other.chmod(0o700)
+    assert other.is_file() and not other.is_symlink()
+    with pytest.raises(vcr.ValidationCommandRunnerInputError, match="must be current interpreter"):
+        build_validation_command_runtime_binding(
+            python_executable=other.resolve(strict=True).as_posix(),
+            allocation_result=prepared_context["allocation"],
+        )
+
+
 def test_runtime_binding_rejects_symlink_interpreter(
     prepared_context, tmp_path
 ) -> None:
@@ -562,7 +589,7 @@ def test_runtime_binding_rejects_working_directory_mismatch(prepared_context) ->
 def test_runtime_binding_repeated_inputs_are_equal(prepared_context) -> None:
     first = prepared_context["runtime"]
     second = build_validation_command_runtime_binding(
-        python_executable=sys.executable,
+        python_executable=Path(sys.executable).resolve(strict=True).as_posix(),
         allocation_result=prepared_context["allocation"],
     )
     assert first == second

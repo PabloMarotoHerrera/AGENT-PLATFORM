@@ -1,5 +1,6 @@
 import ast
 from enum import Enum
+from pathlib import Path
 import sys
 
 import pytest
@@ -370,7 +371,7 @@ def non_delete_context(monkeypatch: pytest.MonkeyPatch, workspace_root):
             status_state["status"] = " M docs/new.md"
     single_result = complete_single_agent_execution(session)
     runtime = build_validation_command_runtime_binding(
-        python_executable=sys.executable,
+        python_executable=Path(sys.executable).resolve(strict=True).as_posix(),
         allocation_result=allocated,
     )
     command_steps = tuple(

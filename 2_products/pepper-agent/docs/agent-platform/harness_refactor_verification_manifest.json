@@ -3,10 +3,10 @@
     "id": "har-verification-selection-manifest",
     "version": 1
   },
-  "ticket_id": "HAR-00",
+  "ticket_id": "HAR-01",
   "prepared_date": "2026-10-15",
   "timezone": "Europe/Madrid",
-  "status": "READY_FOR_HUMAN_REVIEW_NOT_EXECUTED",
+  "status": "HAR01_EXECUTED_READY_FOR_HUMAN_REVIEW_WITH_DEFERRED_DEBT",
   "source_baseline": {
     "repository": "AGENT-PLATFORM",
     "canonical_root": "C:/Users/pablo/OneDrive/Escritorio/AGENT PLATFORM",
@@ -22,19 +22,16 @@
   "verification_checkout": {
     "root": "/home/pablo/work/AGENT-PLATFORM",
     "observed_date": "2026-10-15",
-    "head": "75185e79e46424e7f495dfaad59ebdde7f45db93",
+    "head": "4e640c41a43a8c999a21f11988f825c5dd3bd3bf",
     "branch": "p18-manual-to-hermes-workflow-migration",
-    "canonical_object_available": false,
-    "status": "HUMAN_SYNC_REQUIRED_BEFORE_HAR01_VERIFICATION",
-    "read_only_git_inspection_only": true,
+    "canonical_object_available": true,
+    "status": "HUMAN_SYNCHRONIZATION_CONFIRMED_AT_HAR01_PARENT",
+    "initial_index_and_tracked_tree_clean": true,
     "pre_existing_status_short": [
-      " M 2_products/pepper-agent/docs/agent-platform/workflow_migration_closure.md",
-      " M 2_products/pepper-agent/hermes_cli/agent_platform/post_execution_material_revision.py",
-      " M 2_products/pepper-agent/tools/pepper_workflow_tools.py",
-      "?? 2_products/pepper-agent/hermes_cli/agent_platform/material_revision_reconciliation.py",
-      "?? 2_products/pepper-agent/tests/hermes_cli/test_c64_validation_authority_boundary.py",
-      "?? 2_products/pepper-agent/tests/hermes_cli/test_c94_material_revision_reconciliation.py"
-    ]
+      "?? 2_products/pepper-agent/tests/hermes_cli/test_c64_validation_authority_boundary.py"
+    ],
+    "test_execution_location": "Independent git-archive source reconstructions under /tmp/har01-20261015-08pqco2o, not this checkout",
+    "codex_git_synchronization": false
   },
   "canonical_wrapper": {
     "path": "2_products/pepper-agent/scripts/run_tests.sh",
@@ -1805,7 +1802,7 @@
   "selections": [
     {
       "selection_id": "baseline",
-      "status": "NOT_EXECUTED_BY_HAR00",
+      "status": "EXECUTED_BY_HAR01_WITH_DEFERRED_PARENT_FAILURES",
       "purpose": "Reproduce/classify the historical broad selection without hiding its failures.",
       "selection_origin": "9_artifacts/c94/broad-command.json",
       "first_downstream_owner_ticket": "HAR-01",
@@ -1815,55 +1812,100 @@
           "path": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_ticket_architect_bridge.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "3f6787f7443238b9e05ea7c4b9ff8353cc20d97af83322f29e353e1973e585d2"
+          "sha256": "3f6787f7443238b9e05ea7c4b9ff8353cc20d97af83322f29e353e1973e585d2",
+          "har01_parent_SHA256": "3f6787f7443238b9e05ea7c4b9ff8353cc20d97af83322f29e353e1973e585d2",
+          "har01_candidate_SHA256": "3f6787f7443238b9e05ea7c4b9ff8353cc20d97af83322f29e353e1973e585d2",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "3f6787f7443238b9e05ea7c4b9ff8353cc20d97af83322f29e353e1973e585d2",
+          "har01_windows_to_tested_relation": "BYTE_IDENTICAL"
         },
         {
           "path": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_review_validation_loop.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "b9d0cb1bbd52ab89a81130dc9d594f35583551f90785a5cf57d8e16d1988a2e1"
+          "sha256": "b9d0cb1bbd52ab89a81130dc9d594f35583551f90785a5cf57d8e16d1988a2e1",
+          "har01_parent_SHA256": "b9d0cb1bbd52ab89a81130dc9d594f35583551f90785a5cf57d8e16d1988a2e1",
+          "har01_candidate_SHA256": "b9d0cb1bbd52ab89a81130dc9d594f35583551f90785a5cf57d8e16d1988a2e1",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "b9d0cb1bbd52ab89a81130dc9d594f35583551f90785a5cf57d8e16d1988a2e1",
+          "har01_windows_to_tested_relation": "BYTE_IDENTICAL"
         },
         {
           "path": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_lead_agent_workflow_context.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "71b0d167faca9082b8955fcdbf4b2d552fe4a6ed2ce149079737a7a09e509f64"
+          "sha256": "71b0d167faca9082b8955fcdbf4b2d552fe4a6ed2ce149079737a7a09e509f64",
+          "har01_parent_SHA256": "71b0d167faca9082b8955fcdbf4b2d552fe4a6ed2ce149079737a7a09e509f64",
+          "har01_candidate_SHA256": "71b0d167faca9082b8955fcdbf4b2d552fe4a6ed2ce149079737a7a09e509f64",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "71b0d167faca9082b8955fcdbf4b2d552fe4a6ed2ce149079737a7a09e509f64",
+          "har01_windows_to_tested_relation": "BYTE_IDENTICAL"
         },
         {
           "path": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_work_packet_validation_command_runner.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "1f40a32088db9272ecdf631effcae38a9f8c4b52c4337dfbe52013f3e0a3fcd3"
+          "sha256": "1f40a32088db9272ecdf631effcae38a9f8c4b52c4337dfbe52013f3e0a3fcd3",
+          "har01_parent_SHA256": "1f40a32088db9272ecdf631effcae38a9f8c4b52c4337dfbe52013f3e0a3fcd3",
+          "har01_candidate_SHA256": "a755b7ba023305c153d1ca8a8b937bc81a369cf5fd1ec5cedac2e36fa5e73110",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "a755b7ba023305c153d1ca8a8b937bc81a369cf5fd1ec5cedac2e36fa5e73110",
+          "har01_windows_to_tested_relation": "BYTE_IDENTICAL"
         },
         {
           "path": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_work_packet_human_git_handoff.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "2100905e5b725b640bfcddc32f1b9e4d0b9dbc661ba5dc4cd27e86babf6dad89"
+          "sha256": "2100905e5b725b640bfcddc32f1b9e4d0b9dbc661ba5dc4cd27e86babf6dad89",
+          "har01_parent_SHA256": "2100905e5b725b640bfcddc32f1b9e4d0b9dbc661ba5dc4cd27e86babf6dad89",
+          "har01_candidate_SHA256": "2100905e5b725b640bfcddc32f1b9e4d0b9dbc661ba5dc4cd27e86babf6dad89",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "2100905e5b725b640bfcddc32f1b9e4d0b9dbc661ba5dc4cd27e86babf6dad89",
+          "har01_windows_to_tested_relation": "BYTE_IDENTICAL"
         },
         {
           "path": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_work_packet_diff_artifact_review.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "e14acf1f8fe87a6a82aaa253d20eb3c3344219baa676ff099e33fcfbad680294"
+          "sha256": "e14acf1f8fe87a6a82aaa253d20eb3c3344219baa676ff099e33fcfbad680294",
+          "har01_parent_SHA256": "e14acf1f8fe87a6a82aaa253d20eb3c3344219baa676ff099e33fcfbad680294",
+          "har01_candidate_SHA256": "128b8c9b2b1e969ef0191ffe0050e53e6de703a5e268b8c0302932171b753524",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "128b8c9b2b1e969ef0191ffe0050e53e6de703a5e268b8c0302932171b753524",
+          "har01_windows_to_tested_relation": "BYTE_IDENTICAL"
         },
         {
           "path": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_provider_worker_controlled_gate.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "e847e66823e862f9abd44cc9bc28c5dddde4aa5f641d080931723339ed457d91"
+          "sha256": "e847e66823e862f9abd44cc9bc28c5dddde4aa5f641d080931723339ed457d91",
+          "har01_parent_SHA256": "e847e66823e862f9abd44cc9bc28c5dddde4aa5f641d080931723339ed457d91",
+          "har01_candidate_SHA256": "e847e66823e862f9abd44cc9bc28c5dddde4aa5f641d080931723339ed457d91",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "e847e66823e862f9abd44cc9bc28c5dddde4aa5f641d080931723339ed457d91",
+          "har01_windows_to_tested_relation": "BYTE_IDENTICAL"
         },
         {
           "path": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_provider_retry_policy.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "74f23a7210c31fb90fb26a6fc5f64af1774ec3e03ee5cd597618e330e0932d84"
+          "sha256": "74f23a7210c31fb90fb26a6fc5f64af1774ec3e03ee5cd597618e330e0932d84",
+          "har01_parent_SHA256": "74f23a7210c31fb90fb26a6fc5f64af1774ec3e03ee5cd597618e330e0932d84",
+          "har01_candidate_SHA256": "74f23a7210c31fb90fb26a6fc5f64af1774ec3e03ee5cd597618e330e0932d84",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "74f23a7210c31fb90fb26a6fc5f64af1774ec3e03ee5cd597618e330e0932d84",
+          "har01_windows_to_tested_relation": "BYTE_IDENTICAL"
         },
         {
           "path": "2_products/pepper-agent/tests/tools/test_c91_pre_review_commands.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "38b44d54fc78184ea68a60dea2b1828a15911ed39cb3928cd710be45499741be"
+          "sha256": "38b44d54fc78184ea68a60dea2b1828a15911ed39cb3928cd710be45499741be",
+          "har01_parent_SHA256": "38b44d54fc78184ea68a60dea2b1828a15911ed39cb3928cd710be45499741be",
+          "har01_candidate_SHA256": "38b44d54fc78184ea68a60dea2b1828a15911ed39cb3928cd710be45499741be",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "38b44d54fc78184ea68a60dea2b1828a15911ed39cb3928cd710be45499741be",
+          "har01_windows_to_tested_relation": "BYTE_IDENTICAL"
         }
       ],
       "proposed_command": {
@@ -1890,18 +1932,59 @@
           "--tb=short"
         ]
       },
-      "runtime_result": null,
+      "runtime_result": {
+        "verification_ticket": "HAR-01",
+        "accepted_parent": "4e640c41a43a8c999a21f11988f825c5dd3bd3bf",
+        "parent_counts": {
+          "passed": 771,
+          "failed": 19,
+          "errors": 1327
+        },
+        "candidate_counts": {
+          "passed": 2113,
+          "failed": 6,
+          "errors": 0
+        },
+        "parent_exit_code": 1,
+        "candidate_exit_code": 1,
+        "unresolved_failed_node_ids": [
+          "tests/hermes_cli/test_agent_platform_ticket_architect_bridge.py::test_c26_active_execution_still_preempts_pending_successor_projection",
+          "tests/hermes_cli/test_agent_platform_ticket_architect_bridge.py::test_c26_rejected_successor_revision_preempts_stale_review_prepare_projection",
+          "tests/hermes_cli/test_agent_platform_work_packet_diff_artifact_review.py::test_prior_172_exports_remain_exact_prefix",
+          "tests/hermes_cli/test_agent_platform_work_packet_human_git_handoff.py::test_legacy_instruction_renderer_is_not_public_or_package_level",
+          "tests/hermes_cli/test_agent_platform_work_packet_human_git_handoff.py::test_p17_0_through_p17_6_exports_remain_exact_prefix",
+          "tests/hermes_cli/test_agent_platform_work_packet_validation_command_runner.py::test_prior_113_exports_remain_exact_prefix"
+        ],
+        "unresolved_error_node_ids": [],
+        "candidate_only_failures": 0,
+        "candidate_only_errors": 0,
+        "eliminated_failed_count": 13,
+        "eliminated_error_count": 1327,
+        "parent_log": "C:/Users/pablo/.codex/har-evidence/HAR-01-20261015-08pqco2o/parent-baseline.log",
+        "candidate_log": "C:/Users/pablo/.codex/har-evidence/HAR-01-20261015-08pqco2o/candidate-final-baseline.log",
+        "exact_commands_and_metadata": {
+          "parent": "C:/Users/pablo/.codex/har-evidence/HAR-01-20261015-08pqco2o/parent-baseline-run.json",
+          "candidate": "C:/Users/pablo/.codex/har-evidence/HAR-01-20261015-08pqco2o/candidate-final-baseline-run.json"
+        },
+        "full_results": "C:/Users/pablo/.codex/har-evidence/HAR-01-20261015-08pqco2o/verification-results.json",
+        "full_results_SHA256": "a577f02f7a6dc87af3ae4ab315c72c735d1d2be20f540b8c9b6cc096016b93ac",
+        "full_results_json_pointer": "/comparisons/baseline",
+        "whole_suite_pass_claim": false
+      },
       "execution_requires": [
         "accepted HAR-00 and complete HAR-01 ticket",
         "human-synchronized exact accepted source/candidate checkout",
         "isolated storage/runtime; no live HERMES_HOME or provider effects",
         "record interpreter realpath/source identity/environment and all failed/error nodes"
       ],
-      "acceptance_note": "Running a selection is not declaring it green. Known unresolved nodes must remain visible; quarantine is not passing."
+      "acceptance_note": "Running a selection is not declaring it green. Known unresolved nodes must remain visible; quarantine is not passing.",
+      "status_at_HAR00": "NOT_EXECUTED_BY_HAR00",
+      "har01_status": "EXECUTED_BY_HAR01_WITH_DEFERRED_PARENT_FAILURES",
+      "historical_file_hash_scope": "files[].sha256 is the preserved HAR-00 inventory hash, not a claim about the HAR-01 candidate; fresh identities are recorded with HAR-01 run evidence."
     },
     {
       "selection_id": "first_slice",
-      "status": "NOT_EXECUTED_BY_HAR00",
+      "status": "EXECUTED_BY_HAR01_PASSED",
       "purpose": "Commands, exact approved inspection, post-execution request/reconciliation/revision and manual/review dependencies.",
       "selection_origin": "HAR-00 static selection from tracked tests",
       "first_downstream_owner_ticket": "HAR-01",
@@ -1911,43 +1994,78 @@
           "path": "2_products/pepper-agent/tests/hermes_cli/test_c91_validation_lifecycle.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "8483a3c5d51bde17a7adf16581ff49f45045ad93c5137b3f3130fef5dce7acf6"
+          "sha256": "8483a3c5d51bde17a7adf16581ff49f45045ad93c5137b3f3130fef5dce7acf6",
+          "har01_parent_SHA256": "8483a3c5d51bde17a7adf16581ff49f45045ad93c5137b3f3130fef5dce7acf6",
+          "har01_candidate_SHA256": "8483a3c5d51bde17a7adf16581ff49f45045ad93c5137b3f3130fef5dce7acf6",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "8483a3c5d51bde17a7adf16581ff49f45045ad93c5137b3f3130fef5dce7acf6",
+          "har01_windows_to_tested_relation": "BYTE_IDENTICAL"
         },
         {
           "path": "2_products/pepper-agent/tests/tools/test_c91_pre_review_commands.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "38b44d54fc78184ea68a60dea2b1828a15911ed39cb3928cd710be45499741be"
+          "sha256": "38b44d54fc78184ea68a60dea2b1828a15911ed39cb3928cd710be45499741be",
+          "har01_parent_SHA256": "38b44d54fc78184ea68a60dea2b1828a15911ed39cb3928cd710be45499741be",
+          "har01_candidate_SHA256": "38b44d54fc78184ea68a60dea2b1828a15911ed39cb3928cd710be45499741be",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "38b44d54fc78184ea68a60dea2b1828a15911ed39cb3928cd710be45499741be",
+          "har01_windows_to_tested_relation": "BYTE_IDENTICAL"
         },
         {
           "path": "2_products/pepper-agent/tests/hermes_cli/test_c92_post_execution_material_revision.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "473be4fec174acd5a0e5169c5d19d09bc614a068732aff7583e6ae35134a600a"
+          "sha256": "473be4fec174acd5a0e5169c5d19d09bc614a068732aff7583e6ae35134a600a",
+          "har01_parent_SHA256": "4223a8db7c1537bf09e9932eb0b17c885f91dc8a86c0012e7ee4e36f680c7201",
+          "har01_candidate_SHA256": "4223a8db7c1537bf09e9932eb0b17c885f91dc8a86c0012e7ee4e36f680c7201",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "473be4fec174acd5a0e5169c5d19d09bc614a068732aff7583e6ae35134a600a",
+          "har01_windows_to_tested_relation": "UNCHANGED_WINDOWS_CHECKOUT_CRLF_VERSUS_TESTED_GIT_BLOB_LF"
         },
         {
           "path": "2_products/pepper-agent/tests/hermes_cli/test_c93_approved_artifact_inspection.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "1ee69a706f86906f6a854515982cf3b33cc73d8b37f22b0df67793d886a2ec63"
+          "sha256": "1ee69a706f86906f6a854515982cf3b33cc73d8b37f22b0df67793d886a2ec63",
+          "har01_parent_SHA256": "1ee69a706f86906f6a854515982cf3b33cc73d8b37f22b0df67793d886a2ec63",
+          "har01_candidate_SHA256": "1ee69a706f86906f6a854515982cf3b33cc73d8b37f22b0df67793d886a2ec63",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "1ee69a706f86906f6a854515982cf3b33cc73d8b37f22b0df67793d886a2ec63",
+          "har01_windows_to_tested_relation": "BYTE_IDENTICAL"
         },
         {
           "path": "2_products/pepper-agent/tests/hermes_cli/test_c94_material_revision_reconciliation.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "41990f8436c7400da205a72471315766384e27c75f597a2f11d348780995e317"
+          "sha256": "41990f8436c7400da205a72471315766384e27c75f597a2f11d348780995e317",
+          "har01_parent_SHA256": "41990f8436c7400da205a72471315766384e27c75f597a2f11d348780995e317",
+          "har01_candidate_SHA256": "41990f8436c7400da205a72471315766384e27c75f597a2f11d348780995e317",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "41990f8436c7400da205a72471315766384e27c75f597a2f11d348780995e317",
+          "har01_windows_to_tested_relation": "BYTE_IDENTICAL"
         },
         {
           "path": "2_products/pepper-agent/tests/hermes_cli/test_c59_manual_validation_authority.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "dd4437507cec52185af71d4a073d3cbae0aff0b377d9ab10b9814b4435af4063"
+          "sha256": "dd4437507cec52185af71d4a073d3cbae0aff0b377d9ab10b9814b4435af4063",
+          "har01_parent_SHA256": "3e35f4d16091e06c144b89e02d06f39f8f180c2c5c8855b81a6fe1c52b9daf53",
+          "har01_candidate_SHA256": "3e35f4d16091e06c144b89e02d06f39f8f180c2c5c8855b81a6fe1c52b9daf53",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "dd4437507cec52185af71d4a073d3cbae0aff0b377d9ab10b9814b4435af4063",
+          "har01_windows_to_tested_relation": "UNCHANGED_WINDOWS_CHECKOUT_CRLF_VERSUS_TESTED_GIT_BLOB_LF"
         },
         {
           "path": "2_products/pepper-agent/tests/tools/test_workpacket_validation_tool.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "9962a747c075a2b44a8c15de04947dfcd72b3782eef49a98e70dadc0eff6d6e1"
+          "sha256": "9962a747c075a2b44a8c15de04947dfcd72b3782eef49a98e70dadc0eff6d6e1",
+          "har01_parent_SHA256": "9962a747c075a2b44a8c15de04947dfcd72b3782eef49a98e70dadc0eff6d6e1",
+          "har01_candidate_SHA256": "9962a747c075a2b44a8c15de04947dfcd72b3782eef49a98e70dadc0eff6d6e1",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "9962a747c075a2b44a8c15de04947dfcd72b3782eef49a98e70dadc0eff6d6e1",
+          "har01_windows_to_tested_relation": "BYTE_IDENTICAL"
         }
       ],
       "proposed_command": {
@@ -1972,18 +2090,52 @@
           "--tb=short"
         ]
       },
-      "runtime_result": null,
+      "runtime_result": {
+        "verification_ticket": "HAR-01",
+        "accepted_parent": "4e640c41a43a8c999a21f11988f825c5dd3bd3bf",
+        "parent_counts": {
+          "passed": 219,
+          "failed": 0,
+          "errors": 0
+        },
+        "candidate_counts": {
+          "passed": 219,
+          "failed": 0,
+          "errors": 0
+        },
+        "parent_exit_code": 0,
+        "candidate_exit_code": 0,
+        "unresolved_failed_node_ids": [],
+        "unresolved_error_node_ids": [],
+        "candidate_only_failures": 0,
+        "candidate_only_errors": 0,
+        "eliminated_failed_count": 0,
+        "eliminated_error_count": 0,
+        "parent_log": "C:/Users/pablo/.codex/har-evidence/HAR-01-20261015-08pqco2o/parent-first_slice.log",
+        "candidate_log": "C:/Users/pablo/.codex/har-evidence/HAR-01-20261015-08pqco2o/candidate-final-first_slice.log",
+        "exact_commands_and_metadata": {
+          "parent": "C:/Users/pablo/.codex/har-evidence/HAR-01-20261015-08pqco2o/parent-first_slice-run.json",
+          "candidate": "C:/Users/pablo/.codex/har-evidence/HAR-01-20261015-08pqco2o/candidate-final-first_slice-run.json"
+        },
+        "full_results": "C:/Users/pablo/.codex/har-evidence/HAR-01-20261015-08pqco2o/verification-results.json",
+        "full_results_SHA256": "a577f02f7a6dc87af3ae4ab315c72c735d1d2be20f540b8c9b6cc096016b93ac",
+        "full_results_json_pointer": "/comparisons/first_slice",
+        "whole_suite_pass_claim": false
+      },
       "execution_requires": [
         "accepted HAR-00 and complete HAR-01 ticket",
         "human-synchronized exact accepted source/candidate checkout",
         "isolated storage/runtime; no live HERMES_HOME or provider effects",
         "record interpreter realpath/source identity/environment and all failed/error nodes"
       ],
-      "acceptance_note": "Running a selection is not declaring it green. Known unresolved nodes must remain visible; quarantine is not passing."
+      "acceptance_note": "Running a selection is not declaring it green. Known unresolved nodes must remain visible; quarantine is not passing.",
+      "status_at_HAR00": "NOT_EXECUTED_BY_HAR00",
+      "har01_status": "EXECUTED_BY_HAR01_PASSED",
+      "historical_file_hash_scope": "files[].sha256 is the preserved HAR-00 inventory hash, not a claim about the HAR-01 candidate; fresh identities are recorded with HAR-01 run evidence."
     },
     {
       "selection_id": "compatibility",
-      "status": "NOT_EXECUTED_BY_HAR00",
+      "status": "EXECUTED_BY_HAR01_PASSED",
       "purpose": "Historical authority, successive revisions, retry, manual/zero-change, review/handoff and compiler compatibility.",
       "selection_origin": "9_artifacts/c94/regression-command.json",
       "first_downstream_owner_ticket": "HAR-01",
@@ -1993,103 +2145,188 @@
           "path": "2_products/pepper-agent/tests/hermes_cli/test_c59_manual_validation_authority.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "dd4437507cec52185af71d4a073d3cbae0aff0b377d9ab10b9814b4435af4063"
+          "sha256": "dd4437507cec52185af71d4a073d3cbae0aff0b377d9ab10b9814b4435af4063",
+          "har01_parent_SHA256": "3e35f4d16091e06c144b89e02d06f39f8f180c2c5c8855b81a6fe1c52b9daf53",
+          "har01_candidate_SHA256": "3e35f4d16091e06c144b89e02d06f39f8f180c2c5c8855b81a6fe1c52b9daf53",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "dd4437507cec52185af71d4a073d3cbae0aff0b377d9ab10b9814b4435af4063",
+          "har01_windows_to_tested_relation": "UNCHANGED_WINDOWS_CHECKOUT_CRLF_VERSUS_TESTED_GIT_BLOB_LF"
         },
         {
           "path": "2_products/pepper-agent/tests/hermes_cli/test_c65_retry_material_revision.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "c2fe6e7984542c4bdd32e9b7aff94595d913899c76c6f0d77549831839184abb"
+          "sha256": "c2fe6e7984542c4bdd32e9b7aff94595d913899c76c6f0d77549831839184abb",
+          "har01_parent_SHA256": "c2fe6e7984542c4bdd32e9b7aff94595d913899c76c6f0d77549831839184abb",
+          "har01_candidate_SHA256": "c2fe6e7984542c4bdd32e9b7aff94595d913899c76c6f0d77549831839184abb",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "c2fe6e7984542c4bdd32e9b7aff94595d913899c76c6f0d77549831839184abb",
+          "har01_windows_to_tested_relation": "BYTE_IDENTICAL"
         },
         {
           "path": "2_products/pepper-agent/tests/hermes_cli/test_c66_invalid_validation_command_revision.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "78b74a8603c9504ddcb79d800554b8878b7fe0dd79e59dc29b25743bd0014318"
+          "sha256": "78b74a8603c9504ddcb79d800554b8878b7fe0dd79e59dc29b25743bd0014318",
+          "har01_parent_SHA256": "78b74a8603c9504ddcb79d800554b8878b7fe0dd79e59dc29b25743bd0014318",
+          "har01_candidate_SHA256": "78b74a8603c9504ddcb79d800554b8878b7fe0dd79e59dc29b25743bd0014318",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "78b74a8603c9504ddcb79d800554b8878b7fe0dd79e59dc29b25743bd0014318",
+          "har01_windows_to_tested_relation": "BYTE_IDENTICAL"
         },
         {
           "path": "2_products/pepper-agent/tests/hermes_cli/test_c67_successive_recovery_cycles.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "b9549967401d684257c67c2b4c2cbeea454dcb68c206282d7c668ac81315fdb6"
+          "sha256": "b9549967401d684257c67c2b4c2cbeea454dcb68c206282d7c668ac81315fdb6",
+          "har01_parent_SHA256": "b9549967401d684257c67c2b4c2cbeea454dcb68c206282d7c668ac81315fdb6",
+          "har01_candidate_SHA256": "b9549967401d684257c67c2b4c2cbeea454dcb68c206282d7c668ac81315fdb6",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "b9549967401d684257c67c2b4c2cbeea454dcb68c206282d7c668ac81315fdb6",
+          "har01_windows_to_tested_relation": "BYTE_IDENTICAL"
         },
         {
           "path": "2_products/pepper-agent/tests/hermes_cli/test_c69_zero_change_decision.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "c31929db9669db7bdc38d4a5dcd9dcf3b015e37ff87575b0f6249cd1e7e3c01d"
+          "sha256": "c31929db9669db7bdc38d4a5dcd9dcf3b015e37ff87575b0f6249cd1e7e3c01d",
+          "har01_parent_SHA256": "c31929db9669db7bdc38d4a5dcd9dcf3b015e37ff87575b0f6249cd1e7e3c01d",
+          "har01_candidate_SHA256": "c31929db9669db7bdc38d4a5dcd9dcf3b015e37ff87575b0f6249cd1e7e3c01d",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "c31929db9669db7bdc38d4a5dcd9dcf3b015e37ff87575b0f6249cd1e7e3c01d",
+          "har01_windows_to_tested_relation": "BYTE_IDENTICAL"
         },
         {
           "path": "2_products/pepper-agent/tests/hermes_cli/test_c72_review_evidence_transport.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "c2f5fdbfd655193a719aafa71f12dce96e0683d57c3f19501d659535c2ca05ee"
+          "sha256": "c2f5fdbfd655193a719aafa71f12dce96e0683d57c3f19501d659535c2ca05ee",
+          "har01_parent_SHA256": "c2f5fdbfd655193a719aafa71f12dce96e0683d57c3f19501d659535c2ca05ee",
+          "har01_candidate_SHA256": "c2f5fdbfd655193a719aafa71f12dce96e0683d57c3f19501d659535c2ca05ee",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "c2f5fdbfd655193a719aafa71f12dce96e0683d57c3f19501d659535c2ca05ee",
+          "har01_windows_to_tested_relation": "BYTE_IDENTICAL"
         },
         {
           "path": "2_products/pepper-agent/tests/hermes_cli/test_c73_post_accept_material_revision.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "c58fc3157f566007b7c841fbc6516a3013389e093bc20819607c066336915f5b"
+          "sha256": "c58fc3157f566007b7c841fbc6516a3013389e093bc20819607c066336915f5b",
+          "har01_parent_SHA256": "c58fc3157f566007b7c841fbc6516a3013389e093bc20819607c066336915f5b",
+          "har01_candidate_SHA256": "c58fc3157f566007b7c841fbc6516a3013389e093bc20819607c066336915f5b",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "c58fc3157f566007b7c841fbc6516a3013389e093bc20819607c066336915f5b",
+          "har01_windows_to_tested_relation": "BYTE_IDENTICAL"
         },
         {
           "path": "2_products/pepper-agent/tests/hermes_cli/test_c76_manual_validation_resolution.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "aaeb5a4d41487d17fa66da456db9c2089f6daeb4ab838525657a74dbb3986ef5"
+          "sha256": "aaeb5a4d41487d17fa66da456db9c2089f6daeb4ab838525657a74dbb3986ef5",
+          "har01_parent_SHA256": "aaeb5a4d41487d17fa66da456db9c2089f6daeb4ab838525657a74dbb3986ef5",
+          "har01_candidate_SHA256": "aaeb5a4d41487d17fa66da456db9c2089f6daeb4ab838525657a74dbb3986ef5",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "aaeb5a4d41487d17fa66da456db9c2089f6daeb4ab838525657a74dbb3986ef5",
+          "har01_windows_to_tested_relation": "BYTE_IDENTICAL"
         },
         {
           "path": "2_products/pepper-agent/tests/hermes_cli/test_c87_material_revision_provenance.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "d98cd41cda8243381c17989c020551132103d530a41a3403b51e5e8647c7fc7c"
+          "sha256": "d98cd41cda8243381c17989c020551132103d530a41a3403b51e5e8647c7fc7c",
+          "har01_parent_SHA256": "d98cd41cda8243381c17989c020551132103d530a41a3403b51e5e8647c7fc7c",
+          "har01_candidate_SHA256": "d98cd41cda8243381c17989c020551132103d530a41a3403b51e5e8647c7fc7c",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "d98cd41cda8243381c17989c020551132103d530a41a3403b51e5e8647c7fc7c",
+          "har01_windows_to_tested_relation": "BYTE_IDENTICAL"
         },
         {
           "path": "2_products/pepper-agent/tests/hermes_cli/test_c88_review_readiness.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "fd631f4373152305a6d9014f49f4729e0a8c2c46b15f8a015434c1eede15da84"
+          "sha256": "fd631f4373152305a6d9014f49f4729e0a8c2c46b15f8a015434c1eede15da84",
+          "har01_parent_SHA256": "fd631f4373152305a6d9014f49f4729e0a8c2c46b15f8a015434c1eede15da84",
+          "har01_candidate_SHA256": "fd631f4373152305a6d9014f49f4729e0a8c2c46b15f8a015434c1eede15da84",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "fd631f4373152305a6d9014f49f4729e0a8c2c46b15f8a015434c1eede15da84",
+          "har01_windows_to_tested_relation": "BYTE_IDENTICAL"
         },
         {
           "path": "2_products/pepper-agent/tests/hermes_cli/test_c89_post_prepare_recovery.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "c9170fd74afe48cce9d08e3ea7e56d120025a17eb2c087d260161d4e9f3567c6"
+          "sha256": "c9170fd74afe48cce9d08e3ea7e56d120025a17eb2c087d260161d4e9f3567c6",
+          "har01_parent_SHA256": "c9170fd74afe48cce9d08e3ea7e56d120025a17eb2c087d260161d4e9f3567c6",
+          "har01_candidate_SHA256": "c9170fd74afe48cce9d08e3ea7e56d120025a17eb2c087d260161d4e9f3567c6",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "c9170fd74afe48cce9d08e3ea7e56d120025a17eb2c087d260161d4e9f3567c6",
+          "har01_windows_to_tested_relation": "BYTE_IDENTICAL"
         },
         {
           "path": "2_products/pepper-agent/tests/hermes_cli/test_c90_handoff_rendering.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "fb89a93267524f396a4b16082c2324aa11fe5660db7ea35a04140880127fb674"
+          "sha256": "fb89a93267524f396a4b16082c2324aa11fe5660db7ea35a04140880127fb674",
+          "har01_parent_SHA256": "fb89a93267524f396a4b16082c2324aa11fe5660db7ea35a04140880127fb674",
+          "har01_candidate_SHA256": "fb89a93267524f396a4b16082c2324aa11fe5660db7ea35a04140880127fb674",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "fb89a93267524f396a4b16082c2324aa11fe5660db7ea35a04140880127fb674",
+          "har01_windows_to_tested_relation": "BYTE_IDENTICAL"
         },
         {
           "path": "2_products/pepper-agent/tests/hermes_cli/test_c91_validation_lifecycle.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "8483a3c5d51bde17a7adf16581ff49f45045ad93c5137b3f3130fef5dce7acf6"
+          "sha256": "8483a3c5d51bde17a7adf16581ff49f45045ad93c5137b3f3130fef5dce7acf6",
+          "har01_parent_SHA256": "8483a3c5d51bde17a7adf16581ff49f45045ad93c5137b3f3130fef5dce7acf6",
+          "har01_candidate_SHA256": "8483a3c5d51bde17a7adf16581ff49f45045ad93c5137b3f3130fef5dce7acf6",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "8483a3c5d51bde17a7adf16581ff49f45045ad93c5137b3f3130fef5dce7acf6",
+          "har01_windows_to_tested_relation": "BYTE_IDENTICAL"
         },
         {
           "path": "2_products/pepper-agent/tests/hermes_cli/test_c92_post_execution_material_revision.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "473be4fec174acd5a0e5169c5d19d09bc614a068732aff7583e6ae35134a600a"
+          "sha256": "473be4fec174acd5a0e5169c5d19d09bc614a068732aff7583e6ae35134a600a",
+          "har01_parent_SHA256": "4223a8db7c1537bf09e9932eb0b17c885f91dc8a86c0012e7ee4e36f680c7201",
+          "har01_candidate_SHA256": "4223a8db7c1537bf09e9932eb0b17c885f91dc8a86c0012e7ee4e36f680c7201",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "473be4fec174acd5a0e5169c5d19d09bc614a068732aff7583e6ae35134a600a",
+          "har01_windows_to_tested_relation": "UNCHANGED_WINDOWS_CHECKOUT_CRLF_VERSUS_TESTED_GIT_BLOB_LF"
         },
         {
           "path": "2_products/pepper-agent/tests/hermes_cli/test_c93_approved_artifact_inspection.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "1ee69a706f86906f6a854515982cf3b33cc73d8b37f22b0df67793d886a2ec63"
+          "sha256": "1ee69a706f86906f6a854515982cf3b33cc73d8b37f22b0df67793d886a2ec63",
+          "har01_parent_SHA256": "1ee69a706f86906f6a854515982cf3b33cc73d8b37f22b0df67793d886a2ec63",
+          "har01_candidate_SHA256": "1ee69a706f86906f6a854515982cf3b33cc73d8b37f22b0df67793d886a2ec63",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "1ee69a706f86906f6a854515982cf3b33cc73d8b37f22b0df67793d886a2ec63",
+          "har01_windows_to_tested_relation": "BYTE_IDENTICAL"
         },
         {
           "path": "2_products/pepper-agent/tests/tools/test_workpacket_validation_tool.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "9962a747c075a2b44a8c15de04947dfcd72b3782eef49a98e70dadc0eff6d6e1"
+          "sha256": "9962a747c075a2b44a8c15de04947dfcd72b3782eef49a98e70dadc0eff6d6e1",
+          "har01_parent_SHA256": "9962a747c075a2b44a8c15de04947dfcd72b3782eef49a98e70dadc0eff6d6e1",
+          "har01_candidate_SHA256": "9962a747c075a2b44a8c15de04947dfcd72b3782eef49a98e70dadc0eff6d6e1",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "9962a747c075a2b44a8c15de04947dfcd72b3782eef49a98e70dadc0eff6d6e1",
+          "har01_windows_to_tested_relation": "BYTE_IDENTICAL"
         },
         {
           "path": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_work_packet_compiler.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "4ad02150f6fe5c973f696497055c2227eb5e542c08aed11fec7502a440cba16b"
+          "sha256": "4ad02150f6fe5c973f696497055c2227eb5e542c08aed11fec7502a440cba16b",
+          "har01_parent_SHA256": "4ad02150f6fe5c973f696497055c2227eb5e542c08aed11fec7502a440cba16b",
+          "har01_candidate_SHA256": "4ad02150f6fe5c973f696497055c2227eb5e542c08aed11fec7502a440cba16b",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "4ad02150f6fe5c973f696497055c2227eb5e542c08aed11fec7502a440cba16b",
+          "har01_windows_to_tested_relation": "BYTE_IDENTICAL"
         }
       ],
       "proposed_command": {
@@ -2124,18 +2361,52 @@
           "--tb=short"
         ]
       },
-      "runtime_result": null,
+      "runtime_result": {
+        "verification_ticket": "HAR-01",
+        "accepted_parent": "4e640c41a43a8c999a21f11988f825c5dd3bd3bf",
+        "parent_counts": {
+          "passed": 716,
+          "failed": 0,
+          "errors": 0
+        },
+        "candidate_counts": {
+          "passed": 716,
+          "failed": 0,
+          "errors": 0
+        },
+        "parent_exit_code": 0,
+        "candidate_exit_code": 0,
+        "unresolved_failed_node_ids": [],
+        "unresolved_error_node_ids": [],
+        "candidate_only_failures": 0,
+        "candidate_only_errors": 0,
+        "eliminated_failed_count": 0,
+        "eliminated_error_count": 0,
+        "parent_log": "C:/Users/pablo/.codex/har-evidence/HAR-01-20261015-08pqco2o/parent-compatibility.log",
+        "candidate_log": "C:/Users/pablo/.codex/har-evidence/HAR-01-20261015-08pqco2o/candidate-final-compatibility.log",
+        "exact_commands_and_metadata": {
+          "parent": "C:/Users/pablo/.codex/har-evidence/HAR-01-20261015-08pqco2o/parent-compatibility-run.json",
+          "candidate": "C:/Users/pablo/.codex/har-evidence/HAR-01-20261015-08pqco2o/candidate-final-compatibility-run.json"
+        },
+        "full_results": "C:/Users/pablo/.codex/har-evidence/HAR-01-20261015-08pqco2o/verification-results.json",
+        "full_results_SHA256": "a577f02f7a6dc87af3ae4ab315c72c735d1d2be20f540b8c9b6cc096016b93ac",
+        "full_results_json_pointer": "/comparisons/compatibility",
+        "whole_suite_pass_claim": false
+      },
       "execution_requires": [
         "accepted HAR-00 and complete HAR-01 ticket",
         "human-synchronized exact accepted source/candidate checkout",
         "isolated storage/runtime; no live HERMES_HOME or provider effects",
         "record interpreter realpath/source identity/environment and all failed/error nodes"
       ],
-      "acceptance_note": "Running a selection is not declaring it green. Known unresolved nodes must remain visible; quarantine is not passing."
+      "acceptance_note": "Running a selection is not declaring it green. Known unresolved nodes must remain visible; quarantine is not passing.",
+      "status_at_HAR00": "NOT_EXECUTED_BY_HAR00",
+      "har01_status": "EXECUTED_BY_HAR01_PASSED",
+      "historical_file_hash_scope": "files[].sha256 is the preserved HAR-00 inventory hash, not a claim about the HAR-01 candidate; fresh identities are recorded with HAR-01 run evidence."
     },
     {
       "selection_id": "authority_security",
-      "status": "NOT_EXECUTED_BY_HAR00",
+      "status": "EXECUTED_BY_HAR01_WITH_DEFERRED_PARENT_FAILURES",
       "purpose": "Preserve deny-first, confinement, human Git and immutable model negative coverage.",
       "selection_origin": "HAR-00 static selection from tracked tests",
       "first_downstream_owner_ticket": "HAR-01",
@@ -2145,25 +2416,45 @@
           "path": "2_products/pepper-agent/tests/tools/test_governed_workpacket_file_confinement.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "284df282e5065bedd9c7e0fbce4f2a0acd731c06589d05fe62c043fdcc7df71d"
+          "sha256": "284df282e5065bedd9c7e0fbce4f2a0acd731c06589d05fe62c043fdcc7df71d",
+          "har01_parent_SHA256": "284df282e5065bedd9c7e0fbce4f2a0acd731c06589d05fe62c043fdcc7df71d",
+          "har01_candidate_SHA256": "284df282e5065bedd9c7e0fbce4f2a0acd731c06589d05fe62c043fdcc7df71d",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "284df282e5065bedd9c7e0fbce4f2a0acd731c06589d05fe62c043fdcc7df71d",
+          "har01_windows_to_tested_relation": "BYTE_IDENTICAL"
         },
         {
           "path": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_work_packet_tool_permissions.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "bac48a05e0af61a07fe1e453f5b3af5663e82336961c30ac84d44f9f018d884e"
+          "sha256": "bac48a05e0af61a07fe1e453f5b3af5663e82336961c30ac84d44f9f018d884e",
+          "har01_parent_SHA256": "bac48a05e0af61a07fe1e453f5b3af5663e82336961c30ac84d44f9f018d884e",
+          "har01_candidate_SHA256": "bac48a05e0af61a07fe1e453f5b3af5663e82336961c30ac84d44f9f018d884e",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "bac48a05e0af61a07fe1e453f5b3af5663e82336961c30ac84d44f9f018d884e",
+          "har01_windows_to_tested_relation": "BYTE_IDENTICAL"
         },
         {
           "path": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_governed_workflow_state_machine.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "7e2ae986ff2fc1c9c2b37b6063c919c663d4fe75fc33d2f8d1a07b5fead861c4"
+          "sha256": "7e2ae986ff2fc1c9c2b37b6063c919c663d4fe75fc33d2f8d1a07b5fead861c4",
+          "har01_parent_SHA256": "7e2ae986ff2fc1c9c2b37b6063c919c663d4fe75fc33d2f8d1a07b5fead861c4",
+          "har01_candidate_SHA256": "7e2ae986ff2fc1c9c2b37b6063c919c663d4fe75fc33d2f8d1a07b5fead861c4",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "7e2ae986ff2fc1c9c2b37b6063c919c663d4fe75fc33d2f8d1a07b5fead861c4",
+          "har01_windows_to_tested_relation": "BYTE_IDENTICAL"
         },
         {
           "path": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_work_packet_governed_autonomy.py",
           "exists": true,
           "tracked_at_HAR00_baseline": true,
-          "sha256": "0287170a3ced51bd42a8e4d784f6b6da0b3a682032e571d4b7bb74937e785170"
+          "sha256": "0287170a3ced51bd42a8e4d784f6b6da0b3a682032e571d4b7bb74937e785170",
+          "har01_parent_SHA256": "0287170a3ced51bd42a8e4d784f6b6da0b3a682032e571d4b7bb74937e785170",
+          "har01_candidate_SHA256": "0287170a3ced51bd42a8e4d784f6b6da0b3a682032e571d4b7bb74937e785170",
+          "har01_candidate_SHA256_scope": "Exact bytes in isolated Linux candidate-final snapshot, not a claim that checkout line endings are identical on Windows.",
+          "har01_windows_worktree_SHA256": "0287170a3ced51bd42a8e4d784f6b6da0b3a682032e571d4b7bb74937e785170",
+          "har01_windows_to_tested_relation": "BYTE_IDENTICAL"
         }
       ],
       "proposed_command": {
@@ -2185,94 +2476,194 @@
           "--tb=short"
         ]
       },
-      "runtime_result": null,
+      "runtime_result": {
+        "verification_ticket": "HAR-01",
+        "accepted_parent": "4e640c41a43a8c999a21f11988f825c5dd3bd3bf",
+        "parent_counts": {
+          "passed": 793,
+          "failed": 3,
+          "errors": 371
+        },
+        "candidate_counts": {
+          "passed": 1164,
+          "failed": 3,
+          "errors": 0
+        },
+        "parent_exit_code": 1,
+        "candidate_exit_code": 1,
+        "unresolved_failed_node_ids": [
+          "tests/hermes_cli/test_agent_platform_work_packet_governed_autonomy.py::test_01ah_exports_append_after_p17_r",
+          "tests/hermes_cli/test_agent_platform_work_packet_tool_permissions.py::test_import_smoke_exact_output",
+          "tests/hermes_cli/test_agent_platform_work_packet_tool_permissions.py::test_public_export_prefix_and_counts"
+        ],
+        "unresolved_error_node_ids": [],
+        "candidate_only_failures": 0,
+        "candidate_only_errors": 0,
+        "eliminated_failed_count": 0,
+        "eliminated_error_count": 371,
+        "parent_log": "C:/Users/pablo/.codex/har-evidence/HAR-01-20261015-08pqco2o/parent-authority_security.log",
+        "candidate_log": "C:/Users/pablo/.codex/har-evidence/HAR-01-20261015-08pqco2o/candidate-final-authority_security.log",
+        "exact_commands_and_metadata": {
+          "parent": "C:/Users/pablo/.codex/har-evidence/HAR-01-20261015-08pqco2o/parent-authority_security-run.json",
+          "candidate": "C:/Users/pablo/.codex/har-evidence/HAR-01-20261015-08pqco2o/candidate-final-authority_security-run.json"
+        },
+        "full_results": "C:/Users/pablo/.codex/har-evidence/HAR-01-20261015-08pqco2o/verification-results.json",
+        "full_results_SHA256": "a577f02f7a6dc87af3ae4ab315c72c735d1d2be20f540b8c9b6cc096016b93ac",
+        "full_results_json_pointer": "/comparisons/authority_security",
+        "whole_suite_pass_claim": false
+      },
       "execution_requires": [
         "accepted HAR-00 and complete HAR-01 ticket",
         "human-synchronized exact accepted source/candidate checkout",
         "isolated storage/runtime; no live HERMES_HOME or provider effects",
         "record interpreter realpath/source identity/environment and all failed/error nodes"
       ],
-      "acceptance_note": "Running a selection is not declaring it green. Known unresolved nodes must remain visible; quarantine is not passing."
+      "acceptance_note": "Running a selection is not declaring it green. Known unresolved nodes must remain visible; quarantine is not passing.",
+      "status_at_HAR00": "NOT_EXECUTED_BY_HAR00",
+      "har01_status": "EXECUTED_BY_HAR01_WITH_DEFERRED_PARENT_FAILURES",
+      "historical_file_hash_scope": "files[].sha256 is the preserved HAR-00 inventory hash, not a claim about the HAR-01 candidate; fresh identities are recorded with HAR-01 run evidence."
     }
   ],
   "decisions": [
     {
       "decision_id": "D01",
-      "status": "PROPOSED",
+      "status": "HUMAN_APPROVED",
       "approval_owner": "Pablo",
-      "human_approval": null,
+      "human_approval": {
+        "owner": "Pablo",
+        "authority": "Human-supplied HAR-01 ticket sections 1 and 6.5",
+        "recorded_date": "2026-10-15",
+        "recorded_by": "HAR-01",
+        "scope": "Architectural project direction only; no live Pepper approval or downstream-ticket execution authority."
+      },
       "recommendation": "Pure harness subpackage under existing hermes_cli.agent_platform distribution; adapters depend inward; reuse Hermes registry.",
-      "first_dependent_ticket": "HAR-04"
+      "first_dependent_ticket": "HAR-04",
+      "approval_limit": "Transitional pure core under the existing package; adapters depend inward; core cannot import private Pepper selectors."
     },
     {
       "decision_id": "D02",
-      "status": "PROPOSED",
+      "status": "HUMAN_APPROVED",
       "approval_owner": "Pablo",
-      "human_approval": null,
+      "human_approval": {
+        "owner": "Pablo",
+        "authority": "Human-supplied HAR-01 ticket sections 1 and 6.5",
+        "recorded_date": "2026-10-15",
+        "recorded_by": "HAR-01",
+        "scope": "Architectural project direction only; no live Pepper approval or downstream-ticket execution authority."
+      },
       "recommendation": "Orthogonal dimensions and typed executable/human/observation/remediation/safe-stop continuations.",
       "first_dependent_ticket": "HAR-04"
     },
     {
       "decision_id": "D03",
-      "status": "PROPOSED",
+      "status": "HUMAN_APPROVED",
       "approval_owner": "Pablo",
-      "human_approval": null,
+      "human_approval": {
+        "owner": "Pablo",
+        "authority": "Human-supplied HAR-01 ticket sections 1 and 6.5",
+        "recorded_date": "2026-10-15",
+        "recorded_by": "HAR-01",
+        "scope": "Architectural project direction only; no live Pepper approval or downstream-ticket execution authority."
+      },
       "recommendation": "Shared pure admissibility; adapter revalidates immediately before effects.",
       "first_dependent_ticket": "HAR-07"
     },
     {
       "decision_id": "D04",
-      "status": "PROPOSED",
+      "status": "HUMAN_APPROVED",
       "approval_owner": "Pablo",
-      "human_approval": null,
+      "human_approval": {
+        "owner": "Pablo",
+        "authority": "Human-supplied HAR-01 ticket sections 1 and 6.5",
+        "recorded_date": "2026-10-15",
+        "recorded_by": "HAR-01",
+        "scope": "Architectural project direction only; no live Pepper approval or downstream-ticket execution authority."
+      },
       "recommendation": "Trusted local operator, explicit project/resource/actor scope and qualified local concurrency; no multi-tenant claim.",
       "first_dependent_ticket": "HAR-04"
     },
     {
       "decision_id": "D05",
-      "status": "PROPOSED",
+      "status": "HUMAN_APPROVED",
       "approval_owner": "Pablo",
-      "human_approval": null,
+      "human_approval": {
+        "owner": "Pablo",
+        "authority": "Human-supplied HAR-01 ticket sections 1 and 6.5",
+        "recorded_date": "2026-10-15",
+        "recorded_by": "HAR-01",
+        "scope": "Architectural project direction only; no live Pepper approval or downstream-ticket execution authority."
+      },
       "recommendation": "Explicit versioned evidence dependency DAG; preserve historical interpretation and original digests.",
       "first_dependent_ticket": "HAR-10"
     },
     {
       "decision_id": "D06",
-      "status": "PROPOSED",
+      "status": "HUMAN_APPROVED",
       "approval_owner": "Pablo",
-      "human_approval": null,
+      "human_approval": {
+        "owner": "Pablo",
+        "authority": "Human-supplied HAR-01 ticket sections 1 and 6.5",
+        "recorded_date": "2026-10-15",
+        "recorded_by": "HAR-01",
+        "scope": "Architectural project direction only; no live Pepper approval or downstream-ticket execution authority."
+      },
       "recommendation": "Separate intent, immutable authority, transitive executable dependencies, validation inputs and resource placement.",
       "first_dependent_ticket": "HAR-11"
     },
     {
       "decision_id": "D07",
-      "status": "PROPOSED",
+      "status": "HUMAN_APPROVED",
       "approval_owner": "Pablo",
-      "human_approval": null,
+      "human_approval": {
+        "owner": "Pablo",
+        "authority": "Human-supplied HAR-01 ticket sections 1 and 6.5",
+        "recorded_date": "2026-10-15",
+        "recorded_by": "HAR-01",
+        "scope": "Architectural project direction only; no live Pepper approval or downstream-ticket execution authority."
+      },
       "recommendation": "Limited expected-version durable operation journal; unknown effect outcome requires qualified recovery or stop.",
       "first_dependent_ticket": "HAR-12"
     },
     {
       "decision_id": "D08",
-      "status": "PROPOSED",
+      "status": "HUMAN_APPROVED",
       "approval_owner": "Pablo",
-      "human_approval": null,
+      "human_approval": {
+        "owner": "Pablo",
+        "authority": "Human-supplied HAR-01 ticket sections 1 and 6.5",
+        "recorded_date": "2026-10-15",
+        "recorded_by": "HAR-01",
+        "scope": "Architectural project direction only; no live Pepper approval or downstream-ticket execution authority."
+      },
       "recommendation": "Versioned legacy readers, side-effect-free shadow and one-writer cutover; never erase later decisions.",
       "first_dependent_ticket": "HAR-04"
     },
     {
       "decision_id": "D09",
-      "status": "PROPOSED",
+      "status": "HUMAN_APPROVED_CONCEPT_DETAILS_DEFERRED",
       "approval_owner": "Pablo",
-      "human_approval": null,
+      "human_approval": {
+        "owner": "Pablo",
+        "authority": "Human-supplied HAR-01 ticket sections 1 and 6.5",
+        "recorded_date": "2026-10-15",
+        "recorded_by": "HAR-01",
+        "scope": "Architectural project direction only; no live Pepper approval or downstream-ticket execution authority."
+      },
       "recommendation": "Owner adjudicates C26 selection/action semantics and public compatibility separately; recommendation is not acceptance.",
-      "first_dependent_ticket": "HAR-02"
+      "first_dependent_ticket": "HAR-02",
+      "approval_limit": "Execution ticket versus human decision target conceptually separated. Exact C26 cases and public API guarantees remain unresolved in HAR-02/HAR-03."
     },
     {
       "decision_id": "D10",
-      "status": "PROPOSED",
+      "status": "HUMAN_APPROVED",
       "approval_owner": "Pablo",
-      "human_approval": null,
+      "human_approval": {
+        "owner": "Pablo",
+        "authority": "Human-supplied HAR-01 ticket sections 1 and 6.5",
+        "recorded_date": "2026-10-15",
+        "recorded_by": "HAR-01",
+        "scope": "Architectural project direction only; no live Pepper approval or downstream-ticket execution authority."
+      },
       "recommendation": "Domain completion by governed artifact/acceptance policy; retain applicable Pepper human Git handoff; simulated pilot only.",
       "first_dependent_ticket": "HAR-15"
     }
@@ -2454,21 +2845,24 @@
       "description": "Stale verification checkout; canonical C94 object absent.",
       "first_downstream_owner_ticket": "HAR-01",
       "acceptance_boundary": "Human synchronization before executable verification; no Codex Git mutation.",
-      "status": "OPEN"
+      "status": "RESOLVED_BY_HUMAN_BEFORE_HAR01",
+      "resolution": "Windows and WSL both verified at accepted parent; canonical checkouts not used to execute tests."
     },
     {
       "gap_id": "GAP-INTERPRETER",
       "description": "Fresh cause/reproduction and allowed-interpreter fixture repair.",
       "first_downstream_owner_ticket": "HAR-01",
       "acceptance_boundary": "Preserve negative security tests; classify residual failures rather than hide them.",
-      "status": "OPEN"
+      "status": "RESOLVED_IN_HAR01_SELECTED_SCOPE_PENDING_HUMAN_REVIEW",
+      "resolution": "Three positive fixture factories use the current resolved regular interpreter. Original 13 failures/1327 errors plus 371 authority_security dependent errors eliminated; 12 supplemental security cases pass. Guards unchanged."
     },
     {
       "gap_id": "GAP-PUBLIC-API",
       "description": "Supported public surface and structural expectations undecided.",
       "first_downstream_owner_ticket": "HAR-02",
       "acceptance_boundary": "D09 human choice before changing assertions/publicness.",
-      "status": "OPEN"
+      "status": "OPEN",
+      "HAR01_fresh_observation": "Four archived broad export failures plus three additional authority_security export-position/prefix failures reproduce on exact parent and candidate. All remain unresolved; HAR-02 ticket scope must account for the three additional nodes."
     },
     {
       "gap_id": "GAP-C26",
@@ -2542,7 +2936,8 @@
     ],
     "negative_security_tests_must_remain": true,
     "quarantine_counts_as_pass": false,
-    "next_gate": "Human architecture review and any required human WSL synchronization, then a separately invoked HAR-01 ticket; never automatic HAR-04."
+    "next_gate": "Human review and exact-path human commit/push of HAR-01, then separately invoked HAR-02 including newly observed public-compatibility debt.",
+    "HAR01_executed_in_isolation": true
   },
   "roadmap_copy": {
     "source_path": "HAR/HAR_roadmap_refactorizacion_harnes.md",
@@ -2550,5 +2945,430 @@
     "canonical_path": "2_products/pepper-agent/docs/agent-platform/harness_refactor_roadmap.md",
     "normalization": "Only trailing Markdown double-space hard breaks become <br>; source file untouched, all 30 ticket bodies/dependencies/gates retained.",
     "sequencing_adjustments": []
-  }
+  },
+  "har00_manifest_identity": {
+    "ticket_id": "HAR-00",
+    "prepared_date": "2026-10-15",
+    "status": "READY_FOR_HUMAN_REVIEW_NOT_EXECUTED",
+    "source_baseline": {
+      "repository": "AGENT-PLATFORM",
+      "canonical_root": "C:/Users/pablo/OneDrive/Escritorio/AGENT PLATFORM",
+      "branch": "p18-manual-to-hermes-workflow-migration",
+      "head": "64debea2b3ae184b95c4eeb4cb1d9b58938c9aec",
+      "subject": "P18.9.13-C94 Reconcile material revision authority",
+      "initial_tracked_diff_empty": true,
+      "initial_index_empty": true,
+      "scope": "HAR-00 inventory baseline only; later tickets record their accepted parent and candidate source",
+      "audit_id": "P18.9.13-ARCH-AUDIT-01",
+      "audit_exact_commit": "64debea2b3ae184b95c4eeb4cb1d9b58938c9aec"
+    },
+    "verification_checkout": {
+      "root": "/home/pablo/work/AGENT-PLATFORM",
+      "observed_date": "2026-10-15",
+      "head": "75185e79e46424e7f495dfaad59ebdde7f45db93",
+      "branch": "p18-manual-to-hermes-workflow-migration",
+      "canonical_object_available": false,
+      "status": "HUMAN_SYNC_REQUIRED_BEFORE_HAR01_VERIFICATION",
+      "read_only_git_inspection_only": true,
+      "pre_existing_status_short": [
+        " M 2_products/pepper-agent/docs/agent-platform/workflow_migration_closure.md",
+        " M 2_products/pepper-agent/hermes_cli/agent_platform/post_execution_material_revision.py",
+        " M 2_products/pepper-agent/tools/pepper_workflow_tools.py",
+        "?? 2_products/pepper-agent/hermes_cli/agent_platform/material_revision_reconciliation.py",
+        "?? 2_products/pepper-agent/tests/hermes_cli/test_c64_validation_authority_boundary.py",
+        "?? 2_products/pepper-agent/tests/hermes_cli/test_c94_material_revision_reconciliation.py"
+      ]
+    }
+  },
+  "har00_decision_records": [
+    {
+      "decision_id": "D01",
+      "status": "PROPOSED",
+      "approval_owner": "Pablo",
+      "human_approval": null,
+      "recommendation": "Pure harness subpackage under existing hermes_cli.agent_platform distribution; adapters depend inward; reuse Hermes registry.",
+      "first_dependent_ticket": "HAR-04"
+    },
+    {
+      "decision_id": "D02",
+      "status": "PROPOSED",
+      "approval_owner": "Pablo",
+      "human_approval": null,
+      "recommendation": "Orthogonal dimensions and typed executable/human/observation/remediation/safe-stop continuations.",
+      "first_dependent_ticket": "HAR-04"
+    },
+    {
+      "decision_id": "D03",
+      "status": "PROPOSED",
+      "approval_owner": "Pablo",
+      "human_approval": null,
+      "recommendation": "Shared pure admissibility; adapter revalidates immediately before effects.",
+      "first_dependent_ticket": "HAR-07"
+    },
+    {
+      "decision_id": "D04",
+      "status": "PROPOSED",
+      "approval_owner": "Pablo",
+      "human_approval": null,
+      "recommendation": "Trusted local operator, explicit project/resource/actor scope and qualified local concurrency; no multi-tenant claim.",
+      "first_dependent_ticket": "HAR-04"
+    },
+    {
+      "decision_id": "D05",
+      "status": "PROPOSED",
+      "approval_owner": "Pablo",
+      "human_approval": null,
+      "recommendation": "Explicit versioned evidence dependency DAG; preserve historical interpretation and original digests.",
+      "first_dependent_ticket": "HAR-10"
+    },
+    {
+      "decision_id": "D06",
+      "status": "PROPOSED",
+      "approval_owner": "Pablo",
+      "human_approval": null,
+      "recommendation": "Separate intent, immutable authority, transitive executable dependencies, validation inputs and resource placement.",
+      "first_dependent_ticket": "HAR-11"
+    },
+    {
+      "decision_id": "D07",
+      "status": "PROPOSED",
+      "approval_owner": "Pablo",
+      "human_approval": null,
+      "recommendation": "Limited expected-version durable operation journal; unknown effect outcome requires qualified recovery or stop.",
+      "first_dependent_ticket": "HAR-12"
+    },
+    {
+      "decision_id": "D08",
+      "status": "PROPOSED",
+      "approval_owner": "Pablo",
+      "human_approval": null,
+      "recommendation": "Versioned legacy readers, side-effect-free shadow and one-writer cutover; never erase later decisions.",
+      "first_dependent_ticket": "HAR-04"
+    },
+    {
+      "decision_id": "D09",
+      "status": "PROPOSED",
+      "approval_owner": "Pablo",
+      "human_approval": null,
+      "recommendation": "Owner adjudicates C26 selection/action semantics and public compatibility separately; recommendation is not acceptance.",
+      "first_dependent_ticket": "HAR-02"
+    },
+    {
+      "decision_id": "D10",
+      "status": "PROPOSED",
+      "approval_owner": "Pablo",
+      "human_approval": null,
+      "recommendation": "Domain completion by governed artifact/acceptance policy; retain applicable Pepper human Git handoff; simulated pilot only.",
+      "first_dependent_ticket": "HAR-15"
+    }
+  ],
+  "updated_date": "2026-10-15",
+  "active_verification_baseline": {
+    "branch": "p18-manual-to-hermes-workflow-migration",
+    "head": "4e640c41a43a8c999a21f11988f825c5dd3bd3bf",
+    "HAR00": "HUMAN_ACCEPTED_COMMITTED_PUSHED_PER_HAR01_TICKET",
+    "windows_and_wsl_checked_read_only": true,
+    "initial_index_and_tracked_tree_clean": true,
+    "source_baseline_field_scope": "Historical HAR-00 inventory; this active baseline governs HAR-01 execution."
+  },
+  "verification_checkout_history": [
+    {
+      "root": "/home/pablo/work/AGENT-PLATFORM",
+      "observed_date": "2026-10-15",
+      "head": "75185e79e46424e7f495dfaad59ebdde7f45db93",
+      "branch": "p18-manual-to-hermes-workflow-migration",
+      "canonical_object_available": false,
+      "status": "HUMAN_SYNC_REQUIRED_BEFORE_HAR01_VERIFICATION",
+      "read_only_git_inspection_only": true,
+      "pre_existing_status_short": [
+        " M 2_products/pepper-agent/docs/agent-platform/workflow_migration_closure.md",
+        " M 2_products/pepper-agent/hermes_cli/agent_platform/post_execution_material_revision.py",
+        " M 2_products/pepper-agent/tools/pepper_workflow_tools.py",
+        "?? 2_products/pepper-agent/hermes_cli/agent_platform/material_revision_reconciliation.py",
+        "?? 2_products/pepper-agent/tests/hermes_cli/test_c64_validation_authority_boundary.py",
+        "?? 2_products/pepper-agent/tests/hermes_cli/test_c94_material_revision_reconciliation.py"
+      ]
+    }
+  ],
+  "har01_verification": {
+    "status": "READY_FOR_HUMAN_REVIEW_WITH_EXPLICIT_DEFERRED_DEBT",
+    "accepted_by_human": false,
+    "accepted_parent": "4e640c41a43a8c999a21f11988f825c5dd3bd3bf",
+    "branch": "p18-manual-to-hermes-workflow-migration",
+    "evidence_root_windows": "C:/Users/pablo/.codex/har-evidence/HAR-01-20261015-08pqco2o",
+    "evidence_root_wsl": "/tmp/har01-20261015-08pqco2o/evidence",
+    "full_results": {
+      "path": "C:/Users/pablo/.codex/har-evidence/HAR-01-20261015-08pqco2o/verification-results.json",
+      "SHA256": "a577f02f7a6dc87af3ae4ab315c72c735d1d2be20f540b8c9b6cc096016b93ac"
+    },
+    "selection_comparison_summary": {
+      "baseline": {
+        "parent": {
+          "passed": 771,
+          "failed": 19,
+          "errors": 1327
+        },
+        "candidate": {
+          "passed": 2113,
+          "failed": 6,
+          "errors": 0
+        },
+        "parent_exit_code": 1,
+        "candidate_exit_code": 1,
+        "candidate_only_failures": 0,
+        "candidate_only_errors": 0,
+        "eliminated_failed_count": 13,
+        "eliminated_error_count": 1327
+      },
+      "first_slice": {
+        "parent": {
+          "passed": 219,
+          "failed": 0,
+          "errors": 0
+        },
+        "candidate": {
+          "passed": 219,
+          "failed": 0,
+          "errors": 0
+        },
+        "parent_exit_code": 0,
+        "candidate_exit_code": 0,
+        "candidate_only_failures": 0,
+        "candidate_only_errors": 0,
+        "eliminated_failed_count": 0,
+        "eliminated_error_count": 0
+      },
+      "compatibility": {
+        "parent": {
+          "passed": 716,
+          "failed": 0,
+          "errors": 0
+        },
+        "candidate": {
+          "passed": 716,
+          "failed": 0,
+          "errors": 0
+        },
+        "parent_exit_code": 0,
+        "candidate_exit_code": 0,
+        "candidate_only_failures": 0,
+        "candidate_only_errors": 0,
+        "eliminated_failed_count": 0,
+        "eliminated_error_count": 0
+      },
+      "authority_security": {
+        "parent": {
+          "passed": 793,
+          "failed": 3,
+          "errors": 371
+        },
+        "candidate": {
+          "passed": 1164,
+          "failed": 3,
+          "errors": 0
+        },
+        "parent_exit_code": 1,
+        "candidate_exit_code": 1,
+        "candidate_only_failures": 0,
+        "candidate_only_errors": 0,
+        "eliminated_failed_count": 0,
+        "eliminated_error_count": 371
+      }
+    },
+    "root_cause": {
+      "invoked_interpreter_is_symlink": true,
+      "resolved_interpreter": "/home/pablo/miniforge/bin/python3.12",
+      "guard_requirement": "Absolute regular non-symlink executable equal to Path(sys.executable).resolve(strict=True); existing production code unchanged.",
+      "positive_fixture_fix": "Path(sys.executable).resolve(strict=True).as_posix() only at authorized positive construction/replay sites.",
+      "factories": [
+        {
+          "file": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_work_packet_validation_command_runner.py",
+          "function": "completed_single_agent_context",
+          "extra_positive_site": "test_runtime_binding_repeated_inputs_are_equal"
+        },
+        {
+          "file": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_work_packet_diff_artifact_review.py",
+          "function": "terminal_context"
+        },
+        {
+          "file": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_work_packet_non_critical_ticket_pilot.py",
+          "function": "non_delete_context",
+          "scope_authority": "HAR-01 section 5 permitted shared-helper clause; actual baseline/intermediate traceback establishes necessity",
+          "trace_evidence": "C:/Users/pablo/.codex/har-evidence/HAR-01-20261015-08pqco2o/candidate-baseline.log"
+        }
+      ]
+    },
+    "tested_source_overlays": [
+      {
+        "path": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_work_packet_validation_command_runner.py",
+        "parent_SHA256": "1f40a32088db9272ecdf631effcae38a9f8c4b52c4337dfbe52013f3e0a3fcd3",
+        "candidate_SHA256": "a755b7ba023305c153d1ca8a8b937bc81a369cf5fd1ec5cedac2e36fa5e73110"
+      },
+      {
+        "path": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_work_packet_diff_artifact_review.py",
+        "parent_SHA256": "e14acf1f8fe87a6a82aaa253d20eb3c3344219baa676ff099e33fcfbad680294",
+        "candidate_SHA256": "128b8c9b2b1e969ef0191ffe0050e53e6de703a5e268b8c0302932171b753524"
+      },
+      {
+        "path": "2_products/pepper-agent/tests/hermes_cli/test_agent_platform_work_packet_non_critical_ticket_pilot.py",
+        "parent_SHA256": "c080087b8eeaf800ed4ed84651cc8f656d744eeb6de3b9b880e8a2c935c79d07",
+        "candidate_SHA256": "6beacf8b80b111754959917155c040b0fd70fd7095fae9ab699199444dd3a401"
+      },
+      {
+        "path": "2_products/pepper-agent/docs/agent-platform/harness_refactor_architecture.md",
+        "parent_SHA256": "4bbe6759b3f7a8f36a8947a855930d50f45eccecd0074a3c87731b0883106d6b",
+        "candidate_SHA256": "3470f5fe2f8759937053595e7a8a20eb17bdcc9bf2612be7bc06f4a3024371a4"
+      }
+    ],
+    "source_identity_limit": "Final runtime tests used immutable parent reconstruction plus three fixture files and the architecture approval document. Verification-manifest result metadata was updated after test execution; no executable source changed afterward.",
+    "supplemental_security": {
+      "result": {
+        "passed": 12,
+        "failed": 0,
+        "errors": 0
+      },
+      "cases": [
+        {
+          "node_id": "tests/hermes_cli/test_agent_platform_work_packet_validation_command_runner.py::test_p17_4_exports_are_present[build_validation_command_runtime_binding]",
+          "status": "passed"
+        },
+        {
+          "node_id": "tests/hermes_cli/test_agent_platform_work_packet_validation_command_runner.py::test_runtime_binding_current_interpreter_passes",
+          "status": "passed"
+        },
+        {
+          "node_id": "tests/hermes_cli/test_agent_platform_work_packet_validation_command_runner.py::test_runtime_binding_rejects_bad_interpreter_paths[python]",
+          "status": "passed"
+        },
+        {
+          "node_id": "tests/hermes_cli/test_agent_platform_work_packet_validation_command_runner.py::test_runtime_binding_rejects_bad_interpreter_paths[C:/definitely/missing/python.exe]",
+          "status": "passed"
+        },
+        {
+          "node_id": "tests/hermes_cli/test_agent_platform_work_packet_validation_command_runner.py::test_runtime_binding_rejects_directory_interpreter",
+          "status": "passed"
+        },
+        {
+          "node_id": "tests/hermes_cli/test_agent_platform_work_packet_validation_command_runner.py::test_runtime_binding_rejects_missing_absolute_interpreter",
+          "status": "passed"
+        },
+        {
+          "node_id": "tests/hermes_cli/test_agent_platform_work_packet_validation_command_runner.py::test_runtime_binding_rejects_different_regular_interpreter",
+          "status": "passed"
+        },
+        {
+          "node_id": "tests/hermes_cli/test_agent_platform_work_packet_validation_command_runner.py::test_runtime_binding_rejects_symlink_interpreter",
+          "status": "passed"
+        },
+        {
+          "node_id": "tests/hermes_cli/test_agent_platform_work_packet_validation_command_runner.py::test_runtime_binding_rejects_working_directory_mismatch",
+          "status": "passed"
+        },
+        {
+          "node_id": "tests/hermes_cli/test_agent_platform_work_packet_validation_command_runner.py::test_runtime_binding_repeated_inputs_are_equal",
+          "status": "passed"
+        },
+        {
+          "node_id": "tests/hermes_cli/test_agent_platform_work_packet_validation_command_runner.py::test_runtime_binding_tampered_digest_fails",
+          "status": "passed"
+        },
+        {
+          "node_id": "tests/hermes_cli/test_agent_platform_work_packet_validation_command_runner.py::test_request_binding_rejects_mismatches[runtime_binding_SHA256]",
+          "status": "passed"
+        }
+      ],
+      "run_metadata": {
+        "selection": "supplemental_interpreter_security",
+        "argv": [
+          "bash",
+          "scripts/run_tests.sh",
+          "tests/hermes_cli/test_agent_platform_work_packet_validation_command_runner.py",
+          "-j",
+          "1",
+          "--file-retries",
+          "0",
+          "--",
+          "-q",
+          "--tb=short",
+          "-k",
+          "runtime_binding",
+          "--junitxml=/tmp/har01-20261015-08pqco2o/evidence/interpreter-security.xml"
+        ],
+        "cwd": "/tmp/har01-20261015-08pqco2o/candidate-final/2_products/pepper-agent",
+        "source": "same immutable candidate-final snapshot",
+        "environment": {
+          "HOME": "/tmp/har01-20261015-08pqco2o/home-candidate-final",
+          "HERMES_HOME": "/tmp/har01-20261015-08pqco2o/home-candidate-final/.hermes",
+          "PATH": "/usr/bin:/bin",
+          "LANG": "C.UTF-8",
+          "LC_ALL": "C.UTF-8",
+          "TZ": "UTC",
+          "PYTHONDONTWRITEBYTECODE": "1"
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 1.634,
+        "log": "/tmp/har01-20261015-08pqco2o/evidence/interpreter-security.log",
+        "log_SHA256": "143fd4d0db297942c4082c89c48de96512d2b17b982d80fb3187309e46172926"
+      },
+      "xml": "C:/Users/pablo/.codex/har-evidence/HAR-01-20261015-08pqco2o/interpreter-security.xml",
+      "xml_SHA256": "ab6df3491c7d287864622594dd707a0869a81a26797c395f8bc8af717889faa1"
+    },
+    "additional_parent_debt": {
+      "structural_export_failed_node_ids": [
+        "tests/hermes_cli/test_agent_platform_work_packet_governed_autonomy.py::test_01ah_exports_append_after_p17_r",
+        "tests/hermes_cli/test_agent_platform_work_packet_tool_permissions.py::test_import_smoke_exact_output",
+        "tests/hermes_cli/test_agent_platform_work_packet_tool_permissions.py::test_public_export_prefix_and_counts"
+      ],
+      "interpreter_error_nodes_count": 371,
+      "source_evidence": [
+        "tests/hermes_cli/test_agent_platform_work_packet_tool_permissions.py:355-390",
+        "tests/hermes_cli/test_agent_platform_work_packet_governed_autonomy.py:287-291"
+      ],
+      "ownership": "HAR-02 public compatibility, proposed for inclusion in its human-scoped ticket; not changed in HAR-01."
+    },
+    "historical_data_preserved": true,
+    "all_canonical_selections_executed": true,
+    "candidate_only_failures": 0,
+    "candidate_only_errors": 0,
+    "production_guard_unchanged": true,
+    "production_guard_SHA256": "bf8caf8dbc08f1df94c078970544e74a628758692c6b9d7f7fb750e3d5edd86f",
+    "static_preservation_evidence": "C:/Users/pablo/.codex/har-evidence/HAR-01-20261015-08pqco2o/static-preservation.json",
+    "shared_runtime": "Existing .venv dependency environment, no installs/repairs; independently extracted source and isolated HOME per comparison side.",
+    "precompile_warning": "git ls-files reports no Git repository in git-archive reconstructions. Wrapper explicitly treats precompile as best effort (|| true); all explicit selected files execute, no replacement runner or policy change.",
+    "intermediate_status": {
+      "status": "SUPERSEDED_NOT_FINAL_VERIFICATION",
+      "baseline_counts": {
+        "passed": 1404,
+        "failed": 6,
+        "errors": 709
+      },
+      "additional_traceback": "review_validation_loop.py:337 -> non_critical_ticket_pilot.py:372 non_delete_context -> unchanged interpreter guard",
+      "first_slice_status": "INTENTIONALLY_INTERRUPTED_AFTER_TWO_FACTORY_FIXES; not used as final evidence",
+      "record": "C:/Users/pablo/.codex/har-evidence/HAR-01-20261015-08pqco2o/intermediate-superseded.json"
+    },
+    "whole_repository_suite": false,
+    "live_access": false,
+    "git_mutation": false,
+    "G0": "PENDING_HAR03",
+    "source_byte_provenance": {
+      "isolated_sources": "Git archive produces committed blob bytes; the three edited fixture files and architecture approval document were overlaid byte-for-byte from Windows.",
+      "unchanged_windows_checkout_differences": {
+        "2_products/pepper-agent/tests/hermes_cli/test_c92_post_execution_material_revision.py": {
+          "windows_SHA256": "473be4fec174acd5a0e5169c5d19d09bc614a068732aff7583e6ae35134a600a",
+          "tested_git_blob_SHA256": "4223a8db7c1537bf09e9932eb0b17c885f91dc8a86c0012e7ee4e36f680c7201",
+          "relation": "UNCHANGED_WINDOWS_CHECKOUT_CRLF_VERSUS_TESTED_GIT_BLOB_LF",
+          "source_file_modified_by_HAR01": false
+        },
+        "2_products/pepper-agent/tests/hermes_cli/test_c59_manual_validation_authority.py": {
+          "windows_SHA256": "dd4437507cec52185af71d4a073d3cbae0aff0b377d9ab10b9814b4435af4063",
+          "tested_git_blob_SHA256": "3e35f4d16091e06c144b89e02d06f39f8f180c2c5c8855b81a6fe1c52b9daf53",
+          "relation": "UNCHANGED_WINDOWS_CHECKOUT_CRLF_VERSUS_TESTED_GIT_BLOB_LF",
+          "source_file_modified_by_HAR01": false
+        }
+      },
+      "normalization_performed_on_source": false,
+      "comparison_only": "CRLF-to-LF comparison proves the two untouched checkout files match tested committed content. No test/source file was normalized or rewritten."
+    }
+  },
+  "selection_file_hash_scope": "files[].sha256 retains the HAR-00 historical inventory; HAR-01 parent/candidate hashes and run identities are recorded separately."
 }
