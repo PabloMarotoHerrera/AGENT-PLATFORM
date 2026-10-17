@@ -1636,3 +1636,112 @@ retain accepted-parent documentary bytes; all nine new source/test files match
 the final tested delivery. Fresh prefix/namespace/JSON/roadmap/source/diff checks
 verify the appended docs separately. Final documentary bytes are not claimed
 as executable regression inputs.
+
+## HAR-12 - Durable operation journal and expected-version control
+
+HAR-12 implements roadmap F04 after accepted HAR-11
+967aa006b4e27e5134d13c63292a782e1849b9cd. This is a candidate for human review.
+G0/G1 approvals retain their original scope; G2 remains OPEN / NOT APPROVED.
+No HAR-04-HAR-11 contract, effect owner, guard, historical store or registry changes.
+
+### Selected boundary and pure protocol
+
+The selected reference is C94's immutable reconciliation-authority append:
+material_revision_reconciliation.reconcile revalidates exact source/authority,
+then zero_change_decision.persist exclusively creates its predecessor-keyed JSON
+record before success acknowledgement. Legacy RLocks are process-local; no new
+cross-store transaction guarantee is attributed to that existing implementation.
+HAR-12 models only the append/effect acknowledgement in a disposable substrate,
+without importing or invoking the historical owner or reading operational data.
+The external HAR-12-AS-IS-JOURNAL-BOUNDARY-MATRIX records actual owners, consent,
+source bindings, stores, receipts, ambiguity and failure/recovery boundaries.
+
+New pure operation_journal.py and journal_protocol.py reuse HAR-04 strict frozen
+versioned models, HAR-10 assessment references and HAR-11 identity contexts.
+New v1 identities cover requests, expected versions, writer bindings, effect
+intents/attempts/receipts, transitions, journal entries, conflicts, unknown results,
+fixture-only assumptions and observational completion. Journal revision, operation
+version, aggregate counter, protocol/schema, historical revision and source/
+authority identity remain distinct domains. Each transition binds exact previous
+entry identity and revision. Illegal order, foreign bindings, stale revisions,
+unsupported policies and completion without a confirmed receipt are rejected.
+
+### Local persistence, writer and final version boundary
+
+New isolated_operation_journal.py explicitly creates a fresh private child of a
+supplied disposable parent. No import initializes a store; no ambient HERMES_HOME,
+production path, runtime, registry, provider or arbitrary handler callback is used.
+Schema 1 has operations, immutable stage entries, aggregate counters, conflict
+audit and immutable fake-effect/receipt tables. BEGIN IMMEDIATE transactions and
+an actual conditional UPDATE serialize local writers and check versions atomically.
+The owner permanently binds one operation/request, writer, scope, expected version
+and source/authority context. Competing claims are audited, never overridden.
+There are no leases, expired-lock cleanup, automatic takeover or hidden reclaim.
+Reads are bounded: 32 stage entries, 128 conflict-tail rows, one MiB SQLite values;
+effect payloads are bounded to 64 KiB. Full conflict history is retained in storage.
+
+New isolated_effect_adapter.py has one fake immutable append; it cannot dispatch
+a real tool. Preparation checks expected version; the final pre-effect check/CAS,
+fake effect and receipt write share a separate SQLite transaction. Durable attempt
+is recorded before dispatch; journal receipt confirmation and completion are later
+transactions. These are local one-file guarantees, not cross-database atomicity.
+Effect IDs are unique within that disposable store. Identical bound duplicates
+reuse their original receipt without reapplying the effect; changed operation,
+project/resource, attempt or payload produces a typed preserved conflict.
+Receipts bind operation/effect/version/resource/payload/owner, source/authority/
+inputs, adapter and observed aggregate. Readback checks chain, persisted request,
+row revision, original effect bytes and receipt binding, not receipt shape alone.
+
+### Authority and unknown outcomes
+
+HAR-10 criterion satisfaction and HAR-11 structural matching never authorize an
+effect. Positive tests supply a separate explicit fixture-only assumption for the
+exact request and human decision, current identity and valid validation evidence.
+An issuer/actor string is not trusted authority. Source/authority drift, historical
+or unqualified currentness, missing human decision and invalid evidence block
+dispatch. Results always remain observational with grants_authority=false and
+authorizes_execution=false. No production authority issuer or enforcement hook
+exists here; no historical consent is rewritten or inherited by new source.
+
+ATTEMPTED does not prove an effect was absent. An effect may be persisted while
+journal confirmation is missing: the bounded fixture records EFFECT_OUTCOME_UNKNOWN.
+UNKNOWN cannot retry or complete; interrupted ATTEMPTED also cannot redispatch
+through the fixture sequence. A confirmed receipt before completion remains
+EFFECT_CONFIRMED, not automatically COMPLETED. Rejected effects remain distinct.
+Explicit qualified observation/recovery is reserved, not implemented or fabricated.
+
+### Verification and limitations
+
+Final HAR-12 focused: 88 passed (42 protocol, 11 store, 25 effects, 10 purity).
+Unchanged HAR-04-HAR-11: 733; combined: 821. Parent/final candidate canonical
+baseline 2126, first_slice 219, compatibility 716, authority_security 1174 pass.
+Six disposable mutations detected 3/3/1/1/8/1 failures: removed expected comparison,
+second owner, completion without receipt, unknown retry, foreign receipt and
+unqualified authority. Actual source hashes, substitutions, failed nodes, XML,
+durable positive/negative traces and every attempt are external and referenced
+by har12_verification at C:/Users/pablo/.codex/har-evidence/HAR-12-20261017.
+
+The first development run's 57/20 failures were fixture-helper argument collision
+and import-probe directory assumptions; only new tests were corrected. All later
+83/86/88 development runs and the final frozen candidate are retained. No C69/C76
+failure occurred in this canonical matrix; prior recent_success debt remains
+unresolved, with no weakened guard. Import canaries guard pure core effects and
+runtime/registry/provider access. A fresh-process real-adapter probe permits
+SQLite/filesystem writes only below its supplied disposable parent and denies
+network/process effects. Graphify AST update ran in an external full source copy
+with no clustering/LLM; the repository graph remains outside this edit scope.
+
+Basic before-effect, post-effect/pre-receipt and post-receipt/pre-completion
+windows, transaction rollback and independent-connection writer/effect races are
+tested. There is no comprehensive process-kill/recovery/replay campaign, external
+exactly-once, distributed ownership or physical power-loss guarantee. The local
+test owner and filesystem/DB integrity are assumed; this is not a sandbox against
+malicious Python or SQL administrators. These limits carry forward to authorized
+HAR-13 work; HAR-13 has not started. G2 remains open.
+
+P18.9.13 R0002/run45 was not accessed, copied or changed. No Git mutation,
+provider, worker, Docker, Pepper restart or live operation occurred. Documentation
+is appended after executable testing: immutable test copies retain accepted-parent
+documentary bytes, all eight new source/test files match final delivery, and
+prefix/namespace/G1/roadmap/JSON/source/diff checks verify the additions separately.
+Final appended documentary bytes are not claimed as executable regression inputs.

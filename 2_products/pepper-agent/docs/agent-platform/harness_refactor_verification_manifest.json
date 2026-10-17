@@ -5956,5 +5956,485 @@
         "diff/whitespace and scope checks"
       ]
     }
+  },
+  "har12_verification": {
+    "ticket": "HAR-12",
+    "accepted_parent": "967aa006b4e27e5134d13c63292a782e1849b9cd",
+    "branch": "p18-manual-to-hermes-workflow-migration",
+    "status": "READY_FOR_HUMAN_REVIEW_NOT_ACCEPTED",
+    "traceability": "F04",
+    "gates": {
+      "G0": "CLOSED_HUMAN_APPROVED",
+      "G1": "CLOSED_HUMAN_APPROVED_BOUNDED_SHADOW",
+      "G2": "OPEN_NOT_APPROVED"
+    },
+    "selected_operation": "C94 immutable reconciliation-authority append; isolated local effect/acknowledgement model, not full historical guard parity",
+    "new_code_SHA256": {
+      "hermes_cli/agent_platform/harness/operation_journal.py": "75f9c5a6bec552e4b97155a333fbfec049cfafc193f7505daa87af6faa4d8a0a",
+      "hermes_cli/agent_platform/harness/journal_protocol.py": "4530e3945539acd493288d1904f8482e50e01de1e93bd300f0ce1f5d5fb1f2bd",
+      "hermes_cli/agent_platform/isolated_operation_journal.py": "0e85a2fb981da9d01951121622529c6be783b00782b6991ce1a5872521d411dd",
+      "hermes_cli/agent_platform/isolated_effect_adapter.py": "eb4419857374698c53ddae5c77d21c7ecb57446a447b1e12cb04eae1b84ab6a9",
+      "tests/hermes_cli/test_har12_operation_journal.py": "049074c90ce5702ad52366d97bb2d093a2a7c2b497a1ecd836b5b665fab4e6ef",
+      "tests/hermes_cli/test_har12_journal_store.py": "7dabaebc09c96c05e64bfa5ec263c162e8795f3c07a3d5b672d6ce1d7345e089",
+      "tests/hermes_cli/test_har12_isolated_effects.py": "43ae392688df8113533eca8c06ac00971e2ac36508d4c609f9efd12abed1943e",
+      "tests/hermes_cli/test_har12_journal_purity.py": "3eb74dc10daf2545acd038580e3216619e0404273987d62c1a7eae461ebd4de2"
+    },
+    "protocol": {
+      "contract_id": "harness-operation-journal",
+      "version": 1
+    },
+    "policy": {
+      "contract_id": "isolated-immutable-append",
+      "version": 1
+    },
+    "adapter": {
+      "contract_id": "isolated-sqlite-append",
+      "version": 1
+    },
+    "aggregate_version_domain": "isolated-sqlite-aggregate:1 plus exact aggregate/scope/counter; separate from journal and historical revisions",
+    "store_schema_version": 1,
+    "store_model": "Fresh explicitly created disposable SQLite; BEGIN IMMEDIATE, local CAS, permanent per-operation writer",
+    "transactions": [
+      "atomic request/genesis",
+      "atomic owner claim",
+      "each separate durable stage",
+      "atomic final expected-version check/CAS and fake effect plus receipt",
+      "journal receipt confirmation",
+      "journal completion"
+    ],
+    "read_bounds": {
+      "entries": 32,
+      "conflict_tail": 128,
+      "SQLite_value_bytes": 1048576,
+      "effect_payload_bytes": 65536
+    },
+    "delivery": "Immutable effect ID unique within one disposable store; identical bound attempt/payload reuses original receipt without a second write; conflicting operation/resource/payload is refused",
+    "receipt": "Binds full attempt, owner, operation/version, project/resource, payload, expected/observed aggregate, implementation, authority, inputs, adapter/version and outcome; verified against persisted effect bytes",
+    "unknown_policy": "ATTEMPTED is not evidence of absence; UNKNOWN cannot advance to retry. No takeover/leases/automatic recovery. Explicit qualified observation/recovery reserved, not implemented",
+    "authority": "Only explicit ISOLATED_SYNTHETIC_TEST_ONLY assumption for exact request, human decision, fresh-currentness claims, HAR10 assessment and HAR11 assessment; none is a production permit",
+    "results_observational": true,
+    "grants_authority": false,
+    "authorizes_execution": false,
+    "focused_passed": 88,
+    "focused_by_module": {
+      "operation_journal": 42,
+      "journal_store": 11,
+      "isolated_effects": 25,
+      "journal_purity": 10
+    },
+    "prior_focused_passed": 733,
+    "combined_focused_passed": 821,
+    "canonical_runs": {
+      "parent": {
+        "baseline": {
+          "side": "parent",
+          "name": "baseline",
+          "argv": [
+            "bash",
+            "scripts/run_tests.sh",
+            "tests/hermes_cli/test_agent_platform_ticket_architect_bridge.py",
+            "tests/hermes_cli/test_agent_platform_review_validation_loop.py",
+            "tests/hermes_cli/test_agent_platform_lead_agent_workflow_context.py",
+            "tests/hermes_cli/test_agent_platform_work_packet_validation_command_runner.py",
+            "tests/hermes_cli/test_agent_platform_work_packet_human_git_handoff.py",
+            "tests/hermes_cli/test_agent_platform_work_packet_diff_artifact_review.py",
+            "tests/hermes_cli/test_agent_platform_provider_worker_controlled_gate.py",
+            "tests/hermes_cli/test_agent_platform_provider_retry_policy.py",
+            "tests/tools/test_c91_pre_review_commands.py",
+            "-j",
+            "4",
+            "--file-retries",
+            "0",
+            "--",
+            "-q",
+            "--tb=short"
+          ],
+          "cwd": "/tmp/har12-20261017-9e012a76/parent/2_products/pepper-agent",
+          "environment": {
+            "HOME": "/tmp/har12-20261017-9e012a76/home-parent-baseline",
+            "HERMES_HOME": "/tmp/har12-20261017-9e012a76/home-parent-baseline/.hermes",
+            "PATH": "/usr/bin:/bin",
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "TZ": "UTC",
+            "PYTHONDONTWRITEBYTECODE": "1"
+          },
+          "exit_code": 0,
+          "seconds": 45.368,
+          "log_sha256": "307ced02b0dd05df3e05fdb7587e62f03b83665628baf96bb369c00541258f89",
+          "passed": 2126,
+          "failed": 0
+        },
+        "first_slice": {
+          "side": "parent",
+          "name": "first_slice",
+          "argv": [
+            "bash",
+            "scripts/run_tests.sh",
+            "tests/hermes_cli/test_c91_validation_lifecycle.py",
+            "tests/tools/test_c91_pre_review_commands.py",
+            "tests/hermes_cli/test_c92_post_execution_material_revision.py",
+            "tests/hermes_cli/test_c93_approved_artifact_inspection.py",
+            "tests/hermes_cli/test_c94_material_revision_reconciliation.py",
+            "tests/hermes_cli/test_c59_manual_validation_authority.py",
+            "tests/tools/test_workpacket_validation_tool.py",
+            "-j",
+            "1",
+            "--file-retries",
+            "0",
+            "--",
+            "-q",
+            "--tb=short"
+          ],
+          "cwd": "/tmp/har12-20261017-9e012a76/parent/2_products/pepper-agent",
+          "environment": {
+            "HOME": "/tmp/har12-20261017-9e012a76/home-parent-first_slice",
+            "HERMES_HOME": "/tmp/har12-20261017-9e012a76/home-parent-first_slice/.hermes",
+            "PATH": "/usr/bin:/bin",
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "TZ": "UTC",
+            "PYTHONDONTWRITEBYTECODE": "1"
+          },
+          "exit_code": 0,
+          "seconds": 380.643,
+          "log_sha256": "abd28daba2a5563d4cc57a00c36e81eee49bdfb9f7421ec9dd87a1c38e7c13b2",
+          "passed": 219,
+          "failed": 0
+        },
+        "compatibility": {
+          "side": "parent",
+          "name": "compatibility",
+          "argv": [
+            "bash",
+            "scripts/run_tests.sh",
+            "tests/hermes_cli/test_c59_manual_validation_authority.py",
+            "tests/hermes_cli/test_c65_retry_material_revision.py",
+            "tests/hermes_cli/test_c66_invalid_validation_command_revision.py",
+            "tests/hermes_cli/test_c67_successive_recovery_cycles.py",
+            "tests/hermes_cli/test_c69_zero_change_decision.py",
+            "tests/hermes_cli/test_c72_review_evidence_transport.py",
+            "tests/hermes_cli/test_c73_post_accept_material_revision.py",
+            "tests/hermes_cli/test_c76_manual_validation_resolution.py",
+            "tests/hermes_cli/test_c87_material_revision_provenance.py",
+            "tests/hermes_cli/test_c88_review_readiness.py",
+            "tests/hermes_cli/test_c89_post_prepare_recovery.py",
+            "tests/hermes_cli/test_c90_handoff_rendering.py",
+            "tests/hermes_cli/test_c91_validation_lifecycle.py",
+            "tests/hermes_cli/test_c92_post_execution_material_revision.py",
+            "tests/hermes_cli/test_c93_approved_artifact_inspection.py",
+            "tests/tools/test_workpacket_validation_tool.py",
+            "tests/hermes_cli/test_agent_platform_work_packet_compiler.py",
+            "-j",
+            "4",
+            "--file-retries",
+            "0",
+            "--",
+            "-q",
+            "--tb=short"
+          ],
+          "cwd": "/tmp/har12-20261017-9e012a76/parent/2_products/pepper-agent",
+          "environment": {
+            "HOME": "/tmp/har12-20261017-9e012a76/home-parent-compatibility",
+            "HERMES_HOME": "/tmp/har12-20261017-9e012a76/home-parent-compatibility/.hermes",
+            "PATH": "/usr/bin:/bin",
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "TZ": "UTC",
+            "PYTHONDONTWRITEBYTECODE": "1"
+          },
+          "exit_code": 0,
+          "seconds": 206.692,
+          "log_sha256": "f1a2065de1691b6545ec6144f46a70895dadd07cf51b0c7f1f6e31ca58882f11",
+          "passed": 716,
+          "failed": 0
+        },
+        "authority_security": {
+          "side": "parent",
+          "name": "authority_security",
+          "argv": [
+            "bash",
+            "scripts/run_tests.sh",
+            "tests/tools/test_governed_workpacket_file_confinement.py",
+            "tests/hermes_cli/test_agent_platform_work_packet_tool_permissions.py",
+            "tests/hermes_cli/test_agent_platform_governed_workflow_state_machine.py",
+            "tests/hermes_cli/test_agent_platform_work_packet_governed_autonomy.py",
+            "-j",
+            "4",
+            "--file-retries",
+            "0",
+            "--",
+            "-q",
+            "--tb=short"
+          ],
+          "cwd": "/tmp/har12-20261017-9e012a76/parent/2_products/pepper-agent",
+          "environment": {
+            "HOME": "/tmp/har12-20261017-9e012a76/home-parent-authority_security",
+            "HERMES_HOME": "/tmp/har12-20261017-9e012a76/home-parent-authority_security/.hermes",
+            "PATH": "/usr/bin:/bin",
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "TZ": "UTC",
+            "PYTHONDONTWRITEBYTECODE": "1"
+          },
+          "exit_code": 0,
+          "seconds": 4.197,
+          "log_sha256": "6579952bd98d2817763cecbfbff8f60eedf6555e355f92dc3b11c1a7d05aaa9d",
+          "passed": 1174,
+          "failed": 0
+        }
+      },
+      "delivery": {
+        "baseline": {
+          "side": "delivery",
+          "name": "baseline",
+          "argv": [
+            "bash",
+            "scripts/run_tests.sh",
+            "tests/hermes_cli/test_agent_platform_ticket_architect_bridge.py",
+            "tests/hermes_cli/test_agent_platform_review_validation_loop.py",
+            "tests/hermes_cli/test_agent_platform_lead_agent_workflow_context.py",
+            "tests/hermes_cli/test_agent_platform_work_packet_validation_command_runner.py",
+            "tests/hermes_cli/test_agent_platform_work_packet_human_git_handoff.py",
+            "tests/hermes_cli/test_agent_platform_work_packet_diff_artifact_review.py",
+            "tests/hermes_cli/test_agent_platform_provider_worker_controlled_gate.py",
+            "tests/hermes_cli/test_agent_platform_provider_retry_policy.py",
+            "tests/tools/test_c91_pre_review_commands.py",
+            "-j",
+            "4",
+            "--file-retries",
+            "0",
+            "--",
+            "-q",
+            "--tb=short"
+          ],
+          "cwd": "/tmp/har12-20261017-9e012a76/delivery/2_products/pepper-agent",
+          "environment": {
+            "HOME": "/tmp/har12-20261017-9e012a76/home-delivery-baseline",
+            "HERMES_HOME": "/tmp/har12-20261017-9e012a76/home-delivery-baseline/.hermes",
+            "PATH": "/usr/bin:/bin",
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "TZ": "UTC",
+            "PYTHONDONTWRITEBYTECODE": "1"
+          },
+          "exit_code": 0,
+          "seconds": 45.087,
+          "log_sha256": "84ee37105fae4640b166ac1a02b559db58d16c8d5073d655cdd9399684aac4f8",
+          "passed": 2126,
+          "failed": 0
+        },
+        "first_slice": {
+          "side": "delivery",
+          "name": "first_slice",
+          "argv": [
+            "bash",
+            "scripts/run_tests.sh",
+            "tests/hermes_cli/test_c91_validation_lifecycle.py",
+            "tests/tools/test_c91_pre_review_commands.py",
+            "tests/hermes_cli/test_c92_post_execution_material_revision.py",
+            "tests/hermes_cli/test_c93_approved_artifact_inspection.py",
+            "tests/hermes_cli/test_c94_material_revision_reconciliation.py",
+            "tests/hermes_cli/test_c59_manual_validation_authority.py",
+            "tests/tools/test_workpacket_validation_tool.py",
+            "-j",
+            "1",
+            "--file-retries",
+            "0",
+            "--",
+            "-q",
+            "--tb=short"
+          ],
+          "cwd": "/tmp/har12-20261017-9e012a76/delivery/2_products/pepper-agent",
+          "environment": {
+            "HOME": "/tmp/har12-20261017-9e012a76/home-delivery-first_slice",
+            "HERMES_HOME": "/tmp/har12-20261017-9e012a76/home-delivery-first_slice/.hermes",
+            "PATH": "/usr/bin:/bin",
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "TZ": "UTC",
+            "PYTHONDONTWRITEBYTECODE": "1"
+          },
+          "exit_code": 0,
+          "seconds": 396.282,
+          "log_sha256": "a19f0e15dedc69fbff4720f0ba53b75a798a45e20ac1d86fcaaa3ce3eb518428",
+          "passed": 219,
+          "failed": 0
+        },
+        "compatibility": {
+          "side": "delivery",
+          "name": "compatibility",
+          "argv": [
+            "bash",
+            "scripts/run_tests.sh",
+            "tests/hermes_cli/test_c59_manual_validation_authority.py",
+            "tests/hermes_cli/test_c65_retry_material_revision.py",
+            "tests/hermes_cli/test_c66_invalid_validation_command_revision.py",
+            "tests/hermes_cli/test_c67_successive_recovery_cycles.py",
+            "tests/hermes_cli/test_c69_zero_change_decision.py",
+            "tests/hermes_cli/test_c72_review_evidence_transport.py",
+            "tests/hermes_cli/test_c73_post_accept_material_revision.py",
+            "tests/hermes_cli/test_c76_manual_validation_resolution.py",
+            "tests/hermes_cli/test_c87_material_revision_provenance.py",
+            "tests/hermes_cli/test_c88_review_readiness.py",
+            "tests/hermes_cli/test_c89_post_prepare_recovery.py",
+            "tests/hermes_cli/test_c90_handoff_rendering.py",
+            "tests/hermes_cli/test_c91_validation_lifecycle.py",
+            "tests/hermes_cli/test_c92_post_execution_material_revision.py",
+            "tests/hermes_cli/test_c93_approved_artifact_inspection.py",
+            "tests/tools/test_workpacket_validation_tool.py",
+            "tests/hermes_cli/test_agent_platform_work_packet_compiler.py",
+            "-j",
+            "4",
+            "--file-retries",
+            "0",
+            "--",
+            "-q",
+            "--tb=short"
+          ],
+          "cwd": "/tmp/har12-20261017-9e012a76/delivery/2_products/pepper-agent",
+          "environment": {
+            "HOME": "/tmp/har12-20261017-9e012a76/home-delivery-compatibility",
+            "HERMES_HOME": "/tmp/har12-20261017-9e012a76/home-delivery-compatibility/.hermes",
+            "PATH": "/usr/bin:/bin",
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "TZ": "UTC",
+            "PYTHONDONTWRITEBYTECODE": "1"
+          },
+          "exit_code": 0,
+          "seconds": 200.571,
+          "log_sha256": "f2a2d78b562b8397666722f75dbf19ea9a4cc6d999da2340894f5e737196118b",
+          "passed": 716,
+          "failed": 0
+        },
+        "authority_security": {
+          "side": "delivery",
+          "name": "authority_security",
+          "argv": [
+            "bash",
+            "scripts/run_tests.sh",
+            "tests/tools/test_governed_workpacket_file_confinement.py",
+            "tests/hermes_cli/test_agent_platform_work_packet_tool_permissions.py",
+            "tests/hermes_cli/test_agent_platform_governed_workflow_state_machine.py",
+            "tests/hermes_cli/test_agent_platform_work_packet_governed_autonomy.py",
+            "-j",
+            "4",
+            "--file-retries",
+            "0",
+            "--",
+            "-q",
+            "--tb=short"
+          ],
+          "cwd": "/tmp/har12-20261017-9e012a76/delivery/2_products/pepper-agent",
+          "environment": {
+            "HOME": "/tmp/har12-20261017-9e012a76/home-delivery-authority_security",
+            "HERMES_HOME": "/tmp/har12-20261017-9e012a76/home-delivery-authority_security/.hermes",
+            "PATH": "/usr/bin:/bin",
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "TZ": "UTC",
+            "PYTHONDONTWRITEBYTECODE": "1"
+          },
+          "exit_code": 0,
+          "seconds": 4.208,
+          "log_sha256": "92995a559eba83fec98a23bbd7f85243e18a76a0f9d0d9fa7bb3ea5fac2361fa",
+          "passed": 1174,
+          "failed": 0
+        }
+      }
+    },
+    "mutation_failure_counts": {
+      "remove-expected-version": 3,
+      "second-writer": 3,
+      "attempt-completed-without-receipt": 1,
+      "retry-unknown": 1,
+      "foreign-receipt": 8,
+      "unqualified-authority": 1
+    },
+    "all_attempts_retained": true,
+    "development_history": [
+      "Initial external preflight assertion looked for a wrong G1 namespace key; corrected to accepted har_g1_seal before code edits",
+      "First focused development: 57 passed / 20 failed; test-helper positional parameter value collided with value= counter updates, and parent conftest-created hermes_test lay outside intended import probe. Fixed only new HAR12 tests; accepted tests unchanged",
+      "Subsequent focused development: 83, 86 and 88 passed as integrity/coverage refinements were added. Final immutable delivery independently passes all 88 and combined 821",
+      "No C69/C76 timing failure occurred in these four parent/four final candidate canonical runs. Existing historical recent_success debt remains unresolved; no guard/test changed"
+    ],
+    "evidence_references": [
+      {
+        "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-12-20261017\\preflight.json",
+        "sha256": "c487a563d2e77addb201b4bade4525d7d9f814b99589f232d71d4081220d8f7a"
+      },
+      {
+        "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-12-20261017\\g1-seal.json",
+        "sha256": "74650635fa2d51de8e962339f613d71c52f77e583813a784030f68c034b4e0b0"
+      },
+      {
+        "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-12-20261017\\snapshots.json",
+        "sha256": "c73c055d5f0d0f050daa021da558c76c4a72fdf9e23edeb45eba21278e245a8d"
+      },
+      {
+        "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-12-20261017\\canonical-commands.json",
+        "sha256": "b8c0dce32e9afa73376b1d7b3bddf6006d60745bd55e6e096110aff16f4f82df"
+      },
+      {
+        "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-12-20261017\\HAR-12-AS-IS-JOURNAL-BOUNDARY-MATRIX.md",
+        "sha256": "bc2ae907e69649c3a502eb118209eae7cd0542050ab3328eb51a18c3dc8e9408"
+      },
+      {
+        "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-12-20261017\\source-freeze-and-imports.json",
+        "sha256": "7beb67dabf56c9dcf108bc54f133c04566a3d8de0567c8c05efcc78bed8ac4ec"
+      },
+      {
+        "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-12-20261017\\durable-stage-traces-and-contracts.json",
+        "sha256": "adc294a7c475e340b05896daccbf4297b52d29da1d6d302a97feda29bb07fcd0"
+      },
+      {
+        "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-12-20261017\\junit-nodeids.json",
+        "sha256": "344624acc2732f0244c02f8b60b892099cc5a0907b2d1223fae6a48112db3ee9"
+      },
+      {
+        "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-12-20261017\\mutation-results.json",
+        "sha256": "96b9919433dd65ce12399a712c8ab9076ebd34e961cadc53ac46165e5862cb77"
+      },
+      {
+        "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-12-20261017\\post-test-immutable-snapshot-preservation.json",
+        "sha256": "0e7be7f95df5f04cb86cbe54f50e1a845049ed5f02e0d0738e11ecff816add51"
+      },
+      {
+        "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-12-20261017\\graphify-update.json",
+        "sha256": "efd83d594ab42a9327233b557b7b1e4aa183ccef16a547c793d1cbeb9eac00c7"
+      }
+    ],
+    "operational_authority_granted": false,
+    "production_integration": false,
+    "live_workflow_access": false,
+    "Git_mutations": false,
+    "HAR13_started": false,
+    "frozen_context": "P18.9.13 R0002/run45 not accessed",
+    "limitations": [
+      "One local disposable SQLite file only; no cross-store or distributed atomicity",
+      "No external exactly-once guarantee, network APIs, workers, Docker or providers",
+      "SQLite FULL synchronous setting is not a proven physical power-loss guarantee",
+      "Trusted local test owner and local filesystem/DB integrity assumed; no sandbox against malicious Python/SQL administrators",
+      "Permanent owner has no lease or automatic takeover; ATTEMPTED/UNKNOWN needs a separately authorized recovery policy",
+      "Injected bounded failure windows and fresh connections are not HAR13 comprehensive process-kill/replay/recovery verification",
+      "Fake append faithfully models selected identity/exclusive-key/acknowledgement boundary; it does not establish full C94 policy parity or retrofit legacy filesystem atomicity",
+      "No production authority/currentness producer, human acceptance or effect-owner activation; G2 remains open"
+    ],
+    "documentation_verification": {
+      "appended_after_executable_testing": true,
+      "tested_documentation": "Accepted-parent documentary bytes; eight new source/test files match frozen delivery",
+      "final_documentary_bytes_not_claimed_as_executable_test_inputs": true,
+      "fresh_checks": [
+        "architecture prefix bytes",
+        "all old manifest namespaces semantic equality",
+        "G1 seal equality",
+        "roadmap bytes",
+        "frozen source SHA256",
+        "JSON validity",
+        "diff whitespace",
+        "scope/index/status"
+      ]
+    }
   }
 }
