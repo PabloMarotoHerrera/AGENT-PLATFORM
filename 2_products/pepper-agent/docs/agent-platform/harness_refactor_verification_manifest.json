@@ -4856,5 +4856,122 @@
     "Historical timing-sensitive C69 baseline variability",
     "Operational authority and G1 closure not established"
   ]
-}
+},
+  "har_g1_seal": {
+    "decision_id": "HAR-G1-SHADOW-BOUNDED-APPROVAL",
+    "gate": "G1",
+    "phase": 1,
+    "decision": "HUMAN_APPROVED_BOUNDED_SHADOW",
+    "gate_status": "CLOSED_HUMAN_APPROVED_BOUNDED_SHADOW",
+    "approved_by": "HUMAN_OPERATOR",
+    "scope": "FIRST_SLICE_PASSIVE_SHADOW",
+    "accepted_parent_sha": "c00ae949d29b9de15457219be0a354390efa848d",
+    "evidence_references": [
+      {
+        "path": "C:/Users/pablo/.codex/har-evidence/HAR-09-20261015/verification/HAR-09-verification-summary.json",
+        "sha256": "4f440b6f01a87a36f4be977061c37563a1b878b59db1aa35d15c7d782e25e9ff"
+      },
+      {
+        "path": "C:/Users/pablo/.codex/har-evidence/HAR-09-20261015/verification/HAR-09-corpus-summary.json",
+        "sha256": "ce060a35ad29d975984c31621e8e3dcae5462a541a983b9cb4440a9647e959fb"
+      }
+    ],
+    "acceptance_basis": {
+      "authority_source": "Explicit human decision in HAR-G1-SEAL ticket, sections 1 and 3.D; Codex records and does not exercise approval authority.",
+      "HAR09_human_acceptance": "ACCEPTED_COMMITTED_PUSHED_BY_HUMAN_AS_REPORTED_IN_TICKET",
+      "roadmap_sections": [
+        "6 — Fases y gates, phase 1 / G1",
+        "7 — HAR-09 — Adaptadores del primer ámbito y comparación shadow G1"
+      ],
+      "temporal_interpretation": "Earlier G1 OPEN, HAR09_implemented false and READY_FOR_HUMAN_REVIEW_NOT_ACCEPTED values remain historical snapshots. This additive namespace records the later human governance decision, without an executable authority resolver.",
+      "separate_boundaries": [
+        "HAR09 implementation acceptance",
+        "bounded G1 human approval",
+        "current operational authority qualification",
+        "permission for a specific effect",
+        "runtime activation authorization"
+      ],
+      "only_first_two_boundaries_occurred": true
+    },
+    "observed_coverage": {
+      "declarative_operations": 15,
+      "existing_handlers": 8,
+      "final_return_sites": 33,
+      "fresh_static_correspondences_verified": 15,
+      "public_action_families_mapped": 5,
+      "operations_without_standalone_public_mapping": 10,
+      "noninvocable_diagnostic_families": 2,
+      "shadow_disabled_by_default": true,
+      "new_writer_or_executor": false,
+      "legacy_remains_authoritative": true,
+      "shadow_influences_public_selection_or_results": false,
+      "double_legacy_execution_in_tested_fixtures": false
+    },
+    "historical_verification": {
+      "classification": "HISTORICAL_HAR09_EVIDENCE_NOT_RERUN_BY_SEAL",
+      "focused_passed": 137,
+      "combined_HAR04_HAR09_passed": 518,
+      "canonical_passed": {
+        "baseline": 2126,
+        "first_slice": 219,
+        "compatibility": 716,
+        "authority_security": 1174
+      },
+      "mutation_failure_counts": {
+        "disabled-call": 1,
+        "changed-result": 1,
+        "unqualified-c94": 1,
+        "hidden-critical": 9
+      },
+      "corpus_scenarios": 60,
+      "conditional_parity": 50,
+      "expected_qualification_gaps": 8,
+      "unsupported_operations": 2,
+      "unexplained_differences": 0,
+      "safety_critical_disagreements": 0,
+      "empirical_inspection_captures": 4,
+      "empirical_full_authority_guard_parity": "INSUFFICIENT_EVIDENCE",
+      "empirical_positive_parity": 0,
+      "corpus_provenance_counts": {
+        "ACCEPTED_HISTORICAL_ASSERTION": 2,
+        "STATIC_INTERPRETATION": 2,
+        "SYNTHETIC_ASSUMPTION": 56
+      }
+    },
+    "limitations": [
+      "No operationally trusted currentness producer exists.",
+      "The 45 external/human HAR-08 boundaries remain unqualified.",
+      "Synthetic positive qualification does not create real consent.",
+      "Static handler correspondence does not establish runtime availability.",
+      "Only bounded Hermes tool entrypoints are shadow-wired; HTTP/direct runtime paths are not independently shadow-wired.",
+      "Comprehensive empirical policy/guard parity remains unproven.",
+      "Historical C69 recent_success timing variability remains unresolved.",
+      "Historical bootstrap/maintenance side effects in legacy readers remain outside the guarantees of the pure observation core.",
+      "Production deployment, concurrency safety and broader multi-tenant trust are not established.",
+      "No permission to execute effects follows from G1 approval."
+    ],
+    "operational_authority_granted": false,
+    "production_activation_authorized": false,
+    "live_workflow_access_authorized": false,
+    "frozen_operational_state": {
+      "ticket_id": "P18.9.13",
+      "revision": "R0002",
+      "run_id": 45,
+      "status": "FROZEN_UNCHANGED_NOT_REVALIDATED",
+      "excluded_authorizations": [
+        "read or repair live records",
+        "execute pending validation commands",
+        "reconcile material revision authority",
+        "approve or reject pending decisions",
+        "prepare live review",
+        "dispatch workers or providers",
+        "activate shadow or new harness control in production",
+        "modify historical hashes or signed contracts"
+      ]
+    },
+    "g2_status": "NOT_STARTED",
+    "next_ticket": "HAR-10",
+    "next_ticket_condition": "Eligible only after human acceptance of this documentary seal; not initiated.",
+    "documentation_status": "DOCUMENTARY_SEAL_READY_FOR_HUMAN_REVIEW"
+  }
 }

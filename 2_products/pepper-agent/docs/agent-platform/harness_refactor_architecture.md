@@ -1300,3 +1300,107 @@ this change. Operational readiness/currentness and empirical coverage of every
 effectful path remain unproved. No live P18.9.13 data was read or changed, no Git
 mutation, deployment or HAR-10 work occurred. These source/document additions may
 change the historical broad source fingerprint; no live reconciliation is implied.
+
+
+## G1 — Human-Approved Bounded Shadow Gate
+
+### Human decision and temporal interpretation
+
+Decision ID: `HAR-G1-SHADOW-BOUNDED-APPROVAL`. Gate: **G1**. Phase: **1**.
+Decision: **APPROVED** (`HUMAN_APPROVED_BOUNDED_SHADOW`). Gate status:
+**CLOSED_HUMAN_APPROVED_BOUNDED_SHADOW**. Scope: **FIRST_SLICE_PASSIVE_SHADOW**.
+Accepted HAR-09 implementation baseline:
+`c00ae949d29b9de15457219be0a354390efa848d`.
+
+The human operator has accepted, committed and pushed HAR-09 and explicitly
+approved bounded G1 in the HAR-G1-SEAL ticket (§§1, 3.D). Codex records that
+human decision; Codex does not exercise approval authority. No additional
+signature, approval timestamp or external authority record is asserted.
+
+Roadmap §6 defines G1 as “Primer ámbito conectado en modo shadow, sin nueva
+autoridad de efectos.” Roadmap §7, HAR-09, requires isolated adapters/comparison,
+default-off entrypoints, no double execution, no new writes/dispatch, preserved
+C91–C94 digests/policies, no unexplained supported-slice differences and human
+approval for intentional public semantic changes. This seal preserves that scope.
+
+Historical G1 OPEN, HAR09_implemented false and
+READY_FOR_HUMAN_REVIEW_NOT_ACCEPTED values above and in the manifest remain
+unchanged snapshots. The new `har_g1_seal` namespace records the later human
+governance decision. It is documentary, not an executable authority resolver.
+
+**G1 CLOSED does not mean OPERATIONALLY AUTHORIZED.** HAR-09 human acceptance
+and bounded G1 human approval have occurred. Current operational authority
+qualification, permission for a specific effect and runtime activation
+authorization are separate and have not been granted. Operational authority:
+**NOT GRANTED**. Production activation: **NOT AUTHORIZED**. Live workflow access:
+**NOT AUTHORIZED**. G0 remains CLOSED — HUMAN APPROVED; G2 is **NOT_STARTED**.
+
+Documentary status: **DOCUMENTARY_SEAL_READY_FOR_HUMAN_REVIEW**. This seal is not
+yet human-accepted, committed or pushed. HAR-10 is the next eligible ticket only
+after human documentary acceptance; HAR-10 is **not initiated**.
+
+### Accepted implementation and historical evidence
+
+The accepted slice covers 15 HAR-06 declarative operations, eight existing
+Hermes handlers and 33 instrumented final return sites; 15/15 fresh static
+handler correspondences were VERIFIED with updated source/AST identities.
+Five public-action families are mapped; ten operations have no standalone
+public action mapping; two RESOLVE_* diagnostic families remain noninvocable.
+Shadow is disabled by default. No new writer or executor exists; legacy remains
+authoritative. Shadow does not influence public selection or results, and tested
+fixtures demonstrate no double legacy operation execution.
+
+The accepted `har09_verification` namespace references historical evidence:
+`C:/Users/pablo/.codex/har-evidence/HAR-09-20261015/verification/HAR-09-verification-summary.json`
+(SHA256 `4f440b6f01a87a36f4be977061c37563a1b878b59db1aa35d15c7d782e25e9ff`)
+and sibling `HAR-09-corpus-summary.json`; exact corpus identity is in
+`har_g1_seal.evidence_references`. HAR-G1-SEAL checks documentary integrity;
+it does not rerun these executable suites or revalidate live authority.
+
+| Historical HAR-09 evidence | Accepted result |
+|---|---|
+| HAR-09 focused | 137 passed |
+| HAR-04–HAR-09 combined focused | 518 passed |
+| Canonical baseline | 2126 passed |
+| First-slice | 219 passed |
+| Compatibility | 716 passed |
+| Authority/security | 1174 passed |
+| Four mutation classes detected | disabled-call 1; changed-result 1; unqualified-c94 1; hidden-critical 9 failures |
+| Classified corpus | 60 scenarios: 50 conditional parity, 8 expected qualification gaps, 2 unsupported operations |
+| Corpus disagreements | 0 unexplained; 0 safety-critical |
+| Empirical C91–C94 inspection captures | 4; all INSUFFICIENT_EVIDENCE for complete authority/guard parity; 0 empirical positive parity |
+
+The 50 conditional cases are not 50 independently verified operational
+executions. Corpus provenance is 56 synthetic assumptions, two static
+interpretations and two accepted historical assertions. The four empirical
+captures are separate and are not empirical positive parity. Canonical figures
+retain HAR-09's recorded parent/candidate evidence and all attempts, including
+the historical C69 initial parent failure and unchanged passing repeat.
+
+### Preserved limitations
+
+1. No operationally trusted currentness producer exists.
+2. The 45 external/human HAR-08 boundaries remain unqualified.
+3. Synthetic positive qualification does not create real consent.
+4. Static handler correspondence does not establish runtime availability.
+5. Only bounded Hermes tool entrypoints are shadow-wired; HTTP/direct runtime paths are not independently shadow-wired.
+6. Comprehensive empirical policy/guard parity remains unproven.
+7. Historical C69 recent_success timing variability remains unresolved.
+8. Historical bootstrap/maintenance side effects in legacy readers remain outside the guarantees of the pure observation core.
+9. Production deployment, concurrency safety and broader multi-tenant trust are not established.
+10. No permission to execute effects follows from G1 approval.
+
+These remain explicit technical limitations and future work, not resolved claims.
+Declaration, static correspondence, runtime availability, admissibility and
+execution remain separate. A source binding, captured CURRENT claim or serialized
+ALLOW does not create operational consent or permission.
+
+### Frozen state and operational exclusions
+
+**P18.9.13 R0002/run45 remains frozen, unchanged and not revalidated.** This seal
+provides no authority to read or repair live records, execute pending validation
+commands, reconcile material revision authority, approve or reject a pending
+decision, prepare a live review, dispatch workers/providers, activate shadow or
+new harness control in production, or modify historical hashes or signed
+contracts. Documentary changes may affect the historical broad source fingerprint;
+that does not permit reconciliation, repair or reuse of old consent.
