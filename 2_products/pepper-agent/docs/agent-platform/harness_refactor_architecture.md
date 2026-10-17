@@ -1745,3 +1745,105 @@ is appended after executable testing: immutable test copies retain accepted-pare
 documentary bytes, all eight new source/test files match final delivery, and
 prefix/namespace/G1/roadmap/JSON/source/diff checks verify the additions separately.
 Final appended documentary bytes are not claimed as executable regression inputs.
+
+## HAR-13 - Recovery, replay and failures between durable stages
+
+HAR-13 implements F04/F07 after accepted HAR-12
+63b99551ddcfc2da321a3c5a48320897b8ab6584. Candidate for human review, not acceptance.
+G0/G1 approvals retain their scope; G2 remains OPEN / NOT APPROVED. No accepted
+HAR-04-HAR-12 code, historical effect owner, store or guard is modified. HAR-14
+routing, production recovery and authority issuance are not activated.
+
+### Passive snapshot and versioned recovery policy
+
+New harness/journal_recovery.py validates injected raw bounded durable evidence:
+exact expected operation, ordered journal/predecessor chain, persisted owner,
+aggregate version, effect bytes/attempt/receipt, conflict audit, schema/policy and
+observation provenance. Ownership is separately checked against every entry;
+unsupported or unreadable observation never implies an unbound owner. Missing
+physical receipt is classified as corrupt even if aggregate drift also exists.
+Outcomes distinguish NOT_STARTED, PRE_EFFECT_DURABLE, ATTEMPT_OUTCOME_UNCERTAIN,
+EFFECT_CONFIRMED_DURABLE, COMPLETED_DURABLE, EFFECT_REJECTED_DURABLE, CONFLICT,
+CORRUPT_HISTORY, UNSUPPORTED_VERSION and SAFE_STOP. No damaged row is reconstructed,
+reordered, deleted or repaired. Selected corruption snapshots retain original
+raw fields and database byte hashes. Full malicious consistent database rewriting
+is not authenticated or ruled out by these structural checks.
+
+New harness/replay_policy.py always refuses effect retry, new attempts and owner
+takeover; same request/writer text is not authentication. Process ACTIVE, EXITED
+or UNKNOWN affects observation only; death/PID/timeout never invalidates durable
+ownership. Matching serialized writer continuation in tests is explicitly a
+trusted isolated fixture assumption. A confirmed receipt may be reviewed to
+identify missing journal stages, but neither confirmation nor completion is
+written. Every result is observational, grants_authority=false and
+authorizes_execution=false. Source/authority/input/decision/resource drift cannot
+inherit the old operation's recovery applicability.
+
+New isolated_journal_recovery.py accepts only an explicitly injected existing
+disposable HAR12 handle and expected request. It opens mode=ro, query_only SQLite
+and one consistent bounded read transaction; it never calls the historical
+runtime or opens ambient HERMES_HOME. More than 32 entries/128 audit rows,
+unsupported schema or unreadable evidence fail closed. No authority or liveness
+producer, dispatcher, store writer or automatic recovery executor is introduced.
+
+### Real process termination and independent readback
+
+Test-only har13_process_fixture.py delegates actual accepted SQL and commit calls
+through a connection proxy inside a disposable child. Parent validates exact
+Popen PID/root/window handshake, uses child-only SIGKILL and bounded waits/reap.
+There are no production crash hooks or accepted-source edits. A fresh independent
+reader observes the same database after each window W00-W11: before request,
+after request/claim/preparation/intent/attempt, before final CAS, during uncommitted
+effect/receipt, after effect commit, after confirmation/completion and during
+uncommitted conflict audit. Two Python-exception controls are separately labelled,
+never counted as process-crash proof. HOME/HERMES_HOME are explicitly disposable;
+no provider, worker, Docker, network or operational workflow is involved.
+
+The fixture owner explicitly opens the exact disposable SQLite writable handle
+for SQLite engine hot-journal rollback before passive mode-ro readback. This is
+transaction recovery, not application record repair or deletion of a writer's
+authority. The recovery adapter itself is read-only; a fresh-process audit probe
+checks mode=ro, denies writes/network/process/ambient access and retains identical
+database SHA256. Committed corrupted records are not silently repaired.
+
+W05-W07 remain uncertain despite zero visible effect rows: absence of completion
+or receipt never proves no effect. W07 shows rollback after real process death;
+W08 shows effect/receipt durable with ATTEMPTED head, and no second dispatch. W09
+remains confirmed, not completed. W10 needs exact chain and receipt. Cross-process
+owner claims, active-owner refusal and competing same-effect/aggregate operations
+preserve one effect/one aggregate increment. Stale journal restart probes and
+source/authority/evidence/decision/resource replay conflicts are retained.
+
+### Verification, guarantees and remaining limits
+
+HAR-13 focused 57 passed: concurrency 5, crash windows 14, recovery 21, purity 8,
+replay 9. Prior HAR-04-HAR-12 821 and combined 878 pass. Parent and final candidate
+canonical baseline 2126, first_slice 219, compatibility 716, authority_security
+1174 pass. Eight mutations detect 3/2/1/1/1/1/1/3 failures: unsafe attempted retry,
+confirmed promoted to completed, takeover after exit, stale aggregate ignored,
+foreign receipt, corrupt predecessor ignored, fabricated confirmation and a new
+attempt for uncertain outcome. Initial 50/1 development failure and later 56/57
+passes are retained. Candidate first compatibility was 715/1: C76
+test_fresh_dispatch[False-executable], line 310, KANBAN_RESPAWN_GUARD/recent_success.
+The same node/guard appears in unchanged historical parent evidence; source
+hashes match. Current paired full repeat and diagnostic results are retained
+in legacy-timing-comparison.json. This is a variability inference with explicit
+limits, not a guard repair. No accepted test/guard was weakened.
+
+External HAR-13-AS-IS-CRASH-RECOVERY-MATRIX, process/PID/readback/corruption records,
+supplementary probes, exact XML nodes and HAR-13-RECOVERY-GUARANTEE-MATRIX are
+referenced by har13_verification at C:/Users/pablo/.codex/har-evidence/HAR-13-20261017.
+Demonstrations cover one local WSL/Linux SQLite substrate and selected faults,
+not exhaustive schedules, multi-store atomicity, external exactly-once, physical
+power loss, distributed leases or production authenticated recovery. Later
+aggregate changes without additional qualified history conservatively conflict.
+The trusted local fixture owner/filesystem boundary remains explicit.
+
+Graphify AST update runs in an external full source copy with no clustering/LLM;
+the repository graph stays outside the edit allowlist. All accepted source bytes
+and unrelated untracked assets remain unchanged. P18.9.13 R0002/run45 is frozen
+and was not accessed. No Git mutation, live operation, G2 closure or HAR14 work.
+Documentation is appended after executable testing: immutable snapshots retain
+accepted documentary bytes, ten new source/test files match final delivery, and
+prefix/namespace/G1/roadmap/JSON/source/diff checks verify the additions separately.
+Final documentary bytes are not claimed as executable regression inputs.
