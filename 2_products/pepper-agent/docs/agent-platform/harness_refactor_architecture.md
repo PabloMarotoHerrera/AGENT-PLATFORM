@@ -1404,3 +1404,135 @@ decision, prepare a live review, dispatch workers/providers, activate shadow or
 new harness control in production, or modify historical hashes or signed
 contracts. Documentary changes may affect the historical broad source fingerprint;
 that does not permit reconciliation, repair or reuse of old consent.
+
+
+## HAR-10 - Explicit validation DAG and historical compatibility
+
+Candidate for human review, not acceptance. Accepted parent G1 seal:
+`0ab08f5a74aa2414b4eb0d862ea1a19a28928548`, branch
+`p18-manual-to-hermes-workflow-migration`. The human HAR-10 ticket identifies
+that seal as accepted; its older documentary-status fields remain historical
+snapshots. G0 and bounded G1 remain human-approved. G2 is OPEN_NOT_CLOSED;
+HAR-11 is not started. Roadmap section 7 HAR-10 (F02/F07), D05 and the G1
+non-authority boundary are preserved. No accepted HAR-04-HAR-09 code changed.
+
+### Passive contracts and graph semantics
+
+New `harness/validation_dag.py` reuses HAR-04 strict frozen contracts, ContractRef,
+ContentRef, Effect, canonical_json and parse_contract; no accepted exports change.
+It declares requirements, evidence producers/dependencies, criteria, explicit
+human/external boundaries, context, observations and diagnostic assessments.
+Current ticket, successor ticket, execution target, human decision target,
+revision and run remain separate bound fields; no successor inherits authority.
+
+Edges point producer/output evidence to dependent requirement; declared producer
+prerequisites point requirement to producer. Required edges are AND; optional
+edges cannot discharge declared required evidence. IDs, exact versions, source
+references and typed conditions (RECORDED/PASSED/FAILED/HUMAN_APPROVED) govern
+semantics. Native descriptions are presentation data, never parsed as dependencies.
+Semantic identity uses the harness-validation-dag-v1 domain; complete document
+identity additionally binds descriptions. Historical source sensitivity is retained.
+
+`harness/validation_dag_verifier.py` provides verify and assess. Verification
+checks unique declarations/edges, producer/output/version/criterion references,
+required-evidence coverage, authority/effect-policy consistency and cycles.
+Effectful producer declarations need passive correspondence and policy metadata;
+this does not resolve a handler, availability or permission. Stable ID/version
+topological ordering and a deterministic actual cycle witness are passive.
+
+Bounds: 64 requirements, 128 producers, 64 criteria, 128 boundaries, 256 dependencies,
+512 supplied observations; HAR-04 1 MiB transport (also the observation batch).
+Historical views admit at most 32 steps. At most 1024 diagnostics and one cycle
+witness are returned; diagnostic_bound_hit explicitly reports truncation while
+the graph stays invalid. Graphs are finite declarations, not execution schedules.
+
+### Evidence is not approval
+
+Observation status separates ABSENT, PRESENT, PASSED, FAILED, INVALID, STALE,
+CONFLICT, UNSUPPORTED and UNAVAILABLE from outcome, qualification and human
+decision. Source/producer/version/context mismatches, conflicts, absent evidence
+and unsatisfied upstream requirements block readiness. Contradictory observations
+never select a convenient result; their assessment names HUMAN_OWNER resolution.
+
+Failed evidence may satisfy a RECORDED/FAILED prerequisite and expose human
+classification; it never passes an ALL_PASSED criterion or a human aggregate.
+Human acceptance/classification criteria cannot be machine-evaluable. An explicit
+human record must bind the exact requirement, current context and all observed
+evidence identities through a declared human boundary. Wrong-ticket/version,
+stale, rejected, pending, historical or unrelated decisions do not satisfy it.
+No V11-equivalent approval is generated from graph propagation.
+
+There is no production authority qualifier. Positive cases require a named
+SyntheticAuthorityAssumption with ISOLATED_SYNTHETIC_TEST_ONLY scope. Assessments
+retain graph/evidence identities, qualification scope and assumption provenance.
+Even a satisfied criterion has accepted=false, grants_authority=false and
+observational=true. Readiness is not human acceptance or effect authorization.
+
+### Frozen historical compatibility
+
+New `historical_validation_adapter.py` accepts only injected bytes, explicit
+source/schema references and context. Policy pepper-historical-validation-projection
+version 1 observes bounded TicketSpec/WorkPacket schema-1 validation-step subsets.
+It does not implement full historical schema, signed-digest or guard qualification.
+EXACT_COMPATIBLE is reserved and is not claimed for these partial views.
+Mappings remain PARTIALLY_OBSERVABLE or AMBIGUOUS_HISTORICAL_SEMANTICS; unsupported
+schemas, version conflicts, malformed input and byte-digest mismatch are explicit.
+
+C91 ID/range/debt-word interpretation is frozen under that compatibility policy
+and traced to the unchanged command_validation.py source identity in the manifest.
+Derived textual edges expose an interpretation, never newly signed prerequisites.
+Self references are excluded; repeated references are deduplicated; compiled
+ordinals are checked without reordering history. Incomplete/ambiguous mappings
+block readiness. The supplied original byte identity, original schema, policy,
+unresolved diagnostics and derived graph identity remain distinct. No historical
+bytes or digest algorithms are rewritten. Descriptive changes in historical
+inputs retain their source-identity sensitivity; HAR-11 is not implemented.
+
+### Verification and remaining limits
+
+The external HAR-10-AS-IS-VALIDATION-DEPENDENCY-MATRIX records owning contracts,
+producers/consumers, source identities, implicit prerequisites, failure and human
+boundaries, textual influence and compatibility risks. A synthetic reference
+graph has 14 requirements, 13 producers and two boundaries; it covers command
+evidence, approved instructions, terminal/source consistency, manual inspection,
+passed/failed validation, classification, successor identity, material request,
+reconciliation and review. It is not a production plan or registry.
+
+Final isolated results: HAR-10 116 passed (22 contracts, 57 verifier, 37 historical
+and purity); HAR-04-HAR-09 parent 518 passed; HAR-04-HAR-10 candidate 634 passed.
+Parent/delivery canonical baseline 2126, first_slice 219, compatibility 716 and
+authority_security 1174 passed each, using exact manifest argv. Five disposable
+mutations detected 2/2/3/15/9 failures: cycle, missing producer, failed acceptance,
+human autoacceptance and discarded historical ambiguity. Exact nodes, commands,
+source hashes, logs, XML, all attempts and limits are in har10_verification and
+`C:/Users/pablo/.codex/har-evidence/HAR-10-20261017`.
+
+Initial development interpreter-linkage, purity-probe-directory and incomplete
+archive failures remain recorded; they are not concealed as passing tests.
+The unchanged full parent and final delivery substantiate the canonical results.
+Historical C69 recent_success variability remains debt; no guard was weakened.
+An intermediate immutable candidate recorded 714 passed / 2 failed in compatibility:
+C69 test_fresh_corrective_dispatch[executable] and C76 test_fresh_dispatch[True-executable],
+both KANBAN_RESPAWN_GUARD / recent_success. The affected legacy Git blobs are
+unchanged from the accepted HAR-09 parent; current unchanged parent and final
+delivery pass 716. Supplementary parent full repeat and XML probes are retained.
+C76 is an additional witness of that same guard. A fresh unchanged-parent
+diagnostic reproduces the same assertion/guard for False-executable (21 passed,
+1 failed), distinct from the intermediate True-executable parameter. No historical
+C76 parent failure is asserted. The retained timing-debt classification is an explicit inference,
+not a repair or a complete proof of timing behavior (legacy-timing-comparison.json).
+Fresh-process probes guard imports, filesystem writes, SQLite, network and
+process effects; canaries exercise the guards. No runtime/registry/provider
+imports or I/O occur in the new core/adaptation algorithms.
+
+No production wiring, trusted currentness, comprehensive empirical guard parity,
+workflow execution or G2 closure is claimed. G1's 45 unqualified human/external
+boundaries and other retained limitations remain unchanged. P18.9.13 R0002/run45
+is frozen and was not read, copied, repaired or reconciled. No command validation,
+manual attestation, approval, review preparation, worker/provider dispatch,
+deployment, Git mutation or HAR-11 work is authorized by this candidate.
+
+Documentation was appended after executable testing. The tested immutable
+snapshots retain accepted-parent documentary bytes; all final source/test bytes
+match delivery. The two documentary additions receive separate fresh prefix,
+namespace, JSON and diff checks, rather than an executable-regression claim.
