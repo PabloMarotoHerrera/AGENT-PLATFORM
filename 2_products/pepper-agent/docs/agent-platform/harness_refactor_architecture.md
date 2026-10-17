@@ -1536,3 +1536,103 @@ Documentation was appended after executable testing. The tested immutable
 snapshots retain accepted-parent documentary bytes; all final source/test bytes
 match delivery. The two documentary additions receive separate fresh prefix,
 namespace, JSON and diff checks, rather than an executable-regression claim.
+
+## HAR-11 - Separate authority, implementation and input identities
+
+HAR-11 implements roadmap F05/F10 after accepted HAR-10
+cf95baec6fd56af03cc4264b4bd37235592fd4d2. This is a candidate for human review.
+G1 remains human-approved bounded shadow; G2 remains OPEN / NOT APPROVED.
+No accepted HAR-04-HAR-10 contract, runtime effect owner or registry is changed.
+
+### Independent versioned identities and joint comparison
+
+New dependency_identity.py reuses HAR-04 immutable strict contracts, versioned
+references and canonical transport, plus HAR-10 ValidationContext. HumanIntentRef,
+AuthorityBindingRef, ImplementationRef, ValidationInputRef and ResourceBindingRef
+have separate v1 domains. DependencyContext binds capability/operation, all five
+dimensions, exact expected versions, policy, manifest, scope, workflow context,
+required human decision, historical source, provenance and currentness.
+Integrity and issuer authenticity remain different obligations.
+
+New invalidation.py compares these bindings and verified manifests together.
+It retains simultaneous ordered causes and consequences: source/parser/policy
+changes require fresh evidence and human reauthorization; changed inputs require
+fresh evidence; changed authority/resources/history retain their own obligations.
+Stale prior ALLOW subjects cannot be reused after relevant drift. Missing/partial
+closures never produce UNCHANGED by comparing their known subset. All results
+are observational, grants_authority=false and authorizes_execution=false.
+Positive qualification is explicitly ISOLATED_SYNTHETIC_TEST_ONLY. No production
+issuer/currentness evidence or execution credential is manufactured.
+
+### Transitive manifests, independent discovery and broad fallback
+
+New dependency_manifest.py bounds inventories/manifests to 128 nodes, 512 edges,
+16 capabilities and 32 direct dependencies per inventory fact. Deterministic
+traversal handles diamonds, missing references, cycles, conflicts and unsupported
+policies. Independently supplied inventory facts cover both nodes and edges;
+ConsumerScopeFact separately binds roots, operation and bounded/full-tree/unknown
+consumption. Manifest flags cannot override a full-tree inventory fact. A closed
+declared graph alone does not establish discovery completeness.
+
+Qualified implementation identities require an exact inventory/boundary/policy
+synthetic assumption and known consumer scope. Unknown runtime/dynamic behavior
+requires incomplete/broad fallback; no partial identity is emitted as complete.
+Presentation-only exclusion needs explicit independently classified facts and
+justified policy/assumptions. Consumed Markdown remains behaviorally relevant.
+Full-tree consumers retain broad-source sensitivity, including covered docs.
+Existing broad fingerprint algorithms, source digests and C92 registry are not
+replaced, narrowed or rewritten.
+
+### Passive actual scope and historical interpretation
+
+New dependency_identity_adapter.py accepts bounded injected bytes, inventory and
+HAR-06 correspondence evidence; it freshly checks all 15 static bindings. Static
+VERIFIED is not availability, admissibility or execution. Actual C91-C94 runtime
+closure remains unqualified and requires existing broad coverage. The external
+offline source sample is a selected conservative over-approximation, including
+consumed roadmap Markdown and unresolved external profile configuration. It is
+not a proof of complete behavior or a current broad fingerprint. Its broad-source
+placeholder is explicitly synthetic/unqualified and grants no historical consent.
+No filesystem/source discovery occurs inside the adapter or pure algorithms.
+
+Version-1 historical views describe injected C91 command-validation, C92 material
+request and C94 reconciliation records. They preserve original byte identity and
+combined digest values, record policy owners and derived observation identities,
+and do not execute historical digest validators. Constituent observations are
+not separately authenticated signatures. Partial, ambiguous, invalid, unsupported,
+conflicting and broader-fallback outcomes remain explicit; HAR-10 ambiguity is
+retained. EXACT_SUPPORTED_REPRESENTATION is reserved, not asserted by these views.
+
+### Verification and remaining boundaries
+
+The synthetic reference covers 13 first-slice families and one dynamic boundary
+using 13 nodes: C91, C92, C93, C94, material revision, manual validation, review
+and C26. Parser/policy fan-out, resources, historical consent, inputs, consumed
+and presentation docs, broad coverage and stale positives are tested. No result
+is a production plan or consent. Fresh-process probes and exercised canaries
+cover runtime/registry/model-tools/provider imports, writes, SQLite, network and
+process effects; an after-collection audit also rejects source reads during pure
+comparison/adapter execution.
+
+Final focused results: HAR-11 99; unchanged HAR-04-HAR-10 634; combined 733 passed.
+Six disposable mutations are detected, with 7/2/5/4/1/1 failures respectively:
+transitive traversal, parser sensitivity, stale ALLOW, partial UNCHANGED, Markdown
+exemption and broad-to-narrow substitution. XML nodes, exact substitutions and
+source identities are external. Parent/final candidate canonical passing counts
+are baseline 2126, first_slice 219, compatibility 716, authority_security 1174.
+The first unchanged-parent compatibility attempt was 715/1: C76 False-executable,
+assert execution_started, KANBAN_RESPAWN_GUARD/recent_success. This reproduces the
+accepted HAR-10 parent diagnostic. The full unchanged-parent repeat passes 716;
+all attempts remain recorded. This is a retained variability inference with
+limits, not a repair. No guard or legacy test has been weakened.
+
+Complete evidence is in har11_verification and externally at
+C:/Users/pablo/.codex/har-evidence/HAR-11-20261017. P18.9.13 R0002/run45 remains
+frozen and was not accessed. No Git mutation, production wiring, operational
+execution or HAR-12 work occurred; G2 remains open.
+
+Documentation is appended after executable testing. The immutable test copies
+retain accepted-parent documentary bytes; all nine new source/test files match
+the final tested delivery. Fresh prefix/namespace/JSON/roadmap/source/diff checks
+verify the appended docs separately. Final documentary bytes are not claimed
+as executable regression inputs.

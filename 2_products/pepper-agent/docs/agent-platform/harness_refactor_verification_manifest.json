@@ -5437,5 +5437,524 @@
       ],
       "final_documentary_bytes_not_claimed_as_executable_test_inputs": true
     }
+  },
+  "har11_verification": {
+    "ticket": "HAR-11",
+    "accepted_parent": "cf95baec6fd56af03cc4264b4bd37235592fd4d2",
+    "branch": "p18-manual-to-hermes-workflow-migration",
+    "status": "READY_FOR_HUMAN_REVIEW_NOT_ACCEPTED",
+    "gates": {
+      "G0": "CLOSED_HUMAN_APPROVED",
+      "G1": "CLOSED_HUMAN_APPROVED_BOUNDED_SHADOW",
+      "G2": "OPEN_NOT_APPROVED"
+    },
+    "new_code_SHA256": {
+      "hermes_cli/agent_platform/harness/dependency_identity.py": "5ce158190838c6fab320be03b9df75fe6a98a5c099f1fbb9aee33b22895b9b43",
+      "hermes_cli/agent_platform/harness/dependency_manifest.py": "0cb737bc75811ad9dfb83f34a39935fdf154f25fb52ac15a5fd8e313592cde0e",
+      "hermes_cli/agent_platform/harness/invalidation.py": "eb24aad37b6ca2adb6650417fec2a05d353417870c1b46fa0b7b2dd0f623d45c",
+      "hermes_cli/agent_platform/dependency_identity_adapter.py": "8e60e05bde4e81461855ecfed70e1da0d03922823ef19780020e6640171e25f7",
+      "tests/hermes_cli/test_har11_dependency_identity.py": "26424b33939e469df0cbeced8e23dc9118df8f6fe4d0e7ff1125a7d2b6dd3ea6",
+      "tests/hermes_cli/test_har11_dependency_manifest.py": "aa85a34c5e3127f37049ab2a164d4291c616d839bc8a2615266191433f3dcc84",
+      "tests/hermes_cli/test_har11_historical_identity.py": "ab8fbbb61db7f097b981c0daa446ff858ba0713a83f1330efb402d46c3deee39",
+      "tests/hermes_cli/test_har11_identity_purity.py": "1732caa927c9561f0a916b31db211fcb16c2af7c9979211e0b039475ed0b52f1",
+      "tests/hermes_cli/test_har11_invalidation.py": "86cac641e51274e53d25e9f19d1d681dd7d9800a27130c816427493d65a6b9f2"
+    },
+    "identity_domains": {
+      "intent": "human-intent-v1",
+      "authority": "immutable-authority-v1",
+      "implementation": "executable-implementation-v1",
+      "resource": "resource-binding-v1"
+    },
+    "validation_input_domain": "validation-input-v1",
+    "discovery_qualification": "Synthetic assumptions only; independent nodes, edges and consumer-scope facts; never completeness by reachability alone",
+    "actual_source_binding_verified": 15,
+    "actual_closure": "UNKNOWN_DYNAMIC_REQUIRES_EXISTING_BROAD_FALLBACK",
+    "actual_broad_fingerprint_collected": false,
+    "broad_source_fixture_provenance": "INJECTED_UNQUALIFIED_SYNTHETIC_PLACEHOLDER_NOT_A_HISTORICAL_FINGERPRINT",
+    "historical_views": [
+      "pepper-command-validation-record:1",
+      "pepper-material-revision-request:1",
+      "pepper-material-revision-reconciliation:1"
+    ],
+    "historical_original_digest_verified": false,
+    "prior_focused_passed": 634,
+    "new_focused_passed": 99,
+    "combined_focused_passed": 733,
+    "new_test_modules": {
+      "identity": 10,
+      "manifest": 27,
+      "invalidation": 36,
+      "historical": 17,
+      "purity": 9
+    },
+    "canonical_runs": {
+      "parent": {
+        "baseline": {
+          "side": "parent",
+          "name": "baseline",
+          "argv": [
+            "bash",
+            "scripts/run_tests.sh",
+            "tests/hermes_cli/test_agent_platform_ticket_architect_bridge.py",
+            "tests/hermes_cli/test_agent_platform_review_validation_loop.py",
+            "tests/hermes_cli/test_agent_platform_lead_agent_workflow_context.py",
+            "tests/hermes_cli/test_agent_platform_work_packet_validation_command_runner.py",
+            "tests/hermes_cli/test_agent_platform_work_packet_human_git_handoff.py",
+            "tests/hermes_cli/test_agent_platform_work_packet_diff_artifact_review.py",
+            "tests/hermes_cli/test_agent_platform_provider_worker_controlled_gate.py",
+            "tests/hermes_cli/test_agent_platform_provider_retry_policy.py",
+            "tests/tools/test_c91_pre_review_commands.py",
+            "-j",
+            "4",
+            "--file-retries",
+            "0",
+            "--",
+            "-q",
+            "--tb=short"
+          ],
+          "cwd": "/tmp/har11-20261017-lari8l4q/parent/2_products/pepper-agent",
+          "environment": {
+            "HOME": "/tmp/har11-20261017-lari8l4q/home-parent-baseline",
+            "HERMES_HOME": "/tmp/har11-20261017-lari8l4q/home-parent-baseline/.hermes",
+            "PATH": "/usr/bin:/bin",
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "TZ": "UTC",
+            "PYTHONDONTWRITEBYTECODE": "1"
+          },
+          "exit_code": 0,
+          "seconds": 42.932,
+          "log_sha256": "3898022a8dbae3d38b446518e1e3022eed3a520ffa545bd015a4ad81c4404502",
+          "passed": 2126,
+          "failed": 0,
+          "tail": "YTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\nfatal: not a git repository (or any of the parent directories): .git\n\u25b6 launching test runner\nDiscovered 9 test files (~469 tests) under ['tests/hermes_cli/test_agent_platform_ticket_architect_bridge.py', 'tests/hermes_cli/test_agent_platform_review_validation_loop.py', 'tests/hermes_cli/test_agent_platform_lead_agent_workflow_context.py', 'tests/hermes_cli/test_agent_platform_work_packet_validation_command_runner.py', 'tests/hermes_cli/test_agent_platform_work_packet_human_git_handoff.py', 'tests/hermes_cli/test_agent_platform_work_packet_diff_artifact_review.py', 'tests/hermes_cli/test_agent_platform_provider_worker_controlled_gate.py', 'tests/hermes_cli/test_agent_platform_provider_retry_policy.py', 'tests/tools/test_c91_pre_review_commands.py']; running with -j 4\n[  2.6% |    12/~469 | \u271312 | \u2717 0] \u2713 tests/hermes_cli/test_agent_platform_provider_retry_policy.py (12\u2713, 1.5s)\n[  3.6% |    17/~469 | \u271317 | \u2717 0] \u2713 tests/hermes_cli/test_agent_platform_provider_worker_controlled_gate.py (5\u2713, 1.9s)\n[  7.5% |    35/~469 | \u271335 | \u2717 0] \u2713 tests/hermes_cli/test_agent_platform_lead_agent_workflow_context.py (18\u2713, 2.5s)\n[ 23.2% |   109/~469 | \u2713475 | \u2717  0] \u2713 tests/hermes_cli/test_agent_platform_work_packet_human_git_handoff.py (440\u2713, 2.9s)\n[ 43.5% |   204/~469 | \u2713847 | \u2717  0] \u2713 tests/hermes_cli/test_agent_platform_work_packet_diff_artifact_review.py (372\u2713, 3.6s)\n[ 45.2% |   212/~469 | \u2713866 | \u2717  0] \u2713 tests/tools/test_c91_pre_review_commands.py (19\u2713, 0.8s)\n[ 55.7% |   261/~469 | \u27131640 | \u2717   0] \u2713 tests/hermes_cli/test_agent_platform_review_validation_loop.py (774\u2713, 13.0s)\n[ 73.1% |   343/~469 | \u27131957 | \u2717   0] \u2713 tests/hermes_cli/test_agent_platform_work_packet_validation_command_runner.py (317\u2713, 17.5s)\n[100.0% |   469/~469 | \u27132126 | \u2717   0] \u2713 tests/hermes_cli/test_agent_platform_ticket_architect_bridge.py (169\u2713, 45.2s)\n\n=== Summary: 9 files, 2126 tests passed, 0 failed (100% complete) in 46.6s (4 workers) ===\n  Durations cached to test_durations.json (9 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   9\n  Total subprocess CPU-wall: 88.8s  (runner wall: 46.6s, parallelism: 4x)\n  P50: 2.89s  P90: 45.16s  P95: 45.16s  P99: 45.16s  Max: 45.16s\n  <1s: 1 files (11%)  <2s: 3 files (33%)\n  Top 10 slowest:\n     45.16s  tests/hermes_cli/test_agent_platform_ticket_architect_bridge.py\n     17.46s  tests/hermes_cli/test_agent_platform_work_packet_validation_command_runner.py\n     12.97s  tests/hermes_cli/test_agent_platform_review_validation_loop.py\n      3.64s  tests/hermes_cli/test_agent_platform_work_packet_diff_artifact_review.py\n      2.89s  tests/hermes_cli/test_agent_platform_work_packet_human_git_handoff.py\n      2.53s  tests/hermes_cli/test_agent_platform_lead_agent_workflow_context.py\n      1.90s  tests/hermes_cli/test_agent_platform_provider_worker_controlled_gate.py\n      1.47s  tests/hermes_cli/test_agent_platform_provider_retry_policy.py\n      0.80s  tests/tools/test_c91_pre_review_commands.py\n"
+        },
+        "first_slice": {
+          "side": "parent",
+          "name": "first_slice",
+          "argv": [
+            "bash",
+            "scripts/run_tests.sh",
+            "tests/hermes_cli/test_c91_validation_lifecycle.py",
+            "tests/tools/test_c91_pre_review_commands.py",
+            "tests/hermes_cli/test_c92_post_execution_material_revision.py",
+            "tests/hermes_cli/test_c93_approved_artifact_inspection.py",
+            "tests/hermes_cli/test_c94_material_revision_reconciliation.py",
+            "tests/hermes_cli/test_c59_manual_validation_authority.py",
+            "tests/tools/test_workpacket_validation_tool.py",
+            "-j",
+            "1",
+            "--file-retries",
+            "0",
+            "--",
+            "-q",
+            "--tb=short"
+          ],
+          "cwd": "/tmp/har11-20261017-lari8l4q/parent/2_products/pepper-agent",
+          "environment": {
+            "HOME": "/tmp/har11-20261017-lari8l4q/home-parent-first_slice",
+            "HERMES_HOME": "/tmp/har11-20261017-lari8l4q/home-parent-first_slice/.hermes",
+            "PATH": "/usr/bin:/bin",
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "TZ": "UTC",
+            "PYTHONDONTWRITEBYTECODE": "1"
+          },
+          "exit_code": 0,
+          "seconds": 363.342,
+          "log_sha256": "d7883cdc1f0aa73e83124ff42133d7de856da4ae14fe7ad29b6837a9d08524b1",
+          "passed": 219,
+          "failed": 0,
+          "tail": "\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\nfatal: not a git repository (or any of the parent directories): .git\n\u25b6 launching test runner\nDiscovered 7 test files (~99 tests) under ['tests/hermes_cli/test_c91_validation_lifecycle.py', 'tests/tools/test_c91_pre_review_commands.py', 'tests/hermes_cli/test_c92_post_execution_material_revision.py', 'tests/hermes_cli/test_c93_approved_artifact_inspection.py', 'tests/hermes_cli/test_c94_material_revision_reconciliation.py', 'tests/hermes_cli/test_c59_manual_validation_authority.py', 'tests/tools/test_workpacket_validation_tool.py']; running with -j 1\n[ 14.1% |    14/~99 | \u271336 | \u2717 0] \u2713 tests/hermes_cli/test_c59_manual_validation_authority.py (36\u2713, 5.6s)\n[ 24.2% |    24/~99 | \u271358 | \u2717 0] \u2713 tests/hermes_cli/test_c91_validation_lifecycle.py (22\u2713, 69.0s)\n[ 33.3% |    33/~99 | \u271379 | \u2717 0] \u2713 tests/hermes_cli/test_c92_post_execution_material_revision.py (21\u2713, 80.0s)\n[ 42.4% |    42/~99 | \u2713102 | \u2717  0] \u2713 tests/hermes_cli/test_c93_approved_artifact_inspection.py (23\u2713, 63.5s)\n[ 54.5% |    54/~99 | \u2713130 | \u2717  0] \u2713 tests/hermes_cli/test_c94_material_revision_reconciliation.py (28\u2713, 177.6s)\n[ 62.6% |    62/~99 | \u2713149 | \u2717  0] \u2713 tests/tools/test_c91_pre_review_commands.py (19\u2713, 0.8s)\n[100.0% |    99/~99 | \u2713219 | \u2717  0] \u2713 tests/tools/test_workpacket_validation_tool.py (70\u2713, 3.3s)\n\n=== Summary: 7 files, 219 tests passed, 0 failed (100% complete) in 399.8s (1 workers) ===\n  Durations cached to test_durations.json (7 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   7\n  Total subprocess CPU-wall: 399.8s  (runner wall: 399.8s, parallelism: 1x)\n  P50: 63.50s  P90: 177.56s  P95: 177.56s  P99: 177.56s  Max: 177.56s\n  <1s: 1 files (14%)  <2s: 1 files (14%)\n  Top 10 slowest:\n    177.56s  tests/hermes_cli/test_c94_material_revision_reconciliation.py\n     80.04s  tests/hermes_cli/test_c92_post_execution_material_revision.py\n     69.04s  tests/hermes_cli/test_c91_validation_lifecycle.py\n     63.50s  tests/hermes_cli/test_c93_approved_artifact_inspection.py\n      5.60s  tests/hermes_cli/test_c59_manual_validation_authority.py\n      3.34s  tests/tools/test_workpacket_validation_tool.py\n      0.75s  tests/tools/test_c91_pre_review_commands.py\n"
+        },
+        "compatibility_first_attempt": {
+          "side": "parent",
+          "name": "compatibility",
+          "argv": [
+            "bash",
+            "scripts/run_tests.sh",
+            "tests/hermes_cli/test_c59_manual_validation_authority.py",
+            "tests/hermes_cli/test_c65_retry_material_revision.py",
+            "tests/hermes_cli/test_c66_invalid_validation_command_revision.py",
+            "tests/hermes_cli/test_c67_successive_recovery_cycles.py",
+            "tests/hermes_cli/test_c69_zero_change_decision.py",
+            "tests/hermes_cli/test_c72_review_evidence_transport.py",
+            "tests/hermes_cli/test_c73_post_accept_material_revision.py",
+            "tests/hermes_cli/test_c76_manual_validation_resolution.py",
+            "tests/hermes_cli/test_c87_material_revision_provenance.py",
+            "tests/hermes_cli/test_c88_review_readiness.py",
+            "tests/hermes_cli/test_c89_post_prepare_recovery.py",
+            "tests/hermes_cli/test_c90_handoff_rendering.py",
+            "tests/hermes_cli/test_c91_validation_lifecycle.py",
+            "tests/hermes_cli/test_c92_post_execution_material_revision.py",
+            "tests/hermes_cli/test_c93_approved_artifact_inspection.py",
+            "tests/tools/test_workpacket_validation_tool.py",
+            "tests/hermes_cli/test_agent_platform_work_packet_compiler.py",
+            "-j",
+            "4",
+            "--file-retries",
+            "0",
+            "--",
+            "-q",
+            "--tb=short"
+          ],
+          "cwd": "/tmp/har11-20261017-lari8l4q/parent/2_products/pepper-agent",
+          "environment": {
+            "HOME": "/tmp/har11-20261017-lari8l4q/home-parent-compatibility",
+            "HERMES_HOME": "/tmp/har11-20261017-lari8l4q/home-parent-compatibility/.hermes",
+            "PATH": "/usr/bin:/bin",
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "TZ": "UTC",
+            "PYTHONDONTWRITEBYTECODE": "1"
+          },
+          "exit_code": 1,
+          "seconds": 199.135,
+          "log_sha256": "41840d5705ed5a0953ce62fc22ff29fc499a4493090759cb0e020217b1fa0ed9",
+          "passed": 715,
+          "failed": 1,
+          "tail": "i-codex.chatgpt-oauth.gpt-5.5.v1\",\nE       \"worker_profile_id\": \"worker.openai-codex.chatgpt-oauth.gpt-5.5.single-request.v1\",\nE       \"kanban_board_slug\": \"default\",\nE       \"kanban_task_id\": \"t_f77ac9fb\",\nE       \"kanban_task_status\": \"done\",\nE       \"kanban_run_id\": null,\nE       \"assignee_profile\": \"pepper-implementation-product\",\nE       \"selected_profile\": \"pepper-implementation-product\",\nE       \"workspace_kind\": \"scratch\",\nE       \"workspace_path\": \"/tmp/pytest-of-pablo/pytest-300/test_fresh_dispatch_False_exec0/hermes-home/kanban/workspaces/t_f77ac9fb\",\nE       \"workspace_created\": false,\nE       \"source_materialized\": false,\nE       \"durable_source_authority_validated_before_worker_execution\": false,\nE       \"source_authority_materialized_before_worker_execution\": false,\nE       \"source_authority_materialization_verification\": null,\nE       \"durable_source_authority_reference\": null,\nE       \"durable_source_authority_SHA256\": null,\nE       \"governed_source_authority_path\": null,\nE       \"governed_source_authority_snapshot_SHA256\": null,\nE       \"dispatch_performed\": false,\nE       \"execution_started\": false,\nE       \"worker_execution\": false,\nE       \"worker_process_started\": false,\nE       \"worker_pid_recorded\": false,\nE       \"Kanban_dispatch\": false,\nE       \"Git_mutation\": false,\nE       \"auto_retry\": false,\nE       \"auto_rollback\": false,\nE       \"task\": {\nE         \"id\": \"t_f77ac9fb\",\nE         \"status\": \"done\",\nE         \"assignee\": \"pepper-implementation-product\",\nE         \"workspace_kind\": \"scratch\",\nE         \"workspace_path\": \"/tmp/pytest-of-pablo/pytest-300/test_fresh_dispatch_False_exec0/hermes-home/kanban/workspaces/t_f77ac9fb\",\nE         \"current_run_id\": null\nE       },\nE       \"runs\": [\nE         {\nE           \"id\": 1,\nE           \"task_id\": \"t_f77ac9fb\",\nE           \"profile\": \"pepper-implementation-product\",\nE           \"step_key\": null,\nE           \"status\": \"done\",\nE           \"claim_lock\": null,\nE           \"claim_expires\": null,\nE           \"worker_pid\": null,\nE           \"max_runtime_seconds\": null,\nE           \"last_heartbeat_at\": null,\nE           \"started_at\": 1792229598,\nE           \"ended_at\": 1792236803,\nE           \"outcome\": \"completed\",\nE           \"failure_category\": null,\nE           \"failure_summary\": null,\nE           \"summary\": \"validation-infrastructure-failed: unsupported governed CLI option before tests\",\nE           \"metadata\": null,\nE           \"error\": null\nE         }\nE       ],\nE       \"next_action\": {\nE         \"id\": \"START_P99_4_EXECUTION_REQUIRES_HUMAN_AUTHORIZATION\",\nE         \"target_ticket_id\": \"P99.4\"\nE       }\nE     }\nE   assert False\n=========================== short test summary info ============================\nFAILED tests/hermes_cli/test_c76_manual_validation_resolution.py::test_fresh_dispatch[False-executable]\n1 failed, 21 passed in 117.89s (0:01:57)\n\n=== 1 file with test failures (1 test failed) ===\n  tests/hermes_cli/test_c76_manual_validation_resolution.py  (1 test failed)\n"
+        },
+        "compatibility": {
+          "side": "parent",
+          "name": "compatibility-repeat",
+          "argv": [
+            "bash",
+            "scripts/run_tests.sh",
+            "tests/hermes_cli/test_c59_manual_validation_authority.py",
+            "tests/hermes_cli/test_c65_retry_material_revision.py",
+            "tests/hermes_cli/test_c66_invalid_validation_command_revision.py",
+            "tests/hermes_cli/test_c67_successive_recovery_cycles.py",
+            "tests/hermes_cli/test_c69_zero_change_decision.py",
+            "tests/hermes_cli/test_c72_review_evidence_transport.py",
+            "tests/hermes_cli/test_c73_post_accept_material_revision.py",
+            "tests/hermes_cli/test_c76_manual_validation_resolution.py",
+            "tests/hermes_cli/test_c87_material_revision_provenance.py",
+            "tests/hermes_cli/test_c88_review_readiness.py",
+            "tests/hermes_cli/test_c89_post_prepare_recovery.py",
+            "tests/hermes_cli/test_c90_handoff_rendering.py",
+            "tests/hermes_cli/test_c91_validation_lifecycle.py",
+            "tests/hermes_cli/test_c92_post_execution_material_revision.py",
+            "tests/hermes_cli/test_c93_approved_artifact_inspection.py",
+            "tests/tools/test_workpacket_validation_tool.py",
+            "tests/hermes_cli/test_agent_platform_work_packet_compiler.py",
+            "-j",
+            "4",
+            "--file-retries",
+            "0",
+            "--",
+            "-q",
+            "--tb=short"
+          ],
+          "cwd": "/tmp/har11-20261017-lari8l4q/parent/2_products/pepper-agent",
+          "environment": {
+            "HOME": "/tmp/har11-20261017-lari8l4q/home-parent-compatibility-repeat",
+            "HERMES_HOME": "/tmp/har11-20261017-lari8l4q/home-parent-compatibility-repeat/.hermes",
+            "PATH": "/usr/bin:/bin",
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "TZ": "UTC",
+            "PYTHONDONTWRITEBYTECODE": "1"
+          },
+          "exit_code": 0,
+          "seconds": 222.896,
+          "log_sha256": "7ce47ad0b7916a1b5078f3a749a38096ff601f3628d8e9cd41d5348722de62f2",
+          "passed": 716,
+          "failed": 0,
+          "tail": "ol.py', 'tests/hermes_cli/test_agent_platform_work_packet_compiler.py']; running with -j 4\n[ 20.2% |    54/~267 | \u2713245 | \u2717  0] \u2713 tests/hermes_cli/test_agent_platform_work_packet_compiler.py (245\u2713, 2.4s)\n[ 25.5% |    68/~267 | \u2713281 | \u2717  0] \u2713 tests/hermes_cli/test_c59_manual_validation_authority.py (36\u2713, 6.2s)\n[ 29.2% |    78/~267 | \u2713297 | \u2717  0] \u2713 tests/hermes_cli/test_c65_retry_material_revision.py (16\u2713, 24.3s)\n[ 33.0% |    88/~267 | \u2713318 | \u2717  0] \u2713 tests/hermes_cli/test_c67_successive_recovery_cycles.py (21\u2713, 44.5s)\n[ 39.7% |   106/~267 | \u2713344 | \u2717  0] \u2713 tests/hermes_cli/test_c69_zero_change_decision.py (26\u2713, 45.4s)\n[ 43.4% |   116/~267 | \u2713373 | \u2717  0] \u2713 tests/hermes_cli/test_c66_invalid_validation_command_revision.py (29\u2713, 64.6s)\n[ 50.2% |   134/~267 | \u2713418 | \u2717  0] \u2713 tests/hermes_cli/test_c72_review_evidence_transport.py (45\u2713, 91.1s)\n[ 55.8% |   149/~267 | \u2713462 | \u2717  0] \u2713 tests/hermes_cli/test_c73_post_accept_material_revision.py (44\u2713, 75.0s)\n[ 63.3% |   169/~267 | \u2713494 | \u2717  0] \u2713 tests/hermes_cli/test_c87_material_revision_provenance.py (32\u2713, 70.3s)\n[ 67.0% |   179/~267 | \u2713516 | \u2717  0] \u2713 tests/hermes_cli/test_c88_review_readiness.py (22\u2713, 22.1s)\n[ 68.9% |   184/~267 | \u2713534 | \u2717  0] \u2713 tests/hermes_cli/test_c89_post_prepare_recovery.py (18\u2713, 33.6s)\n[ 72.3% |   193/~267 | \u2713558 | \u2717  0] \u2713 tests/hermes_cli/test_c90_handoff_rendering.py (24\u2713, 28.9s)\n[ 76.0% |   203/~267 | \u2713580 | \u2717  0] \u2713 tests/hermes_cli/test_c91_validation_lifecycle.py (22\u2713, 79.6s)\n[ 89.9% |   240/~267 | \u2713650 | \u2717  0] \u2713 tests/tools/test_workpacket_validation_tool.py (70\u2713, 7.2s)\n[ 93.3% |   249/~267 | \u2713672 | \u2717  0] \u2713 tests/hermes_cli/test_c76_manual_validation_resolution.py (22\u2713, 177.7s)\n[ 96.6% |   258/~267 | \u2713695 | \u2717  0] \u2713 tests/hermes_cli/test_c93_approved_artifact_inspection.py (23\u2713, 73.3s)\n[100.0% |   267/~267 | \u2713716 | \u2717  0] \u2713 tests/hermes_cli/test_c92_post_execution_material_revision.py (21\u2713, 89.4s)\n\n=== Summary: 17 files, 716 tests passed, 0 failed (100% complete) in 244.9s (4 workers) ===\n  Durations cached to test_durations.json (17 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   17\n  Total subprocess CPU-wall: 935.6s  (runner wall: 244.9s, parallelism: 4x)\n  P50: 45.43s  P90: 91.06s  P95: 177.75s  P99: 177.75s  Max: 177.75s\n  <1s: 0 files (0%)  <2s: 0 files (0%)\n  Top 10 slowest:\n    177.75s  tests/hermes_cli/test_c76_manual_validation_resolution.py\n     91.06s  tests/hermes_cli/test_c72_review_evidence_transport.py\n     89.38s  tests/hermes_cli/test_c92_post_execution_material_revision.py\n     79.56s  tests/hermes_cli/test_c91_validation_lifecycle.py\n     75.03s  tests/hermes_cli/test_c73_post_accept_material_revision.py\n     73.35s  tests/hermes_cli/test_c93_approved_artifact_inspection.py\n     70.31s  tests/hermes_cli/test_c87_material_revision_provenance.py\n     64.63s  tests/hermes_cli/test_c66_invalid_validation_command_revision.py\n     45.43s  tests/hermes_cli/test_c69_zero_change_decision.py\n     44.45s  tests/hermes_cli/test_c67_successive_recovery_cycles.py\n"
+        },
+        "authority_security": {
+          "side": "parent",
+          "name": "authority_security",
+          "argv": [
+            "bash",
+            "scripts/run_tests.sh",
+            "tests/tools/test_governed_workpacket_file_confinement.py",
+            "tests/hermes_cli/test_agent_platform_work_packet_tool_permissions.py",
+            "tests/hermes_cli/test_agent_platform_governed_workflow_state_machine.py",
+            "tests/hermes_cli/test_agent_platform_work_packet_governed_autonomy.py",
+            "-j",
+            "4",
+            "--file-retries",
+            "0",
+            "--",
+            "-q",
+            "--tb=short"
+          ],
+          "cwd": "/tmp/har11-20261017-lari8l4q/parent/2_products/pepper-agent",
+          "environment": {
+            "HOME": "/tmp/har11-20261017-lari8l4q/home-parent-authority_security",
+            "HERMES_HOME": "/tmp/har11-20261017-lari8l4q/home-parent-authority_security/.hermes",
+            "PATH": "/usr/bin:/bin",
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "TZ": "UTC",
+            "PYTHONDONTWRITEBYTECODE": "1"
+          },
+          "exit_code": 0,
+          "seconds": 4.168,
+          "log_sha256": "684f64b19ae2c515953cdfd249d2d5037e432559904040b0576ed8eb1b8cc962",
+          "passed": 1174,
+          "failed": 0,
+          "tail": "\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\nfatal: not a git repository (or any of the parent directories): .git\n\u25b6 launching test runner\nDiscovered 4 test files (~171 tests) under ['tests/tools/test_governed_workpacket_file_confinement.py', 'tests/hermes_cli/test_agent_platform_work_packet_tool_permissions.py', 'tests/hermes_cli/test_agent_platform_governed_workflow_state_machine.py', 'tests/hermes_cli/test_agent_platform_work_packet_governed_autonomy.py']; running with -j 4\n[  8.8% |    15/~171 | \u271315 | \u2717 0] \u2713 tests/tools/test_governed_workpacket_file_confinement.py (15\u2713, 1.3s)\n[ 42.7% |    73/~171 | \u2713328 | \u2717  0] \u2713 tests/hermes_cli/test_agent_platform_work_packet_tool_permissions.py (313\u2713, 2.7s)\n[ 89.5% |   153/~171 | \u27131046 | \u2717   0] \u2713 tests/hermes_cli/test_agent_platform_governed_workflow_state_machine.py (718\u2713, 3.0s)\n[100.0% |   171/~171 | \u27131174 | \u2717   0] \u2713 tests/hermes_cli/test_agent_platform_work_packet_governed_autonomy.py (128\u2713, 4.6s)\n\n=== Summary: 4 files, 1174 tests passed, 0 failed (100% complete) in 4.6s (4 workers) ===\n  Durations cached to test_durations.json (4 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   4\n  Total subprocess CPU-wall: 11.6s  (runner wall: 4.6s, parallelism: 4x)\n  P50: 3.02s  P90: 4.60s  P95: 4.60s  P99: 4.60s  Max: 4.60s\n  <1s: 0 files (0%)  <2s: 1 files (25%)\n  Top 10 slowest:\n      4.60s  tests/hermes_cli/test_agent_platform_work_packet_governed_autonomy.py\n      3.02s  tests/hermes_cli/test_agent_platform_governed_workflow_state_machine.py\n      2.65s  tests/hermes_cli/test_agent_platform_work_packet_tool_permissions.py\n      1.29s  tests/tools/test_governed_workpacket_file_confinement.py\n"
+        }
+      },
+      "delivery-final": {
+        "baseline": {
+          "side": "delivery-final",
+          "name": "baseline",
+          "argv": [
+            "bash",
+            "scripts/run_tests.sh",
+            "tests/hermes_cli/test_agent_platform_ticket_architect_bridge.py",
+            "tests/hermes_cli/test_agent_platform_review_validation_loop.py",
+            "tests/hermes_cli/test_agent_platform_lead_agent_workflow_context.py",
+            "tests/hermes_cli/test_agent_platform_work_packet_validation_command_runner.py",
+            "tests/hermes_cli/test_agent_platform_work_packet_human_git_handoff.py",
+            "tests/hermes_cli/test_agent_platform_work_packet_diff_artifact_review.py",
+            "tests/hermes_cli/test_agent_platform_provider_worker_controlled_gate.py",
+            "tests/hermes_cli/test_agent_platform_provider_retry_policy.py",
+            "tests/tools/test_c91_pre_review_commands.py",
+            "-j",
+            "4",
+            "--file-retries",
+            "0",
+            "--",
+            "-q",
+            "--tb=short"
+          ],
+          "cwd": "/tmp/har11-20261017-lari8l4q/delivery-final/2_products/pepper-agent",
+          "environment": {
+            "HOME": "/tmp/har11-20261017-lari8l4q/home-delivery-final-baseline",
+            "HERMES_HOME": "/tmp/har11-20261017-lari8l4q/home-delivery-final-baseline/.hermes",
+            "PATH": "/usr/bin:/bin",
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "TZ": "UTC",
+            "PYTHONDONTWRITEBYTECODE": "1"
+          },
+          "exit_code": 0,
+          "seconds": 50.185,
+          "log_sha256": "2446a6bb4ca452554aa4e185d78c3bb7c6bca9b42ec97b89b5da6cb0e70b5eb2",
+          "passed": 2126,
+          "failed": 0,
+          "tail": "YTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\nfatal: not a git repository (or any of the parent directories): .git\n\u25b6 launching test runner\nDiscovered 9 test files (~469 tests) under ['tests/hermes_cli/test_agent_platform_ticket_architect_bridge.py', 'tests/hermes_cli/test_agent_platform_review_validation_loop.py', 'tests/hermes_cli/test_agent_platform_lead_agent_workflow_context.py', 'tests/hermes_cli/test_agent_platform_work_packet_validation_command_runner.py', 'tests/hermes_cli/test_agent_platform_work_packet_human_git_handoff.py', 'tests/hermes_cli/test_agent_platform_work_packet_diff_artifact_review.py', 'tests/hermes_cli/test_agent_platform_provider_worker_controlled_gate.py', 'tests/hermes_cli/test_agent_platform_provider_retry_policy.py', 'tests/tools/test_c91_pre_review_commands.py']; running with -j 4\n[  2.6% |    12/~469 | \u271312 | \u2717 0] \u2713 tests/hermes_cli/test_agent_platform_provider_retry_policy.py (12\u2713, 0.5s)\n[  3.6% |    17/~469 | \u271317 | \u2717 0] \u2713 tests/hermes_cli/test_agent_platform_provider_worker_controlled_gate.py (5\u2713, 1.6s)\n[  7.5% |    35/~469 | \u271335 | \u2717 0] \u2713 tests/hermes_cli/test_agent_platform_lead_agent_workflow_context.py (18\u2713, 2.2s)\n[ 23.2% |   109/~469 | \u2713475 | \u2717  0] \u2713 tests/hermes_cli/test_agent_platform_work_packet_human_git_handoff.py (440\u2713, 2.8s)\n[ 43.5% |   204/~469 | \u2713847 | \u2717  0] \u2713 tests/hermes_cli/test_agent_platform_work_packet_diff_artifact_review.py (372\u2713, 3.6s)\n[ 45.2% |   212/~469 | \u2713866 | \u2717  0] \u2713 tests/tools/test_c91_pre_review_commands.py (19\u2713, 0.8s)\n[ 55.7% |   261/~469 | \u27131640 | \u2717   0] \u2713 tests/hermes_cli/test_agent_platform_review_validation_loop.py (774\u2713, 12.7s)\n[ 73.1% |   343/~469 | \u27131957 | \u2717   0] \u2713 tests/hermes_cli/test_agent_platform_work_packet_validation_command_runner.py (317\u2713, 17.3s)\n[100.0% |   469/~469 | \u27132126 | \u2717   0] \u2713 tests/hermes_cli/test_agent_platform_ticket_architect_bridge.py (169\u2713, 54.6s)\n\n=== Summary: 9 files, 2126 tests passed, 0 failed (100% complete) in 55.1s (4 workers) ===\n  Durations cached to test_durations.json (9 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   9\n  Total subprocess CPU-wall: 96.2s  (runner wall: 55.1s, parallelism: 4x)\n  P50: 2.85s  P90: 54.60s  P95: 54.60s  P99: 54.60s  Max: 54.60s\n  <1s: 2 files (22%)  <2s: 3 files (33%)\n  Top 10 slowest:\n     54.60s  tests/hermes_cli/test_agent_platform_ticket_architect_bridge.py\n     17.33s  tests/hermes_cli/test_agent_platform_work_packet_validation_command_runner.py\n     12.73s  tests/hermes_cli/test_agent_platform_review_validation_loop.py\n      3.58s  tests/hermes_cli/test_agent_platform_work_packet_diff_artifact_review.py\n      2.85s  tests/hermes_cli/test_agent_platform_work_packet_human_git_handoff.py\n      2.22s  tests/hermes_cli/test_agent_platform_lead_agent_workflow_context.py\n      1.58s  tests/hermes_cli/test_agent_platform_provider_worker_controlled_gate.py\n      0.82s  tests/tools/test_c91_pre_review_commands.py\n      0.52s  tests/hermes_cli/test_agent_platform_provider_retry_policy.py\n"
+        },
+        "first_slice": {
+          "side": "delivery-final",
+          "name": "first_slice",
+          "argv": [
+            "bash",
+            "scripts/run_tests.sh",
+            "tests/hermes_cli/test_c91_validation_lifecycle.py",
+            "tests/tools/test_c91_pre_review_commands.py",
+            "tests/hermes_cli/test_c92_post_execution_material_revision.py",
+            "tests/hermes_cli/test_c93_approved_artifact_inspection.py",
+            "tests/hermes_cli/test_c94_material_revision_reconciliation.py",
+            "tests/hermes_cli/test_c59_manual_validation_authority.py",
+            "tests/tools/test_workpacket_validation_tool.py",
+            "-j",
+            "1",
+            "--file-retries",
+            "0",
+            "--",
+            "-q",
+            "--tb=short"
+          ],
+          "cwd": "/tmp/har11-20261017-lari8l4q/delivery-final/2_products/pepper-agent",
+          "environment": {
+            "HOME": "/tmp/har11-20261017-lari8l4q/home-delivery-final-first_slice",
+            "HERMES_HOME": "/tmp/har11-20261017-lari8l4q/home-delivery-final-first_slice/.hermes",
+            "PATH": "/usr/bin:/bin",
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "TZ": "UTC",
+            "PYTHONDONTWRITEBYTECODE": "1"
+          },
+          "exit_code": 0,
+          "seconds": 381.623,
+          "log_sha256": "715a18ec31ffe38d3f2b02c0292a0e1262bc91fa96cc415969c1773af7a1bca5",
+          "passed": 219,
+          "failed": 0,
+          "tail": "\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\nfatal: not a git repository (or any of the parent directories): .git\n\u25b6 launching test runner\nDiscovered 7 test files (~99 tests) under ['tests/hermes_cli/test_c91_validation_lifecycle.py', 'tests/tools/test_c91_pre_review_commands.py', 'tests/hermes_cli/test_c92_post_execution_material_revision.py', 'tests/hermes_cli/test_c93_approved_artifact_inspection.py', 'tests/hermes_cli/test_c94_material_revision_reconciliation.py', 'tests/hermes_cli/test_c59_manual_validation_authority.py', 'tests/tools/test_workpacket_validation_tool.py']; running with -j 1\n[ 14.1% |    14/~99 | \u271336 | \u2717 0] \u2713 tests/hermes_cli/test_c59_manual_validation_authority.py (36\u2713, 11.6s)\n[ 24.2% |    24/~99 | \u271358 | \u2717 0] \u2713 tests/hermes_cli/test_c91_validation_lifecycle.py (22\u2713, 76.2s)\n[ 33.3% |    33/~99 | \u271379 | \u2717 0] \u2713 tests/hermes_cli/test_c92_post_execution_material_revision.py (21\u2713, 80.2s)\n[ 42.4% |    42/~99 | \u2713102 | \u2717  0] \u2713 tests/hermes_cli/test_c93_approved_artifact_inspection.py (23\u2713, 63.7s)\n[ 54.5% |    54/~99 | \u2713130 | \u2717  0] \u2713 tests/hermes_cli/test_c94_material_revision_reconciliation.py (28\u2713, 180.7s)\n[ 62.6% |    62/~99 | \u2713149 | \u2717  0] \u2713 tests/tools/test_c91_pre_review_commands.py (19\u2713, 0.8s)\n[100.0% |    99/~99 | \u2713219 | \u2717  0] \u2713 tests/tools/test_workpacket_validation_tool.py (70\u2713, 6.4s)\n\n=== Summary: 7 files, 219 tests passed, 0 failed (100% complete) in 419.6s (1 workers) ===\n  Durations cached to test_durations.json (7 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   7\n  Total subprocess CPU-wall: 419.6s  (runner wall: 419.6s, parallelism: 1x)\n  P50: 63.75s  P90: 180.73s  P95: 180.73s  P99: 180.73s  Max: 180.73s\n  <1s: 1 files (14%)  <2s: 1 files (14%)\n  Top 10 slowest:\n    180.73s  tests/hermes_cli/test_c94_material_revision_reconciliation.py\n     80.15s  tests/hermes_cli/test_c92_post_execution_material_revision.py\n     76.16s  tests/hermes_cli/test_c91_validation_lifecycle.py\n     63.75s  tests/hermes_cli/test_c93_approved_artifact_inspection.py\n     11.63s  tests/hermes_cli/test_c59_manual_validation_authority.py\n      6.40s  tests/tools/test_workpacket_validation_tool.py\n      0.76s  tests/tools/test_c91_pre_review_commands.py\n"
+        },
+        "compatibility": {
+          "side": "delivery-final",
+          "name": "compatibility",
+          "argv": [
+            "bash",
+            "scripts/run_tests.sh",
+            "tests/hermes_cli/test_c59_manual_validation_authority.py",
+            "tests/hermes_cli/test_c65_retry_material_revision.py",
+            "tests/hermes_cli/test_c66_invalid_validation_command_revision.py",
+            "tests/hermes_cli/test_c67_successive_recovery_cycles.py",
+            "tests/hermes_cli/test_c69_zero_change_decision.py",
+            "tests/hermes_cli/test_c72_review_evidence_transport.py",
+            "tests/hermes_cli/test_c73_post_accept_material_revision.py",
+            "tests/hermes_cli/test_c76_manual_validation_resolution.py",
+            "tests/hermes_cli/test_c87_material_revision_provenance.py",
+            "tests/hermes_cli/test_c88_review_readiness.py",
+            "tests/hermes_cli/test_c89_post_prepare_recovery.py",
+            "tests/hermes_cli/test_c90_handoff_rendering.py",
+            "tests/hermes_cli/test_c91_validation_lifecycle.py",
+            "tests/hermes_cli/test_c92_post_execution_material_revision.py",
+            "tests/hermes_cli/test_c93_approved_artifact_inspection.py",
+            "tests/tools/test_workpacket_validation_tool.py",
+            "tests/hermes_cli/test_agent_platform_work_packet_compiler.py",
+            "-j",
+            "4",
+            "--file-retries",
+            "0",
+            "--",
+            "-q",
+            "--tb=short"
+          ],
+          "cwd": "/tmp/har11-20261017-lari8l4q/delivery-final/2_products/pepper-agent",
+          "environment": {
+            "HOME": "/tmp/har11-20261017-lari8l4q/home-delivery-final-compatibility",
+            "HERMES_HOME": "/tmp/har11-20261017-lari8l4q/home-delivery-final-compatibility/.hermes",
+            "PATH": "/usr/bin:/bin",
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "TZ": "UTC",
+            "PYTHONDONTWRITEBYTECODE": "1"
+          },
+          "exit_code": 0,
+          "seconds": 210.094,
+          "log_sha256": "10278b6ed622919ca0eeb39a50ef4a94f73e7be1a9442e9316d4ac5af005231d",
+          "passed": 716,
+          "failed": 0,
+          "tail": "l.py', 'tests/hermes_cli/test_agent_platform_work_packet_compiler.py']; running with -j 4\n[ 20.2% |    54/~267 | \u2713245 | \u2717  0] \u2713 tests/hermes_cli/test_agent_platform_work_packet_compiler.py (245\u2713, 2.4s)\n[ 25.5% |    68/~267 | \u2713281 | \u2717  0] \u2713 tests/hermes_cli/test_c59_manual_validation_authority.py (36\u2713, 15.7s)\n[ 29.2% |    78/~267 | \u2713297 | \u2717  0] \u2713 tests/hermes_cli/test_c65_retry_material_revision.py (16\u2713, 27.6s)\n[ 33.0% |    88/~267 | \u2713318 | \u2717  0] \u2713 tests/hermes_cli/test_c67_successive_recovery_cycles.py (21\u2713, 48.2s)\n[ 39.7% |   106/~267 | \u2713344 | \u2717  0] \u2713 tests/hermes_cli/test_c69_zero_change_decision.py (26\u2713, 54.1s)\n[ 43.4% |   116/~267 | \u2713373 | \u2717  0] \u2713 tests/hermes_cli/test_c66_invalid_validation_command_revision.py (29\u2713, 74.4s)\n[ 49.1% |   131/~267 | \u2713417 | \u2717  0] \u2713 tests/hermes_cli/test_c73_post_accept_material_revision.py (44\u2713, 68.1s)\n[ 55.8% |   149/~267 | \u2713462 | \u2717  0] \u2713 tests/hermes_cli/test_c72_review_evidence_transport.py (45\u2713, 91.3s)\n[ 59.6% |   159/~267 | \u2713484 | \u2717  0] \u2713 tests/hermes_cli/test_c88_review_readiness.py (22\u2713, 13.4s)\n[ 67.0% |   179/~267 | \u2713516 | \u2717  0] \u2713 tests/hermes_cli/test_c87_material_revision_provenance.py (32\u2713, 61.0s)\n[ 68.9% |   184/~267 | \u2713534 | \u2717  0] \u2713 tests/hermes_cli/test_c89_post_prepare_recovery.py (18\u2713, 27.3s)\n[ 72.3% |   193/~267 | \u2713558 | \u2717  0] \u2713 tests/hermes_cli/test_c90_handoff_rendering.py (24\u2713, 25.6s)\n[ 76.0% |   203/~267 | \u2713580 | \u2717  0] \u2713 tests/hermes_cli/test_c91_validation_lifecycle.py (22\u2713, 74.2s)\n[ 89.9% |   240/~267 | \u2713650 | \u2717  0] \u2713 tests/tools/test_workpacket_validation_tool.py (70\u2713, 3.4s)\n[ 93.3% |   249/~267 | \u2713673 | \u2717  0] \u2713 tests/hermes_cli/test_c93_approved_artifact_inspection.py (23\u2713, 68.6s)\n[ 96.6% |   258/~267 | \u2713695 | \u2717  0] \u2713 tests/hermes_cli/test_c76_manual_validation_resolution.py (22\u2713, 160.3s)\n[100.0% |   267/~267 | \u2713716 | \u2717  0] \u2713 tests/hermes_cli/test_c92_post_execution_material_revision.py (21\u2713, 84.8s)\n\n=== Summary: 17 files, 716 tests passed, 0 failed (100% complete) in 231.0s (4 workers) ===\n  Durations cached to test_durations.json (17 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   17\n  Total subprocess CPU-wall: 900.4s  (runner wall: 231.0s, parallelism: 4x)\n  P50: 54.13s  P90: 91.25s  P95: 160.29s  P99: 160.29s  Max: 160.29s\n  <1s: 0 files (0%)  <2s: 0 files (0%)\n  Top 10 slowest:\n    160.29s  tests/hermes_cli/test_c76_manual_validation_resolution.py\n     91.25s  tests/hermes_cli/test_c72_review_evidence_transport.py\n     84.83s  tests/hermes_cli/test_c92_post_execution_material_revision.py\n     74.36s  tests/hermes_cli/test_c66_invalid_validation_command_revision.py\n     74.21s  tests/hermes_cli/test_c91_validation_lifecycle.py\n     68.62s  tests/hermes_cli/test_c93_approved_artifact_inspection.py\n     68.06s  tests/hermes_cli/test_c73_post_accept_material_revision.py\n     60.96s  tests/hermes_cli/test_c87_material_revision_provenance.py\n     54.13s  tests/hermes_cli/test_c69_zero_change_decision.py\n     48.23s  tests/hermes_cli/test_c67_successive_recovery_cycles.py\n"
+        },
+        "authority_security": {
+          "side": "delivery-final",
+          "name": "authority_security",
+          "argv": [
+            "bash",
+            "scripts/run_tests.sh",
+            "tests/tools/test_governed_workpacket_file_confinement.py",
+            "tests/hermes_cli/test_agent_platform_work_packet_tool_permissions.py",
+            "tests/hermes_cli/test_agent_platform_governed_workflow_state_machine.py",
+            "tests/hermes_cli/test_agent_platform_work_packet_governed_autonomy.py",
+            "-j",
+            "4",
+            "--file-retries",
+            "0",
+            "--",
+            "-q",
+            "--tb=short"
+          ],
+          "cwd": "/tmp/har11-20261017-lari8l4q/delivery-final/2_products/pepper-agent",
+          "environment": {
+            "HOME": "/tmp/har11-20261017-lari8l4q/home-delivery-final-authority_security",
+            "HERMES_HOME": "/tmp/har11-20261017-lari8l4q/home-delivery-final-authority_security/.hermes",
+            "PATH": "/usr/bin:/bin",
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "TZ": "UTC",
+            "PYTHONDONTWRITEBYTECODE": "1"
+          },
+          "exit_code": 0,
+          "seconds": 4.174,
+          "log_sha256": "d534908ec1c9d16fa84a1cfd2e870851b032781d01480613d91cdc8c239f56dc",
+          "passed": 1174,
+          "failed": 0,
+          "tail": "\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\nfatal: not a git repository (or any of the parent directories): .git\n\u25b6 launching test runner\nDiscovered 4 test files (~171 tests) under ['tests/tools/test_governed_workpacket_file_confinement.py', 'tests/hermes_cli/test_agent_platform_work_packet_tool_permissions.py', 'tests/hermes_cli/test_agent_platform_governed_workflow_state_machine.py', 'tests/hermes_cli/test_agent_platform_work_packet_governed_autonomy.py']; running with -j 4\n[  8.8% |    15/~171 | \u271315 | \u2717 0] \u2713 tests/tools/test_governed_workpacket_file_confinement.py (15\u2713, 1.2s)\n[ 42.7% |    73/~171 | \u2713328 | \u2717  0] \u2713 tests/hermes_cli/test_agent_platform_work_packet_tool_permissions.py (313\u2713, 2.7s)\n[ 89.5% |   153/~171 | \u27131046 | \u2717   0] \u2713 tests/hermes_cli/test_agent_platform_governed_workflow_state_machine.py (718\u2713, 3.0s)\n[100.0% |   171/~171 | \u27131174 | \u2717   0] \u2713 tests/hermes_cli/test_agent_platform_work_packet_governed_autonomy.py (128\u2713, 4.6s)\n\n=== Summary: 4 files, 1174 tests passed, 0 failed (100% complete) in 4.6s (4 workers) ===\n  Durations cached to test_durations.json (4 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   4\n  Total subprocess CPU-wall: 11.5s  (runner wall: 4.6s, parallelism: 4x)\n  P50: 2.96s  P90: 4.60s  P95: 4.60s  P99: 4.60s  Max: 4.60s\n  <1s: 0 files (0%)  <2s: 1 files (25%)\n  Top 10 slowest:\n      4.60s  tests/hermes_cli/test_agent_platform_work_packet_governed_autonomy.py\n      2.96s  tests/hermes_cli/test_agent_platform_governed_workflow_state_machine.py\n      2.66s  tests/hermes_cli/test_agent_platform_work_packet_tool_permissions.py\n      1.23s  tests/tools/test_governed_workpacket_file_confinement.py\n"
+        }
+      }
+    },
+    "mutation_detected_failure_counts": {
+      "transitive-traversal": 7,
+      "shared-parser": 2,
+      "stale-positive": 5,
+      "partial-unchanged": 4,
+      "markdown-exemption": 1,
+      "broad-to-narrow": 1
+    },
+    "all_attempts_retained": true,
+    "development_history": [
+      "Early development results retained separately; 97-test intermediate frozen candidate superseded by 99-test final candidate",
+      "Independent consumer-scope facts added to prevent a manifest from narrowing a full-tree consumer by changing its own flags",
+      "Final snapshot setup first had shell-string newline SyntaxError before interpreter setup/test execution; corrected in external setup script, no source defect",
+      "Unchanged parent compatibility first attempt 715/1, C76 False-executable recent_success; full unchanged-parent repeat 716/0; traces preserved"
+    ],
+    "evidence_references": [
+      {
+        "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-11-20261017\\preflight.json",
+        "sha256": "a7397caf8425a6d19218b42762d1b33cc17befd9deaccc04a55b80311312fc6a"
+      },
+      {
+        "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-11-20261017\\snapshots.json",
+        "sha256": "d16ea11db2f89d7493d0204717cca570b945ddb20dbdfeca545343917ff6256e"
+      },
+      {
+        "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-11-20261017\\canonical-commands.json",
+        "sha256": "b8c0dce32e9afa73376b1d7b3bddf6006d60745bd55e6e096110aff16f4f82df"
+      },
+      {
+        "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-11-20261017\\HAR-11-AS-IS-IDENTITY-DEPENDENCY-MATRIX.md",
+        "sha256": "23bf47f813b12ab086e6b09423c6182ca7499b17d0fb1a59bf6ab72c036623db"
+      },
+      {
+        "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-11-20261017\\AS-IS-static-source-inventory.json",
+        "sha256": "2cb17fae4dbe9497c07fe5dee78d1c93e9f8343f35c57fd363f4dbd9bd654c37"
+      },
+      {
+        "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-11-20261017\\final-source-freeze-and-imports.json",
+        "sha256": "2ba8447f863367d3b4888d8ea83b557311c798314fc917e7c4e6a91201d2b36f"
+      },
+      {
+        "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-11-20261017\\final-immutable-snapshot-preservation.json",
+        "sha256": "1d46a23cc5ce953a09ce1e2885c7305416d3cee309162bd4d947518730188801"
+      },
+      {
+        "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-11-20261017\\post-test-immutable-snapshot-preservation.json",
+        "sha256": "882b5a8c6a55c6fcbf51e6bf0856b4e41f43dd6fd9acc9fce4571875195880c4"
+      },
+      {
+        "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-11-20261017\\HAR-11-final-reference-and-identity-evidence.json",
+        "sha256": "76ee454e05d3eee3f88064b48e5782e759769ce1f9da3abc1b9a336864555586"
+      },
+      {
+        "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-11-20261017\\final-junit-nodeids.json",
+        "sha256": "e1ed13f32dbff32933f8c6f7d793dc08b3614eebcb67c0c321a3f95258942782"
+      },
+      {
+        "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-11-20261017\\final-mutation-witnesses.json",
+        "sha256": "2b4ba2917d845d27dd471365e69091fb5d1d23546a099e79e69a5cbcf5cdc992"
+      },
+      {
+        "path": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-11-20261017\\legacy-timing-comparison.json",
+        "sha256": "4de3b6c95ee08307c03716b9363f1de5a76e2ebe0893d5dc00f5aaf6badb2075"
+      }
+    ],
+    "operational_authority_granted": false,
+    "production_integration": false,
+    "live_workflow_access": false,
+    "Git_mutations": false,
+    "HAR12_started": false,
+    "frozen_context": "P18.9.13 R0002/run45 not accessed",
+    "limits": [
+      "No authenticated issuer, consent or currentness producer",
+      "Synthetic closed reference model is not evidence of real Pepper runtime closure",
+      "Existing broad fingerprints and C92 authority/source registry unchanged",
+      "Historical views are partial, retain combined identities and do not execute original digest algorithms",
+      "Matching identities never imply effect authorization; no effect owner is changed",
+      "C69/C76 timing variability retained, not repaired; inference limits in external comparison",
+      "G2 open; no HAR12 durable journal/version enforcement or runtime hook"
+    ],
+    "documentation_verification": {
+      "appended_after_executable_testing": true,
+      "tested_snapshot_documentation": "Accepted-parent documentary bytes; nine final source/test files match tested delivery-final",
+      "final_documentary_bytes_not_claimed_as_executable_test_inputs": true,
+      "fresh_checks": [
+        "original architecture prefix byte equality",
+        "prior JSON namespaces semantic equality",
+        "roadmap byte equality",
+        "JSON validity",
+        "code SHA256 freeze",
+        "diff/whitespace and scope checks"
+      ]
+    }
   }
 }
