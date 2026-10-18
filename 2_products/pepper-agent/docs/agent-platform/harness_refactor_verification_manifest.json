@@ -7020,5 +7020,97 @@
         "diff whitespace"
       ]
     }
+  },
+  "har14b_verification": {
+    "ticket": "HAR-14-B",
+    "accepted_parent": "c55d45a76152fda3422a8c465581fb67f7250ba1",
+    "date": "2026-10-18",
+    "status": "READY_FOR_HUMAN_REVIEW_LEVEL2_PENDING",
+    "design": "HAR14A human-approved K2 local trusted-code/store, sequential observed read",
+    "selected_capability": "O03.validation_steps@1",
+    "effect": "OBSERVE",
+    "proof_level": "MECHANICAL_SYNTHETIC_ONLY",
+    "independent_authority_proof": "TRUSTED_ISSUER_PROOF_PENDING",
+    "G0": "CLOSED_HUMAN_APPROVED",
+    "G1": "CLOSED_HUMAN_APPROVED_BOUNDED_SHADOW",
+    "G2": "OPEN_NOT_APPROVED",
+    "operational_authority_granted": false,
+    "runtime_activation_authorized": false,
+    "live_workflow_access": false,
+    "Git_mutations": false,
+    "HAR14C_started": false,
+    "code_SHA256": {
+      "hermes_cli/agent_platform/approved_artifact_inspection.py": "ce4c81c8a5fcdf81c524589019dcfb2fc6b8ee983008b383e15343363f9eb2ad",
+      "hermes_cli/agent_platform/approved_artifact_read_qualification.py": "0e71c0a1cc0eb3f97e31895b768c62195abd686b045cbee7c350417a225088b0",
+      "hermes_cli/agent_platform/approved_artifact_routing.py": "499dd348e8df6fcec53093eb0877a42d183a8a7c83687a0f18eb1c7ecc898883",
+      "tests/hermes_cli/har14_read_helpers.py": "b5c47553421c3d0cd946fded44eb29839427b8c648fe3ab3e79199802baa5e0e",
+      "tests/hermes_cli/test_har14_approved_artifact_routing.py": "02726efd33d61e6783e3ca642eeb74f6adf2fd0ce748ce7b968e366ed3bcb244",
+      "tests/hermes_cli/test_har14_mutation_sensitivity.py": "b92cfce3244fe5857074c80d3036e4848fc3e347eac10c88015c388e2f205916",
+      "tests/hermes_cli/test_har14_read_qualification.py": "1b25a9cd1daf92024dc109747fc4993819ec5b7083df1a025720c97d52b2c42a",
+      "tests/hermes_cli/test_har14_routing_purity.py": "583b0968c71acf281969b12594fa857624cfaa4eef464c53c4cc45d4ec717f25"
+    },
+    "evidence_directory": "C:\\Users\\pablo\\.codex\\har-evidence\\HAR-14-B-20261018",
+    "limitations": [
+      "No independently sourced human-origin approval was supplied or sought; synthetic records/digests are not human authentication.",
+      "Private composition is not a sandbox against hostile Python/OS or compromised original stores.",
+      "Sequential final G/D/C rereads cannot eliminate ABA/transient revocation or last-read/release gaps.",
+      "Disk/broad source identity is bound under isolated loaded-code custody assumptions, not operational code attestation.",
+      "Original public signature collapses omitted versus explicit None; normalized boundary values/types are bound, no new public argument is introduced.",
+      "HAR11 actual closure remains broad/unqualified; no core contract or original fingerprint algorithm changes."
+    ],
+    "focused_passed": 44,
+    "prior_focused_passed": 878,
+    "combined_focused_passed": 922,
+    "canonical_passed": {
+      "parent": {
+        "baseline": 2126,
+        "first_slice": 219,
+        "compatibility": 716,
+        "authority_security": 1174
+      },
+      "candidate": {
+        "baseline": 2126,
+        "first_slice": 219,
+        "compatibility": 716,
+        "authority_security": 1174
+      }
+    },
+    "detected_mutations": 12,
+    "fresh_static_bindings_verified": 15,
+    "canonical_failed": 0,
+    "canonical_errors": 0,
+    "all_attempts_retained": true,
+    "prior_contract_code_and_tests_changed": false,
+    "public_API_expanded": false,
+    "production_initialization": false,
+    "source_snapshot_documentation_state": "Canonical candidate snapshot contains initial candidate documentation; this results-only additive documentation finalization was statically checked after code/test verification. No recorded synthetic qualification is reused across source identities.",
+    "development_attempts": [
+      {
+        "name": "focused-r1",
+        "passed": 35,
+        "failed": 3,
+        "classification": "test expectation issues: wrapper success field, selector-before-approval rejection, drift injected too early"
+      },
+      {
+        "name": "focused-r2",
+        "passed": 39,
+        "failed": 0
+      },
+      {
+        "name": "focused-r3",
+        "passed": 44,
+        "failed": 0,
+        "classification": "added Unicode pages and actual missing/rejected/corrupt record coverage"
+      }
+    ],
+    "evidence_references": [
+      "HAR-14-B-canonical-comparison.json",
+      "mutation-results.json",
+      "fresh-HAR06-bindings.json",
+      "mechanical-binding-traces.json",
+      "effect-probe-result.json",
+      "focused-junit-identities.json",
+      "HAR-14-B-level2-provenance-status.json"
+    ]
   }
 }

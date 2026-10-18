@@ -1847,3 +1847,42 @@ Documentation is appended after executable testing: immutable snapshots retain
 accepted documentary bytes, ten new source/test files match final delivery, and
 prefix/namespace/G1/roadmap/JSON/source/diff checks verify the additions separately.
 Final documentary bytes are not claimed as executable regression inputs.
+
+
+## HAR-14-B — C93 read qualification candidate (2026-10-18)
+
+HAR-14-A K.2 was human-approved for the trusted local code/store model. A bounded
+product-side C93 owner now exercises only O03.validation_steps@1 under explicit
+isolated composition; LEGACY remains default and O03.ticket_spec stays legacy.
+No tool, registry, HTTP/config/environment switch or production initializer is
+added. Original preflight validators and final generation/decision/selector
+rereads remain C93-owned; no historic digest or HAR-04–HAR-13 contract is changed.
+
+The invocation creates and consumes its own exact HAR-07 input/qualification,
+evaluates once and performs original final revalidation. Serialized qualifications
+and issuer names are observations, not credentials; no caller-supplied proof can
+unlock a response. Source/resource/input drift or rejection stops the selected
+route, with no legacy fallback. Original defaults, pagination, errors and public
+responses remain; the original signature cannot distinguish omission from explicit
+None, and this limit is recorded rather than a new public argument being added.
+
+All positive evidence is MECHANICAL_SYNTHETIC_ONLY. Independent human-origin
+authority provenance is TRUSTED_ISSUER_PROOF_PENDING; no material was supplied,
+solicited or copied to fill that gate. A green isolated test is neither issuer
+authentication nor permission for J2 activation. Observed sequential currentness
+does not promise atomic currentness at delivery, ABA detection, or security
+against hostile Python executing in the trusted process. HAR-11 retains broad
+fallback and unqualified production closure. No operational journal, writer,
+command/provider/worker call or recovery permission is introduced. P18.9.13
+remains frozen and unread; G2 OPEN, HAR-14-C not started. Verification results and
+all attempts belong in the additive har14b_verification namespace and external
+evidence, without altering prior decisions, G1 seal or canonical selections.
+
+HAR-14-B verification completed in disposable parent/candidate snapshots:44 new
+tests,878 prior focused tests,922 combined tests; exact canonical argv passed on
+both sides with2126/219/716/1174. All12 disposable mutations were detected,
+15 fresh static bindings VERIFIED, and isolated import/read-phase effect probes
+passed. Initial development expectation failures are retained externally. These
+are mechanical proofs only: TRUSTED_ISSUER_PROOF_PENDING, G2 OPEN, no J2/runtime
+activation, no live P18.9.13 access and no HAR-14-C. Human code acceptance remains
+separate from issuer demonstration and any later operational authorization.

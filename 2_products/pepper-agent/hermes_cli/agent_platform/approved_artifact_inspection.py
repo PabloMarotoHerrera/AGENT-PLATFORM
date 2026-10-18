@@ -1,6 +1,10 @@
 """Exact, bounded reads through the existing approval artifact boundary."""
 
 import hashlib
+from contextvars import ContextVar
+
+# No production composition installs a route. Tool arguments cannot select it.
+_READ_ROUTE = ContextVar("c93_private_read_route", default=None)
 
 
 def inspect(*, ticket_id, section_id, expected_binding=None, chunk_index=None, max_chars=None):
@@ -55,12 +59,31 @@ def inspect(*, ticket_id, section_id, expected_binding=None, chunk_index=None, m
     if type(index) is not int or not 0 <= index < count:
         raise ValueError("artifact section chunk is out of range")
     chunked = count > 1 or chunk_index is not None
-    # Revalidate current authority after assembling the response; no lock files,
-    # repair operations, counters, or workflow transitions are needed for a read.
-    if (bridge.load_generation_record(ticket_id=ticket_id) != generation
-            or bridge.load_approval_decision_record(ticket_id=ticket_id, generation_record=generation) != decision
-            or pr._current_incomplete_generation_record_from_records() != current):
-        raise ValueError("current approved authority changed during inspection")
+    route = _READ_ROUTE.get() if section_id == "validation_steps" else None
+    invocation = None
+    if route is not None:
+        response = _response(section_id, binding, serialized, index, size, count, chunked, section)
+        capture = {"generation": generation, "decision": decision, "current": current,
+                   "response": response, "request": {"ticket_id": ticket_id, "section_id": section_id,
+                   "expected_binding": expected_binding, "chunk_index": chunk_index, "max_chars": max_chars}}
+        invocation = route._prepare(capture)
+    try:
+        # Revalidate current authority after assembling the response; no lock files,
+        # repair operations, counters, or workflow transitions are needed for a read.
+        if (bridge.load_generation_record(ticket_id=ticket_id) != generation
+                or bridge.load_approval_decision_record(ticket_id=ticket_id, generation_record=generation) != decision
+                or pr._current_incomplete_generation_record_from_records() != current):
+            raise ValueError("current approved authority changed during inspection")
+        if invocation is not None:
+            route._finish(invocation, capture)
+            return response
+        return _response(section_id, binding, serialized, index, size, count, chunked, section)
+    finally:
+        if invocation is not None:
+            route._discard(invocation)
+
+
+def _response(section_id, binding, serialized, index, size, count, chunked, section):
     return {
         "read_only": True, "validated": True, "inspection_status": "available",
         "authority_scope": "current_approved", "artifact_type": "TicketSpec",
